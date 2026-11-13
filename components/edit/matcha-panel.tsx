@@ -129,13 +129,17 @@ import {
   type MatchSignal,
   type MatchaMeasures,
   RESEARCHER_TYPE_LABEL,
-  RESEARCHER_TYPE_ORDER,
   RESEARCH_ACTIVE_YEARS,
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
-import { RESEARCH_TYPE_LABELS, RESEARCH_TYPE_MIN_PUBS } from "@/lib/research-type";
-import { briefCsvFields, buildMatchaCsv } from "@/lib/edit/matcha-export";
+import { RESEARCH_TYPE_LABELS, RESEARCH_TYPE_MIN_PUBS, RESEARCH_TYPE_YEARS } from "@/lib/research-type";
+import {
+  briefExportFields,
+  matchaExportFilename,
+  type MatchaExportRow,
+} from "@/lib/edit/matcha-export";
+import { methodologyHref } from "@/lib/methodology-anchors";
 import {
   angleRoleLead,
   briefAngle,
@@ -370,28 +374,97 @@ function toggled(set: ReadonlySet<string>, value: string): Set<string> {
 /** The sponsor console's default person-type selection (a `roleCategoryLabel` value). */
 const DEFAULT_PERSON_TYPE = roleCategoryLabel("full_time_faculty");
 
-/** The sponsor console's default researcher-type selection: everyone but "Clinician". CTL's
- *  usual ask is a lab to partner with; the clinicians stay one click away (consultant or
- *  patient-data asks). "Unclassified" stays in: it is not "not a researcher". */
-const DEFAULT_RESEARCHER_TYPES: ReadonlySet<string> = new Set(
-  RESEARCHER_TYPE_ORDER.filter((t) => t !== "clinician").map((t) => RESEARCHER_TYPE_LABEL[t]),
+/** "Funded, kind not evident": a research award as PI, but too few first/last-author papers of
+ *  either kind to say which (archetype `funded_investigator`). Also the export's Research kind
+ *  cell for that person. */
+const KIND_FUNDED = "Funded, kind not evident";
+const KIND_NONE = "No research signal";
+
+/**
+ * The Research filter: one nested group in place of the old flat "Researcher type" and "Research
+ * kind" groups. Keys, not labels, because "Physician-scientist" sits under both parents.
+ *
+ * A parent selects everyone with that kind; a child narrows to physicians (`isPhysician`) or
+ * non-physicians within it. A person with both kinds counts under both parents. The per-person
+ * label (`researcherType`) is untouched: it stays on the card, the brief and the export.
+ */
+type ResearchKey =
+  | "lab"
+  | "lab:physician"
+  | "lab:other"
+  | "clinical"
+  | "clinical:physician"
+  | "clinical:other"
+  | "funded"
+  | "none";
+
+const RESEARCH_PARENTS: readonly {
+  key: ResearchKey;
+  label: string;
+  children: readonly { key: ResearchKey; label: string }[];
+}[] = [
+  {
+    key: "lab",
+    label: RESEARCH_TYPE_LABELS.lab,
+    children: [
+      { key: "lab:physician", label: RESEARCHER_TYPE_LABEL.physician_scientist },
+      { key: "lab:other", label: RESEARCHER_TYPE_LABEL.basic_scientist },
+    ],
+  },
+  {
+    key: "clinical",
+    label: RESEARCH_TYPE_LABELS.clinical,
+    children: [
+      { key: "clinical:physician", label: RESEARCHER_TYPE_LABEL.physician_scientist },
+      { key: "clinical:other", label: RESEARCHER_TYPE_LABEL.clinical_researcher },
+    ],
+  },
+  { key: "funded", label: KIND_FUNDED, children: [] },
+  { key: "none", label: KIND_NONE, children: [] },
+];
+
+/** Chip text: "Laboratory research" or "Laboratory research: Physician-scientist". */
+const RESEARCH_CHIP_LABEL: ReadonlyMap<string, string> = new Map(
+  RESEARCH_PARENTS.flatMap((p) => [
+    [p.key, p.label] as const,
+    ...p.children.map((c) => [c.key, `${p.label}: ${c.label}`] as const),
+  ]),
 );
 
-/** The "Research kind" facet's third option: a research award as PI, but too few
- *  first/last-author papers of either kind to say which (archetype `funded_investigator`). */
-const KIND_FUNDED = "Funded, kind not evident";
-const RESEARCH_KIND_OPTIONS: readonly string[] = [
-  RESEARCH_TYPE_LABELS.lab,
-  RESEARCH_TYPE_LABELS.clinical,
-  KIND_FUNDED,
-];
-/** The sponsor console's default research-kind selection: laboratory researchers only.
- *  Funded-but-kind-unknown is left out because on a staging run it admitted clinical chiefs
- *  at the top of an industry ask; it and clinical research stay one click away. */
-const DEFAULT_RESEARCH_KINDS: ReadonlySet<string> = new Set([RESEARCH_TYPE_LABELS.lab]);
+/** The sponsor console's default: laboratory research only. Funded-but-kind-unknown is left out
+ *  because on a staging run it admitted clinical chiefs at the top of an industry ask; it and
+ *  clinical research stay one click away. */
+const DEFAULT_RESEARCH: ReadonlySet<string> = new Set<ResearchKey>(["lab"]);
 
-/** The research-kind options this candidate matches. Empty when `researchKinds` is absent
- *  (an older stored run): not computed, so it can satisfy no kind filter. */
+/** The Research keys this candidate matches. Empty when `researchKinds` is absent (an older
+ *  stored run): not computed, so it can satisfy no Research filter. A missing `isPhysician`
+ *  matches the parent only. */
+function researchKeys(m: MatchaMeasures | undefined): ResearchKey[] {
+  if (!m?.researchKinds) return [];
+  const keys: ResearchKey[] = [];
+  for (const k of m.researchKinds) {
+    keys.push(k);
+    if (m.isPhysician === true) keys.push(`${k}:physician`);
+    else if (m.isPhysician === false) keys.push(`${k}:other`);
+  }
+  if (m.researchKinds.length === 0)
+    keys.push(m.researcherType === "funded_investigator" ? "funded" : "none");
+  return keys;
+}
+
+/** Toggle one Research box. Ticking a child unticks its parent, and ticking a parent unticks
+ *  its children: "Laboratory research" plus "Laboratory research: Physician-scientist" would
+ *  read as a narrowing that the OR never applies. */
+function toggledResearch(set: ReadonlySet<string>, key: string): Set<string> {
+  const next = toggled(set, key);
+  if (!next.has(key)) return next;
+  const [parent, child] = key.split(":");
+  if (child) next.delete(parent);
+  else for (const c of RESEARCH_PARENTS.find((p) => p.key === key)?.children ?? []) next.delete(c.key);
+  return next;
+}
+
+/** The export's Research kind cell: the kinds a person shows, joined with "; ". */
 function researchKindLabels(m: MatchaMeasures | undefined): string[] {
   if (!m?.researchKinds) return [];
   return [
@@ -460,17 +533,6 @@ function researcherTypeReason(m: MatchaMeasures): string {
   }
 }
 
-/** The active-filter chip, phrased by whichever side is shorter: the default reads
- *  "all but Clinician", not a list of three. */
-function researcherTypeChip(selected: ReadonlySet<string>, present: readonly string[]): string {
-  const on = present.filter((l) => selected.has(l));
-  const off = present.filter((l) => !selected.has(l));
-  if (on.length === 0) return `Researcher type: hiding all ${off.join(", ")}`;
-  return off.length > 0 && off.length < on.length
-    ? `Researcher type: all but ${off.join(", ")}`
-    : `Researcher type: ${on.join(", ")}`;
-}
-
 function ResearcherTypePill({ measures }: { measures?: MatchaMeasures }) {
   const type = measures?.researcherType;
   if (!type) return null;
@@ -531,11 +593,8 @@ function compareByName(a: MatchaCandidate, b: MatchaCandidate): number {
   return surnameKey(a).localeCompare(surnameKey(b)) || a.name.localeCompare(b.name);
 }
 
-/** Client-side download — the matcher is admin-only and the whole pool is already in the
- *  browser, so a server hop would only be able to re-export the DEFAULT ranking, not the
- *  re-ranked one the officer is actually looking at. Mirrors `find-researchers.tsx`. */
-function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+/** Save a Blob under `filename` (the export route's response). */
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -659,11 +718,11 @@ export function MatchaPanel({
   // #1654 — selection is keyed by the DISPLAY label (what FacetGroup renders and toggles),
   // so the filter compares labels too. One vocabulary, no id↔label map to drift.
   const [stageSel, setStageSel] = useState<ReadonlySet<string>>(new Set());
-  // Researcher type. `null` = untouched, which means the DEFAULT selection on the sponsor path
-  // (see `typeSelEffective`); an explicit empty set means "show everyone".
-  const [typeSel, setTypeSel] = useState<ReadonlySet<string> | null>(null);
-  // Research kind. Same `null` = untouched convention (see `kindSelEffective`).
-  const [kindSel, setKindSel] = useState<ReadonlySet<string> | null>(null);
+  // Research (nested; `ResearchKey`s). `null` = untouched, which means the DEFAULT selection on
+  // the sponsor path (see `researchSelEffective`); an explicit empty set means "show everyone".
+  const [researchSel, setResearchSel] = useState<ReadonlySet<string> | null>(null);
+  // The .xlsx export is a server round trip; say so when it fails rather than download nothing.
+  const [exportState, setExportState] = useState<"idle" | "pending" | "error">("idle");
   // Grant Matcha — the officer owns the predicate. The hard career-stage axis defaults ON (it IS
   // the opportunity's own rule); unchecking RELAXES it, interleaving the dropped people back into
   // the ranking by fit, badged — a client-side toggle over already-fetched candidates, never a
@@ -702,7 +761,7 @@ export function MatchaPanel({
   // new ask's title, with the new ask's ranks. Cleared in `runSearch` beside `expanded`.
   //
   // Uncapped. The earlier design capped picks at 5–6, which was never a fact about shortlisting —
-  // it was Compare's column budget. Compare is parked, and a CSV has no columns to run out of.
+  // it was Compare's column budget. Compare is parked, and a spreadsheet has no columns to run out of.
   const [shortlist, setShortlist] = useState<ReadonlySet<string>>(new Set());
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
@@ -1044,8 +1103,7 @@ export function MatchaPanel({
     setConceptSel(new Set());
     setCtlOnly(false);
     setStageSel(new Set());
-    setTypeSel(new Set());
-    setKindSel(new Set());
+    setResearchSel(new Set());
     setRoleSel(new Set());
   }
 
@@ -1157,8 +1215,7 @@ export function MatchaPanel({
         };
         setGrantCandidates([]); // toggling back to people clears any prior grant results
         clearFilters(); // stale facet selections must not silently hide fresh results
-        setTypeSel(null); // ...except researcher type, research kind and person type, which return to their defaults
-        setKindSel(null);
+        setResearchSel(null); // ...except Research and person type, which return to their defaults
         setRoleSel(null);
         setExpanded(new Set()); // D8 — previous run's per-row expansions don't carry to new people
         setShortlist(new Set()); // the shortlist is per-ask: last sponsor's picks are not this one's
@@ -1285,7 +1342,7 @@ export function MatchaPanel({
   // OUT of the ranking function and lives here, where it is an explicit officer action with a
   // count attached.
   // It REDEFINES THE POOL rather than filtering the painted rows, and that is the whole of it:
-  // facets count it, the facet filters search it, the rank is stamped from it, and the CSV
+  // facets count it, the facet filters search it, the rank is stamped from it, and the export
   // exports it. Hiding only at the render layer would leave a "Neurology · 12" facet that filters
   // down to 9, and would export scholars the officer had just excluded.
   const yearCutoff = hiddenBefore(recency);
@@ -1512,37 +1569,18 @@ export function MatchaPanel({
     );
   }, [ranked]);
 
-  // Researcher type. Counts only rows that CARRY the measure, like the groups above.
-  const typeFacet = useMemo(() => {
+  // Research. Offered only when the run carries `researchKinds`; a stored run from before the
+  // field has none, so it gets no group and no default (a default there would hide every row).
+  // A person with both kinds counts under both parents, so counts can sum past the total.
+  const researchCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const c of ranked) {
-      const t = c.measures?.researcherType;
-      if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
-    }
-    return RESEARCHER_TYPE_ORDER.filter((t) => counts.has(t)).map(
-      (t) => [RESEARCHER_TYPE_LABEL[t], counts.get(t)!] as const,
-    );
-  }, [ranked]);
-  // The default applies only on the sponsor path and only when the run carries the measure:
-  // a stored run from before this field existed has no types, and a default there would hide
-  // every row. Grant Matcha states its own eligibility, so it starts unfiltered.
-  const typeSelEffective = useMemo<ReadonlySet<string>>(
-    () => typeSel ?? (!grantPath && typeFacet.length > 0 ? DEFAULT_RESEARCHER_TYPES : new Set()),
-    [typeSel, grantPath, typeFacet.length],
-  );
-
-  // Research kind. Offered only when the run carries `researchKinds`; a stored run from before
-  // the field has none, so it gets no group and no default (a default there would hide every
-  // row). A person with both kinds counts under both options.
-  const kindFacet = useMemo(() => {
-    const counts = new Map<string, number>(RESEARCH_KIND_OPTIONS.map((l) => [l, 0]));
     let carried = false;
     for (const c of ranked) {
       if (!c.measures?.researchKinds) continue;
       carried = true;
-      for (const l of researchKindLabels(c.measures)) counts.set(l, counts.get(l)! + 1);
+      for (const k of researchKeys(c.measures)) counts.set(k, (counts.get(k) ?? 0) + 1);
     }
-    return carried ? RESEARCH_KIND_OPTIONS.map((l) => [l, counts.get(l)!] as const) : [];
+    return carried ? counts : null;
   }, [ranked]);
   // An ask that singles out clinicians is not looking for a laboratory: no default then.
   const clinicianAsk = preferences.some(
@@ -1550,13 +1588,14 @@ export function MatchaPanel({
       p.measure === "isClinician" ||
       (p.measure === "researcherType" && p.types.includes("clinician")),
   );
-  // Like the Person type default: applied only when it would leave someone to look at.
-  const defaultKindsLeaveSomeone = kindFacet.some(([l, n]) => n > 0 && DEFAULT_RESEARCH_KINDS.has(l));
-  const kindSelEffective = useMemo<ReadonlySet<string>>(
+  // Like the Person type default: applied only when it would leave someone to look at. Grant
+  // Matcha states its own eligibility, so it starts unfiltered.
+  const defaultResearchLeavesSomeone = (researchCounts?.get("lab") ?? 0) > 0;
+  const researchSelEffective = useMemo<ReadonlySet<string>>(
     () =>
-      kindSel ??
-      (!grantPath && defaultKindsLeaveSomeone && !clinicianAsk ? DEFAULT_RESEARCH_KINDS : new Set()),
-    [kindSel, grantPath, defaultKindsLeaveSomeone, clinicianAsk],
+      researchSel ??
+      (!grantPath && defaultResearchLeavesSomeone && !clinicianAsk ? DEFAULT_RESEARCH : new Set()),
+    [researchSel, grantPath, defaultResearchLeavesSomeone, clinicianAsk],
   );
 
   // Person type. Same discipline as the two above: only rows that CARRY a role are counted, so
@@ -1584,8 +1623,7 @@ export function MatchaPanel({
     conceptSel.size > 0 ||
     ctlOnly ||
     stageSel.size > 0 ||
-    typeSelEffective.size > 0 ||
-    kindSelEffective.size > 0 ||
+    researchSelEffective.size > 0 ||
     roleSelEffective.size > 0;
 
   // Active filters, as removable chips above the results (mockup) — the rail's checkboxes are how
@@ -1612,19 +1650,10 @@ export function MatchaPanel({
       label: v,
       onRemove: () => setRoleSel(toggled(roleSelEffective, v)),
     })),
-    ...(typeSelEffective.size > 0
-      ? [
-          {
-            key: "researcherType",
-            label: researcherTypeChip(typeSelEffective, typeFacet.map(([l]) => l)),
-            onRemove: () => setTypeSel(new Set()),
-          },
-        ]
-      : []),
-    ...[...kindSelEffective].map((v) => ({
-      key: `kind:${v}`,
-      label: v,
-      onRemove: () => setKindSel(toggled(kindSelEffective, v)),
+    ...[...researchSelEffective].map((v) => ({
+      key: `research:${v}`,
+      label: RESEARCH_CHIP_LABEL.get(v) ?? v,
+      onRemove: () => setResearchSel(toggled(researchSelEffective, v)),
     })),
     ...(ctlOnly
       ? [{ key: "ctl", label: "Holds CTL technology", onRemove: () => setCtlOnly(false) }]
@@ -1649,7 +1678,7 @@ export function MatchaPanel({
   );
 
   // Uncapped, and deliberately: this is every candidate that matches the filters, and it is
-  // what the CSV exports. `visible` below is the same list with the render cap applied.
+  // what the export sends. `visible` below is the same list with the render cap applied.
   const filtered = useMemo(
     () =>
       rankedRows.filter(
@@ -1662,11 +1691,8 @@ export function MatchaPanel({
           (stageSel.size === 0 ||
             (c.measures?.careerStage != null &&
               stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
-          (typeSelEffective.size === 0 ||
-            (c.measures?.researcherType != null &&
-              typeSelEffective.has(RESEARCHER_TYPE_LABEL[c.measures.researcherType]))) &&
-          (kindSelEffective.size === 0 ||
-            researchKindLabels(c.measures).some((l) => kindSelEffective.has(l))) &&
+          (researchSelEffective.size === 0 ||
+            researchKeys(c.measures).some((k) => researchSelEffective.has(k))) &&
           (roleSelEffective.size === 0 ||
             roleSelEffective.has(roleCategoryLabel(c.measures?.roleCategory))),
       ),
@@ -1676,8 +1702,7 @@ export function MatchaPanel({
       conceptSel,
       ctlOnly,
       stageSel,
-      typeSelEffective,
-      kindSelEffective,
+      researchSelEffective,
       roleSelEffective,
     ],
   );
@@ -1990,66 +2015,81 @@ export function MatchaPanel({
 
   const nameOf = (cwid: string) => rankedRows.find(({ c }) => c.cwid === cwid)?.c.name ?? cwid;
 
-  /** One mapping, both exports. Two copies of it would drift, and the CSV would then depend on
-   *  which button the officer pressed — the rows are the same rows either way. */
-  function exportCsv(rows: readonly { c: MatchaCandidate; rank: number }[], filename: string) {
-    const csv = buildMatchaCsv(
-      rows.map(({ c, rank }) => ({
-        rank,
-        cwid: c.cwid,
-        name: c.name,
-        title: c.title,
-        department: c.department,
-        fit: TIER_LABEL[candidateFitTier(c, topScore)],
-        matchedConcepts: matchedConcepts(c, concepts).map((m) => m.concept.term),
-        // Blank = the measure is absent, never "no stage" / "not a clinician" (#1654).
-        careerStage: c.measures?.careerStage ? careerStageLabel(c.measures.careerStage) : "",
-        clinician:
-          c.measures?.isClinician === undefined ? "" : c.measures.isClinician ? "Yes" : "No",
-        personType: roleCategoryLabel(c.measures?.roleCategory),
-        researcherType: c.measures?.researcherType
-          ? RESEARCHER_TYPE_LABEL[c.measures.researcherType]
-          : "",
-        // Blank = not computed (an older stored run); computed-and-empty says so.
-        researchKind: c.measures?.researchKinds
-          ? researchKindLabels(c.measures).join("; ") || "None evident"
-          : "",
-        technologyCount: c.technologyCount,
-        profileUrl: new URL(
-          profilePath(c.profileSlug),
-          window.location.origin,
-        ).toString(),
-        // The export deliberately carries the PRE-gate set (an officer's outreach list), so
-        // each row must say whether the page's gate shows it. `meetsStageRule` is the SAME
-        // predicate the gate and the badges use — the stated rule, not the toggle — and it is
-        // null on `/edit/matcha`, where the column (see the option below) does not exist.
-        ...(meetsStageRule ? { eligible: meetsStageRule(c) ? "Yes" : "No" } : {}),
-        // Matcha Phase 3 — the brief's why + topics (edited text when present). Never the note.
-        ...(briefsOn ? briefCsvFields(briefMap.get(c.cwid)) : {}),
-      })),
-      { eligibility: meetsStageRule != null, brief: briefsOn },
-    );
-    downloadCsv(filename, csv);
+  /** One mapping, both exports. Two copies of it would drift, and the file would then depend on
+   *  which button the officer pressed — the rows are the same rows either way.
+   *
+   *  The rows are built HERE, from the officer's re-ranked, filtered list (a server re-run would
+   *  only know the default ranking), and posted to the export route, which writes the `.xlsx`.
+   *  ExcelJS stays out of the browser bundle. */
+  async function exportXlsx(rows: readonly { c: MatchaCandidate; rank: number }[], shortlist: boolean) {
+    const exportRows: MatchaExportRow[] = rows.map(({ c, rank }) => ({
+      rank,
+      cwid: c.cwid,
+      name: c.name,
+      title: c.title,
+      department: c.department,
+      fit: TIER_LABEL[candidateFitTier(c, topScore)],
+      matchedConcepts: matchedConcepts(c, concepts).map((m) => m.concept.term),
+      // Blank = the measure is absent, never "no stage" / "not a clinician" (#1654).
+      careerStage: c.measures?.careerStage ? careerStageLabel(c.measures.careerStage) : "",
+      clinician:
+        c.measures?.isClinician === undefined ? "" : c.measures.isClinician ? "Yes" : "No",
+      personType: roleCategoryLabel(c.measures?.roleCategory),
+      researcherType: c.measures?.researcherType
+        ? RESEARCHER_TYPE_LABEL[c.measures.researcherType]
+        : "",
+      // Blank = not computed (an older stored run); computed-and-empty says so.
+      researchKind: c.measures?.researchKinds
+        ? researchKindLabels(c.measures).join("; ") || "None evident"
+        : "",
+      technologyCount: c.technologyCount,
+      profileUrl: new URL(profilePath(c.profileSlug), window.location.origin).toString(),
+      // The export deliberately carries the PRE-gate set (an officer's outreach list), so
+      // each row must say whether the page's gate shows it. `meetsStageRule` is the SAME
+      // predicate the gate and the badges use — the stated rule, not the toggle — and it is
+      // null on `/edit/matcha`, where the column (see the option below) does not exist.
+      ...(meetsStageRule ? { eligible: meetsStageRule(c) ? "Yes" : "No" } : {}),
+      // Matcha Phase 3 — the brief's why + topics (edited text when present). Never the note.
+      ...(briefsOn ? briefExportFields(briefMap.get(c.cwid)) : {}),
+    }));
+    const title = titleOverride ?? ask?.title ?? null;
+    setExportState("pending");
+    try {
+      const r = await fetch("/api/edit/matcha/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          rows: exportRows,
+          eligibility: meetsStageRule != null,
+          brief: briefsOn,
+          shortlist,
+          title,
+        }),
+      });
+      if (!r.ok) throw new Error(`export ${r.status}`);
+      downloadBlob(matchaExportFilename(title, shortlist, new Date()), await r.blob());
+      setExportState("idle");
+    } catch {
+      setExportState("error");
+    }
   }
 
   /** Exports every row the filters matched — current sliders, current filters — NOT just the
    *  hundred we painted. An officer who filters to the CTL portfolio and gets 180 hits must
-   *  download 180, not the first 100 with no warning that the rest exist. A server route could
-   *  not do this at all: it would re-run the match and emit the DEFAULT ranking, not the one
-   *  the officer re-weighted.
+   *  download 180, not the first 100 with no warning that the rest exist.
    *
    *  Still REACHABLE once a shortlist exists, just no longer the unqualified "Export" — see the
    *  button, which renames itself rather than disappearing. Dropping it would strand the officer
    *  who ticked one row and still wanted the whole filtered list. */
   function exportFiltered() {
-    exportCsv(filtered, "sponsor-match-researchers.csv");
+    void exportXlsx(filtered, false);
   }
 
   /** The default export once anything is ticked. Its own filename: these two files have the same
    *  columns and wildly different meanings, and a shortlist landing in Downloads under the name of
    *  the 400-row list is how the wrong one gets sent to a sponsor. */
   function exportShortlist() {
-    exportCsv(shortlistRows, "sponsor-match-shortlist.csv");
+    void exportXlsx(shortlistRows, true);
   }
 
   // #6d retained searches — the "Recent searches" drawer (Matcha.dc.html). ONE controlled shadcn
@@ -3375,22 +3415,11 @@ export function MatchaPanel({
                       title="The Enterprise Directory's person type — faculty, postdoc, doctoral student, and so on."
                     />
                   ) : null}
-                  {typeFacet.length > 0 ? (
-                    <FacetGroup
-                      label="Researcher type"
-                      options={typeFacet}
-                      selected={typeSelEffective}
-                      onToggle={(v) => setTypeSel(toggled(typeSelEffective, v))}
-                      title={`One type per person, from two facts: whether they hold a medical degree, and whether their own papers are laboratory or clinical research (${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers in the last ${RESEARCH_ACTIVE_YEARS} years). Funded investigators are PI on a research award from any sponsor but show neither kind. Clinicians are hidden by default.`}
-                    />
-                  ) : null}
-                  {kindFacet.length > 0 ? (
-                    <FacetGroup
-                      label="Research kind"
-                      options={kindFacet}
-                      selected={kindSelEffective}
-                      onToggle={(v) => setKindSel(toggled(kindSelEffective, v))}
-                      title={`The kind of research a person's own papers show: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_ACTIVE_YEARS} years. A person can show both. "${KIND_FUNDED}" is a PI on a research award whose papers show neither. Laboratory research is selected by default.`}
+                  {researchCounts ? (
+                    <ResearchFacetGroup
+                      counts={researchCounts}
+                      selected={researchSelEffective}
+                      onToggle={(k) => setResearchSel(toggledResearch(researchSelEffective, k))}
                     />
                   ) : null}
                   <FacetGroup
@@ -3617,13 +3646,18 @@ export function MatchaPanel({
                       variant="outline"
                       size="sm"
                       onClick={exportFiltered}
-                      disabled={filtered.length === 0}
+                      disabled={filtered.length === 0 || exportState === "pending"}
                     >
                       <Download className="size-3.5" />
                       {shortlistRows.length > 0
                         ? `Export all (${filtered.length})`
                         : `Export (${filtered.length})`}
                     </Button>
+                    {exportState === "error" ? (
+                      <span role="alert" className="text-destructive text-xs">
+                        Export failed. Try again.
+                      </span>
+                    ) : null}
                     {/* Matcha Phase 4 — the printable report. Same flag as the briefs. */}
                     {briefsOn ? (
                       reportCwids.length > 0 ? (
@@ -3883,7 +3917,13 @@ export function MatchaPanel({
                     <span className="text-muted-foreground text-sm" aria-hidden="true">
                       ·
                     </span>
-                    <Button type="button" variant="outline" size="sm" onClick={exportShortlist}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={exportShortlist}
+                      disabled={exportState === "pending"}
+                    >
                       <Download className="size-3.5" />
                       Export shortlist ({shortlistRows.length})
                     </Button>
@@ -4313,6 +4353,72 @@ function FacetGroup({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** The Research group's hover. Matcha-only behaviour lives here; the shared definitions live on
+ *  /about (`methodologyHref("researchType")`), linked under the group. */
+const RESEARCH_FACET_TITLE = `Laboratory and Clinical research come from a person's own papers: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_TYPE_YEARS} years. A person can show both, so counts can add up to more than the total. Physician-scientist means a medical degree on file. "${KIND_FUNDED}" is a PI on a research award whose papers show neither kind. "${KIND_NONE}" is everyone else. Laboratory research is selected by default. Each person's own label is on their card.`;
+
+/**
+ * The nested Research group. Same row shape as `FacetGroup`, children indented under their
+ * parent. A child's accessible name carries its parent ("Laboratory research: Physician-scientist")
+ * because "Physician-scientist" appears under both parents.
+ */
+function ResearchFacetGroup({
+  counts,
+  selected,
+  onToggle,
+}: {
+  counts: ReadonlyMap<string, number>;
+  selected: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+}) {
+  const row = (key: string, label: string, ariaLabel?: string) => (
+    <label className="flex cursor-pointer items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        checked={selected.has(key)}
+        onChange={() => onToggle(key)}
+        aria-label={ariaLabel}
+        className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+      />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+        {counts.get(key) ?? 0}
+      </span>
+    </label>
+  );
+  return (
+    <div className="mt-3" data-slot="matcha-research-facet">
+      <HoverTooltip wide text={RESEARCH_FACET_TITLE}>
+        <h3 className="text-muted-foreground decoration-muted-foreground/40 text-[11px] font-semibold tracking-[0.08em] uppercase underline decoration-dotted underline-offset-4">
+          Research
+        </h3>
+      </HoverTooltip>
+      <ul className="mt-1.5 space-y-1">
+        {RESEARCH_PARENTS.map((p) => (
+          <li key={p.key}>
+            {row(p.key, p.label)}
+            {p.children.length > 0 ? (
+              <ul className="mt-1 space-y-1 pl-5">
+                {p.children.map((c) => (
+                  <li key={c.key}>{row(c.key, c.label, `${p.label}: ${c.label}`)}</li>
+                ))}
+              </ul>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <a
+        href={methodologyHref("researchType")}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-muted-foreground mt-1.5 inline-block text-xs underline underline-offset-4 hover:text-foreground"
+      >
+        How research and researcher types are defined
+      </a>
     </div>
   );
 }
@@ -5222,7 +5328,7 @@ function ResearcherRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          {/* `profilePath`, not a hand-built path — the CSV export builds its URL column from
+          {/* `profilePath`, not a hand-built path — the export builds its URL column from
               the same helper, so the link and the export cannot drift apart. */}
           <a
             href={profilePath(encodeURIComponent(candidate.profileSlug))}
@@ -6188,7 +6294,7 @@ function BriefPanel({ name, brief }: { name: string; brief: BriefRowProps }) {
 }
 
 /** The shared note at the card's foot. Collapsed until used; NEVER exported (see
- *  `briefCsvFields`). Shared by everyone who opens the paste, which is what the label says. */
+ *  `briefExportFields`). Shared by everyone who opens the paste, which is what the label says. */
 function BriefNote({ name, brief }: { name: string; brief: BriefRowProps }) {
   const { state, canEdit, onPatch } = brief;
   const [editing, setEditing] = useState(false);

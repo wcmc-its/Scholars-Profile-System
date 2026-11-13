@@ -1,14 +1,19 @@
 /**
- * Sponsor-match CSV export. The interesting cases are the two that bite in production:
- * a sponsor's pasted prose reaching a spreadsheet as a live formula, and the fused score
- * leaking into a column the contract deliberately withholds from the UI.
+ * Sponsor-match export rows. The fused score must not leak into a column the contract withholds
+ * from the UI, and the brief note must never be exported. The formula guard and the workbook
+ * shape are tested in matcha-xlsx.test.ts.
  */
 import { describe, expect, it } from "vitest";
 
-import { briefCsvFields, buildMatchaCsv, type MatchaCsvRow } from "@/lib/edit/matcha-export";
+import {
+  briefExportFields,
+  buildMatchaRows,
+  matchaExportFilename,
+  type MatchaExportRow,
+} from "@/lib/edit/matcha-export";
 import { NO_LAB_ANGLE } from "@/lib/edit/matcha-brief-types";
 
-const ROW: MatchaCsvRow = {
+const ROW: MatchaExportRow = {
   rank: 1,
   cwid: "aaa1001",
   name: "Alice Alpha",
@@ -25,58 +30,61 @@ const ROW: MatchaCsvRow = {
   profileUrl: "https://example.org/alice-alpha",
 };
 
-const HEADER =
-  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,Researcher type,Research kind,CTL technologies,Profile URL";
+const HEADER = [
+  "Rank",
+  "CWID",
+  "Name",
+  "Title",
+  "Department",
+  "Fit",
+  "Matched concepts",
+  "Person type",
+  "Career stage",
+  "Clinician",
+  "Researcher type",
+  "Research kind",
+  "CTL technologies",
+  "Profile URL",
+];
 
-describe("buildMatchaCsv", () => {
+describe("buildMatchaRows", () => {
   it("writes the header row and one row per researcher", () => {
-    const lines = buildMatchaCsv([ROW]).split("\r\n");
-    expect(lines[0]).toBe(HEADER);
-    expect(lines[1]).toBe(
-      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,Laboratory research,2,https://example.org/alice-alpha',
-    );
-  });
-
-  it("joins matched concepts with '; ' — a comma would look like another column", () => {
-    const csv = buildMatchaCsv([ROW]);
-    expect(csv).toContain("systemic sclerosis; pulmonary fibrosis");
+    const t = buildMatchaRows([ROW]);
+    expect(t.header).toEqual(HEADER);
+    expect(t.body).toEqual([
+      [
+        1,
+        "aaa1001",
+        "Alice Alpha",
+        "Professor of Medicine",
+        "Medicine",
+        "Strong fit",
+        "systemic sclerosis; pulmonary fibrosis",
+        "Full-time faculty",
+        "Senior",
+        "Yes",
+        "Physician-scientist",
+        "Laboratory research",
+        2,
+        "https://example.org/alice-alpha",
+      ],
+    ]);
   });
 
   it("serializes a null title/department as empty, never the string 'null'", () => {
-    const csv = buildMatchaCsv([{ ...ROW, title: null, department: null }]);
-    expect(csv).not.toContain("null");
-    expect(csv.split("\r\n")[1]).toBe(
-      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,Laboratory research,2,https://example.org/alice-alpha',
-    );
-  });
-
-  /**
-   * THE ONE THAT MATTERS. Concept terms are extracted from a PASTED SPONSOR EMAIL — untrusted
-   * text that lands in a spreadsheet a fundraising officer opens. A term beginning `=`, `+`,
-   * `-` or `@` is a live formula to Excel (OWASP "CSV Injection"). `toCsv` neutralises it; this
-   * pins that we route through it rather than joining strings by hand.
-   */
-  it("neutralises a formula-injection payload in an attacker-controlled concept term", () => {
-    const csv = buildMatchaCsv([
-      { ...ROW, matchedConcepts: ["=cmd|'/c calc'!A1"], name: "@SUM(1+1)" },
-    ]);
-    // Whatever the guard's exact form, the cell must not START a formula once parsed.
-    const cells = csv.split("\r\n")[1];
-    expect(cells).not.toContain(",=cmd");
-    expect(cells).not.toContain(",@SUM");
+    const [row] = buildMatchaRows([{ ...ROW, title: null, department: null }]).body;
+    expect(row[3]).toBe("");
+    expect(row[4]).toBe("");
   });
 
   it("has no fused-score column — the contract keeps that number out of the UI", () => {
-    const csv = buildMatchaCsv([ROW]);
-    expect(csv.split("\r\n")[0]).not.toMatch(/score/i);
-    // `Fit` is the tier LABEL, not a number.
-    expect(csv).toContain("Strong fit");
+    const t = buildMatchaRows([ROW]);
+    expect(t.header.join(",")).not.toMatch(/score/i);
+    expect(t.body[0]).toContain("Strong fit");
   });
 
   it("leaves the measure cells BLANK when absent — a blank is unknown, not 'no' (#1654)", () => {
-    // The producer landed, but a candidate with no Scholar row still carries no measure.
-    // Writing "No" there would assert she is not a clinician; we simply do not know.
-    const unknown: MatchaCsvRow = {
+    const unknown: MatchaExportRow = {
       ...ROW,
       personType: "",
       careerStage: "",
@@ -84,47 +92,55 @@ describe("buildMatchaCsv", () => {
       researcherType: "",
       researchKind: "",
     };
-    const cells = buildMatchaCsv([unknown]).split("\r\n")[1];
-    expect(cells).toContain("systemic sclerosis; pulmonary fibrosis,,,,,,2,");
-    expect(cells).not.toMatch(/,No,/);
+    expect(buildMatchaRows([unknown]).body[0].slice(7, 12)).toEqual(["", "", "", "", ""]);
   });
 
   it("returns just the header for an empty result set", () => {
-    expect(buildMatchaCsv([]).trim()).toBe(HEADER);
+    expect(buildMatchaRows([])).toEqual({ header: HEADER, body: [] });
   });
 
   // ── Grant Matcha — the Eligible column (zero-results fix 3) ────────────────
-  // The export deliberately carries the PRE-gate set (the officer's outreach list), so each
-  // row must say whether the page's gate shows it — otherwise the CSV silently contradicts
-  // the page it came from ("Top 0" on screen, 77 unmarked rows in the file).
+  // The export carries the PRE-gate set, so each row says whether the page's gate shows it.
   it("appends the Eligible column with per-row Yes/No when the build asks for it", () => {
-    const lines = buildMatchaCsv(
+    const t = buildMatchaRows(
       [
         { ...ROW, eligible: "Yes" },
         { ...ROW, cwid: "bbb2002", name: "Bob Beta", eligible: "No" },
       ],
       { eligibility: true },
-    ).split("\r\n");
-    expect(lines[0]).toBe(`${HEADER},Eligible`);
-    expect(lines[1]).toBe(
-      "1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Full-time faculty,Senior,Yes,Physician-scientist,Laboratory research,2,https://example.org/alice-alpha,Yes",
     );
-    expect(lines[2].endsWith(",No")).toBe(true);
+    expect(t.header).toEqual([...HEADER, "Eligible"]);
+    expect(t.body.map((r) => r.at(-1))).toEqual(["Yes", "No"]);
   });
 
   it("an empty grant-path export still writes the Eligible header — an option, not row-inferred", () => {
-    expect(buildMatchaCsv([], { eligibility: true }).trim()).toBe(`${HEADER},Eligible`);
+    expect(buildMatchaRows([], { eligibility: true }).header).toEqual([...HEADER, "Eligible"]);
   });
 
   it("without the option the file is unchanged — `/edit/matcha` states no rule, so no column", () => {
-    // A stray `eligible` value must not smuggle a 15th cell into a 14-column file either.
-    const lines = buildMatchaCsv([{ ...ROW, eligible: "Yes" }]).split("\r\n");
-    expect(lines[0]).toBe(HEADER);
-    expect(lines[1].split(",")).toHaveLength(14);
+    const t = buildMatchaRows([{ ...ROW, eligible: "Yes" }]);
+    expect(t.header).toEqual(HEADER);
+    expect(t.body[0]).toHaveLength(14);
   });
 });
 
-describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
+describe("matchaExportFilename", () => {
+  const d = new Date("2026-11-13T12:00:00Z");
+  it("slugs the title and dates the file", () => {
+    expect(matchaExportFilename("Acme Bio: CAR-T partners", false, d)).toBe(
+      "matcha-acme-bio-car-t-partners-2026-11-13.xlsx",
+    );
+  });
+  it("marks the shortlist so the two files never share a name", () => {
+    expect(matchaExportFilename("Acme", true, d)).toBe("matcha-acme-shortlist-2026-11-13.xlsx");
+  });
+  it("falls back when there is no usable title, and never emits a quote or slash", () => {
+    expect(matchaExportFilename(null, false, d)).toBe("matcha-researchers-2026-11-13.xlsx");
+    expect(matchaExportFilename('"/../x', false, d)).toBe("matcha-x-2026-11-13.xlsx");
+  });
+});
+
+describe("buildMatchaRows — Matcha Phase 3 brief columns", () => {
   const BRIEF = {
     generated: {
       why: "Generated why.",
@@ -147,13 +163,13 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
   };
 
   it("omits the brief columns unless asked (flag off ⇒ master's file)", () => {
-    expect(buildMatchaCsv([ROW]).split("\r\n")[0]).toBe(HEADER);
+    expect(buildMatchaRows([ROW]).header).toEqual(HEADER);
   });
 
   it("writes the EDITED why and topics when present", () => {
-    const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields(BRIEF) }], { brief: true });
-    const [head, line] = csv.split("\r\n");
-    expect(head).toBe(`${HEADER},Why this PI,Partnership angle,Discussion topics`);
+    const t = buildMatchaRows([{ ...ROW, ...briefExportFields(BRIEF) }], { brief: true });
+    expect(t.header).toEqual([...HEADER, "Why this PI", "Partnership angle", "Discussion topics"]);
+    const line = t.body[0].join("|");
     expect(line).toContain("Edited why.");
     expect(line).toContain("Edited angle.");
     expect(line).not.toContain("Generated angle.");
@@ -162,32 +178,34 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
   });
 
   it("falls back to the generated text, with source labels", () => {
-    const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields({ ...BRIEF, edited: null }) }], {
-      brief: true,
-    });
+    const csv = JSON.stringify(
+      buildMatchaRows([{ ...ROW, ...briefExportFields({ ...BRIEF, edited: null }) }], {
+        brief: true,
+      }),
+    );
     expect(csv).toContain("Generated why.");
     expect(csv).toContain("Generated angle.");
     expect(csv).toContain("Generated topic [2024 · Short paper title]");
   });
 
   it("NEVER includes the note", () => {
-    const fields = briefCsvFields(BRIEF);
+    const fields = briefExportFields(BRIEF);
     expect(JSON.stringify(fields)).not.toContain("CONFIDENTIAL-NOTE-TEXT");
-    const csv = buildMatchaCsv([{ ...ROW, ...fields }], { brief: true });
-    expect(csv).not.toContain("CONFIDENTIAL-NOTE-TEXT");
-    expect(csv.split("\r\n")[0]).not.toMatch(/note/i);
+    const t = buildMatchaRows([{ ...ROW, ...fields }], { brief: true });
+    expect(JSON.stringify(t)).not.toContain("CONFIDENTIAL-NOTE-TEXT");
+    expect(t.header.join(",")).not.toMatch(/note/i);
   });
 
   it("writes a blank angle for a brief drafted before angles existed", () => {
     const { angle: _drop, ...legacy } = BRIEF.generated;
     void _drop;
-    const fields = briefCsvFields({ generated: legacy, edited: null });
+    const fields = briefExportFields({ generated: legacy, edited: null });
     expect(fields.briefAngle).toBe("");
     expect(fields.briefWhy).toBe("Generated why.");
   });
 
   it("writes the no-laboratory-angle sentence as plain text", () => {
-    const fields = briefCsvFields({
+    const fields = briefExportFields({
       generated: { ...BRIEF.generated, angle: NO_LAB_ANGLE },
       edited: null,
     });
@@ -195,7 +213,7 @@ describe("buildMatchaCsv — Matcha Phase 3 brief columns", () => {
   });
 
   it("writes blanks for a row with no brief", () => {
-    const csv = buildMatchaCsv([{ ...ROW, ...briefCsvFields(undefined) }], { brief: true });
-    expect(csv.split("\r\n")[1].endsWith("https://example.org/alice-alpha,,,")).toBe(true);
+    const t = buildMatchaRows([{ ...ROW, ...briefExportFields(undefined) }], { brief: true });
+    expect(t.body[0].slice(-4)).toEqual(["https://example.org/alice-alpha", "", "", ""]);
   });
 });
