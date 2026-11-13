@@ -17,7 +17,6 @@ const globalForReciter = globalThis as unknown as {
   __reciterPool?: Pool;
 };
 
-
 function readConfig() {
   const names = {
     host: "SCHOLARS_RECITERDB_HOST",
@@ -45,7 +44,7 @@ function readConfig() {
     user: process.env[names.user]!,
     password: process.env[names.password]!,
     database: process.env[names.database]!,
-    port
+    port,
   };
 }
 
@@ -66,7 +65,6 @@ export function getReciterPool(): Pool {
     // path can be down) instead of stalling callers ~10s on driver defaults.
     connectTimeout: 2000,
     acquireTimeout: 3000,
-   
   }));
 }
 
@@ -109,13 +107,17 @@ export async function closeReciterPool(): Promise<void> {
  * "temporarily unavailable" on every request; say so once instead. Staging and
  * prod run both bridges on, so this is null there.
  */
-export function reciterDbConfigWarning(env: Record<string, string | undefined> = process.env): string | null {
+export function reciterDbConfigWarning(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
   if (env.SCHOLARS_RECITERDB_HOST) return null;
-  const live = ["MENTORING_COPUB_BRIDGE", "PUBLICATION_CITING_BRIDGE"].filter((f) => env[f] !== "on");
+  const live = ["MENTORING_COPUB_BRIDGE", "PUBLICATION_CITING_BRIDGE"].filter(
+    (f) => env[f] !== "on",
+  );
   if (live.length === 0) return null;
   return (
     `[reciterdb] SCHOLARS_RECITERDB_HOST is unset and ${live.join(", ")} not "on": ` +
-    "mentoring and cited-by data will show as unavailable. Set the flag(s) to \"on\" " +
+    'mentoring and cited-by data will show as unavailable. Set the flag(s) to "on" ' +
     "to read the local bridge tables (see .env.example)."
   );
 }
