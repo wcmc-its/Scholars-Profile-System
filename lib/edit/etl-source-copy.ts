@@ -346,6 +346,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "The weekly research-AI job that scores new publications and files them under research areas. Stands behind Research Topics & Scores.",
     origin: "external", // ReCiterAI-run job, read from its own run ledger
   },
+  "ReciterAI-tools": {
+    label: "Research AI: Weekly Methods & Tools",
+    description:
+      "The weekly research-AI job that adds methods and tools from new publications. Stands behind Methods & Tools. Skipping a week with nothing new is normal; not running at all is not.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
   "ReciterAI-spotlight-gate": {
     label: "Research AI: Spotlight Check",
     description:

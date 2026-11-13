@@ -17,7 +17,8 @@
  * one place and invisible in the other.
  */
 
-export type Cadence = "nightly" | "nightly-mirrored" | "weekly" | "monthly" | "annual";
+export type Cadence =
+  "nightly" | "nightly-mirrored" | "weekly" | "weekly-mirrored" | "monthly" | "annual";
 
 export const HOUR_MS = 60 * 60 * 1000;
 
@@ -66,11 +67,27 @@ export const HOUR_MS = 60 * 60 * 1000;
  * `nightly` instead, don't: it also covers ~25 steps THIS repo runs inside the
  * nightly chain, where a 30h ceiling is correct and 54h would hide a real outage
  * for an extra day.
+ *
+ * `weekly-mirrored` is the weekly SLA plus the same one-night mirror lag, for a
+ * WEEKLY producer we sample nightly:
+ *
+ *   7d  gap between two on-time weekly producer runs
+ * + 1d  worst-case lag before OUR nightly mirrors the newest run
+ * + 1d  grace (the same day of grace `weekly` carries)
+ * = 9d  (216h)
+ *
+ * It exists for ReciterAI's tools maintain run, cron(30 3 ? * TUE *). On a
+ * normal week that lands 3.5h before the 07:00 UTC nightly reads it, which
+ * `weekly`'s day of grace would absorb. But the run has no Fargate timeout (the
+ * 2026-11-11 catch-up took 77 minutes), so a slow week can finish after 07:00
+ * and be read the following night, ~27h late, which `weekly` would grade Late
+ * on a healthy producer.
  */
 export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
   nightly: 30,
   "nightly-mirrored": 54,
   weekly: 8 * 24,
+  "weekly-mirrored": 9 * 24,
   monthly: 40 * 24,
   annual: 400 * 24,
 };
@@ -178,53 +195,33 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // so a healthy night is mostly `equal`; the step throws on a dead API rather than grade green, which is why
   // its freshness row means something.
   "ORCID-push": { cadence: "nightly" },
-  // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
-  // (a 0-row success in ddb mode; both envs run SCHOLAR_TOOL_SOURCE=s3 since the
-  // 2026-07-06 cutover), so it is freshness-tracked from the start.
+  // #794 — A2 tools taxonomy → scholar_tool. Our import runs every nightly
+  // (a 0-row success when the artifact is unchanged; both envs run
+  // SCHOLAR_TOOL_SOURCE=s3 since the 2026-07-06 cutover).
   //
-  // RE-ANCHORED AND ACKED, as one change. etl/tools/index.ts now stores the
-  // artifact's `generated_at` (§2.1), so this row finally grades the CONTENT
-  // rather than the liveness of our own import — and when this landed, tools.json
-  // had carried generated_at 2026-06-23 since June, so it graded stale immediately. The ack
-  // is what makes that landable: the staleness becomes an accepted decision
-  // with a review date instead of a permanently red row nobody can fix, which
-  // is the cry-wolf failure the ack mechanism exists to prevent and the same
-  // shape as Spotlight's ack below.
+  // Anchored on the ARTIFACT, not on our import: etl/tools/index.ts stores the
+  // manifest's `generated_at` (§2.1), so this row grades how old the published
+  // tools data is. The import's own liveness is not separately graded here.
   //
-  // Neither half works alone, which is why they are not separable:
-  //   - anchor without ack -> a red row with no route to green;
-  //   - ack without anchor -> INERT. `gradeSource` sets `acknowledged` from
-  //     `stale && ack active`, and a completedAt-anchored Tools is never stale,
-  //     so nothing is suppressed, the reason string reaches no reader, and
-  //     etl/freshness/index.ts's anti-clutter rule logs "ack is no longer
-  //     needed — remove it" on every heartbeat.
+  // `weekly-mirrored` because the producer is weekly: ReciterAI's maintain pass
+  // (EventBridge rule reciterai-tools-weekly, Tuesdays 03:30 UTC; ReciterAI
+  // #502/#503) republishes tools/latest/, and our next nightly reads it. See
+  // SLA_HOURS for the mirror-lag term.
   //
-  // `nightly` is kept, not widened: it is the honest cadence for our import.
-  // When the ack was added the producer had no EventBridge schedule and wrote
-  // no STAGE# ledger row, so there was nothing to grade it against and the ack,
-  // not the cadence, carried the staleness. That is no longer true: ReciterAI
-  // now runs a weekly maintain pass (EventBridge rule reciterai-tools-weekly,
-  // Tuesdays 03:30 UTC; ReciterAI #502/#503) that republishes the artifact and
-  // writes STAGE#tools_maintain#GLOBAL ledger rows. SPS does not consume those
-  // rows yet: `tools_maintain` is not in PRODUCER_STAGES
-  // (etl/dynamodb/producer-run-mapper.ts).
+  // The ack that used to sit here ("a scheduled weekly refresh is being
+  // built") is gone: the refresh is live, and its first publish (catch-up run
+  // 2026-11-11, generated_at 2026-11-11T23:23:31Z) makes this row green on its
+  // own. Producer liveness is graded separately on `ReciterAI-tools` below,
+  // from the STAGE#tools_maintain#GLOBAL ledger row.
   //
-  // Planned follow-up (not done here): add tools_maintain to PRODUCER_STAGES,
-  // then drop the ack and let the anchor stand on its own. Until then, at
-  // `until`: renew as a deliberate decision, or drop BOTH halves.
-  Tools: {
-    cadence: "nightly",
-    ack: {
-      until: "2026-12-31",
-      // Reader-facing copy, same rule as Spotlight's below: this string is
-      // rendered to superusers on /edit/etl-status, so it stays plain English
-      // and the technical account stays in the comment above it.
-      reason:
-        "This data is refreshed by hand rather than on a schedule. The last " +
-        "hand-published refresh was 23 June 2026. A scheduled weekly refresh " +
-        "is being built; until it is live, no action is needed here.",
-    },
-  },
+  // One known way this goes red on a live producer: a maintain run that
+  // republishes nothing. A week with no new PMIDs writes `skipped`, and a run
+  // whose new mentions change no published byte writes `complete` without
+  // uploading, so generated_at does not move in either case. With one week of
+  // new PMIDs per run that is not expected; if it happens, check the
+  // `ReciterAI-tools` row first. Green there and Late here means the producer
+  // ran and had nothing to publish.
+  Tools: { cadence: "weekly-mirrored" },
   // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts
   // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
   // both envs, no env split) writing sources "FamilySensitivity" /
@@ -466,6 +463,13 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // an anchor that is still the age of the output.
   "ReciterAI-grants": { cadence: "nightly-mirrored" },
   "ReciterAI-cores": { cadence: "weekly" },
+  // ReciterAI `pipeline_tools.maintain` (STAGE#tools_maintain#GLOBAL), weekly,
+  // Tuesdays 03:30 UTC. `weekly-mirrored` for the reason set out at SLA_HOURS:
+  // the run has no timeout, so a slow week is mirrored a night late. `skipped`
+  // (no new PMIDs that week) is a healthy outcome, so it counts as live, the
+  // same rule as the spotlight gate. No ack: the 2026-11-11 catch-up run is
+  // already in the ledger as `complete`, so this starts green.
+  "ReciterAI-tools": { cadence: "weekly-mirrored", liveStatuses: ["success", "skipped"] },
   // ReciterAI `pipeline_area_signals` (STAGE#area_signals#GLOBAL), daily after
   // the SPS nightly, so mirrored the following night like its siblings. Acked
   // because the producer is not deployed yet (ReciterAI build plan R2/R3,

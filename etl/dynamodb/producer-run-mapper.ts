@@ -97,6 +97,17 @@ export const PRODUCER_STAGES: Readonly<Record<string, string>> = {
   // FORWARD-DECLARED like cores_run: the stage row appears once that pipeline
   // deploys; until then its TRACKED entry carries a dated ack.
   area_signals: "ReciterAI-area-signals",
+  // cron(30 3 ? * TUE *) -> ECS reciterai-tools (`pipeline_tools.maintain
+  // --publish`; ReciterAI #502/#503). Statuses are `complete | skipped |
+  // failed`: `skipped` is a week with no new PMIDs, a healthy outcome, so it
+  // rides through verbatim (trap 3) and TRACKED counts it as live. A `complete`
+  // row carries `completed_at` and `duration_ms`, and `records_written` is the
+  // count of new PMIDs folded in. The row also carries `cost_observed_usd`,
+  // `cost_estimated_classify_usd` and `held_for_review_count`, which `etl_run`
+  // has no column for, so they are not mirrored: read them from the ledger
+  // row, or from `tools/_review/<run>.json` for the held tools. The same PK
+  // also holds the run lock (`SK = LOCK`), which RUN_SK skips.
+  tools_maintain: "ReciterAI-tools",
 };
 
 /** One `etl_run` row, ready for `create`. */

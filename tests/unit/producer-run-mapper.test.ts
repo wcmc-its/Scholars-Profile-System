@@ -248,6 +248,69 @@ describe("buildProducerRunWrites", () => {
     expect(w.completedAt.getTime() - w.startedAt.getTime()).toBe(41204);
   });
 
+  it("maps the tools_maintain stage, using the real 2026-11-11 catch-up row", () => {
+    // Both items under this PK as they stood on 2026-11-13: the run lock and the
+    // seeded catch-up run. The lock shares the PK and must not become a run;
+    // the cost and held-for-review fields have no etl_run column and must not
+    // break the write.
+    const writes = buildProducerRunWrites(
+      [
+        {
+          PK: "STAGE#tools_maintain#GLOBAL",
+          SK: "LOCK",
+          record_type: "TOOLS_MAINTAIN_LOCK",
+          released: true,
+        },
+        {
+          PK: "STAGE#tools_maintain#GLOBAL",
+          SK: "RUN#2026-11-11T22:06:11Z",
+          record_type: "TOOLS_MAINTAIN_RUN",
+          status: "complete",
+          started_at: "2026-11-11T22:06:11Z",
+          completed_at: "2026-11-11T23:23:42Z",
+          duration_ms: 4651273,
+          records_written: 1045,
+          cost_observed_usd: 0.5,
+          cost_estimated_classify_usd: 3.09,
+          held_for_review_count: 1278,
+          new_tool_count: 92,
+          published: true,
+        },
+      ],
+      NONE,
+    );
+
+    expect(writes).toHaveLength(1);
+    const [w] = writes;
+    expect(w.source).toBe("ReciterAI-tools");
+    expect(w.status).toBe("success");
+    expect(w.rowsProcessed).toBe(1045);
+    expect(w.startedAt.toISOString()).toBe("2026-11-11T22:06:11.000Z");
+    // duration_ms (4651.273s) runs past the second-rounded completed_at.
+    expect(w.completedAt.getTime() - w.startedAt.getTime()).toBe(4651273);
+    expect(w.errorMessage).toBeNull();
+  });
+
+  it("writes a tools_maintain no-new-PMIDs week as `skipped`, which TRACKED counts as live", () => {
+    const [w] = buildProducerRunWrites(
+      [
+        {
+          PK: "STAGE#tools_maintain#GLOBAL",
+          SK: "RUN#2026-11-24T03:30:40Z",
+          status: "skipped",
+          skip_reason: "no_new_pmids",
+          duration_ms: 61000,
+          records_written: 0,
+        },
+      ],
+      NONE,
+    );
+
+    expect(w.source).toBe("ReciterAI-tools");
+    expect(w.status).toBe("skipped");
+    expect(TRACKED["ReciterAI-tools"]?.liveStatuses).toContain("skipped");
+  });
+
   it("writes only runs newer than what is already recorded", () => {
     const rows = [
       { PK: "STAGE#daily_enrichment#GLOBAL", SK: "RUN#2026-09-05T11:01:22Z", status: "complete" },
@@ -625,7 +688,7 @@ describe("producer stage wiring", () => {
     }
   });
 
-  it("covers all nine scheduled ReciterAI jobs", () => {
+  it("covers all ten scheduled ReciterAI jobs", () => {
     // The count is the point of the last three PRs. If a source is dropped here
     // the board silently stops asking about one of the eight, which is exactly
     // the invisible state this work exists to end.
@@ -646,6 +709,7 @@ describe("producer stage wiring", () => {
         "ReciterAI-cores", // reciterai-cores-daily
         "ReciterAI-grants", // reciterai-grants-daily
         "ReciterAI-area-signals", // pipeline_area_signals daily (forward-declared)
+        "ReciterAI-tools", // reciterai-tools-weekly
       ]),
     );
   });

@@ -46,7 +46,8 @@ describe("freshness SLAs", () => {
   it("keeps SLAs monotonic across cadences", () => {
     expect(SLA_HOURS.nightly).toBeLessThan(SLA_HOURS["nightly-mirrored"]);
     expect(SLA_HOURS["nightly-mirrored"]).toBeLessThan(SLA_HOURS.weekly);
-    expect(SLA_HOURS.weekly).toBeLessThan(SLA_HOURS.monthly);
+    expect(SLA_HOURS.weekly).toBeLessThan(SLA_HOURS["weekly-mirrored"]);
+    expect(SLA_HOURS["weekly-mirrored"]).toBeLessThan(SLA_HOURS.monthly);
     expect(SLA_HOURS.monthly).toBeLessThan(SLA_HOURS.annual);
   });
 
@@ -247,60 +248,44 @@ describe("freshness acknowledgements", () => {
     }
   });
 
-  // Same posture for Tools, and the second half of this assertion is the point:
-  // the ack covers a hand-run PRODUCER, while the cadence still grades OUR
-  // nightly import. Widening the cadence instead would hide a dead import,
-  // which is the response this ack exists to avoid.
-  it("Tools is acknowledged without loosening its import cadence", () => {
-    expect(TRACKED.Tools?.ack).toBeDefined();
-    expect(TRACKED.Tools?.cadence).toBe("nightly");
+  // The weekly maintain run (ReciterAI #502/#503) replaced the hand-run
+  // producer, so the ack that said "a scheduled refresh is being built" is
+  // gone and the artifact-age anchor stands on its own at the producer's
+  // cadence plus the mirror lag.
+  it("Tools carries no ack and grades weekly plus mirror lag", () => {
+    expect(TRACKED.Tools?.ack).toBeUndefined();
+    expect(TRACKED.Tools?.cadence).toBe("weekly-mirrored");
   });
 
-  /**
-   * The ack and the generated_at anchor in etl/tools/index.ts are ONE change,
-   * and this pins the HALF that is testable here: given the artifact's real age
-   * as the anchor, the ack engages. It cannot pin the anchor itself —
-   * etl/tools/index.ts runs `main()` on import, so no test may load it — so if
-   * someone reverts that file, these still pass.
-   *
-   * Worth pinning even so, because the failure this describes is silent: an ack
-   * on a source that never grades stale is INERT. `acknowledged` stays false,
-   * the reason string reaches no reader, nothing goes red, and the only symptom
-   * is a heartbeat line telling you to delete the ack you just added. The
-   * `inert` half below is that exact state, asserted so the distinction is
-   * written down rather than rediscovered.
-   *
-   * ponytail: no test on the anchor itself. Making it testable means splitting
-   * recordRun out of a module whose import has side effects — a real refactor
-   * for one assertion. The anchor is one call to parseManifestGeneratedAt,
-   * which tests/unit/freshness-anchor.test.ts already covers. Upgrade path: if
-   * etl/tools/index.ts is ever split for another reason, pin it then.
-   */
-  it("the Tools ack actually engages on the artifact's real age", () => {
-    // tools.json has carried this generated_at since June; the anchor is what
-    // puts it in front of gradeSource instead of our nightly import's clock.
-    const artifactAge = new Date("2026-06-23T00:00:00Z");
-    const now = Date.parse("2026-09-08T21:00:00Z");
-    const graded = gradeSource("Tools", TRACKED.Tools!, artifactAge, now);
+  it("Tools is green on the first scheduled publish and Late after a missed week", () => {
+    // generated_at of the 2026-11-11 catch-up publish (tools/latest/manifest.json).
+    const published = new Date("2026-11-11T23:23:31Z");
 
-    expect(graded.stale).toBe(true); // the truth is still told
-    expect(graded.acknowledged).toBe(true); // ...and accepted, so no failure
-    expect(graded.ackExpired).toBe(false);
+    // Just before the second Tuesday's run lands: a healthy, on-time producer.
+    const beforeNext = gradeSource(
+      "Tools",
+      TRACKED.Tools!,
+      published,
+      Date.parse("2026-11-18T07:00:00Z"),
+    );
+    expect(beforeNext.stale).toBe(false);
 
-    // A completedAt anchor (our import ran tonight) is the inert case: not
-    // stale, so the ack suppresses nothing and explains nothing.
-    const importRan = new Date("2026-09-08T07:12:00Z");
-    const inert = gradeSource("Tools", TRACKED.Tools!, importRan, now);
-    expect(inert.stale).toBe(false);
-    expect(inert.acknowledged).toBe(false);
-  });
+    // 11-17's run published on time at 05:00. 11-24's overran 07:00, so the
+    // 11-25 nightly is the first to read it, and until then the board still
+    // shows 11-17's age. Under plain `weekly` (8d) this healthy state reads Late.
+    const slowWeek = new Date("2026-11-17T05:00:00Z");
+    const readLate = Date.parse("2026-11-25T06:59:00Z");
+    expect(gradeSource("Tools", TRACKED.Tools!, slowWeek, readLate).stale).toBe(false);
+    expect((readLate - slowWeek.getTime()) / 3_600_000).toBeGreaterThan(SLA_HOURS.weekly);
 
-  it("the Tools ack expires into a real failure rather than a permanent green", () => {
-    const artifactAge = new Date("2026-06-23T00:00:00Z");
-    const afterUntil = Date.parse("2027-01-05T00:00:00Z");
-    const graded = gradeSource("Tools", TRACKED.Tools!, artifactAge, afterUntil);
-
-    expect(graded.ackExpired).toBe(true);
-    expect(graded.acknowledged).toBe(false); // counts against us again — the review trigger
+    // A whole missed week is real news, and with no ack it fails the check.
+    const missed = gradeSource(
+      "Tools",
+      TRACKED.Tools!,
+      slowWeek,
+      Date.parse("2026-11-27T07:00:00Z"),
+    );
+    expect(missed.stale).toBe(true);
+    expect(missed.acknowledged).toBe(false);
   });
 });

@@ -85,11 +85,9 @@ export type EtlSourceRow = {
    * `manifestGeneratedAt` when it has one, else `completedAt`. NEVER
    * `completedAt` alone — the Spotlight and Hierarchy loaders write a fresh
    * success row on an unchanged-sha256 short-circuit, so `completedAt` advances
-   * while the artifact stays frozen. Those two are the only sources that write
-   * `manifestGeneratedAt`. Tools short-circuits the same way but stays
-   * completedAt-anchored ON PURPOSE — its producer is hand-run, so anchoring it
-   * on the manifest would false-alarm while healthy (etl/tools/index.ts) — which
-   * means Tools gets job-liveness coverage here and no artifact-age coverage.
+   * while the artifact stays frozen. Tools short-circuits the same way and
+   * also writes `manifestGeneratedAt` (etl/tools/index.ts), so it is graded on
+   * artifact age; its producer's weekly run is graded on `ReciterAI-tools`.
    */
   lastSuccessAt: Date | null;
   ageHours: number | null;
