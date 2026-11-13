@@ -78,6 +78,15 @@ describe("SlugRegistry — chrome + segments", () => {
     rerender(
       <SlugRegistry
         {...base({
+          query: "held",
+          verdict: { kind: "status", status: { state: "taken", slug: "held", held: "override", cwid: "zzx0002", name: "Pin Holder" } },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("slug-check-result").textContent).toBe("TakenPinned for Pin Holder (zzx0002)");
+    rerender(
+      <SlugRegistry
+        {...base({
           query: "old",
           verdict: {
             kind: "status",
@@ -241,13 +250,15 @@ describe("SlugRegistry — per-segment columns", () => {
           segment: "override",
           total: 1,
           rows: [{ slug: "pinned", pinnedForCwid: "h1", setByCwid: "admin9", updatedAt: "2026-02-02T00:00:00.000Z" }],
+          extras: { people: { admin9: { name: "Ada Admin", department: null } }, pinned: [], baseHolders: {} },
         })}
       />,
     );
     const row = screen.getByTestId("slug-row-pinned");
     expect(row.textContent).toContain("pinned");
     expect(row.textContent).toContain("h1");
-    expect(row.textContent).toContain("admin9");
+    expect(row.textContent).toContain("by Ada Admin");
+    expect(row.textContent).not.toContain("admin9");
   });
 
   it("reserved: word + reason, plus the lib/slug.ts note", () => {
@@ -283,10 +294,13 @@ describe("SlugRegistry — per-segment columns", () => {
               decisionNote: "namesake collision",
             },
           ],
+          extras: { people: { admin1: { name: "Al Decider", department: null } }, pinned: [], baseHolders: {} },
         })}
       />,
     );
     const row = screen.getByTestId("slug-row-r1");
+    expect(row.textContent).toContain("by Al Decider");
+    expect(row.textContent).not.toContain("admin1");
     expect(row.textContent).toContain("want-this");
     expect(screen.getByTestId("slug-status-r1").textContent).toBe("Denied");
     expect(row.textContent).toContain("namesake collision");

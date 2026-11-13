@@ -367,7 +367,7 @@ function Verdict({ verdict }: { verdict: RegistryVerdict }) {
     } else if (s.held === "override") {
       tone = "red";
       label = "Taken";
-      detail = `Pinned for ${s.cwid}`;
+      detail = `Pinned for ${s.name ? `${s.name} (${s.cwid})` : s.cwid}`;
     } else {
       tone = "amber";
       label = "Redirect";
@@ -514,7 +514,7 @@ function SegmentRows({
       date: (
         <>
           {formatShortDate(r.updatedAt)}
-          <span className="block text-xs">by {r.setByCwid}</span>
+          <span className="block text-xs">by {person(r.setByCwid)?.name ?? r.setByCwid}</span>
         </>
       ),
       write: { kind: "unpin", cwid: r.pinnedForCwid, slug: r.slug },
@@ -548,7 +548,9 @@ function SegmentRows({
         tone: r.status === "approved" ? "green" : "grey",
         testId: `slug-status-${r.id}`,
       },
-      date: r.decidedAt ? `${formatShortDate(r.decidedAt)} by ${r.decidedByCwid ?? "—"}` : "—",
+      date: r.decidedAt
+        ? `${formatShortDate(r.decidedAt)} by ${r.decidedByCwid ? (person(r.decidedByCwid)?.name ?? r.decidedByCwid) : "—"}`
+        : "—",
     }));
   } else {
     // active + collisions share a shape.

@@ -124,7 +124,7 @@ export type TitleFieldProps = {
   /** True when an operator has pinned a title. */
   hasOverride: boolean;
   /** A request awaiting a decision, if any. */
-  pending: { value: string; requestedBy: string } | null;
+  pending: { value: string; requestedBy: string; requestedByName?: string } | null;
   /** Operator posture (pick outright) vs scholar/proxy posture (request). */
   canSet: boolean;
   /** Where "How titles are chosen" points. Omitted = no link (only a
@@ -334,7 +334,7 @@ export function TitleField({
 
       {request !== null && (
         <div className="border-apollo-border flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs">
-          <span className="text-muted-foreground">{request.requestedBy} requested:</span>
+          <span className="text-muted-foreground">{request.requestedByName ?? request.requestedBy} requested:</span>
           <span className="font-medium">{request.value}</span>
           <Button
             size="sm"

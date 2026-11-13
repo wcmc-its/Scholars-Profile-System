@@ -16,6 +16,7 @@
  * UI surfaces this as an informational `Alert` (UI-SPEC § Card 2 row 3).
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { nameOr, resolvePersonNames } from "@/lib/edit/person-names";
 
 /** The Prisma surface `loadPublicationTakedownContext` needs. */
 type PublicationTakedownReadClient = Pick<
@@ -45,6 +46,8 @@ export type PublicationTakedown = {
   id: string;
   reason: string;
   actorCwid: string;
+  /** The actor's display name (Scholar / directory); the CWID itself when unresolvable. */
+  actorName: string;
   createdAt: Date;
 };
 
@@ -120,6 +123,7 @@ export async function loadPublicationTakedownContext(
         id: wholePubRow.id,
         reason: wholePubRow.reason,
         actorCwid: wholePubRow.createdBy,
+        actorName: nameOr(await resolvePersonNames([wholePubRow.createdBy]), wholePubRow.createdBy),
         createdAt: wholePubRow.createdAt,
       }
     : null;

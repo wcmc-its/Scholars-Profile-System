@@ -7,6 +7,13 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+// Directory fallback for actors with no scholar row: only "staff1" is known there.
+vi.mock("@/lib/edit/directory-names", () => ({
+  resolveDirectoryNames: vi.fn(async (cwids: string[]) =>
+    new Map(cwids.filter((c) => c === "staff1").map((c) => [c, "Sam Staff"])),
+  ),
+}));
+
 import {
   countSlugRegistrySegments,
   loadSlugRegistry,
@@ -342,7 +349,22 @@ describe("resolveSlugStatus", () => {
       fieldOverride: { findFirst: vi.fn().mockResolvedValue({ id: "o1", entityId: "holder7" }) },
     });
     const status = await resolveSlugStatus("pinned-slug", c);
-    expect(status).toMatchObject({ state: "taken", held: "override", cwid: "holder7" });
+    expect(status).toMatchObject({ state: "taken", held: "override", cwid: "holder7", name: null });
+  });
+
+  it("override holder is named, without a deletedAt/status filter (holder may be inactive)", async () => {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce(null) // checkSlugCollision live probe
+      .mockResolvedValueOnce(null) // holder-resolution live probe
+      .mockResolvedValueOnce({ preferredName: "Pin Holder", fullName: null });
+    const c = statusClient({
+      scholar: { findFirst },
+      fieldOverride: { findFirst: vi.fn().mockResolvedValue({ id: "o1", entityId: "holder7" }) },
+    });
+    const status = await resolveSlugStatus("pinned-slug", c);
+    expect(status).toMatchObject({ held: "override", cwid: "holder7", name: "Pin Holder" });
+    expect(findFirst.mock.calls[2][0].where).toEqual({ cwid: "holder7" });
   });
 
   it("a former slug of a different scholar → taken/history (claiming breaks the 301)", async () => {
@@ -428,6 +450,27 @@ describe("loadSlugRegistryExtras", () => {
     expect(x.pinned).toEqual(["js1"]);
     const where = (c.fieldOverride.findMany as AnyMock).mock.calls[0][0].where;
     expect(where).toEqual({ entityType: "scholar", fieldName: "slug", entityId: { in: ["js1"] } });
+  });
+
+  it("override/requested: actors are named — scholar first, directory for staff", async () => {
+    const c = client({
+      scholar: {
+        findMany: vi.fn().mockResolvedValue([
+          { cwid: "admin9", preferredName: "Ada Admin", fullName: null, primaryDepartment: null },
+        ]),
+      },
+    });
+    const x = await loadSlugRegistryExtras(
+      "override",
+      [
+        { slug: "a", pinnedForCwid: "h1", setByCwid: "admin9", updatedAt: new Date() },
+        { slug: "b", pinnedForCwid: "h2", setByCwid: "staff1", updatedAt: new Date() },
+      ] as never,
+      c,
+    );
+    expect((c.scholar.findMany as AnyMock).mock.calls[0][0].where.cwid.in).toEqual(["h1", "h2", "admin9", "staff1"]);
+    expect(x.people.admin9?.name).toBe("Ada Admin");
+    expect(x.people.staff1?.name).toBe("Sam Staff");
   });
 
   it("collisions: each base slug → its live holder, or null when free", async () => {

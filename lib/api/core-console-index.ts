@@ -19,6 +19,7 @@
  * The DB load is a thin wrapper; `buildCoreConsoleRows` is pure and unit-tested.
  */
 import { db } from "@/lib/db";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
 import { claimKey } from "@/lib/api/core-merge";
 import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 import {
@@ -290,12 +291,28 @@ export async function loadCoreConsoleIndex(
     ),
   ]);
 
+  // Core staff are often non-faculty with no Scholar row: name the rest (no
+  // Scholar name, no stored `granteeName`) from the WCM directory in one
+  // batched, time-boxed lookup that never throws. A miss keeps the CWID.
+  const names = new Map<string, string>(
+    scholars.flatMap((s) => (s.preferredName ? [[s.cwid, s.preferredName] as const] : [])),
+  );
+  const stored = new Set(admins.filter((a) => a.granteeName).map((a) => a.cwid));
+  const misses = nameCwids.filter((c) => !names.has(c) && !stored.has(c));
+  if (misses.length > 0) {
+    const directory = await resolveDirectoryNames(misses);
+    for (const c of misses) {
+      const n = directory.get(c.trim().toLowerCase());
+      if (n) names.set(c, n);
+    }
+  }
+
   return buildCoreConsoleRows({
     cores,
     leaders,
     roleLabels: new Map(roles.map((r) => [r.key, r.label])),
     admins: admins.map((a) => ({ ...a, role: String(a.role) })),
-    names: new Map(scholars.filter((s) => s.preferredName).map((s) => [s.cwid, s.preferredName])),
+    names,
     candidateTotals: new Map(totals.map((t) => [t.coreId, t._count._all])),
     candidateHighs: new Map(highs.map((t) => [t.coreId, t._count._all])),
     claimedCandidates: claimedRows

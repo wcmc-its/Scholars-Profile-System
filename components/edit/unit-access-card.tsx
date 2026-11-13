@@ -41,6 +41,8 @@ type AccessRow = {
   title: string | null;
   role: "owner" | "curator";
   grantedBy: string | null;
+  /** Server-resolved display name for `grantedBy`; null/absent ⇒ show the CWID. */
+  grantedByName?: string | null;
   grantedAt: Date;
   /** Provenance (#728): "manual" for human grants; "ED:…" for Web Directory
    *  (Enterprise Directory) imports. ED-sourced rows are read-only here. */
@@ -156,6 +158,12 @@ export function UnitAccessCard({
         setError(mapErrorToMessage(data.error ?? ""));
         return;
       }
+      // The actor's own name for the optimistic "Granted by", from rows the
+      // server already resolved; null ⇒ the CWID until the next page load.
+      const actorName =
+        rows.find((r) => r.grantedBy === actorCwid && r.grantedByName)?.grantedByName ??
+        rows.find((r) => r.cwid === actorCwid && r.name !== r.cwid)?.name ??
+        null;
       setRows((prev) => {
         const without = prev.filter((r) => r.cwid !== addValue.cwid);
         return [
@@ -166,6 +174,7 @@ export function UnitAccessCard({
             title: addValue.title,
             role: addRole,
             grantedBy: actorCwid,
+            grantedByName: actorName,
             grantedAt: new Date(0), // placeholder; refreshed on next page load
           },
         ];
@@ -256,7 +265,7 @@ export function UnitAccessCard({
                     {row.role}
                   </span>
                   <span className="text-muted-foreground col-span-2 text-[12.5px] md:col-span-1">
-                    Granted by <span>{formatGrantedBy(row.grantedBy)}</span>
+                    Granted by <span>{formatGrantedBy(row.grantedBy, row.grantedByName)}</span>
                     {formatGrantedAt(row.grantedAt) !== "—" && (
                       <> · <span className="tabular-nums">{formatGrantedAt(row.grantedAt)}</span></>
                     )}
@@ -362,10 +371,10 @@ export function UnitAccessCard({
 }
 
 /** The ED import stamps a synthetic non-CWID actor (`GRANTED_BY = "ED-ETL"`,
- *  etl/ed-admins/index.ts) — show its human name. Real CWIDs pass through. */
-function formatGrantedBy(grantedBy: string | null): string {
+ *  etl/ed-admins/index.ts) — show its human name. Real CWIDs show their resolved name, else the CWID. */
+function formatGrantedBy(grantedBy: string | null, grantedByName?: string | null): string {
   if (grantedBy === "ED-ETL") return "Web Directory";
-  return grantedBy ?? "—";
+  return grantedByName ?? grantedBy ?? "—";
 }
 
 function formatGrantedAt(d: Date): string {

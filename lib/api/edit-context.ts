@@ -65,6 +65,7 @@ import {
 } from "@/lib/edit/orcid-coverage";
 import type { OrcidEvidence } from "@/lib/edit/orcid";
 import { frtNameKey } from "@/lib/frt/mentee-name";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
@@ -1960,12 +1961,20 @@ export async function loadEditContext(
           ).map((s) => [s.cwid, s.preferredName])
         : [],
     );
+    // A matched mentee with no Scholar row (trainee, staff): name them from the
+    // WCM directory (batched, time-boxed, never throws).
+    const unnamed = matchedCwids.filter((c) => !names.get(c));
+    if (unnamed.length > 0) {
+      for (const [c, n] of await resolveDirectoryNames(unnamed)) names.set(c, n);
+    }
     for (const r of rows) {
       frtMentees.push({
         id: r.id,
         menteeName: r.menteeName,
         menteeCwid: r.menteeCwid,
-        menteeCwidName: r.menteeCwid ? (names.get(r.menteeCwid) ?? null) : null,
+        menteeCwidName: r.menteeCwid
+          ? (names.get(r.menteeCwid) ?? names.get(r.menteeCwid.trim().toLowerCase()) ?? null)
+          : null,
         cwidAssigned: r.cwidAssignedAt !== null,
         mentoringType: r.mentoringType,
         external: r.external,

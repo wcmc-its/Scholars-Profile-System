@@ -70,6 +70,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
+// Directory fallback for submitters with no scholar row (IT staff): "ops" resolves there.
+vi.mock("@/lib/edit/directory-names", () => ({
+  resolveDirectoryNames: async (cwids: string[]) =>
+    new Map(cwids.filter((c) => c === "ops").map((c) => [c, "Olive Ops"])),
+}));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogEditDenial }));
 
 import { DELETE, GET, PATCH, POST } from "@/app/api/edit/opportunity-intake/route";
@@ -169,29 +174,30 @@ describe("GET", () => {
     });
   });
 
-  it("joins submitter cwids to scholar names in one deduped query, fail-soft to {}", async () => {
+  it("joins submitter cwids to scholar names in one deduped query, directory fallback, fail-soft", async () => {
     mockGetEffectiveEditSession.mockResolvedValue({ isSuperuser: true, isDeveloper: false });
     mockListSubmissions.mockResolvedValue([
       { submissionId: "s1", submittedBy: "admin", producedOpportunityIds: [] },
       { submissionId: "s2", submittedBy: "admin", producedOpportunityIds: [] },
-      // A submitter with no scholar row (e.g. IT staff) simply has no entry.
+      // A submitter with no scholar row (e.g. IT staff) is named from the directory.
       { submissionId: "s3", submittedBy: "ops", producedOpportunityIds: [] },
     ]);
     mockScholarFindMany.mockResolvedValue([{ cwid: "admin", preferredName: "Ada Admin" }]);
     const res = await GET();
     expect(res.status).toBe(200);
-    expect((await res.json()).submitterNames).toEqual({ admin: "Ada Admin" });
+    expect((await res.json()).submitterNames).toEqual({ admin: "Ada Admin", ops: "Olive Ops" });
     expect(mockScholarFindMany).toHaveBeenCalledTimes(1);
     expect(mockScholarFindMany).toHaveBeenCalledWith({
       where: { cwid: { in: ["admin", "ops"] } },
       select: { cwid: true, preferredName: true },
     });
 
-    // And the fail-soft posture, same as titles: a scholar read failure is a 200.
+    // And the fail-soft posture, same as titles: a scholar read failure is a 200 (the
+    // directory still names whom it can).
     mockScholarFindMany.mockRejectedValue(new Error("mysql down"));
     const res2 = await GET();
     expect(res2.status).toBe(200);
-    expect((await res2.json()).submitterNames).toEqual({});
+    expect((await res2.json()).submitterNames).toEqual({ ops: "Olive Ops" });
   });
 
   it("degrades to an empty title map (still 200) when the corpus read fails", async () => {

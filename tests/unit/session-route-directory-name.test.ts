@@ -7,9 +7,14 @@ import { expect, it, vi } from "vitest";
 const dir = vi.hoisted(() => ({
   calls: [] as string[][],
   impl: async (_cwids: string[]): Promise<unknown[]> => [],
+  impersonating: null as null | { targetCwid: string; startedAt: number },
+  steward: false,
 }));
 vi.mock("@/lib/auth/session-server", () => ({
-  getSession: async () => ({ cwid: "dev1", iat: 0, exp: 0 }),
+  getSession: async () => ({ cwid: "dev1", iat: 0, exp: 0, impersonating: dir.impersonating }),
+}));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  impersonationActive: (s: { impersonating?: unknown }) => !!s.impersonating,
 }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -29,7 +34,7 @@ vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: async () => false }));
 vi.mock("@/lib/auth/development", () => ({ isDeveloper: async () => true }));
 vi.mock("@/lib/auth/content-editor", () => ({ isContentEditor: async () => false }));
 vi.mock("@/lib/auth/observer", () => ({ isObserver: async () => false }));
-vi.mock("@/lib/auth/comms-steward", () => ({ isCommsSteward: async () => false }));
+vi.mock("@/lib/auth/comms-steward", () => ({ isCommsSteward: async () => dir.steward }));
 vi.mock("@/lib/edit/manageable-units", () => ({ loadManageableUnits: async () => ({ total: 0 }) }));
 
 import { GET } from "@/app/api/auth/session/route";
@@ -49,4 +54,20 @@ it("degrades to null (cwid shown) when the directory is unreachable", async () =
   };
   const body = await (await GET()).json();
   expect(body.displayName).toBeNull();
+});
+
+it("names a profile-less comms_steward View-as target from ED, not the bare cwid", async () => {
+  dir.impersonating = { targetCwid: "stw1", startedAt: Math.floor(Date.now() / 1000) };
+  dir.steward = true;
+  dir.impl = async (cwids) =>
+    cwids[0] === "stw1"
+      ? [{ cwid: "stw1", name: "Roe, Sam", firstName: "Sam", lastName: "Roe", title: null, dept: null, email: null }]
+      : [];
+  try {
+    const body = await (await GET()).json();
+    expect(body.impersonating?.targetName).toBe("Sam Roe");
+  } finally {
+    dir.impersonating = null;
+    dir.steward = false;
+  }
 });

@@ -21,6 +21,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { institutionName } from "@/lib/institutions";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
 
 /** The Prisma surface this loader reads — a client or `db.read` satisfies it. */
 export type AdminRosterClient = Pick<
@@ -153,7 +154,7 @@ export async function loadUnitAdministratorRoster(
   // Batch-resolve grantee display names from the local Scholar table — plus
   // the granters of manual grants, so "Added by …" can show a name.
   const granters = rows
-    .filter((r) => r.source === "manual" && r.grantedBy)
+    .filter((r) => r.source === "manual" && r.grantedBy && r.grantedBy !== "ED-ETL")
     .map((r) => r.grantedBy as string);
   const cwids = [...new Set([...rows.map((r) => r.cwid), ...granters])];
   const scholars = await client.scholar.findMany({
@@ -164,6 +165,11 @@ export async function loadUnitAdministratorRoster(
   for (const s of scholars) {
     scholarName.set(s.cwid, { name: s.preferredName, title: s.primaryTitle });
   }
+  // Granters with no Scholar row (staff superusers) — name them from the WCM
+  // directory (batched, cached, time-boxed, never throws); a miss keeps the CWID.
+  const granterMisses = [...new Set(granters)].filter((c) => !scholarName.has(c));
+  const granterDirectory =
+    granterMisses.length > 0 ? await resolveDirectoryNames(granterMisses) : new Map<string, string>();
 
   // Group by cwid.
   const byCwid = new Map<string, AdminRosterEntry>();
@@ -193,7 +199,11 @@ export async function loadUnitAdministratorRoster(
       role: r.role,
       source: r.source,
       grantedBy: r.grantedBy ?? null,
-      grantedByName: r.grantedBy ? (scholarName.get(r.grantedBy)?.name ?? null) : null,
+      grantedByName: r.grantedBy
+        ? (scholarName.get(r.grantedBy)?.name ??
+          (r.source === "manual" ? granterDirectory.get(r.grantedBy.trim().toLowerCase()) : undefined) ??
+          null)
+        : null,
       grantedAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : null,
     });
   }
