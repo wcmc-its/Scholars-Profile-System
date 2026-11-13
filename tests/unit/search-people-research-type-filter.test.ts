@@ -48,11 +48,22 @@ vi.mock("@/lib/search", () => ({
         activityRecentPub: { doc_count: 0 },
       };
       if (aggs.researchTypes) {
+        // Echo the nested child counts only when the sub-aggs were requested.
+        const rt = aggs.researchTypes as { aggs: { keys: { aggs?: unknown } } };
+        const nested = rt.aggs.keys.aggs !== undefined;
         aggregations.researchTypes = {
           keys: {
             buckets: [
-              { key: "clinical", doc_count: 40 },
-              { key: "lab", doc_count: 6 },
+              {
+                key: "clinical",
+                doc_count: 40,
+                ...(nested ? { physician: { doc_count: 31 }, other: { doc_count: 9 } } : {}),
+              },
+              {
+                key: "lab",
+                doc_count: 6,
+                ...(nested ? { physician: { doc_count: 2 }, other: { doc_count: 4 } } : {}),
+              },
             ],
           },
         };
@@ -91,7 +102,7 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
-import { searchPeople } from "@/lib/api/search";
+import { researchTypeFilterClause, searchPeople } from "@/lib/api/search";
 
 /** The user-axis `post_filter` clauses actually sent, `[]` when absent. */
 function postFilterClauses(body: Record<string, unknown>): Record<string, unknown>[] {
@@ -121,6 +132,7 @@ describe("research type facet — searchPeople filter + agg + facets", () => {
 
   afterEach(() => {
     delete process.env.SEARCH_PEOPLE_RESEARCH_TYPE_FACET;
+    delete process.env.SEARCH_PEOPLE_RESEARCH_TYPE_NESTED;
     vi.clearAllMocks();
   });
 
@@ -191,5 +203,106 @@ describe("research type facet — searchPeople filter + agg + facets", () => {
     const ddAgg = aggFilterClauses(body, "deptDivs");
     expect(ddAgg).toContainEqual(RESEARCH_TYPE_CLAUSE);
     expect(ddAgg).toContainEqual(PERSON_TYPE_CLAUSE);
+  });
+});
+
+describe("research type nested children (SEARCH_PEOPLE_RESEARCH_TYPE_NESTED)", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+  });
+
+  afterEach(() => {
+    delete process.env.SEARCH_PEOPLE_RESEARCH_TYPE_FACET;
+    delete process.env.SEARCH_PEOPLE_RESEARCH_TYPE_NESTED;
+    vi.clearAllMocks();
+  });
+
+  const physicianLab = {
+    bool: {
+      filter: [{ term: { researchType: "lab" } }, { term: { isPhysician: true } }],
+    },
+  };
+
+  it("clause: plain values keep the `terms` shape; children add an isPhysician branch", () => {
+    expect(researchTypeFilterClause(undefined, true)).toBeNull();
+    expect(researchTypeFilterClause([], true)).toBeNull();
+    expect(researchTypeFilterClause(["lab", "clinical"], true)).toEqual({
+      terms: { researchType: ["lab", "clinical"] },
+    });
+    expect(researchTypeFilterClause(["lab:physician"], true)).toEqual({
+      bool: { should: [physicianLab], minimum_should_match: 1 },
+    });
+    expect(researchTypeFilterClause(["clinical", "lab:other"], true)).toEqual({
+      bool: {
+        should: [
+          { terms: { researchType: ["clinical"] } },
+          {
+            bool: {
+              filter: [{ term: { researchType: "lab" } }, { term: { isPhysician: false } }],
+            },
+          },
+        ],
+        minimum_should_match: 1,
+      },
+    });
+  });
+
+  it("clause, nested off: children collapse to the parent `terms` shape", () => {
+    expect(researchTypeFilterClause(["lab:physician", "lab:other", "clinical"], false)).toEqual({
+      terms: { researchType: ["lab", "clinical"] },
+    });
+  });
+
+  it("nested OFF (facet on): no sub-aggs, buckets carry no child counts, child value filters as its parent", async () => {
+    process.env.SEARCH_PEOPLE_RESEARCH_TYPE_FACET = "on";
+    const result = await searchPeople({ q: "doe", filters: { researchType: ["lab:physician"] } });
+    const aggs = capturedBodies[0].aggs as {
+      researchTypes: { aggs: { keys: Record<string, unknown> } };
+    };
+    expect(aggs.researchTypes.aggs.keys.aggs).toBeUndefined();
+    expect(postFilterClauses(capturedBodies[0])).toContainEqual({
+      terms: { researchType: ["lab"] },
+    });
+    expect(result.facets.researchTypes).toEqual([
+      { value: "clinical", count: 40 },
+      { value: "lab", count: 6 },
+    ]);
+  });
+
+  it("nested ON but facet OFF: nothing (nested needs the facet flag)", async () => {
+    process.env.SEARCH_PEOPLE_RESEARCH_TYPE_NESTED = "on";
+    const result = await searchPeople({ q: "doe", filters: { researchType: ["lab:physician"] } });
+    expect(postFilterClauses(capturedBodies[0])).toEqual([]);
+    expect((capturedBodies[0].aggs as Record<string, unknown>).researchTypes).toBeUndefined();
+    expect(result.facets.researchTypes).toEqual([]);
+  });
+
+  it("nested ON: isPhysician filter sub-aggs under each bucket, child counts mapped, child clause in post_filter", async () => {
+    process.env.SEARCH_PEOPLE_RESEARCH_TYPE_FACET = "on";
+    process.env.SEARCH_PEOPLE_RESEARCH_TYPE_NESTED = "on";
+    const result = await searchPeople({
+      q: "doe",
+      filters: { researchType: ["lab:physician"], personType: ["full_time_faculty"] },
+    });
+    const body = capturedBodies[0];
+    const aggs = body.aggs as {
+      researchTypes: { aggs: { keys: { terms: unknown; aggs: unknown } } };
+    };
+    expect(aggs.researchTypes.aggs.keys).toEqual({
+      terms: { field: "researchType", size: 10 },
+      aggs: {
+        physician: { filter: { term: { isPhysician: true } } },
+        other: { filter: { term: { isPhysician: false } } },
+      },
+    });
+    const childClause = { bool: { should: [physicianLab], minimum_should_match: 1 } };
+    expect(postFilterClauses(body)).toContainEqual(childClause);
+    // Excluding-self: the research type agg drops its own clause (children too).
+    expect(aggFilterClauses(body, "researchTypes")).not.toContainEqual(childClause);
+    expect(aggFilterClauses(body, "personTypes")).toContainEqual(childClause);
+    expect(result.facets.researchTypes).toEqual([
+      { value: "clinical", count: 40, physician: 31, other: 9 },
+      { value: "lab", count: 6, physician: 2, other: 4 },
+    ]);
   });
 });

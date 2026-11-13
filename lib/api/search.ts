@@ -119,6 +119,7 @@ import {
   resolveSearchPeopleEsiFacet,
   resolveSearchPeopleInstitutionFacet,
   resolveSearchPeopleResearchTypeFacet,
+  resolveSearchPeopleResearchTypeNested,
   resolveSearchPubInstitutionFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
@@ -127,6 +128,7 @@ import {
   type Scope,
 } from "@/lib/api/search-flags";
 import { investigatorGrantMatchCounts } from "@/lib/api/search-funding";
+import { collapseResearchTypeChildren, parseResearchTypeValue } from "@/lib/research-type";
 import { clinicalMeshMatch, type ClinicalAnchor } from "@/lib/clinical-mesh-anchors";
 import {
   selectEvidence,
@@ -1017,6 +1019,45 @@ export type PublicationHit = {
 
 export type SearchFacetBucket = { value: string; count: number };
 
+/** Research type bucket. `physician` / `other` are the nested child counts
+ *  (`isPhysician` true / false), present only while
+ *  `SEARCH_PEOPLE_RESEARCH_TYPE_NESTED` is on; both 0 before the reindex. */
+export type ResearchTypeFacetBucket = SearchFacetBucket & { physician?: number; other?: number };
+
+/**
+ * People `researchType` filter clause. A bare kind ("lab") matches the kind; a
+ * child ("lab:physician" / "lab:other") also requires `isPhysician`. Values
+ * are OR'd. Nested off ⇒ children collapse to their parent, so the clause is
+ * the plain `terms` shape it was before the children existed.
+ */
+export function researchTypeFilterClause(
+  values: readonly string[] | undefined,
+  nested: boolean,
+): Record<string, unknown> | null {
+  if (!values || values.length === 0) return null;
+  const vals = nested ? [...values] : collapseResearchTypeChildren(values);
+  const plain: string[] = [];
+  const children: Record<string, unknown>[] = [];
+  for (const v of vals) {
+    const p = parseResearchTypeValue(v);
+    if (p?.child) {
+      children.push({
+        bool: {
+          filter: [
+            { term: { researchType: p.kind } },
+            { term: { isPhysician: p.child === "physician" } },
+          ],
+        },
+      });
+    } else {
+      plain.push(v);
+    }
+  }
+  if (children.length === 0) return { terms: { researchType: plain } };
+  const should = [...(plain.length > 0 ? [{ terms: { researchType: plain } }] : []), ...children];
+  return { bool: { should, minimum_should_match: 1 } };
+}
+
 /** Issue #88 — Author facet bucket, hydrated server-side with display name +
  *  slug. #1410 — the avatar endpoint was dropped from the payload (it was
  *  ~95 bytes on each of up to 500 buckets, ~24% of the whole response) because
@@ -1123,7 +1164,7 @@ export type PeopleSearchResult = {
     institutions: SearchFacetBucket[];
     /** Research type facet buckets ("lab" / "clinical"). Empty while
      *  `SEARCH_PEOPLE_RESEARCH_TYPE_FACET` is off (or pre-reindex). */
-    researchTypes: SearchFacetBucket[];
+    researchTypes: ResearchTypeFacetBucket[];
   };
 };
 
@@ -2584,10 +2625,10 @@ async function searchPeopleCore(opts: {
       ? { terms: { primaryOrgCode: filters.institution } }
       : null;
   const researchTypeFacetOn = resolveSearchPeopleResearchTypeFacet();
-  const researchTypeClause =
-    researchTypeFacetOn && filters.researchType && filters.researchType.length > 0
-      ? { terms: { researchType: filters.researchType } }
-      : null;
+  const researchTypeNestedOn = resolveSearchPeopleResearchTypeNested();
+  const researchTypeClause = researchTypeFacetOn
+    ? researchTypeFilterClause(filters.researchType, researchTypeNestedOn)
+    : null;
   const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
   const topicClause = topicCwidFilter && topicCwidFilter.length > 0
     ? { terms: { cwid: topicCwidFilter } }
@@ -3115,7 +3156,20 @@ async function searchPeopleCore(opts: {
       ? {
           researchTypes: {
             filter: { bool: { filter: filtersExcept("researchType") } },
-            aggs: { keys: { terms: { field: "researchType", size: 10 } } },
+            aggs: {
+              keys: {
+                terms: { field: "researchType", size: 10 },
+                // Nested children: physician / non-physician within each kind.
+                ...(researchTypeNestedOn
+                  ? {
+                      aggs: {
+                        physician: { filter: { term: { isPhysician: true } } },
+                        other: { filter: { term: { isPhysician: false } } },
+                      },
+                    }
+                  : {}),
+              },
+            },
           },
         }
       : {}),
@@ -3796,7 +3850,13 @@ async function searchPeopleCore(opts: {
       // Present only when SEARCH_PEOPLE_INSTITUTION_FACET is on.
       institutions?: { keys: { buckets: Bucket[] } };
       // Present only when SEARCH_PEOPLE_RESEARCH_TYPE_FACET is on.
-      researchTypes?: { keys: { buckets: Bucket[] } };
+      researchTypes?: {
+        keys: {
+          buckets: Array<
+            Bucket & { physician?: { doc_count: number }; other?: { doc_count: number } }
+          >;
+        };
+      };
       attributionMatch?: { doc_count: number };
     };
   };
@@ -4764,6 +4824,9 @@ async function searchPeopleCore(opts: {
       researchTypes: (r.aggregations?.researchTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
+        ...(b.physician && b.other
+          ? { physician: b.physician.doc_count, other: b.other.doc_count }
+          : {}),
       })),
     },
   };

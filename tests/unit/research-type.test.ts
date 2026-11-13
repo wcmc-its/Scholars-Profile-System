@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  collapseResearchTypeChildren,
+  parseResearchTypeValue,
+  researchTypeChildRows,
+  researchTypeLabel,
+  toggleResearchTypeValue,
   isClinicalPub,
   isLabPub,
   researchTypesFrom,
@@ -65,5 +70,82 @@ describe("researchTypesFrom", () => {
     expect(researchTypesFrom(2, 3)).toEqual(["clinical"]);
     expect(researchTypesFrom(7, 12)).toEqual(["lab", "clinical"]);
     expect(researchTypesFrom(null, null)).toEqual([]);
+  });
+});
+
+describe("nested research type values", () => {
+  it("parses parents and children; rejects anything else", () => {
+    expect(parseResearchTypeValue("lab")).toEqual({ kind: "lab" });
+    expect(parseResearchTypeValue("clinical:physician")).toEqual({
+      kind: "clinical",
+      child: "physician",
+    });
+    expect(parseResearchTypeValue("lab:other")).toEqual({ kind: "lab", child: "other" });
+    for (const bad of ["", "toString", "lab:md", "lab:physician:x", "other"]) {
+      expect(parseResearchTypeValue(bad)).toBeNull();
+    }
+  });
+
+  it("chip labels: parent alone, child as 'Parent: Child', unknown passes through", () => {
+    expect(researchTypeLabel("lab")).toBe("Laboratory research");
+    expect(researchTypeLabel("lab:physician")).toBe("Laboratory research: Physician-scientist");
+    expect(researchTypeLabel("lab:other")).toBe("Laboratory research: Basic scientist");
+    expect(researchTypeLabel("clinical:physician")).toBe("Clinical research: Physician-scientist");
+    expect(researchTypeLabel("clinical:other")).toBe(
+      "Clinical research: Clinical or population researcher",
+    );
+    expect(researchTypeLabel("bogus")).toBe("bogus");
+  });
+
+  it("collapse maps children to their parent, deduped, order kept", () => {
+    expect(collapseResearchTypeChildren(["lab:physician", "clinical", "lab", "lab:other"])).toEqual([
+      "lab",
+      "clinical",
+    ]);
+    expect(collapseResearchTypeChildren(["bogus"])).toEqual(["bogus"]);
+  });
+
+  it("toggle: a child replaces its parent, a parent replaces its children, other kinds kept", () => {
+    expect(toggleResearchTypeValue(["lab", "clinical"], "lab:physician")).toEqual([
+      "clinical",
+      "lab:physician",
+    ]);
+    expect(toggleResearchTypeValue(["lab:physician", "lab:other", "clinical:other"], "lab")).toEqual([
+      "clinical:other",
+      "lab",
+    ]);
+    // Siblings coexist.
+    expect(toggleResearchTypeValue(["lab:physician"], "lab:other")).toEqual([
+      "lab:physician",
+      "lab:other",
+    ]);
+    // Unticking removes only that value.
+    expect(toggleResearchTypeValue(["lab:physician", "clinical"], "lab:physician")).toEqual([
+      "clinical",
+    ]);
+    // Old plain links keep working.
+    expect(toggleResearchTypeValue([], "lab")).toEqual(["lab"]);
+  });
+
+  it("child rows: physician first, hidden without counts (flag off) or when both are 0 (pre-reindex)", () => {
+    expect(researchTypeChildRows({ value: "lab", physician: 3, other: 5 }, ["lab:other"])).toEqual([
+      { value: "lab:physician", label: "Physician-scientist", count: 3, isActive: false },
+      { value: "lab:other", label: "Basic scientist", count: 5, isActive: true },
+    ]);
+    expect(researchTypeChildRows({ value: "clinical", physician: 0, other: 2 }, [])).toEqual([
+      {
+        value: "clinical:other",
+        label: "Clinical or population researcher",
+        count: 2,
+        isActive: false,
+      },
+    ]);
+    // A ticked zero-count child stays visible so it can be unticked.
+    expect(
+      researchTypeChildRows({ value: "clinical", physician: 0, other: 2 }, ["clinical:physician"]),
+    ).toHaveLength(2);
+    expect(researchTypeChildRows({ value: "lab" }, [])).toEqual([]);
+    expect(researchTypeChildRows({ value: "lab", physician: 0, other: 0 }, [])).toEqual([]);
+    expect(researchTypeChildRows({ value: "bogus", physician: 1, other: 1 }, [])).toEqual([]);
   });
 });

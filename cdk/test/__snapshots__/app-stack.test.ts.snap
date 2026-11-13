@@ -1102,6 +1102,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_NESTED",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_AREA_BOOST",
                 "Value": "on",
               },
@@ -6167,6 +6171,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_NESTED",
                 "Value": "on",
               },
               {

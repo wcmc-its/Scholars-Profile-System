@@ -2370,6 +2370,11 @@ export class AppStack extends Stack {
         // Prod ON 2026-11-02 after staging verified (1,631 people tagged; q=Obesity
         // facet Clinical 320 / Laboratory 103, filter count matches its bucket).
         SEARCH_PEOPLE_RESEARCH_TYPE_FACET: "on",
+        // Nested Research type children (Physician-scientist / non-physician under
+        // each kind), split on the people doc's boolean `isPhysician`. Filter only.
+        // Children stay hidden until the nightly people-alias rebuild writes the
+        // field. Staging ON; prod OFF until reviewed on staging.
+        SEARCH_PEOPLE_RESEARCH_TYPE_NESTED: envConfig.envName === "staging" ? "on" : "off",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.

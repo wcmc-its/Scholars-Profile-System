@@ -89,6 +89,7 @@
 import { taggedPubCount, type ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 import { isPiRole } from "@/lib/funding-roles";
+import { isMedicalDegree, isPhysicianFrom } from "@/lib/medical-degree";
 import { researchTypesFrom, type ResearchType } from "@/lib/research-type";
 // Type-only — erased at compile time, so this does NOT pull `search-taxonomy.ts` (which imports
 // `@/lib/db`) into any client bundle that imports this contract (`matcha-panel.tsx` is
@@ -553,29 +554,8 @@ const NON_RESEARCH_PROGRAM_TYPE = new Set(["Career", "Fellowship", "Training"]);
  *  10-31: Grant, Sponsored Research Agreement and BioPharma intakes are the research ones. */
 const NON_RESEARCH_INTAKE = /service agreement|material transfer|clinical trial/i;
 
-/** Medical-degree families, compared against a degree string uppercased and stripped to
- *  letters ("M.D." and "MD-PhD" both land here). Dental, podiatry, psychology, nursing and
- *  pharmacy degrees are deliberately absent. */
-const MEDICAL_DEGREES = new Set([
-  "MD",
-  "DO",
-  "MBBS",
-  "MBCHB",
-  "MBBCH",
-  "MBBCHIR",
-  "MBBCHBAO",
-  "BMBS",
-  "MDPHD",
-]);
-
-/** Exported for tests. */
-export function isMedicalDegree(degree: string | null | undefined): boolean {
-  const raw = (degree ?? "").toUpperCase().replace(/\./g, "");
-  // Whole string first ("MD-PHD" -> MDPHD), then each part: one cell can hold several degrees
-  // ("MD, MPH", "PhD, MD").
-  if (MEDICAL_DEGREES.has(raw.replace(/[^A-Z]/g, ""))) return true;
-  return raw.split(/[^A-Z]+/).some((part) => MEDICAL_DEGREES.has(part));
-}
+/** Exported for tests; lives in `lib/medical-degree.ts`, shared with the people index. */
+export { isMedicalDegree };
 
 function isTraineeRole(roleCategory: string | null | undefined): boolean {
   const role = roleCategory ?? "";
@@ -630,11 +610,7 @@ export function researcherTypeFrom(
     if (!isResearchAward(g)) continue;
     if (!award || endYear > award.endYear) award = { label: awardLabel(g), endYear };
   }
-  const educations = row.educations ?? [];
-  const isPhysician =
-    educations.length > 0
-      ? educations.some((e) => isMedicalDegree(e.degree))
-      : row.hasClinicalProfile;
+  const isPhysician = isPhysicianFrom(row);
   const kinds = researchTypesFrom(row.labPubs5y, row.clinicalPubs5y);
   let type: ResearcherType;
   if (isTraineeRole(row.roleCategory) && !award) type = "trainee";

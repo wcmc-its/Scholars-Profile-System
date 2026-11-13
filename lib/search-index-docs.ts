@@ -61,6 +61,7 @@ import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { publicRoleWhere } from "@/lib/eligibility";
 import { researchTypesFrom } from "@/lib/research-type";
+import { isPhysicianFrom } from "@/lib/medical-degree";
 import {
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
@@ -697,6 +698,8 @@ export const PEOPLE_INDEX_SELECT = {
   // Research type facet (lib/research-type.ts).
   labPubs5y: true,
   clinicalPubs5y: true,
+  // `isPhysician` (lib/medical-degree.ts), same rule as Matcha.
+  educations: { select: { degree: true } },
   // Institution facet — `Scholar.primaryOrgCode` (ED
   // `weillCornellEduPrimaryOrganization` code: WCMC, HSS, MSKCC, NYP, ...).
   // Plain scalar, direct copy onto the doc in `buildPeopleDoc` below.
@@ -1841,6 +1844,9 @@ export async function buildPeopleDoc(
     ...(s.primaryOrgCode ? { primaryOrgCode: s.primaryOrgCode } : {}),
     // Research type facet — omit-on-empty, like `professorialRank`.
     ...(researchTypes.length > 0 ? { researchType: researchTypes } : {}),
+    // Splits the research type facet into physician / non-physician children.
+    // Always a plain boolean (like `isClinical`), so both sides count.
+    isPhysician: isPhysicianFrom(s),
     // #2300 — "Early Stage Investigator" in every human-facing surface (facet
     // label / chip / tooltip); `esiEligible` is the pre-existing internal
     // code name (`lib/api/match-researchers.ts`) and is kept as-is here. See
