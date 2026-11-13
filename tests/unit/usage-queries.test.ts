@@ -26,6 +26,7 @@ describe("buildUsageQueries", () => {
     expect(q.pageviewsByDay).toContain("metric = 'pageviews'");
     expect(q.topProfiles).toContain("metric = 'profile'");
     expect(q.searchTerms).toContain("metric = 'search_term'");
+    expect(q.suggestedSearchTerms).toContain("metric = 'search_term_suggested'");
     expect(q.referrers).toContain("metric = 'referrer'");
     expect(q.geo).toContain("metric = 'geo'");
     expect(q.device).toContain("metric = 'device'");
@@ -34,6 +35,7 @@ describe("buildUsageQueries", () => {
   it("caps the ranked metrics at USAGE_TOP_N and leaves grouped ones uncapped", () => {
     expect(q.topProfiles).toContain(`LIMIT ${USAGE_TOP_N}`);
     expect(q.searchTerms).toContain(`LIMIT ${USAGE_TOP_N}`);
+    expect(q.suggestedSearchTerms).toContain(`LIMIT ${USAGE_TOP_N}`);
     expect(q.geo).not.toContain("LIMIT");
     expect(q.device).not.toContain("LIMIT");
   });

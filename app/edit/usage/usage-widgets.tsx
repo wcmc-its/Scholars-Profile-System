@@ -306,6 +306,7 @@ export function RankTable({
   csvName,
   rows,
   emptyLabel,
+  note,
 }: {
   testId: string;
   title: string;
@@ -315,6 +316,8 @@ export function RankTable({
   csvName: string;
   rows: RankRow[];
   emptyLabel: string;
+  /** Muted one-liner under the title (what the list counts). */
+  note?: string;
 }) {
   const [open, setOpen] = useState(false);
   const shown = open ? rows : rows.slice(0, COLLAPSED_ROWS);
@@ -352,6 +355,11 @@ export function RankTable({
           <span className="text-muted-foreground text-xs tracking-[.08em] uppercase">{unit}</span>
         </div>
       </div>
+      {note ? (
+        <p className="text-muted-foreground -mt-1 px-4 pb-2.5 text-[12.5px] leading-normal sm:px-5">
+          {note}
+        </p>
+      ) : null}
       {rows.length === 0 ? (
         <p className="border-apollo-border text-muted-foreground border-t px-4 py-3 text-sm sm:px-5">
           {emptyLabel}

@@ -28,18 +28,21 @@ export function assertIsoDate(dt: string): void {
 /** How many rows the ranked (top-N) metrics return. */
 export const USAGE_TOP_N = 25;
 
-/** The six usage queries keyed by view-model field, windowed to `sinceDt` (inclusive). */
+/** The usage queries keyed by view-model field, windowed to `sinceDt` (inclusive). */
 export interface UsageQueries {
   readonly pageviewsByDay: string;
   readonly topProfiles: string;
+  /** Typed searches (`search_term`: every /search?q= request without a `src=` tag). */
   readonly searchTerms: string;
+  /** Suggestion clicks (`search_term_suggested`: home chips, typeahead concept picks). */
+  readonly suggestedSearchTerms: string;
   readonly referrers: string;
   readonly geo: string;
   readonly device: string;
 }
 
 /**
- * Build the six usage queries for the window `[sinceDt, untilDt]` (both
+ * Build the usage queries for the window `[sinceDt, untilDt]` (both
  * inclusive; no upper bound when `untilDt` is omitted). `dt` in daily_usage is a
  * 'YYYY-MM-DD' partition string, so lexicographic `dt >= / <=` comparisons are a
  * correct date-range filter (ISO dates sort chronologically), and partition
@@ -79,6 +82,7 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
     ].join("\n"),
     topProfiles: ranked("profile", "slug", "views"),
     searchTerms: ranked("search_term", "term", "searches"),
+    suggestedSearchTerms: ranked("search_term_suggested", "term", "searches"),
     referrers: grouped("referrer", "referrer", "hits"),
     geo: grouped("geo", "region", "hits"),
     device: grouped("device", "device", "hits"),

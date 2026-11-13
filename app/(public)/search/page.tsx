@@ -120,6 +120,7 @@ import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { compactUnitName } from "@/lib/org-unit-names";
 import { htmlToPlainText } from "@/lib/utils";
+import { withoutSearchSource } from "@/lib/search/query-url";
 
 export const dynamic = "force-dynamic";
 
@@ -197,7 +198,9 @@ function SearchShellSkeleton() {
 }
 
 async function SearchBody({ searchParams }: { searchParams: SP }) {
-  const sp = await searchParams;
+  // `src=` only tags a suggestion click for the usage rollup; it never affects
+  // results, and dropping it here keeps it off every link this page builds.
+  const sp = withoutSearchSource(await searchParams);
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const rawType = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
   // Clinical trials tab (SEARCH_TRIALS_TAB). Off ⇒ `?type=trials` falls back to people.

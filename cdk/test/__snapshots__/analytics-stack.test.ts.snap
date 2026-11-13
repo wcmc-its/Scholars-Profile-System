@@ -426,7 +426,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e4bd2662adca419e9a8fb72df0811876ab154ca1c4587a3011ed00bbbee33084.zip",
+          "S3Key": "88e92b297441593154d87915c8b0b72e8cf127a10cbceb2056a5e56a538b0993.zip",
         },
         "Environment": {
           "Variables": {
@@ -1016,7 +1016,7 @@ ORDER BY hits DESC",
         "Database": {
           "Ref": "UsageDatabase",
         },
-        "Description": "Top 100 search terms (dimension = decoded q=).",
+        "Description": "Top 100 typed search terms (dimension = decoded q=; suggestion clicks are metric search_term_suggested).",
         "Name": "sps-usage-search-terms-prod",
         "QueryString": "SELECT dimension AS term, SUM(cnt) AS searches
 FROM daily_usage
@@ -1579,7 +1579,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e4bd2662adca419e9a8fb72df0811876ab154ca1c4587a3011ed00bbbee33084.zip",
+          "S3Key": "88e92b297441593154d87915c8b0b72e8cf127a10cbceb2056a5e56a538b0993.zip",
         },
         "Environment": {
           "Variables": {
@@ -2169,7 +2169,7 @@ ORDER BY hits DESC",
         "Database": {
           "Ref": "UsageDatabase",
         },
-        "Description": "Top 100 search terms (dimension = decoded q=).",
+        "Description": "Top 100 typed search terms (dimension = decoded q=; suggestion clicks are metric search_term_suggested).",
         "Name": "sps-usage-search-terms-staging",
         "QueryString": "SELECT dimension AS term, SUM(cnt) AS searches
 FROM daily_usage

@@ -226,6 +226,29 @@ const SEARCH_TERM_EXPR =
   "lower(trim(url_decode(url_extract_parameter('http://x?' || cs_uri_query, 'q'))))";
 
 /**
+ * Values of the `src=` query parameter the app adds to a `/search?q=` link the
+ * user did not type: `chip` (the home "Try:" chips) and `suggest` (a MeSH
+ * concept picked from the search-box typeahead). See SEARCH_SOURCES in
+ * lib/search/query-url.ts -- keep the two lists in sync. Any other value, or
+ * none, counts as typed.
+ */
+export const SUGGESTED_SEARCH_SOURCES: readonly string[] = ["chip", "suggest"];
+
+/**
+ * Which search_term metric a /search request lands in: `search_term_suggested`
+ * when it carries a known `src=` tag, else `search_term` (typed). Days rolled
+ * before the app started tagging have no `src=`, so every search on those days
+ * stays under `search_term` -- the same metric name the dashboard and the
+ * `sps-usage-search-terms-*` saved query already read.
+ */
+const SEARCH_METRIC_CASE = [
+  "CASE",
+  `  WHEN url_extract_parameter('http://x?' || cs_uri_query, 'src') IN (${SUGGESTED_SEARCH_SOURCES.map((v) => `'${v}'`).join(", ")}) THEN 'search_term_suggested'`,
+  "  ELSE 'search_term'",
+  "END",
+].join("\n");
+
+/**
  * Reserved top-level route segments that are NOT scholar profiles. SPS serves a
  * profile at a ROOT vanity slug (`app/(public)/[slug]`, e.g. `/carl-f-nathan`) —
  * there is no `/scholar/<cwid>` path — so a profile pageview is a single-segment
@@ -292,8 +315,9 @@ const PROFILE_VIEW_FILTERS = [
 ].join("\n");
 
 /**
- * INSERT INTO daily_usage the six aggregated marketing metrics for a single dt
- * partition: pageviews, profile, search_term, referrer, geo, device. Every arm
+ * INSERT INTO daily_usage the aggregated marketing metrics for a single dt
+ * partition: pageviews, profile, search_term (+ search_term_suggested, from the
+ * same arm), referrer, geo, device. Every arm
  * emits (metric, dimension, cnt, dt) with dt LAST (the partition-projection
  * column-order rule -- the partition key is the final column of the SELECT),
  * and dt is the literal validated date string.
@@ -340,7 +364,8 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
 
     "  UNION ALL",
 
-    // (3) search_term -- dimension = decoded/normalized q=, cnt = searches.
+    // (3) search_term / search_term_suggested -- dimension = decoded/normalized
+    // q=, cnt = searches.
     // Counted at the results page (`/search?q=`, the router.push target of a
     // submitted query), NOT under `/api/search%`: the browser never calls
     // `/api/search?q=` -- the only `/api/search/*` callers are the typeahead
@@ -355,7 +380,11 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     // ponytail: pagination / tab switches re-request /search?q= and count as
     // another search of the same term; there is no session key to dedupe on
     // (cs_cookie is not logged). Accept the over-count.
-    `  SELECT 'search_term' AS metric, ${SEARCH_TERM_EXPR} AS dimension,`,
+    // Split by origin in one scan: a suggestion click carries `src=` and lands
+    // in search_term_suggested; everything else (typed searches, and every
+    // page/filter/tab change, since the search page never re-emits `src=`)
+    // stays in search_term.
+    `  SELECT ${SEARCH_METRIC_CASE} AS metric, ${SEARCH_TERM_EXPR} AS dimension,`,
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day}`,
@@ -364,7 +393,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `    AND ${NOT_BOT_UA}`,
     "    AND cs_uri_query IS NOT NULL AND cs_uri_query <> '-'",
     "    AND url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL",
-    `  GROUP BY ${SEARCH_TERM_EXPR}`,
+    `  GROUP BY ${SEARCH_METRIC_CASE}, ${SEARCH_TERM_EXPR}`,
     `  HAVING ${SEARCH_TERM_EXPR} <> ''`,
 
     "  UNION ALL",
