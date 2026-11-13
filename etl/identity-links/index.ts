@@ -5,6 +5,7 @@
  *   Aurora    scholar (every row, soft-deleted included: people leave WCM for Ithaca)
  *   reciterdb identity_cornell_current (the whole Cornell roster, staff included)
  *             pubsource_orcid_person   (ORCID iDs by CWID and by NetID)
+ *   pub.orcid.org  names for Cornell people the roster has none for
  *        └──▶ match.ts ──▶ scholar_identity_link
  *
  * Reads reciterdb, so it runs on the sources family (SOURCES_SCRIPTS). The "known"
@@ -12,10 +13,12 @@
  *
  * Usage: `npm run etl:identity-links`
  */
+import type { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "@/lib/db";
 import { assertSourceVolume } from "@/lib/etl-guard";
 import { withEtlRun } from "@/lib/etl-run";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { fetchRecord } from "../orcid-registry/orcid-api";
 import { matchIdentities, type CornellPerson, type WcmPerson } from "./match";
 
 type RosterRow = {
@@ -97,18 +100,39 @@ async function main(): Promise<number> {
   // The ED pairs alone are hundreds; a collapse means a broken input, not fewer people.
   assertSourceVolume("identity-links-pairs", { incoming: links.length, existing, maxDropPct: 50 });
 
-  const data = links.map((l) => {
+  // ~10% of the roster (NetIDs imported with an ORCID iD only) has no name. Show
+  // the public ORCID record's name instead. Display only: the first failed lookup
+  // stops further ones and leaves the name blank.
+  let orcidReachable = true;
+  const orcidName = async (orcid: string | undefined): Promise<string | null> => {
+    if (!orcid || !orcidReachable) return null;
+    try {
+      const n = (await fetchRecord(orcid)).person?.name;
+      return [n?.["given-names"]?.value, n?.["family-name"]?.value].filter(Boolean).join(" ") || null;
+    } catch (err) {
+      console.warn(`identity-links: ORCID name lookup failed, skipping the rest: ${err}`);
+      orcidReachable = false;
+      return null;
+    }
+  };
+
+  const data: Prisma.ScholarIdentityLinkCreateManyInput[] = [];
+  for (const l of links) {
     const c = byNetid.get(l.netid);
-    return {
+    const name =
+      c?.name ||
+      [c?.firstName, c?.lastName].filter(Boolean).join(" ") ||
+      (await orcidName(l.signals.orcid ?? c?.orcids[0]));
+    data.push({
       cwid: l.cwid,
       netid: l.netid,
       band: l.band,
       signals: l.signals,
-      cornellName: c?.name?.slice(0, 255) ?? null,
+      cornellName: name?.slice(0, 255) || null,
       cornellDepartment: c?.department?.slice(0, 255) ?? null,
       cornellTitle: c?.title?.slice(0, 255) ?? null,
-    };
-  });
+    });
+  }
   await db.write.$transaction(
     async (tx) => {
       await tx.scholarIdentityLink.deleteMany({});
