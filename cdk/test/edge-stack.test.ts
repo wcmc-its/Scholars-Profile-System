@@ -1987,6 +1987,17 @@ describe("EdgeStack", () => {
           expect(new Set(priorities).size).toBe(priorities.length);
         });
 
+        it("challenges /search requests carrying the token:absent label, after Bot Control", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rule = rules.find((r) => r.Name === "search-challenge-tokenless") as any;
+          expect(rule?.Action).toHaveProperty("Challenge");
+          const stmts = rule?.Statement.AndStatement?.Statements ?? [];
+          expect(stmts).toContainEqual({
+            LabelMatchStatement: { Scope: "LABEL", Key: "awswaf:managed:token:absent" },
+          });
+          expect(Number(rule?.Priority)).toBeGreaterThan(Number(targeted?.Priority));
+        });
+
         it("sets a 4h challenge immunity so search sessions are not re-challenged every 5 min", () => {
           expect(acl.ChallengeConfig).toEqual({
             ImmunityTimeProperty: { ImmunityTime: 14400 },
