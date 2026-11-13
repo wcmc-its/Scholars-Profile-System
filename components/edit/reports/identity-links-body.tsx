@@ -43,6 +43,7 @@ const day = (d: Date) =>
 function Evidence({ r }: { r: IdentityLinkRow }) {
   const items: React.ReactNode[] = [];
   if (r.signals.ed) items.push("The WCM directory lists this NetID for them");
+  if (r.signals.cornell) items.push("The Cornell directory lists this CWID for them");
   if (r.signals.orcid)
     items.push(
       <>
@@ -181,11 +182,12 @@ export async function renderIdentityLinksReport({
             </p>
           )}
           <p className="text-muted-foreground mt-4 text-[12px]">
-            Known pairs are ones the WCM directory already records. Strong pairs share an ORCID iD,
-            or the Cornell record carries the scholar&apos;s WCM email. Possible pairs only share a
-            name, and only names held by exactly one person on each campus are suggested, so check
-            them before acting. A scholar or NetID in a known pair is not suggested with anyone
-            else. The Cornell side is the whole Ithaca roster, staff and students included.
+            Known pairs are ones the WCM or Cornell directory already records. Strong pairs share an
+            ORCID iD, or the Cornell record carries the scholar&apos;s WCM email. Possible pairs
+            only share a name, and only names held by exactly one person on each campus are
+            suggested, so check them before acting. A scholar or NetID in a known pair is not
+            suggested with anyone else. The Cornell side is the whole Ithaca roster, staff and
+            students included.
           </p>
         </ReportCard>
       </ReportLayout>
