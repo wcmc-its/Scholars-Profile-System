@@ -70,7 +70,7 @@ function noContentWithCookie(cookie: SerializedSessionCookie): NextResponse {
  *   2. no session              → 401
  *   3. cross-origin / non-JSON → 403 / 415 (R4, CSRF)
  *   4. real cwid not superuser → 403 `not_superuser` (R1 — REAL cwid, never effective)
- *   5. target not a scholar/unit-admin/comms_steward/global-role holder → 404 `target_not_found`
+ *   5. target not a scholar/unit-admin/comms_steward/global-role holder/proxy → 404 `target_not_found`
  *   6. target IS a superuser   → 403 `target_is_superuser` (R2, down-only)
  * On success: re-seal with the overlay, audit `impersonation_start`, 204.
  */
@@ -144,7 +144,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // exact population that was hard-404ing here before this grant.
   const targetGlobalRole =
     target || targetIsSteward || targetIsUnitAdmin ? null : await resolveGlobalRole(targetCwid);
-  if (!target && !targetIsSteward && !targetIsUnitAdmin && !targetGlobalRole) {
+  // …OR a profile-less proxy editor (`scholar_proxy.proxy_cwid`). The /edit
+  // surfaces already resolve a viewed-as proxy to the scholars they serve
+  // (#3060); without this branch the Profile editors tab offered View as on a
+  // proxy and then 404'd. Same no-escalation reasoning as above.
+  const targetIsProxy =
+    target || targetIsSteward || targetIsUnitAdmin || targetGlobalRole
+      ? false
+      : await db.read.scholarProxy
+          .findFirst({ where: { proxyCwid: targetCwid }, select: { proxyCwid: true } })
+          .then((row) => row !== null)
+          .catch(() => false);
+  if (!target && !targetIsSteward && !targetIsUnitAdmin && !targetGlobalRole && !targetIsProxy) {
     return editError(404, "target_not_found", "targetCwid");
   }
 

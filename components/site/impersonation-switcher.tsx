@@ -311,6 +311,25 @@ export function ViewAsConfirmDialog({
   // Clear a previous attempt's error when a new target is picked.
   useEffect(() => setError(null), [candidate]);
 
+  // The exact-CWID fallback carries only the typed CWID; resolve the person's
+  // real name from the directory so the dialog never titles itself with a CWID.
+  const [resolvedName, setResolvedName] = useState<string | null>(null);
+  useEffect(() => {
+    setResolvedName(null);
+    if (!candidate?.exact) return;
+    let active = true;
+    fetch(`/api/directory/people?cwids=${encodeURIComponent(candidate.cwid)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { people?: Array<{ cwid: string; name: string }> } | null) => {
+        const hit = d?.people?.find((p) => p.cwid === candidate.cwid);
+        if (active && hit?.name) setResolvedName(hit.name);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [candidate]);
+
   async function start(c: Candidate) {
     setStarting(true);
     setError(null);
@@ -339,9 +358,9 @@ export function ViewAsConfirmDialog({
     setError(mapStartError(code));
   }
 
-  const name = candidate?.preferredName ?? "";
-  // A CWID-only synthetic candidate has no first name to use.
-  const first = candidate?.exact ? name : name.split(/\s+/)[0];
+  const name = resolvedName ?? candidate?.preferredName ?? "";
+  // An unresolved CWID-only synthetic candidate has no first name to use.
+  const first = candidate?.exact && !resolvedName ? name : name.split(/\s+/)[0];
 
   return (
     <Dialog open={candidate !== null} onOpenChange={(open) => !open && !starting && onClose()}>
