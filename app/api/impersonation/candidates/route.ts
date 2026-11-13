@@ -51,7 +51,11 @@ import { superusersAmong } from "@/lib/auth/superuser";
 import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
 import { resolveGlobalRole, type GlobalRole } from "@/lib/auth/global-roles";
 import { directoryDisplayName } from "@/lib/edit/directory-names";
-import { searchDirectoryPeopleByName, type DirectoryPerson } from "@/lib/sources/ldap";
+import {
+  fetchDirectoryPeopleByCwid,
+  searchDirectoryPeopleByName,
+  type DirectoryPerson,
+} from "@/lib/sources/ldap";
 import {
   pickDisplayGrant,
   summarizeUnitAdminGrants,
@@ -108,8 +112,9 @@ interface Candidate {
   slug: string | null;
   /** Most-privileged `UnitAdmin` role (owner > curator), else `scholar`; or
    *  `comms_steward` for a Method-Family steward with no scholar/unit role; or
-   *  a global role for a profile-less holder found by directory name search. */
-  role: "owner" | "curator" | "scholar" | "comms_steward" | GlobalRole;
+   *  a global role for a profile-less holder found by directory name search; or
+   *  `proxy` for a profile-less proxy editor (`scholar_proxy`). */
+  role: "owner" | "curator" | "scholar" | "comms_steward" | "proxy" | GlobalRole;
   /** The administered unit's kind, or `null` for a plain scholar / steward. */
   unitKind: ImpersonationUnitKind | null;
   /** Administered unit display name (owner/curator) or home unit (scholar). */
@@ -592,6 +597,51 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             unit: null,
           });
         });
+      }
+    }
+  }
+
+  // Proxy editors with no Scholar row and no other role (`scholar_proxy`). The
+  // POST gate accepts them (#3388), so the switcher must be able to find them:
+  // by directory name (the ED hits above) or by exact CWID. Same R2 superuser
+  // pre-filter, failing closed. Names come from the directory, never the CWID
+  // alone, unless the lookup fails.
+  if (kindFilter === "all") {
+    const emitted = new Set(candidates.map((c) => c.cwid.toLowerCase()));
+    const probe = [...edNameByCwid.keys()];
+    if (q && !isNameQuery(q) && !/\s/.test(q)) probe.push(q.toLowerCase());
+    const pending = [...new Set(probe)].filter((c) => !emitted.has(c));
+    if (pending.length > 0) {
+      const proxyCwids = await db.read.scholarProxy
+        .findMany({
+          where: { proxyCwid: { in: pending } },
+          select: { proxyCwid: true },
+          distinct: ["proxyCwid"],
+        })
+        .then((rows) => rows.map((r) => r.proxyCwid.toLowerCase()))
+        .catch(() => [] as string[]);
+      if (proxyCwids.length > 0) {
+        const unnamed = proxyCwids.filter((c) => !edNameByCwid.has(c));
+        const [hydrated, proxySuperusers] = await Promise.all([
+          within(fetchDirectoryPeopleByCwid(unnamed), ED_TIMEOUT_MS, [] as DirectoryPerson[]),
+          within(superusersAmong(proxyCwids), ED_TIMEOUT_MS, null),
+        ]);
+        for (const p of hydrated) {
+          edNameByCwid.set(p.cwid.toLowerCase(), directoryDisplayName(p) ?? p.name);
+        }
+        if (proxySuperusers) {
+          for (const cwid of proxyCwids) {
+            if (proxySuperusers.has(cwid)) continue;
+            candidates.push({
+              cwid,
+              preferredName: edNameByCwid.get(cwid) ?? cwid,
+              slug: null,
+              role: "proxy",
+              unitKind: null,
+              unit: null,
+            });
+          }
+        }
       }
     }
   }

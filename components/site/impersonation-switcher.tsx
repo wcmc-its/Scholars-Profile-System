@@ -66,7 +66,7 @@ type GlobalRoleKey =
   | "content_editor"
   | "core_director"
   | "observer";
-type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward" | GlobalRoleKey;
+type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward" | "proxy" | GlobalRoleKey;
 type UnitKind = "department" | "division" | "center" | "core" | "institution";
 
 /** A row from `/api/impersonation/candidates` (§7). */
@@ -93,6 +93,7 @@ const ROLE_LABEL: Record<CandidateRole, string> = {
   curator: "Curator",
   scholar: "Scholar",
   comms_steward: "Communications Steward",
+  proxy: "Proxy editor",
   // Same strings as `GLOBAL_ROLE_LABEL` (lib/auth/global-roles.ts).
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",

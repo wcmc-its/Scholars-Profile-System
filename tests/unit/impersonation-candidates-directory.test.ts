@@ -8,8 +8,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { scholarFindMany, unitAdminFindMany, searchDirectory, resolveGlobalRole, superusersAmong } =
-  vi.hoisted(() => ({
+const {
+  scholarFindMany,
+  unitAdminFindMany,
+  searchDirectory,
+  resolveGlobalRole,
+  superusersAmong,
+  proxyFindMany,
+  fetchByCwid,
+} = vi.hoisted(() => ({
+    proxyFindMany: vi.fn(),
+    fetchByCwid: vi.fn(),
     scholarFindMany: vi.fn(),
     unitAdminFindMany: vi.fn(),
     searchDirectory: vi.fn(),
@@ -24,7 +33,10 @@ vi.mock("@/lib/auth/effective-identity", () => ({ canImpersonate: vi.fn(async ()
 vi.mock("@/lib/auth/superuser", () => ({ superusersAmong }));
 vi.mock("@/lib/auth/comms-steward", () => ({ listCommsStewardCwids: () => [] }));
 vi.mock("@/lib/auth/global-roles", () => ({ resolveGlobalRole }));
-vi.mock("@/lib/sources/ldap", () => ({ searchDirectoryPeopleByName: searchDirectory }));
+vi.mock("@/lib/sources/ldap", () => ({
+  searchDirectoryPeopleByName: searchDirectory,
+  fetchDirectoryPeopleByCwid: fetchByCwid,
+}));
 vi.mock("@/lib/db", () => {
   const none = { findMany: vi.fn(async () => []) };
   return {
@@ -37,6 +49,7 @@ vi.mock("@/lib/db", () => {
         center: none,
         core: none,
         stewardDirectory: none,
+        scholarProxy: { findMany: proxyFindMany },
       },
     },
   };
@@ -80,6 +93,8 @@ beforeEach(() => {
   searchDirectory.mockReset().mockResolvedValue([]);
   resolveGlobalRole.mockReset().mockResolvedValue(null);
   superusersAmong.mockReset().mockResolvedValue(new Set<string>());
+  proxyFindMany.mockReset().mockResolvedValue([]);
+  fetchByCwid.mockReset().mockResolvedValue([]);
 });
 
 describe("candidates route — directory name search", () => {
@@ -185,5 +200,34 @@ describe("candidates route — directory name search", () => {
 
     expect(resolveGlobalRole).not.toHaveBeenCalled();
     expect(rows.some((r: { cwid: string }) => r.cwid === "glb0001")).toBe(false);
+  });
+});
+
+describe("candidates route — proxy editors", () => {
+  it("finds a profile-less proxy editor by directory name, labelled proxy", async () => {
+    searchDirectory.mockResolvedValueOnce([edPerson("prx0001", "Pat", "Proxy")]);
+    proxyFindMany.mockResolvedValueOnce([{ proxyCwid: "prx0001" }]);
+    const rows = await (await get("kind=all&q=proxy")).json();
+    const hit = rows.find((r: { cwid: string }) => r.cwid === "prx0001");
+    expect(hit).toMatchObject({ role: "proxy", slug: null });
+    expect(hit.preferredName).not.toBe("prx0001");
+  });
+
+  it("finds a proxy editor by exact CWID and resolves their name from the directory", async () => {
+    scholarFindMany.mockResolvedValue([]);
+    proxyFindMany.mockResolvedValueOnce([{ proxyCwid: "prx0001" }]);
+    fetchByCwid.mockResolvedValueOnce([edPerson("prx0001", "Pat", "Proxy")]);
+    const rows = await (await get("kind=all&q=prx0001")).json();
+    expect(proxyFindMany.mock.calls[0][0].where).toEqual({ proxyCwid: { in: ["prx0001"] } });
+    expect(rows).toEqual([expect.objectContaining({ cwid: "prx0001", role: "proxy" })]);
+    expect(rows[0].preferredName).toMatch(/Pat/);
+  });
+
+  it("drops a superuser proxy (R2)", async () => {
+    scholarFindMany.mockResolvedValue([]);
+    proxyFindMany.mockResolvedValueOnce([{ proxyCwid: "prx0001" }]);
+    superusersAmong.mockResolvedValue(new Set(["prx0001"]));
+    const rows = await (await get("kind=all&q=prx0001")).json();
+    expect(rows).toEqual([]);
   });
 });
