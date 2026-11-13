@@ -33,12 +33,13 @@ describe("loadUsageSummary", () => {
     await loadUsageSummary(launch);
 
     expect(h.cacheKeys).toEqual([
-      ["usage-summary", "v3", "2026-09-18", "2026-09-24"],
-      ["usage-summary", "v3", "2026-07-01", "2026-09-24"],
+      ["usage-summary", "v4", "2026-09-18", "2026-09-24"],
+      ["usage-summary", "v4", "2026-07-01", "2026-09-24"],
     ]);
-    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 7).map((c) => c[0] as string);
-    expect(firstWindow).toHaveLength(7);
+    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 9).map((c) => c[0] as string);
+    expect(firstWindow).toHaveLength(9);
     expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_suggested'"))).toBe(true);
+    expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_bot'"))).toBe(true);
     for (const sql of firstWindow) {
       expect(sql).toContain("dt >= '2026-09-18' AND dt <= '2026-09-24'");
     }
@@ -48,6 +49,25 @@ describe("loadUsageSummary", () => {
       until: "2026-09-24",
       totalPageviews: 5,
     });
+  });
+
+  it("totals human (typed + suggested) and bot searches per range", async () => {
+    // Different search_term* totals per window, as the rollup would hold them.
+    const TOTALS: Record<string, Record<string, string>> = {
+      "2026-09-18": { search_term: "40", search_term_suggested: "10", search_term_bot: "150" },
+      "2026-07-01": { search_term: "900", search_term_suggested: "100", search_term_bot: "250" },
+    };
+    h.runUsageQuery.mockImplementation(async (sql: string) => {
+      if (!sql.includes("metric IN (")) return [];
+      const since = /dt >= '([\d-]+)'/.exec(sql)![1];
+      return Object.entries(TOTALS[since]).map(([metric, searches]) => ({ metric, searches }));
+    });
+
+    const week = await loadUsageSummary({ since: "2026-09-18", until: "2026-09-24", days: 7 });
+    const launch = await loadUsageSummary({ since: "2026-07-01", until: "2026-09-24", days: 86 });
+
+    expect(week.searchVolume).toEqual({ human: 50, bot: 150 });
+    expect(launch.searchVolume).toEqual({ human: 1000, bot: 250 });
   });
 
   it("rejects a malformed window before any query runs", async () => {
@@ -75,6 +95,12 @@ describe("shapeUsageRows", () => {
       topProfiles: [{ slug: "carl-f-nathan", views: "45" }],
       searchTerms: [{ term: "cancer", searches: "30" }],
       suggestedSearchTerms: [{ term: "immunotherapy", searches: "7" }],
+      botSearchTerms: [{ term: "zzz", searches: "90" }],
+      searchTotals: [
+        { metric: "search_term", searches: "30" },
+        { metric: "search_term_suggested", searches: "7" },
+        { metric: "search_term_bot", searches: "90" },
+      ],
       referrers: [{ referrer: "(direct)", hits: "200" }],
       geo: [{ region: "North America", hits: "180" }],
       device: [{ device: "desktop", hits: "150" }],
@@ -89,6 +115,8 @@ describe("shapeUsageRows", () => {
     expect(summary.topProfiles).toEqual([{ slug: "carl-f-nathan", views: 45 }]);
     expect(summary.searchTerms).toEqual([{ term: "cancer", searches: 30 }]);
     expect(summary.suggestedSearchTerms).toEqual([{ term: "immunotherapy", searches: 7 }]);
+    expect(summary.botSearchTerms).toEqual([{ term: "zzz", searches: 90 }]);
+    expect(summary.searchVolume).toEqual({ human: 37, bot: 90 });
     expect(summary.referrers).toEqual([{ label: "(direct)", hits: 200 }]);
     expect(summary.geo).toEqual([{ label: "North America", hits: 180 }]);
     expect(summary.device).toEqual([{ label: "desktop", hits: 150 }]);
@@ -100,6 +128,8 @@ describe("shapeUsageRows", () => {
       topProfiles: [{ slug: "x" }],
       searchTerms: [],
       suggestedSearchTerms: [],
+      botSearchTerms: [],
+      searchTotals: [],
       referrers: [],
       geo: [],
       device: [],
@@ -108,5 +138,6 @@ describe("shapeUsageRows", () => {
     expect(summary.pageviewsByDay).toEqual([{ day: "2026-07-03", views: 0 }]);
     expect(summary.topProfiles).toEqual([{ slug: "x", views: 0 }]);
     expect(summary.searchTerms).toEqual([]);
+    expect(summary.searchVolume).toEqual({ human: 0, bot: 0 });
   });
 });

@@ -1,8 +1,8 @@
 /**
  * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over a
  * chosen range (the header's Range dropdown: last 7 / 30 / 90 days, since
- * launch, or custom; default last 30) — pageviews trend, top profiles, typed
- * and suggested search terms, referrers, geo, device — read from the durable `daily_usage` Athena
+ * launch, or custom; default last 30) — pageviews trend, top profiles, typed,
+ * suggested and bot search terms (+ a human vs bot searches tile), referrers, geo, device — read from the durable `daily_usage` Athena
  * rollup via a daily-cached loader keyed per range.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
@@ -36,7 +36,12 @@ import {
   summarizeServiceHealth,
 } from "@/lib/api/service-health";
 import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
-import { type NamedCount, type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
+import {
+  type NamedCount,
+  type SearchVolume,
+  type UsageSummary,
+  loadUsageSummary,
+} from "@/lib/api/usage-summary";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
@@ -108,7 +113,16 @@ function alarmSub(health: ServiceHealthSummary, range: UsageRange): string {
     : `fired in ${rangePhrase(range)}`;
 }
 
-/** Headline row: pageviews + busiest day (Athena rollup), uptime + alarm
+/** The human-searches tile's sub-line: bot volume and its share of all
+ *  searches (human + bot) in the range. */
+function botSearchSub({ human, bot }: SearchVolume): string {
+  const all = human + bot;
+  return all === 0
+    ? "no searches recorded"
+    : `plus ${bot.toLocaleString()} bot (${pctLabel(bot / all)} of all)`;
+}
+
+/** Headline row: pageviews + busiest day + human vs bot searches (Athena rollup), uptime + alarm
  *  firings (CloudWatch). Every tile follows the header's Range. Each pair
  *  fails soft on its own source. */
 function KpiRow({
@@ -141,6 +155,12 @@ function KpiRow({
             value={peak ? peak.views.toLocaleString() : "—"}
             sub={peak ? shortDay(peak.day) : "no pageviews recorded"}
             testId="usage-busiest-day"
+          />
+          <KpiTile
+            label="Human searches"
+            value={summary.searchVolume.human.toLocaleString()}
+            sub={botSearchSub(summary.searchVolume)}
+            testId="usage-human-searches"
           />
         </>
       ) : null}
@@ -427,6 +447,16 @@ function UsageBody({
           rows={toTermRows(summary.suggestedSearchTerms)}
           emptyLabel="No suggestion clicks in the window."
           note="Home-page Try chips and MeSH concepts picked from the search box suggestions."
+        />
+        <RankTable
+          testId="usage-bot-search-terms"
+          title="Top bot search terms"
+          unit="Searches"
+          labelHeader="Term"
+          csvName="usage-bot-search-terms"
+          rows={toTermRows(summary.botSearchTerms)}
+          emptyLabel="No bot searches in the window."
+          note="Declared bot user agents, plus searches the edge firewall challenged, blocked or rate-limited (a person's first search can be challenged once). Before the search challenge went live in mid-November 2026, only declared bots count."
         />
       </div>
 
