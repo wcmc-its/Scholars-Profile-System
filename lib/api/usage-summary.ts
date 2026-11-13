@@ -9,7 +9,7 @@
  * The Athena queries are wrapped in `unstable_cache` (daily revalidate), keyed
  * per window (`since` + `until`), so each range caches on its own: the rollup
  * only changes nightly, so a per-request Athena round-trip would be pure
- * waste. On a cache miss the seven queries run in parallel (~1-2s); every other
+ * waste. On a cache miss the nine queries run in parallel (~1-2s); every other
  * view is served from cache. Any Athena failure throws out of the uncached
  * loader (never cached) and the page renders an "unavailable" notice.
  *
@@ -30,6 +30,8 @@ export type DayViews = { day: string; views: number };
 export type ProfileViews = { slug: string; views: number };
 export type TermCount = { term: string; searches: number };
 export type NamedCount = { label: string; hits: number };
+/** Range search totals: human = typed + suggested, bot = search_term_bot. */
+export type SearchVolume = { human: number; bot: number };
 
 export type UsageSummary = {
   windowDays: number;
@@ -43,6 +45,9 @@ export type UsageSummary = {
   searchTerms: TermCount[];
   /** Suggested terms people clicked (home chips, typeahead concept picks). */
   suggestedSearchTerms: TermCount[];
+  /** Terms bots searched (declared bot UAs, WAF challenge/block/CAPTCHA/rate-limit). */
+  botSearchTerms: TermCount[];
+  searchVolume: SearchVolume;
   referrers: NamedCount[];
   geo: NamedCount[];
   device: NamedCount[];
@@ -54,6 +59,8 @@ export type UsageRows = {
   topProfiles: AthenaRow[];
   searchTerms: AthenaRow[];
   suggestedSearchTerms: AthenaRow[];
+  botSearchTerms: AthenaRow[];
+  searchTotals: AthenaRow[];
   referrers: AthenaRow[];
   geo: AthenaRow[];
   device: AthenaRow[];
@@ -75,6 +82,8 @@ export type UsageWindow = { since: string; until: string; days: number };
 /** Pure shaper: the raw result sets -> the dashboard view model. */
 export function shapeUsageRows(rows: UsageRows, window?: UsageWindow): UsageSummary {
   const pageviewsByDay = rows.pageviewsByDay.map((r) => ({ day: r.dt ?? "", views: n(r.views) }));
+  const total = (metric: string): number =>
+    rows.searchTotals.reduce((sum, r) => (r.metric === metric ? sum + n(r.searches) : sum), 0);
   return {
     windowDays: window?.days ?? USAGE_WINDOW_DAYS,
     since: window?.since ?? "",
@@ -84,6 +93,11 @@ export function shapeUsageRows(rows: UsageRows, window?: UsageWindow): UsageSumm
     topProfiles: rows.topProfiles.map((r) => ({ slug: r.slug ?? "", views: n(r.views) })),
     searchTerms: terms(rows.searchTerms),
     suggestedSearchTerms: terms(rows.suggestedSearchTerms),
+    botSearchTerms: terms(rows.botSearchTerms),
+    searchVolume: {
+      human: total("search_term") + total("search_term_suggested"),
+      bot: total("search_term_bot"),
+    },
     referrers: rows.referrers.map((r) => ({ label: r.referrer ?? "", hits: n(r.hits) })),
     geo: rows.geo.map((r) => ({ label: r.region ?? "", hits: n(r.hits) })),
     device: rows.device.map((r) => ({ label: r.device ?? "", hits: n(r.hits) })),
@@ -92,18 +106,39 @@ export function shapeUsageRows(rows: UsageRows, window?: UsageWindow): UsageSumm
 
 async function loadUsageSummaryUncached(window: UsageWindow): Promise<UsageSummary> {
   const q = buildUsageQueries(window.since, window.until);
-  const [pageviewsByDay, topProfiles, searchTerms, suggestedSearchTerms, referrers, geo, device] =
-    await Promise.all([
-      runUsageQuery(q.pageviewsByDay),
-      runUsageQuery(q.topProfiles),
-      runUsageQuery(q.searchTerms),
-      runUsageQuery(q.suggestedSearchTerms),
-      runUsageQuery(q.referrers),
-      runUsageQuery(q.geo),
-      runUsageQuery(q.device),
-    ]);
+  const [
+    pageviewsByDay,
+    topProfiles,
+    searchTerms,
+    suggestedSearchTerms,
+    botSearchTerms,
+    searchTotals,
+    referrers,
+    geo,
+    device,
+  ] = await Promise.all([
+    runUsageQuery(q.pageviewsByDay),
+    runUsageQuery(q.topProfiles),
+    runUsageQuery(q.searchTerms),
+    runUsageQuery(q.suggestedSearchTerms),
+    runUsageQuery(q.botSearchTerms),
+    runUsageQuery(q.searchTotals),
+    runUsageQuery(q.referrers),
+    runUsageQuery(q.geo),
+    runUsageQuery(q.device),
+  ]);
   return shapeUsageRows(
-    { pageviewsByDay, topProfiles, searchTerms, suggestedSearchTerms, referrers, geo, device },
+    {
+      pageviewsByDay,
+      topProfiles,
+      searchTerms,
+      suggestedSearchTerms,
+      botSearchTerms,
+      searchTotals,
+      referrers,
+      geo,
+      device,
+    },
     window,
   );
 }
@@ -112,15 +147,15 @@ async function loadUsageSummaryUncached(window: UsageWindow): Promise<UsageSumma
  * Cached loader for the page, one cache entry per window: the key carries the
  * window's `since` and `until`, so "Last 7 days" and "Since launch" never share
  * an entry and a custom range gets its own. Daily revalidate, so each window's
- * seven-query Athena round-trip runs at most ~twice a day per app instance. A
+ * nine-query Athena round-trip runs at most ~twice a day per app instance. A
  * thrown Athena error propagates (never cached) so the page can fail soft. The
  * dates are validated to strict YYYY-MM-DD by buildUsageQueries before any SQL.
  */
 export function loadUsageSummary(window: UsageWindow): Promise<UsageSummary> {
   return unstable_cache(
     () => loadUsageSummaryUncached(window),
-    // v3: + suggestedSearchTerms (a cached v2 entry lacks it).
-    ["usage-summary", "v3", window.since, window.until],
+    // v4: + botSearchTerms, searchVolume (a cached v3 entry lacks them).
+    ["usage-summary", "v4", window.since, window.until],
     { revalidate: USAGE_CACHE_TTL_SECONDS, tags: ["usage-summary"] },
   )();
 }

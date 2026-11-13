@@ -36,6 +36,10 @@ export interface UsageQueries {
   readonly searchTerms: string;
   /** Suggestion clicks (`search_term_suggested`: home chips, typeahead concept picks). */
   readonly suggestedSearchTerms: string;
+  /** Bot searches (`search_term_bot`: declared bot UAs and WAF-answered requests). */
+  readonly botSearchTerms: string;
+  /** Range totals per search metric (`metric`, `searches`), not capped at top-N. */
+  readonly searchTotals: string;
   readonly referrers: string;
   readonly geo: string;
   readonly device: string;
@@ -83,6 +87,13 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
     topProfiles: ranked("profile", "slug", "views"),
     searchTerms: ranked("search_term", "term", "searches"),
     suggestedSearchTerms: ranked("search_term_suggested", "term", "searches"),
+    botSearchTerms: ranked("search_term_bot", "term", "searches"),
+    searchTotals: [
+      "SELECT metric, SUM(cnt) AS searches",
+      "FROM daily_usage",
+      `WHERE metric IN ('search_term', 'search_term_suggested', 'search_term_bot') AND ${since}`,
+      "GROUP BY metric",
+    ].join("\n"),
     referrers: grouped("referrer", "referrer", "hits"),
     geo: grouped("geo", "region", "hits"),
     device: grouped("device", "device", "hits"),

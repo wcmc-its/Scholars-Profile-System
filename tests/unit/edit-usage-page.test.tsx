@@ -4,7 +4,7 @@
  * Show all), Traffic sources cards, and the uptime card. Each data source
  * fails soft on its own. Renders are scoped to the page root.
  */
-import { fireEvent, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -84,6 +84,8 @@ const SUMMARY = {
     { term: "gizmos", searches: 3 },
   ],
   suggestedSearchTerms: [{ term: "sprockets", searches: 5 }],
+  botSearchTerms: [{ term: "cogs", searches: 40 }],
+  searchVolume: { human: 160, bot: 40 },
   referrers: [
     { label: "(direct)", hits: 900 },
     { label: "example.org", hits: 100 },
@@ -239,6 +241,30 @@ describe("/edit/usage", () => {
     expect(within(root.getByTestId("usage-top-search-terms")).getByText("widgets")).toBeTruthy();
   });
 
+  it("lists bot search terms apart from the human lists", async () => {
+    const root = await renderPage();
+    const bot = within(root.getByTestId("usage-bot-search-terms"));
+    expect(bot.getByText("Top bot search terms")).toBeTruthy();
+    expect(bot.getByText("cogs")).toBeTruthy();
+    expect(bot.getByText(/only declared bots count/)).toBeTruthy();
+    expect(bot.getByRole("button", { name: /Download CSV/ })).toBeTruthy();
+    expect(within(root.getByTestId("usage-top-search-terms")).queryByText("cogs")).toBeNull();
+    expect(within(root.getByTestId("usage-suggested-search-terms")).queryByText("cogs")).toBeNull();
+  });
+
+  it("shows human vs bot search volume, with bot share", async () => {
+    const root = await renderPage();
+    expect(root.getByTestId("usage-human-searches").textContent).toBe("160");
+    expect(root.getByText("plus 40 bot (20.0% of all)")).toBeTruthy();
+  });
+
+  it("says so when the range has no searches at all", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, searchVolume: { human: 0, bot: 0 } });
+    const root = await renderPage();
+    expect(root.getByTestId("usage-human-searches").textContent).toBe("0");
+    expect(root.getByText("no searches recorded")).toBeTruthy();
+  });
+
   it("falls back to slugs when the name lookup fails", async () => {
     h.mockFindMany.mockRejectedValue(new Error("db down"));
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -305,6 +331,21 @@ describe("/edit/usage range", () => {
       expect.objectContaining({ key: "launch", since: "2026-07-01", until: "2026-09-24" }),
     );
     expect(root.getByTestId("usage-range-trigger").textContent).toContain("Since launch");
+  });
+
+  it("shows each range's own human vs bot search totals", async () => {
+    h.mockLoadUsage.mockImplementation(async (range: { since: string }) => ({
+      ...SUMMARY,
+      searchVolume:
+        range.since === "2026-09-18" ? { human: 30, bot: 70 } : { human: 1200, bot: 300 },
+    }));
+    const week = await renderPage({ range: "7" });
+    expect(week.getByTestId("usage-human-searches").textContent).toBe("30");
+    expect(week.getByText("plus 70 bot (70.0% of all)")).toBeTruthy();
+    cleanup();
+    const launch = await renderPage({ range: "launch" });
+    expect(launch.getByTestId("usage-human-searches").textContent).toBe("1,200");
+    expect(launch.getByText("plus 300 bot (20.0% of all)")).toBeTruthy();
   });
 
   it("shows a custom range's dates on the trigger", async () => {

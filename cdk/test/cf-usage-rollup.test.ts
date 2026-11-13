@@ -9,6 +9,7 @@ import {
   assertIsoDate,
   buildRollupInsert,
   isRerollable,
+  BOT_SEARCH_STATUSES,
   KNOWN_SCRAPER_UAS,
   MAX_REROLL_AGE_DAYS,
   SUGGESTED_SEARCH_SOURCES,
@@ -69,8 +70,9 @@ describe("buildRollupInsert", () => {
     for (const metric of ["'pageviews'", "'profile'", "'referrer'", "'geo'", "'device'"]) {
       expect(sql).toContain(`${metric} AS metric`);
     }
-    // search_term / search_term_suggested come from one arm's metric CASE.
-    expect(sql).toContain("ELSE 'search_term'\nEND AS metric");
+    // search_term / search_term_suggested / search_term_bot come from one
+    // arm's metric CASE.
+    expect(sql).toContain("THEN 'search_term'\nEND AS metric");
     // Five UNION ALL joins between six arms.
     expect(sql.match(/UNION ALL/g)).toHaveLength(5);
   });
@@ -110,7 +112,7 @@ describe("buildRollupInsert", () => {
     // /api/search/suggest fires per keystroke and /api/search/key-paper is a
     // Matcha evidence fetch -- neither is a search. Real searches land on
     // /search?q= (document + RSC soft-nav).
-    expect(sql).toContain("cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200");
+    expect(sql).toContain("cs_uri_stem = '/search' AND cs_method = 'GET'\n");
     expect(sql).not.toContain("/api/search");
   });
 
@@ -202,31 +204,57 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
   });
 });
 
-describe("buildRollupInsert typed vs suggested search terms", () => {
+describe("buildRollupInsert typed vs suggested vs bot search terms", () => {
   const sql = buildRollupInsert(CFG, "2026-11-13");
   const search = sql.split("UNION ALL")[2];
-  const METRIC_CASE = [
-    "CASE",
-    "  WHEN url_extract_parameter('http://x?' || cs_uri_query, 'src') IN ('chip', 'suggest') THEN 'search_term_suggested'",
-    "  ELSE 'search_term'",
-    "END",
-  ].join("\n");
+  const UA_RE = "(regexp_like(url_decode(cs_user_agent), '(?i)(bot|crawl|spider|";
+  const SRC_IN = "url_extract_parameter('http://x?' || cs_uri_query, 'src') IN ('chip', 'suggest')";
+  const HUMAN = "sc_status = 200 AND x_edge_result_type <> 'Error' AND NOT coalesce(";
+  // The metric CASE, exactly as SELECT emits it (GROUP BY and HAVING repeat it).
+  const caseStart = search.indexOf("SELECT CASE\n") + "SELECT ".length;
+  const METRIC_CASE = search.slice(caseStart, search.indexOf("\nEND AS metric") + "\nEND".length);
+  const branches = METRIC_CASE.split("\n  WHEN ").slice(1);
 
   it("tags exactly the app's suggestion sources (lib/search/query-url.ts SEARCH_SOURCES)", () => {
     expect([...SUGGESTED_SEARCH_SOURCES]).toEqual(["chip", "suggest"]);
   });
 
-  it("splits the search arm by src= in one scan, untagged (and pre-tag days) staying search_term", () => {
-    expect(search).toContain(`SELECT ${METRIC_CASE} AS metric,`);
-    // Trino needs the grouped CASE character-identical to the SELECT one.
-    expect(search).toContain(`GROUP BY ${METRIC_CASE}, lower(trim(url_decode(`);
-    expect(sql.split(METRIC_CASE)).toHaveLength(3); // SELECT + GROUP BY, search arm only
+  it("counts the WAF challenge / block / CAPTCHA / rate-limit statuses as bot", () => {
+    expect([...BOT_SEARCH_STATUSES]).toEqual([202, 403, 405, 429]);
   });
 
-  it("keeps the search arm's existing filters unchanged", () => {
-    expect(search).toContain("cs_uri_stem = '/search' AND cs_method = 'GET' AND sc_status = 200");
-    expect(search).toContain("url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL");
-    expect(search).toContain("NOT coalesce((regexp_like(url_decode(cs_user_agent)");
+  it("splits the search arm three ways in one scan, bot first so each request counts once", () => {
+    expect(branches).toHaveLength(3);
+    // 1. bot: declared bot UA (NULL-safe), or a WAF-answered request, any src=.
+    expect(branches[0]).toContain(`coalesce(${UA_RE}`);
+    expect(branches[0]).toContain("OR sc_status IN (202, 403, 405, 429)");
+    expect(branches[0]).toContain("OR x_edge_result_type = 'Error'");
+    expect(branches[0]).toMatch(/THEN 'search_term_bot'$/);
+    expect(branches[0]).not.toContain("'src'");
+    // 2. suggested: a human 200 carrying src=chip|suggest.
+    expect(branches[1]).toContain(HUMAN);
+    expect(branches[1]).toContain(`${SRC_IN} THEN 'search_term_suggested'`);
+    // 3. typed: every other human 200 (pre-tag days included).
+    expect(branches[2]).toContain(HUMAN);
+    expect(branches[2]).not.toContain("'src'");
+    expect(branches[2]).toMatch(/THEN 'search_term'\nEND$/);
+    // No ELSE: a non-bot 3xx/5xx is NULL and the HAVING drops it.
+    expect(METRIC_CASE).not.toContain("ELSE");
+  });
+
+  it("groups and filters on the character-identical CASE (Trino), search arm only", () => {
+    expect(search).toContain(`GROUP BY ${METRIC_CASE}, lower(trim(url_decode(`);
+    expect(search).toContain(`HAVING ${METRIC_CASE} IS NOT NULL AND lower(trim(`);
+    expect(sql.split(METRIC_CASE)).toHaveLength(4); // SELECT + GROUP BY + HAVING
+  });
+
+  it("no longer filters status / edge error / UA in WHERE, so bot rows reach the CASE", () => {
+    const where = search.slice(search.indexOf("  WHERE"), search.indexOf("  GROUP BY"));
+    expect(where).toContain("cs_uri_stem = '/search' AND cs_method = 'GET'");
+    expect(where).toContain("url_extract_parameter('http://x?' || cs_uri_query, 'q') IS NOT NULL");
+    expect(where).not.toContain("sc_status");
+    expect(where).not.toContain("x_edge_result_type");
+    expect(where).not.toContain("cs_user_agent");
   });
 });
 
