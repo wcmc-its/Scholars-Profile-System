@@ -822,6 +822,7 @@ export function RepresentativePapers({
         {status === "done" && fallback ? (
           <Link
             href={fallback.href}
+            prefetch={false}
             onClick={(e) => e.stopPropagation()}
             className="relative z-10 mt-1 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
           >
