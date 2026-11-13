@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  SERVICE_HEALTH_WINDOW_DAYS,
   bucketMonthlyAvailability,
   computeAvailabilityPercent,
-  computeTrailingUptimePercent,
-  fetchAlarmFirings,
+  computeWindowUptimePercent,
+  fetchAlarmFiringTimes,
   fetchDailyAlbPoints,
   loadServiceHealthUncached,
-  shapeServiceHealth,
+  summarizeServiceHealth,
   type DailyAlbPoint,
+  type ServiceHealthData,
 } from "@/lib/api/service-health";
 
 function day(date: string, requestCount: number, elb5xx = 0, target5xx = 0): DailyAlbPoint {
@@ -89,26 +89,75 @@ describe("bucketMonthlyAvailability", () => {
   });
 });
 
-describe("computeTrailingUptimePercent", () => {
-  it("aggregates only the trailing windowDays entries", () => {
+describe("computeWindowUptimePercent", () => {
+  it("aggregates only the days inside [since, until]", () => {
     const daily: DailyAlbPoint[] = [
-      day("2026-06-01", 1_000, 0, 100), // outside the 2-day window -- must be excluded
+      day("2026-06-01", 1_000, 0, 100), // before the window -- must be excluded
       day("2026-06-02", 1_000, 0, 0),
       day("2026-06-03", 1_000, 0, 0),
+      day("2026-06-04", 1_000, 0, 500), // after the window -- must be excluded
     ];
-    expect(computeTrailingUptimePercent(daily, 2)).toBe(100);
+    expect(computeWindowUptimePercent(daily, "2026-06-02", "2026-06-03")).toBe(100);
+    expect(computeWindowUptimePercent(daily, "2026-06-01", "2026-06-04")).toBeCloseTo(85, 5);
+  });
+
+  it("is null when no day of the series falls in the window", () => {
+    expect(computeWindowUptimePercent([day("2026-07-01", 10)], "2026-05-22", "2026-06-30")).toBe(
+      null,
+    );
   });
 });
 
-describe("shapeServiceHealth", () => {
-  it("combines the daily series and alarm count into the view model", () => {
-    const daily: DailyAlbPoint[] = [day("2026-07-01", 1_000, 0, 1)];
-    const summary = shapeServiceHealth(daily, 3);
-    expect(summary.windowDays).toBe(SERVICE_HEALTH_WINDOW_DAYS);
-    expect(summary.alarmFirings).toBe(3);
-    expect(summary.monthly).toEqual([
-      { month: "2026-07", availabilityPercent: 99.9, totalRequests: 1_000, lowTraffic: false },
-    ]);
+describe("summarizeServiceHealth", () => {
+  // Fetched 2026-11-13 12:00Z: alarm history retained from 2026-10-14 12:00Z.
+  const data: ServiceHealthData = {
+    daily: [
+      day("2026-08-20", 1_000, 0, 1_000), // a bad day ~3 months back
+      day("2026-10-20", 1_000, 0, 10),
+      day("2026-11-10", 1_000, 0, 0),
+      day("2026-11-12", 1_000, 0, 0),
+    ],
+    alarmFiringTimes: ["2026-10-20T03:00:00.000Z", "2026-11-10T05:00:00.000Z"],
+    alarmHistoryFrom: "2026-10-14T12:00:00.000Z",
+  };
+
+  it("windows uptime and alarm firings to the selected range (7 vs 30 vs 90 differ)", () => {
+    const d7 = summarizeServiceHealth(data, { since: "2026-11-06", until: "2026-11-12" });
+    const d30 = summarizeServiceHealth(data, { since: "2026-10-14", until: "2026-11-12" });
+    const d90 = summarizeServiceHealth(data, { since: "2026-08-15", until: "2026-11-12" });
+
+    expect(d7.uptimePercent).toBe(100);
+    expect(d7.alarmFirings).toBe(1);
+    expect(d7.alarmCoverage).toBe("full");
+
+    expect(d30.uptimePercent).toBeCloseTo((1 - 10 / 3_000) * 100, 5);
+    expect(d30.alarmFirings).toBe(2);
+    expect(d30.alarmCoverage).toBe("full"); // starts exactly 30 days back
+
+    expect(d90.uptimePercent).toBeCloseTo((1 - 1_010 / 4_000) * 100, 5);
+    expect(d90.alarmFirings).toBe(2);
+    expect(d90.alarmCoverage).toBe("partial");
+    expect(d90.alarmSince).toBe("2026-10-14");
+  });
+
+  it("has no alarm count for a window entirely older than the retained history", () => {
+    const old = summarizeServiceHealth(data, { since: "2026-08-01", until: "2026-08-31" });
+    expect(old.alarmFirings).toBe(null);
+    expect(old.alarmCoverage).toBe("none");
+    expect(old.uptimePercent).toBe(0);
+  });
+
+  it("excludes a firing after the window's last day", () => {
+    const s = summarizeServiceHealth(
+      { ...data, alarmFiringTimes: ["2026-11-13T01:00:00.000Z"] },
+      { since: "2026-11-06", until: "2026-11-12" },
+    );
+    expect(s.alarmFirings).toBe(0);
+  });
+
+  it("keeps the monthly trend independent of the window", () => {
+    const s = summarizeServiceHealth(data, { since: "2026-11-06", until: "2026-11-12" });
+    expect(s.monthly.map((m) => m.month)).toEqual(["2026-08", "2026-10", "2026-11"]);
   });
 });
 
@@ -181,22 +230,31 @@ describe("fetchDailyAlbPoints", () => {
   });
 });
 
-describe("fetchAlarmFirings", () => {
-  it("counts only state transitions INTO ALARM", async () => {
+describe("fetchAlarmFiringTimes", () => {
+  it("returns the timestamps of state transitions INTO ALARM only", async () => {
     const send = vi.fn().mockResolvedValue({
       AlarmHistoryItems: [
-        { HistorySummary: "Alarm updated from OK to ALARM" },
-        { HistorySummary: "Alarm updated from ALARM to OK" },
-        { HistorySummary: "Alarm updated from INSUFFICIENT_DATA to ALARM" },
+        {
+          HistorySummary: "Alarm updated from OK to ALARM",
+          Timestamp: new Date("2026-08-02T01:00:00Z"),
+        },
+        {
+          HistorySummary: "Alarm updated from ALARM to OK",
+          Timestamp: new Date("2026-08-02T02:00:00Z"),
+        },
+        {
+          HistorySummary: "Alarm updated from INSUFFICIENT_DATA to ALARM",
+          Timestamp: new Date("2026-08-05T00:30:00Z"),
+        },
       ],
     });
-    const count = await fetchAlarmFirings(
+    const times = await fetchAlarmFiringTimes(
       { send },
       "sps-app-unavailable-staging",
       new Date("2026-08-01T00:00:00Z"),
       new Date("2026-08-31T00:00:00Z"),
     );
-    expect(count).toBe(2);
+    expect(times).toEqual(["2026-08-02T01:00:00.000Z", "2026-08-05T00:30:00.000Z"]);
     expect(send.mock.calls[0][0].input).toMatchObject({
       AlarmName: "sps-app-unavailable-staging",
       AlarmTypes: ["CompositeAlarm"],
@@ -206,7 +264,7 @@ describe("fetchAlarmFirings", () => {
   it("propagates a CloudWatch send() rejection rather than resolving to 0", async () => {
     const send = vi.fn().mockRejectedValue(new Error("access_denied"));
     await expect(
-      fetchAlarmFirings({ send }, "sps-app-unavailable-staging", new Date(), new Date()),
+      fetchAlarmFiringTimes({ send }, "sps-app-unavailable-staging", new Date(), new Date()),
     ).rejects.toThrow("access_denied");
   });
 });
@@ -238,7 +296,11 @@ describe("loadServiceHealthUncached", () => {
     vi.stubEnv("SPS_APP_UNAVAILABLE_ALARM", "sps-app-unavailable-staging");
     const send = vi.fn().mockImplementation((cmd: { constructor: { name: string } }) => {
       if (cmd.constructor.name === "DescribeAlarmHistoryCommand") {
-        return Promise.resolve({ AlarmHistoryItems: [{ HistorySummary: "OK to ALARM" }] });
+        return Promise.resolve({
+          AlarmHistoryItems: [
+            { HistorySummary: "OK to ALARM", Timestamp: new Date("2026-08-30T04:00:00Z") },
+          ],
+        });
       }
       return Promise.resolve({
         MetricDataResults: [
@@ -251,7 +313,13 @@ describe("loadServiceHealthUncached", () => {
       client: { send },
       now: new Date("2026-08-31T12:00:00Z"),
     });
-    expect(summary.alarmFirings).toBe(1);
-    expect(summary.monthly.find((m) => m.month === "2026-08")?.totalRequests).toBe(1_000);
+    expect(summary.alarmFiringTimes).toEqual(["2026-08-30T04:00:00.000Z"]);
+    expect(summary.alarmHistoryFrom).toBe("2026-08-01T12:00:00.000Z");
+    expect(summary.daily.find((d) => d.date === "2026-08-30")?.requestCount).toBe(1_000);
+    // The alarm-history lookback is the 30-day retention, not the dashboard range.
+    const alarmCall = send.mock.calls.find(
+      ([cmd]) => cmd.constructor.name === "DescribeAlarmHistoryCommand",
+    )![0];
+    expect(alarmCall.input.StartDate.toISOString()).toBe("2026-08-01T12:00:00.000Z");
   });
 });
