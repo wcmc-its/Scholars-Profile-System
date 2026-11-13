@@ -764,7 +764,7 @@ describe("EtlStack", () => {
               Match.objectLike({
                 Effect: "Allow",
                 Action: "ses:SendEmail",
-                Condition: { StringEquals: { "ses:FromAddress": "no-reply-scholars@weill.cornell.edu" } },
+                Condition: { StringEquals: { "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu" } },
               }),
             ],
           },

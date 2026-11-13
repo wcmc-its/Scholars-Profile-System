@@ -18,7 +18,7 @@ export type EnvName = "staging" | "prod";
  * drift. Verifying this identity (DKIM CNAMEs) + leaving the SES sandbox are ops
  * steps (docs/ses-sender-verification.md).
  */
-export const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
+export const SCHOLARS_MAIL_FROM = "no-reply@scholars-mail.weill.cornell.edu";
 
 /** Resolved configuration for one environment. */
 export interface SpsEnvConfig {
