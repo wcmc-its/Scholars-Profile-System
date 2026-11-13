@@ -55,6 +55,7 @@ import {
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
   EMPTY_QUERY_PEOPLE_SORT,
+  resolveSearchPeopleResearchTypeNested,
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
@@ -72,6 +73,7 @@ import {
   type PeopleSort,
   type PiFilter,
   type PublicationsSort,
+  type ResearchTypeFacetBucket,
   type SearchFacetBucket,
 } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
@@ -111,7 +113,13 @@ import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
 import { institutionDisplayName } from "@/lib/institutions";
-import { researchTypeLabel } from "@/lib/research-type";
+import {
+  collapseResearchTypeChildren,
+  parseResearchTypeValue,
+  researchTypeChildRows,
+  researchTypeLabel,
+  toggleResearchTypeValue,
+} from "@/lib/research-type";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -372,9 +380,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // `institution`); accepted regardless of the per-tab
   // SEARCH_*_INSTITUTION_FACET flags (each search no-ops it while off).
   const institution = parseList(sp.institution);
-  // Research type facet ("lab" / "clinical"); no-op while
-  // SEARCH_PEOPLE_RESEARCH_TYPE_FACET is off.
-  const researchType = parseList(sp.researchType);
+  // Research type facet ("lab" / "clinical", nested children "lab:physician"
+  // etc.); no-op while SEARCH_PEOPLE_RESEARCH_TYPE_FACET is off. Children
+  // collapse to their parent while SEARCH_PEOPLE_RESEARCH_TYPE_NESTED is off,
+  // so a shared child link still filters and its chip reads as the parent.
+  const researchTypeRaw = parseList(sp.researchType);
+  const researchType = resolveSearchPeopleResearchTypeNested()
+    ? researchTypeRaw
+    : collapseResearchTypeChildren(researchTypeRaw);
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
   // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
@@ -1404,7 +1417,10 @@ async function PeopleResults({
     buildUrl((sp) => {
       const current = sp.getAll(axis);
       sp.delete(axis);
-      if (current.includes(value)) {
+      if (axis === "researchType") {
+        // Nested: a child replaces its parent and vice versa.
+        for (const v of toggleResearchTypeValue(current, value)) sp.append(axis, v);
+      } else if (current.includes(value)) {
         for (const v of current) if (v !== value) sp.append(axis, v);
       } else {
         for (const v of current) sp.append(axis, v);
@@ -3180,8 +3196,9 @@ function FacetSidebar({
   activeProfessorialRank: string[];
   activeEarlyStageInvestigator: boolean;
   activeInstitution: string[];
-  /** Research type facet buckets + active values; empty buckets ⇒ no group. */
-  researchTypes: SearchFacetBucket[];
+  /** Research type facet buckets + active values; empty buckets ⇒ no group.
+   *  `physician` / `other` child counts ride along when the nested flag is on. */
+  researchTypes: ResearchTypeFacetBucket[];
   activeResearchType: string[];
   toggleHref: (axis: string, value: string) => string;
   /** #2300 / #2306 — single-boolean toggle for `isClinical` /
@@ -3242,15 +3259,27 @@ function FacetSidebar({
           pre-reindex ⇒ no group). */}
       {researchTypes.length > 0 ? (
         <FacetGroup label="Research type">
-          {sortActiveFirst(researchTypes, (b) => activeResearchType.includes(b.value)).map((b) => (
+          {sortActiveFirst(researchTypes, (b) =>
+            activeResearchType.some((v) => parseResearchTypeValue(v)?.kind === b.value),
+          ).flatMap((b) => [
             <FacetCheckbox
               key={b.value}
               label={researchTypeLabel(b.value)}
               count={b.count}
               isActive={activeResearchType.includes(b.value)}
               href={toggleHref("researchType", b.value)}
-            />
-          ))}
+            />,
+            ...researchTypeChildRows(b, activeResearchType).map((c) => (
+              <FacetCheckbox
+                key={c.value}
+                label={c.label}
+                count={c.count}
+                isActive={c.isActive}
+                href={toggleHref("researchType", c.value)}
+                nested
+              />
+            )),
+          ])}
         </FacetGroup>
       ) : null}
 
@@ -3784,6 +3813,7 @@ function FacetCheckbox({
   wrap,
   radio,
   disabled,
+  nested,
 }: {
   label: React.ReactNode;
   tooltip?: string;
@@ -3803,6 +3833,9 @@ function FacetCheckbox({
    *  enforcement. Used by issue #233 to suppress the redundant `Has active
    *  grants` checkbox when `pi=active|multi` is set. */
   disabled?: boolean;
+  /** Indented child row under a parent checkbox (Research type children).
+   *  Applies to the default (truncating) row only. */
+  nested?: boolean;
 }) {
   const inputType = radio ? "radio" : "checkbox";
   if (disabled) {
@@ -3870,7 +3903,7 @@ function FacetCheckbox({
     );
   }
   return (
-    <li className="flex items-center gap-2 py-1 leading-[1.4]">
+    <li className={`flex items-center gap-2 py-1 leading-[1.4]${nested ? " pl-5" : ""}`}>
       {wrapInTooltip(
         <Link
           href={href}

@@ -635,6 +635,52 @@ describe("buildPeopleDoc — overview field_override read-merge (#2113)", () => 
   });
 });
 
+describe("buildPeopleDoc — isPhysician (research type children)", () => {
+  async function docFor(
+    hasClinicalProfile: boolean,
+    educations: { degree: string | null }[] | undefined,
+  ): Promise<{ isPhysician: unknown }> {
+    const s: Partial<ScholarForIndex> = {
+      cwid: "phy1234",
+      slug: "phy1234",
+      preferredName: "Test Scholar",
+      fullName: "Test Scholar",
+      postnominal: null,
+      primaryTitle: "Professor",
+      primaryDepartment: "Dept",
+      overview: null,
+      roleCategory: "faculty",
+      hasClinicalProfile,
+      deptCode: null,
+      divCode: null,
+      department: null,
+      division: null,
+      topicAssignments: [],
+      grants: [],
+      authorships: [],
+      ...(educations ? { educations: educations as ScholarForIndex["educations"] } : {}),
+    };
+    return (await buildPeopleDoc(s as ScholarForIndex, mockPeopleClient([]), NO_SUP)) as {
+      isPhysician: unknown;
+    };
+  }
+
+  it("a medical degree on any education row ⇒ true", async () => {
+    expect((await docFor(false, [{ degree: "PhD" }, { degree: "M.D." }])).isPhysician).toBe(true);
+  });
+
+  it("education rows without a medical degree ⇒ false, even with a clinical profile", async () => {
+    expect((await docFor(true, [{ degree: "PhD" }])).isPhysician).toBe(false);
+    expect((await docFor(true, [{ degree: "DDS" }])).isPhysician).toBe(false);
+  });
+
+  it("no education rows ⇒ hasClinicalProfile decides; always written as a boolean", async () => {
+    expect((await docFor(true, [])).isPhysician).toBe(true);
+    expect((await docFor(false, [])).isPhysician).toBe(false);
+    expect((await docFor(false, undefined)).isPhysician).toBe(false);
+  });
+});
+
 describe("authorRole — the per-person fact the facet union cannot express", () => {
   // `wcmAuthorPositions` is a paper-level UNION: on a paper with a WCM first-author and a WCM
   // middle-author it holds ["first","middle"] and cannot say WHICH author is which. Using it to

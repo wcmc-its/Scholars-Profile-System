@@ -1463,3 +1463,21 @@ export function resolveSearchTypoFallback(): TypoFallbackMode | false {
 export function resolveSearchPeopleResearchTypeFacet(): boolean {
   return process.env.SEARCH_PEOPLE_RESEARCH_TYPE_FACET === "on";
 }
+
+/**
+ * Nests "Physician-scientist" / non-physician children under each Research
+ * type bucket (`researchType=lab:physician`, `lab:other`, ...), split on the
+ * people doc's boolean `isPhysician` (lib/medical-degree.ts). Filter only, no
+ * ranking change. Off ⇒ no child sub-aggregation, and child URL values
+ * collapse to their parent. Needs `SEARCH_PEOPLE_RESEARCH_TYPE_FACET` on too.
+ * Children stay hidden until a reindex writes `isPhysician` (counts are 0).
+ *
+ * Staging-on / prod-off at merge. Flag-parity: wire
+ * `SEARCH_PEOPLE_RESEARCH_TYPE_NESTED` in `cdk/lib/app-stack.ts`.
+ */
+export function resolveSearchPeopleResearchTypeNested(): boolean {
+  return (
+    resolveSearchPeopleResearchTypeFacet() &&
+    process.env.SEARCH_PEOPLE_RESEARCH_TYPE_NESTED === "on"
+  );
+}

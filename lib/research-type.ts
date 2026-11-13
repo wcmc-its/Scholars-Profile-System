@@ -22,9 +22,83 @@ export const RESEARCH_TYPE_LABELS = {
   clinical: "Clinical research",
 } as const;
 export type ResearchType = keyof typeof RESEARCH_TYPE_LABELS;
-/** Display label for a facet value; unknown values pass through. */
+/**
+ * Nested children of a research-type facet value, split on the people doc's
+ * `isPhysician`. URL values are `<kind>:physician` / `<kind>:other`; a bare
+ * `<kind>` is the parent. Positive labels only.
+ */
+export type ResearchTypeChild = "physician" | "other";
+export const RESEARCH_TYPE_CHILD_LABELS: Record<ResearchType, Record<ResearchTypeChild, string>> = {
+  lab: { physician: "Physician-scientist", other: "Basic scientist" },
+  clinical: { physician: "Physician-scientist", other: "Clinical or population researcher" },
+};
+
+/** Split a facet value into kind and optional child. Null for anything else. */
+export function parseResearchTypeValue(
+  v: string,
+): { kind: ResearchType; child?: ResearchTypeChild } | null {
+  const [kind, child, ...rest] = v.split(":");
+  if (rest.length > 0 || !Object.hasOwn(RESEARCH_TYPE_LABELS, kind)) return null;
+  if (child === undefined) return { kind: kind as ResearchType };
+  if (child !== "physician" && child !== "other") return null;
+  return { kind: kind as ResearchType, child };
+}
+
+/** Display label for a facet value; unknown values pass through. A child reads
+ *  "Laboratory research: Physician-scientist". */
 export function researchTypeLabel(v: string): string {
-  return RESEARCH_TYPE_LABELS[v as ResearchType] ?? v;
+  const p = parseResearchTypeValue(v);
+  if (!p) return v;
+  const parent = RESEARCH_TYPE_LABELS[p.kind];
+  return p.child ? `${parent}: ${RESEARCH_TYPE_CHILD_LABELS[p.kind][p.child]}` : parent;
+}
+
+/** Child values collapse to their parent kind (nested flag off). Deduped,
+ *  order kept; unknown values pass through. */
+export function collapseResearchTypeChildren(values: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    const p = parseResearchTypeValue(v);
+    const next = p ? p.kind : v;
+    if (!out.includes(next)) out.push(next);
+  }
+  return out;
+}
+
+/** Toggle one facet value. Ticking a child drops its parent; ticking a parent
+ *  drops that parent's children. */
+export function toggleResearchTypeValue(current: readonly string[], value: string): string[] {
+  if (current.includes(value)) return current.filter((v) => v !== value);
+  const p = parseResearchTypeValue(value);
+  const kept = current.filter((v) => {
+    const q = parseResearchTypeValue(v);
+    if (!p || !q || q.kind !== p.kind) return true;
+    // Same kind: a child replaces the parent, a parent replaces the children.
+    return p.child ? q.child !== undefined : q.child === undefined;
+  });
+  return [...kept, value];
+}
+
+/** Research type child rows for one parent facet bucket: physician first,
+ *  then other. Empty when the nested flag is off (no child counts) or before
+ *  the reindex (both 0). A zero-count child is shown only while it is ticked. */
+export function researchTypeChildRows(
+  b: { value: string; physician?: number; other?: number },
+  active: readonly string[],
+): { value: string; label: string; count: number; isActive: boolean }[] {
+  const p = parseResearchTypeValue(b.value);
+  if (!p || p.child || b.physician === undefined || b.other === undefined) return [];
+  if (b.physician + b.other === 0) return [];
+  const kind = p.kind;
+  const counts = { physician: b.physician, other: b.other };
+  return (["physician", "other"] as const)
+    .map((child) => ({
+      value: `${kind}:${child}`,
+      label: RESEARCH_TYPE_CHILD_LABELS[kind][child],
+      count: counts[child],
+      isActive: active.includes(`${kind}:${child}`),
+    }))
+    .filter((c) => c.count > 0 || c.isActive);
 }
 
 /** The `analysis_nih` columns this needs (mariadb returns the flags as 'True'/'False'). */

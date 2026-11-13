@@ -434,6 +434,11 @@ export const peopleIndexMapping = {
       // OMIT-on-empty. `keyword` multi-select `terms` filter + agg, behind
       // `SEARCH_PEOPLE_RESEARCH_TYPE_FACET`.
       researchType: { type: "keyword" },
+      // Any education degree is a medical degree (lib/medical-degree.ts),
+      // `hasClinicalProfile` when there are no education rows. Always written.
+      // Splits each `researchType` bucket into physician / non-physician
+      // children behind `SEARCH_PEOPLE_RESEARCH_TYPE_NESTED`.
+      isPhysician: { type: "boolean" },
     },
   },
 };
