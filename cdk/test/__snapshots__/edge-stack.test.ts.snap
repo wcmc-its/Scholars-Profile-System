@@ -2023,6 +2023,45 @@ a{color:var(--slate)}
               "SampledRequestsEnabled": true,
             },
           },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless",
+            "Priority": 10,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "LabelMatchStatement": {
+                      "Key": "awswaf:managed:token:absent",
+                      "Scope": "LABEL",
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-challenge-tokenless",
+              "SampledRequestsEnabled": true,
+            },
+          },
         ],
         "Scope": "CLOUDFRONT",
         "VisibilityConfig": {
@@ -4220,6 +4259,45 @@ a{color:var(--slate)}
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
               "MetricName": "sps-edge-staging-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless",
+            "Priority": 10,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "LabelMatchStatement": {
+                      "Key": "awswaf:managed:token:absent",
+                      "Scope": "LABEL",
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-challenge-tokenless",
               "SampledRequestsEnabled": true,
             },
           },
