@@ -57,7 +57,7 @@ export function ConceptEmptyState({
         ) : null}
       </div>
       {broadCount !== 0 && !omitCta ? (
-        <Link
+        <Link prefetch={false}
           href={broadenHref}
           className="mt-4 inline-flex items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-3 py-1.5 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)] focus-visible:ring-offset-1"
         >
