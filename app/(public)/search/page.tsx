@@ -3283,10 +3283,8 @@ function FacetSidebar({
                 ariaLabel={`${researchTypeLabel(c.value)}, ${c.count.toLocaleString()}${c.isActive ? ", selected" : ""}`}
               />
             )),
-            // ponytail: literal anchor; the section and METHODOLOGY_ANCHORS.researchType ship in
-            // the Matcha docs PR, switch to methodologyHref("researchType") once both are in.
             <li key="about" className="pt-1 text-[12.5px]">
-              <Link href="/about#research-type" className="text-[#2c4f6e] hover:underline">
+              <Link href={methodologyHref("researchType")} className="text-[#2c4f6e] hover:underline">
                 How these are defined
               </Link>
             </li>,
