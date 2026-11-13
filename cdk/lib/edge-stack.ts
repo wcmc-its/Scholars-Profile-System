@@ -1481,14 +1481,11 @@ export class EdgeStack extends Stack {
             },
           },
           // #3368 option 4: Bot Control TARGETED + Challenge on /search*.
-          // On 11-13 the scraper rotated off the Chrome/133 UA (Chrome/137
-          // Windows from residential proxies, plus a headless-Chrome fleet
-          // driving /search by client navigation). None of it self-identifies,
-          // so COMMON never labels it; only token-based checks can tell it
-          // from a person.
+          // Scrapers that don't self-identify never get a COMMON label; only
+          // token-based checks can tell them from a person.
           //
-          // - TGT_TokenAbsent -> Challenge (AWS default: Count). The scraper
-          //   sends ~2 requests per IP, under TGT_VolumetricIpTokenAbsent's
+          // - TGT_TokenAbsent -> Challenge (AWS default: Count). Distributed
+          //   scrapers stay under TGT_VolumetricIpTokenAbsent's
           //   5-per-5-min threshold, so every tokenless /search request has to
           //   be challenged. A real browser solves the silent JS challenge
           //   once and is immune for `challengeConfig` above; an HTTP client
