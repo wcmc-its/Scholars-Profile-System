@@ -2006,6 +2006,15 @@ describe("EdgeStack", () => {
           // The always-on rule is limited to client navigations.
           expect(JSON.stringify(always?.Statement)).toContain('"SearchString":"_rsc="');
           expect(JSON.stringify(always?.Statement)).toContain('"Name":"rsc"');
+          // ...and to page loads that carry a facet walk's worth of parameters.
+          expect(JSON.stringify(always?.Statement)).toContain(
+            '"RegexString":"(&[^&]*){3}"',
+          );
+          const deep = /(&[^&]*){3}/;
+          expect(deep.test("q=cardiology")).toBe(false);
+          expect(deep.test("q=jane+doe&type=people")).toBe(false);
+          expect(deep.test("q=a&type=people&page=2")).toBe(false);
+          expect(deep.test("q=a&type=people&deptDiv=N1&activity=has_grants")).toBe(true);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const surge = rules.find((r) => r.Name === "search-challenge-tokenless-surge") as any;
           expect(surge?.Action).toHaveProperty("Challenge");
