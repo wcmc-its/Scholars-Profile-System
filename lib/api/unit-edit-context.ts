@@ -462,7 +462,7 @@ const DISEASE_ROLLUP_CSV_PATH = path.join(process.cwd(), "docs/cancer-center-per
 export function loadDiseaseCodeOptions(
   csvPath: string = DISEASE_ROLLUP_CSV_PATH,
 ): ReadonlyArray<DiseaseCodeOption> {
-  const rows = parseCsv(readFileSync(csvPath, "utf8"));
+  const rows = parseCsv(readFileSync(/*turbopackIgnore: true*/ csvPath, "utf8"));
   const seen = new Set<string>();
   const options: DiseaseCodeOption[] = [];
   for (const r of rows) {
