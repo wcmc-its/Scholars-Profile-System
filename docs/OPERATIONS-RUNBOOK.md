@@ -4,7 +4,7 @@ Scholars Profile System · Weill Cornell Medicine · scholars.weill.cornell.edu
 
 | | | | |
 |---|---|---|---|
-| **Last updated** | **2026-11-10** | **Version** | 2.2 |
+| **Last updated** | **2026-11-11** | **Version** | 2.3 |
 | **Owner** | Paul Albert, SPS service owner (paa2013@med.cornell.edu) | **Next review** | 2027-02-09 (quarterly) |
 | **Audience** | Anyone responding to an SPS issue: ITS Operations, on-call staff, SPS engineers | **Checked against** | Repo commit `bca752e` (2026-11-09): `cdk/lib/*`, `docs/SLOs.md`, `docs/oncall.md`, `docs/cloudfront-cache-spec.md` |
 
@@ -26,6 +26,8 @@ Scholars Profile System · Weill Cornell Medicine · scholars.weill.cornell.edu
 > **When sources disagree**
 >
 > The linked deep docs win over this runbook, and the CDK code (`cdk/lib/*`) wins over any doc. If you find drift, fix this runbook and update **Last updated** above.
+>
+> This runbook also exists as a Word copy (`SPS-Operations-Runbook.docx`) for ITS Operations, made from this file. **Whenever this file changes, update the Word copy too**, and keep its **Version** and **Last updated** in step.
 
 ## Contents
 
@@ -1407,6 +1409,7 @@ Master index: [DOCUMENTATION-REGISTRY.md](./DOCUMENTATION-REGISTRY.md), organize
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.3 | 2026-11-11 | Added a note that the Word copy must be updated whenever the Markdown changes, and brought the Word copy up to date with 2.1 and 2.2. |
 | 2.2 | 2026-11-10 | Patching: Dependabot security, digest and patch-only PRs merge automatically; new fixable critical or high image findings in prod alert to Teams. |
 | 2.1 | 2026-11-10 | Added Patching (who patches each layer, Inspector image scanning, severity targets, weekly review) and the weekly patch review to Recurring tasks. |
 | 2.0 | 2026-11-09 | Rewritten for responders: triage table, severity levels, contacts up front, 19 step-by-step playbooks, glossary and open-items list. Local development section removed (see README). Checked against repo commit `bca752e`. Corrections:<br>Profiles **are** cached at origin and edge since 2026-10-02; the old guidance said they weren't.<br>Alarm catalog updated from code: added `sps-edge-origin-down`, `-unreachable`, `-origin-cert-expiring`, `-probe-stalled`, `sps-aurora-acu`, `sps-opensearch-breaker`, `sps-etl-duration-margin`, `sps-etl-retry-storm` and the job alarms; the composite now has five inputs.<br>ETL: prod schedules are enabled (removed "disabled until launch"); weekly run is now Sunday 12:00 UTC; staging nightly is 07:45 UTC.<br>Sizing: prod app tasks are 2 vCPU / 4 GB; staging Aurora maximum is 4 ACU; OpenSearch domain names updated.<br>SAML certificate deadline is past; now tracked as a cleanup check.<br>Stack count reconciled (10 classes; 9 deploy in prod, 8 in staging). DR images *are* replicated to us-west-2.<br>Fixed broken repo links and section references; search check now uses the live site instead of localhost. |
