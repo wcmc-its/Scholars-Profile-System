@@ -11,6 +11,8 @@
  * missed week rolls into the next digest instead of being lost. First run (no
  * prior success): the last 7 days.
  *
+ * An empty window sends nothing (the run still records success).
+ *
  * Disabled (exit 0, no mail, no state change) when FEEDBACK_DIGEST_RECIPIENT is
  * empty. A send failure throws, so the run is marked `failed`, the process
  * exits non-zero and the state machine's status alarm pages.
@@ -41,7 +43,7 @@ export function parseRecipients(raw: string | undefined): string[] {
 }
 
 /** Returns what happened; throws on a send failure (after recording it). */
-export async function runFeedbackDigest(deps: FeedbackDigestDeps): Promise<"disabled" | "sent"> {
+export async function runFeedbackDigest(deps: FeedbackDigestDeps): Promise<"disabled" | "empty" | "sent"> {
   const recipients = parseRecipients(deps.env.FEEDBACK_DIGEST_RECIPIENT);
   if (recipients.length === 0) {
     deps.log("[feedback-digest] FEEDBACK_DIGEST_RECIPIENT is empty; digest disabled, nothing sent");
@@ -52,6 +54,13 @@ export async function runFeedbackDigest(deps: FeedbackDigestDeps): Promise<"disa
   const runId = await deps.startRun(to);
   try {
     const rows = await deps.rowsBetween(from, to);
+    // Empty week: no mail, but still a success so the window advances. A
+    // broken job is the status/cadence alarms' job, not an empty email's.
+    if (rows.length === 0) {
+      await deps.finishRun(runId, "success", 0);
+      deps.log("[feedback-digest] no submissions this window; nothing sent");
+      return "empty";
+    }
     const mail = buildFeedbackDigest({
       rows,
       from,
