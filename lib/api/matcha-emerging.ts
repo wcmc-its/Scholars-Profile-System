@@ -41,12 +41,28 @@ export type EmergingWorkRow = {
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Possessive or plural after a word: "Crohn's", "diseases". */
+const SUFFIX = "(?:['\u2019]s|e?s)?";
+
 function memberPattern(term: string): RegExp | null {
   const t = term.trim();
   if (t.length < 3) return null;
   const caseSensitive = t.length <= 5 && t === t.toUpperCase() && /[A-Z]/.test(t);
+  // Concept members are indexing-style ("Crohn disease", "Inflammatory bowel diseases"); prose
+  // says "Crohn's disease", "inflammatory bowel disease", "Crohn-disease". So each word drops a
+  // trailing possessive/plural (not the "s" of "-is", "-us", "-ss") and takes an optional one back, and words join on space or hyphen.
+  const words = t
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((w) => {
+      const stem = caseSensitive ? w : w.replace(/['\u2019]s$/i, "").replace(/(?<=\w{3})(?<![siu])s$/i, "");
+      return escape(stem) + (caseSensitive ? "" : SUFFIX);
+    });
   // \b fails next to non-word characters ("TNF-α", "IL-23"), so bound on "not a letter/digit".
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escape(t)}(?![\\p{L}\\p{N}])`, caseSensitive ? "u" : "iu");
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}])${words.join("[\\s-]+")}(?![\\p{L}\\p{N}])`,
+    caseSensitive ? "u" : "iu",
+  );
 }
 
 /** The concept terms (cluster representatives) a text matches, in the concepts' order. */
