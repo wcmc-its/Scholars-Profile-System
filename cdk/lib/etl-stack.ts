@@ -626,6 +626,26 @@ export class EtlStack extends Stack {
       ],
     });
 
+    // #3348 — etl:mentoring:refresh (MentoringBridgeWeekly) WRITES the bridge
+    // NDJSON it then imports. Its own policy, not the ReciterAI one (pinned
+    // Scan/GetObject-only). PutObject only, scoped to this env's sub-prefix, so
+    // one env can never overwrite the other's products (export-copubs reads the
+    // env's own DB, so they differ). The reads stay on the GetObject grant above
+    // (`mentoring/*`, `citations/*`).
+    new iam.Policy(this, "EtlTaskRoleMentoringBridgeExportPolicy", {
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:PutObject"],
+          resources: [
+            `arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/${env}/*`,
+            `arn:aws:s3:::wcmc-reciterai-artifacts/citations/${env}/*`,
+          ],
+        }),
+      ],
+    });
+
     // Inbound mail — etl:news-clips (clips/) and etl:funding-digest (funding/)
     // list + read the raw emails SES drops into the account-wide inbound-mail
     // bucket (cdk/lib/inbound-mail-stack.ts, prod-app singleton), and the
@@ -1432,6 +1452,9 @@ export class EtlStack extends Stack {
       "etl:clinical-trials",
       "etl:data-sharing",
       "etl:journal-impact-factor",
+      // #3348 — exports the mentoring/cited-by bridge products from reciterdb,
+      // then imports them (etl/mentoring/refresh.ts).
+      "etl:mentoring:refresh",
     ]);
     // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
     // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
@@ -2306,6 +2329,18 @@ export class EtlStack extends Stack {
       {
         id: "DataSharingWeekly",
         npmScript: "etl:data-sharing",
+        external: true,
+        tier: "continue",
+      },
+      // #3348 — mentoring co-pub + cited-by bridge refresh, previously run only
+      // by hand. Exports from reciterdb (in-VPC, same path as DataSharingWeekly)
+      // to env-scoped S3 keys, then runs the five bridge importers, each of which
+      // records its own etl_run row for freshness (lib/etl/freshness-policy.ts).
+      // `continue` — a reciterdb hiccup leaves last week's tables in place and
+      // must never abort the weekly chain.
+      {
+        id: "MentoringBridgeWeekly",
+        npmScript: "etl:mentoring:refresh",
         external: true,
         tier: "continue",
       },

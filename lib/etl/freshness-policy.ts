@@ -302,6 +302,15 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // withEtlRun("DataSharing", main) call). Continue-tier, so freshness is the only
   // detector of a silently-dead schedule.
   DataSharing: { cadence: "weekly" },
+  // #3348 — the five bridge importers run by MentoringBridgeWeekly
+  // (cdk/lib/etl-stack.ts, tier:"continue", etl/mentoring/refresh.ts). Each
+  // writes its own etl_run row; continue-tier, so freshness is the only
+  // detector of a dead schedule or a stalled export.
+  "Mentee-Copubs-Import": { cadence: "weekly" },
+  "AOC-Mentee-Import": { cadence: "weekly" },
+  "Mentee-Copub-List-Import": { cadence: "weekly" },
+  "Learner-Pubs-Import": { cadence: "weekly" },
+  "Publication-Citing-Import": { cadence: "weekly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts InfoedBiosketchWeekly, tier:"continue")
   // that writes source "InfoEd-Biosketch" (etl/infoed-biosketch/index.ts withEtlRun).
   "InfoEd-Biosketch": { cadence: "weekly" },

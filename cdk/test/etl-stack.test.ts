@@ -1632,8 +1632,10 @@ describe("EtlStack", () => {
             );
           });
         });
-        // One write statement per bucket: CurationBackupBucket, GrantsExportBucket.
-        expect(writeStmts).toHaveLength(2);
+        // One write statement per bucket: CurationBackupBucket, GrantsExportBucket,
+        // plus #3348's mentoring-bridge export (SPS's own NDJSON products, which
+        // happen to live in the ReciterAI artifacts bucket).
+        expect(writeStmts).toHaveLength(3);
         const serializedResources = writeStmts.map((s) =>
           JSON.stringify(s.Resource),
         );
@@ -1649,11 +1651,18 @@ describe("EtlStack", () => {
           }
           expect(actions).not.toContain("s3:DeleteObject");
           expect(actions).not.toContain("s3:*");
-          // Resource is never a bare * or a ReciterAI artifact bucket (those
-          // stay read-only).
+          // Resource is never a bare *. The ReciterAI buckets stay read-only
+          // EXCEPT the bridge export: exactly PutObject on this env's
+          // mentoring/ and citations/ sub-prefixes, nothing else in the bucket.
           const serialized = JSON.stringify(stmt.Resource);
-          expect(serialized).not.toMatch(/wcmc-reciterai/);
           expect(serialized).not.toMatch(/^"\*"$/);
+          if (/wcmc-reciterai/.test(serialized)) {
+            expect(actions).toEqual(["s3:PutObject"]);
+            expect(stmt.Resource).toEqual([
+              `arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/prod/*`,
+              `arn:aws:s3:::wcmc-reciterai-artifacts/citations/prod/*`,
+            ]);
+          }
         }
       });
 

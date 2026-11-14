@@ -63,6 +63,7 @@
     "etl:mentoring:import-learner-pubs": "tsx etl/mentoring/import-learner-pubs.ts",
     "etl:mentoring:export-citing": "tsx etl/mentoring/export-citing.ts",
     "etl:mentoring:import-citing": "tsx etl/mentoring/import-citing.ts",
+    "etl:mentoring:refresh": "tsx etl/mentoring/refresh.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
