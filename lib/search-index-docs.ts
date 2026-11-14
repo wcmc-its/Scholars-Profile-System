@@ -905,6 +905,7 @@ export function buildPublicationDoc(
     // queries (e.g. "psychiatric comorbidities") can match the paper itself,
     // not just the scholar. Empty/missing abstracts are stored as "".
     abstract: p.abstract ?? "",
+    hasAbstract: Boolean(p.abstract),
     authorNames,
     wcmAuthors,
     wcmAuthorPositions: Array.from(wcmAuthorPositions),

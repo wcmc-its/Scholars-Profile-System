@@ -528,6 +528,9 @@ export const publicationsIndexMapping = {
       // weight repetition; analyzed with the same `pub_text` analyzer as
       // title/authorNames so stemming and stopwords are consistent.
       abstract: { type: "text", analyzer: "pub_text" },
+      // Returned in hits instead of `abstract` so the result row knows whether to offer the
+      // lazy abstract toggle without shipping the full text back on every hit.
+      hasAbstract: { type: "boolean" },
       authorNames: { type: "text", analyzer: "pub_text" },
       // WCM author position roles for the Publications-tab facet
       // (issue #8 follow-up). Keyword array of {first, senior, middle};
@@ -538,8 +541,7 @@ export const publicationsIndexMapping = {
       // Issue #88 — flat keyword array of WCM author CWIDs on each pub.
       // Denormalized from `wcmAuthors[].cwid` so the Author facet can run
       // a cheap top-level terms aggregation with exclude-self filter
-      // semantics, identical to the wcmAuthorPositions pattern. The nested
-      // `wcmAuthors` field stays for chip rendering on result rows.
+      // semantics, identical to the wcmAuthorPositions pattern.
       wcmAuthorCwids: { type: "keyword" },
       // Issue #837 — keyword array of the department key(s) of this pub's
       // displayable WCM authors (FK `deptCode`, or a `name:<deptName>`
@@ -555,21 +557,12 @@ export const publicationsIndexMapping = {
       // `Scholar.primaryOrgCode`s (WCMC, HSS, MSKCC, ...), same union /
       // omit-on-empty shape as `wcmAuthorDepartments`; `SEARCH_PUB_INSTITUTION_FACET`.
       wcmAuthorInstitutions: { type: "keyword" },
-      // Pre-rendered author chips for the WCM-coauthor stack on results.
-      wcmAuthors: {
-        type: "nested",
-        properties: {
-          cwid: { type: "keyword" },
-          slug: { type: "keyword" },
-          preferredName: { type: "text" },
-          position: { type: "integer" },
-          // Per-person authorship role: sole | first | last | middle. `wcmAuthorPositions` above is
-          // a paper-level UNION and cannot attribute a role to a person; this can. Adding it needs
-          // a full publications reindex — it is a new field on an existing mapping, so documents
-          // written before the reindex simply lack it, and every reader treats absent as unknown.
-          role: { type: "keyword" },
-        },
-      },
+      // Per-author {cwid, slug, preferredName, position, role}. Stored in `_source` only: no
+      // query or aggregation reads it (facets use the flat `wcmAuthor*` keyword arrays above,
+      // and result-row chips are re-fetched from the DB). `nested` made every author a hidden
+      // Lucene doc for nothing. The key-paper path reads `wcmAuthors[].role` from `_source`;
+      // docs written before the role field existed simply lack it.
+      wcmAuthors: { type: "object", enabled: false },
     },
   },
 };
