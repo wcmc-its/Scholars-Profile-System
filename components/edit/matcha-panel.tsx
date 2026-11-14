@@ -123,6 +123,9 @@ import {
   type EvidenceProvenance,
   type MatchaCandidate,
   type MatchaConcept,
+  type MatchaEmergingItem,
+  type MatchaEmergingOnAsk,
+  type MatchaEmergingWork,
   type MatchaFitTier,
   type MatchaResponse,
   type MatchaPreference,
@@ -772,6 +775,8 @@ export function MatchaPanel({
   // chips, and the terms the officer has clicked to add back. `included` is threaded into the NEXT
   // `runSearch` so the server force-pins them; both reset on a fresh paste (not on an add re-run).
   const [culled, setCulled] = useState<CulledConcept[]>([]);
+  /** Emerging work matched to the ask (display only; recomputed on every response). */
+  const [emerging, setEmerging] = useState<MatchaEmergingWork | undefined>(undefined);
   const [included, setIncluded] = useState<string[]>([]);
   // The extractor's essence title (org + focus). Stable across slider/preference edits — only
   // a new search replaces it — so the header does not churn as the officer tunes the ranking.
@@ -1135,6 +1140,7 @@ export function MatchaPanel({
       setMatchedText(text);
       setConcepts([]);
       setCulled([]);
+      setEmerging(undefined);
       setIncluded([]);
       setTitleSummary(undefined);
       setRequester(undefined);
@@ -1182,6 +1188,7 @@ export function MatchaPanel({
           clearFilters();
           setCandidates([]); // the people list stays empty in grant mode
           setGrantCandidates(data.candidates ?? []);
+          setEmerging(undefined); // people-path only
           setConcepts(data.concepts ?? []);
           setCulled(data.culled ?? []);
           if (!opts.include) setIncluded([]);
@@ -1222,6 +1229,7 @@ export function MatchaPanel({
         void loadHistory(); // the row the server just retained
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
+        setEmerging(data.emergingWork);
         setCulled(data.culled ?? []); // #1780 Phase 2 — the latest tail (excludes anything now searched)
         // Reset the officer's include picks ONLY on a fresh search. An add re-run passes `include`,
         // and the click handler already set `included` to the new set — don't clobber it.
@@ -2492,6 +2500,7 @@ export function MatchaPanel({
         onSelect={() => setShortlist((s) => toggled(s, c.cwid))}
         {...(badge ? { eligBadge: badge } : {})}
         {...(briefsOn ? { brief: briefPropsFor(c.cwid) } : {})}
+        emergingItems={emerging?.byCwid[c.cwid]}
       />
     ) : (
       <CompactRow
@@ -3983,6 +3992,9 @@ export function MatchaPanel({
                             {primaryList}
                             {weakFloorSection}
                             {eligFloorSection}
+                            {emerging && emerging.onAsk.length > 0 ? (
+                              <EmergingOnAsk items={emerging.onAsk} />
+                            ) : null}
                           </>
                         );
                       }
@@ -5168,11 +5180,14 @@ function ResearcherRow({
   onSelect,
   eligBadge,
   brief,
+  emergingItems,
 }: {
   candidate: MatchaCandidate;
   rank: number;
   concepts: MatchaConcept[];
   topScore: number;
+  /** This researcher's conference abstracts and preprints that match the ask. Absent ⇒ none. */
+  emergingItems?: MatchaEmergingItem[];
   /** Matcha Phase 3 (MATCHA_BRIEF) — the brief panel + note. Absent ⇒ master's card, untouched. */
   brief?: BriefRowProps;
   /** #1696 — the current ranking run. See `claimedPmids` below: this row can OUTLIVE a run. */
@@ -5558,6 +5573,17 @@ function ResearcherRow({
             </ul>
           </details>
         ) : null}
+        {emergingItems && emergingItems.length > 0 ? (
+          <details className="mt-1.5" data-slot="matcha-emerging">
+            <summary className={`flex w-fit items-center gap-1 text-muted-foreground cursor-pointer text-xs select-none ${SUMMARY_NO_MARKER}`}>
+              <Caret />
+              Emerging work — {emergingItems.length} abstract
+              {emergingItems.length === 1 ? "" : "s"} or preprint
+              {emergingItems.length === 1 ? "" : "s"}
+            </summary>
+            <EmergingList items={emergingItems} />
+          </details>
+        ) : null}
         {/* Teal, per the mockup — CTL-IP gets its own hue so it does not read as another
             concept chip. Both hexes already ship in globals.css on `.entity-badge--institute`. */}
         {candidate.technologyCount > 0 ? (
@@ -5594,6 +5620,74 @@ function ResearcherRow({
         {brief ? <BriefNote name={name} brief={brief} /> : null}
       </div>
     </div>
+  );
+}
+
+// ── Emerging work (display only; `lib/api/matcha-emerging.ts`) ─────────────────
+
+const EMERGING_TYPE_LABEL: Record<string, string> = {
+  "conference-abstract": "Conference abstract",
+  "conference-paper": "Conference paper",
+  preprint: "Preprint",
+};
+
+function EmergingList({ items }: { items: readonly MatchaEmergingItem[] }) {
+  return (
+    <ul className="mt-1 space-y-1">
+      {items.map((w) => (
+        <li key={w.id} className="text-xs">
+          <a
+            href={w.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-foreground/90 underline-offset-4 hover:underline"
+          >
+            <PubTitle value={w.title} />
+          </a>{" "}
+          <span className="text-muted-foreground">
+            {[EMERGING_TYPE_LABEL[w.type] ?? w.type, w.venue, w.date.slice(0, 7)]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Matching abstracts and preprints whose authors are not in the ranked results: a junior bench
+ *  researcher with new on-topic work stays visible even when publications rank them low. */
+function EmergingOnAsk({ items }: { items: readonly MatchaEmergingOnAsk[] }) {
+  return (
+    <section data-slot="matcha-emerging-on-ask" className="border-border mt-6 border-t pt-4">
+      <h3 className="text-sm font-semibold">Emerging on this ask</h3>
+      <p className="text-muted-foreground mt-0.5 text-xs">
+        Recent WCM conference abstracts and preprints that match this ask, by people not in the
+        results above. Shown for reference; they do not affect the ranking.
+      </p>
+      <ul className="mt-2 space-y-2">
+        {items.map((w) => (
+          <li key={w.id} className="text-xs">
+            <EmergingList items={[w]} />
+            <div className="text-muted-foreground mt-0.5">
+              {w.authors.map((a, i) => (
+                <span key={a.cwid}>
+                  {i > 0 ? ", " : ""}
+                  <a
+                    href={profilePath(encodeURIComponent(a.profileSlug))}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline-offset-4 hover:underline"
+                  >
+                    {a.name}
+                  </a>
+                </span>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -1005,6 +1005,37 @@ export type MatchaResponse = {
    *  now: that run's ISO timestamp. The console labels the results with it and lets the
    *  officer force a fresh run. Absent ⇒ computed for this request. */
   asOf?: string;
+  /** Emerging work (WCM conference abstracts and preprints) matched to this ask. Computed at
+   *  response time, display only, never a rank input (`lib/api/matcha-emerging.ts`). Absent when
+   *  nothing matched or the read failed. */
+  emergingWork?: MatchaEmergingWork;
+};
+
+/** One conference abstract or preprint from `fundable_work`, as Matcha shows it. */
+export type MatchaEmergingItem = {
+  /** OpenAlex work key. */
+  id: string;
+  title: string;
+  /** OpenAlex type: "conference-abstract" | "conference-paper" | "preprint". */
+  type: string;
+  venue: string | null;
+  /** YYYY-MM-DD. */
+  date: string;
+  /** DOI link when there is one, else the OpenAlex page. */
+  url: string;
+  /** The ask's concept terms it matched. */
+  concepts: string[];
+};
+
+/** An item none of whose authors is in the ranked results. */
+export type MatchaEmergingOnAsk = MatchaEmergingItem & {
+  authors: { cwid: string; name: string; profileSlug: string }[];
+};
+
+export type MatchaEmergingWork = {
+  /** Ranked researcher → their matching items (at most 3). No key ⇒ none. */
+  byCwid: Record<string, MatchaEmergingItem[]>;
+  onAsk: MatchaEmergingOnAsk[];
 };
 
 /**
