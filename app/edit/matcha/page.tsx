@@ -29,7 +29,7 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Matcha — Scholars Console",
+  title: "Matcha: Open search — Scholars Console",
   robots: { index: false, follow: false },
 };
 
