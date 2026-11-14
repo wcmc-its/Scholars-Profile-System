@@ -65,11 +65,27 @@ export function collapseResearchTypeChildren(values: readonly string[]): string[
   return out;
 }
 
-/** Toggle one facet value. Ticking a child drops its parent; ticking a parent
- *  drops that parent's children. */
-export function toggleResearchTypeValue(current: readonly string[], value: string): string[] {
-  if (current.includes(value)) return current.filter((v) => v !== value);
+/** Whether a facet row reads as ticked. A ticked parent ticks its children too:
+ *  "Laboratory research" is every laboratory researcher, both kinds. */
+export function isResearchTypeChecked(active: readonly string[], value: string): boolean {
+  if (active.includes(value)) return true;
   const p = parseResearchTypeValue(value);
+  return !!p?.child && active.includes(p.kind);
+}
+
+/** Toggle one facet value, keeping the URL in its shortest form:
+ *  - unticking a child of a ticked parent leaves the sibling child;
+ *  - ticking the second child of a parent is the parent;
+ *  - ticking a child drops its parent, ticking a parent drops its children. */
+export function toggleResearchTypeValue(current: readonly string[], value: string): string[] {
+  const p = parseResearchTypeValue(value);
+  if (p?.child) {
+    const sibling = `${p.kind}:${p.child === "physician" ? "other" : "physician"}`;
+    if (current.includes(p.kind)) return [...current.filter((v) => v !== p.kind), sibling];
+    if (!current.includes(value) && current.includes(sibling))
+      return [...current.filter((v) => v !== sibling), p.kind];
+  }
+  if (current.includes(value)) return current.filter((v) => v !== value);
   const kept = current.filter((v) => {
     const q = parseResearchTypeValue(v);
     if (!p || !q || q.kind !== p.kind) return true;
@@ -96,7 +112,7 @@ export function researchTypeChildRows(
       value: `${kind}:${child}`,
       label: RESEARCH_TYPE_CHILD_LABELS[kind][child],
       count: counts[child],
-      isActive: active.includes(`${kind}:${child}`),
+      isActive: isResearchTypeChecked(active, `${kind}:${child}`),
     }))
     .filter((c) => c.count > 0 || c.isActive);
 }

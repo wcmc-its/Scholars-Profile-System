@@ -105,20 +105,22 @@ describe("nested research type values", () => {
     expect(collapseResearchTypeChildren(["bogus"])).toEqual(["bogus"]);
   });
 
-  it("toggle: a child replaces its parent, a parent replaces its children, other kinds kept", () => {
-    expect(toggleResearchTypeValue(["lab", "clinical"], "lab:physician")).toEqual([
-      "clinical",
-      "lab:physician",
-    ]);
+  it("toggle: a parent replaces its children, other kinds kept", () => {
     expect(toggleResearchTypeValue(["lab:physician", "lab:other", "clinical:other"], "lab")).toEqual([
       "clinical:other",
       "lab",
     ]);
-    // Siblings coexist.
-    expect(toggleResearchTypeValue(["lab:physician"], "lab:other")).toEqual([
-      "lab:physician",
+    // Ticking the second child is the parent.
+    expect(toggleResearchTypeValue(["lab:physician", "clinical"], "lab:other")).toEqual([
+      "clinical",
+      "lab",
+    ]);
+    // Unticking a child of a ticked parent leaves its sibling.
+    expect(toggleResearchTypeValue(["lab", "clinical"], "lab:physician")).toEqual([
+      "clinical",
       "lab:other",
     ]);
+    expect(toggleResearchTypeValue(["clinical"], "clinical:other")).toEqual(["clinical:physician"]);
     // Unticking removes only that value.
     expect(toggleResearchTypeValue(["lab:physician", "clinical"], "lab:physician")).toEqual([
       "clinical",
@@ -144,6 +146,10 @@ describe("nested research type values", () => {
     expect(
       researchTypeChildRows({ value: "clinical", physician: 0, other: 2 }, ["clinical:physician"]),
     ).toHaveLength(2);
+    // A ticked parent ticks both children.
+    expect(
+      researchTypeChildRows({ value: "lab", physician: 3, other: 5 }, ["lab"]).map((r) => r.isActive),
+    ).toEqual([true, true]);
     expect(researchTypeChildRows({ value: "lab" }, [])).toEqual([]);
     expect(researchTypeChildRows({ value: "lab", physician: 0, other: 0 }, [])).toEqual([]);
     expect(researchTypeChildRows({ value: "bogus", physician: 1, other: 1 }, [])).toEqual([]);
