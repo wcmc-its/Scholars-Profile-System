@@ -37,6 +37,24 @@ describe("matchedConceptTerms", () => {
     expect(matchedConceptTerms("Mucosal healing in CROHN'S DISEASE", concepts)).toEqual(["Crohn disease"]);
     expect(matchedConceptTerms("A model of inflammatory bowel disease.", concepts)).toEqual(["IBD"]);
   });
+  it("indexing-style members match prose: possessives, plurals, hyphens", () => {
+    const mesh = [
+      { term: "Crohn disease", kind: "concept" as const, members: ["Crohn disease", "Inflammatory bowel diseases"] },
+    ];
+    for (const text of [
+      "patients with Crohn's disease",
+      "Crohn\u2019s disease activity",
+      "a cohort with inflammatory bowel disease",
+      "inflammatory-bowel diseases",
+    ])
+      expect(matchedConceptTerms(text, mesh)).toEqual(["Crohn disease"]);
+    expect(matchedConceptTerms("Crohnology of disease", mesh)).toEqual([]);
+    // "-is" words keep their s: "Psoriatic arthritis" must not become "arthriti".
+    const pa = [{ term: "Psoriatic arthritis", kind: "concept" as const, members: ["Psoriatic arthritis"] }];
+    expect(matchedConceptTerms("early psoriatic arthritis cohort", pa)).toEqual(["Psoriatic arthritis"]);
+    expect(matchedConceptTerms("psoriatic arthriti", pa)).toEqual([]);
+  });
+
   it("short all-caps members match case-sensitively and on word edges", () => {
     expect(matchedConceptTerms("patients with IBD-associated colitis", concepts)).toEqual(["IBD"]);
     expect(matchedConceptTerms("ibd in lower case", concepts)).toEqual([]);
