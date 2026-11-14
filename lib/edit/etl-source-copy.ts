@@ -275,6 +275,32 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Adds a scholar's shared research datasets to their profile's Datasets section.",
     origin: "external", // sibling ReCiterDB
   },
+  // #3348 — the five ReCiterDB mentoring/cited-by bridge imports (weekly).
+  "Mentee-Copubs-Import": {
+    label: "Mentee Co-publications",
+    description: "Counts the papers each mentor co-authored with their mentees, for the profile mentoring section.",
+    origin: "external",
+  },
+  "AOC-Mentee-Import": {
+    label: "MD Scholarly-Project Mentees",
+    description: "Loads Areas of Concentration mentor and student pairs from ReCiterDB.",
+    origin: "external",
+  },
+  "Mentee-Copub-List-Import": {
+    label: "Mentee Co-publication Lists",
+    description: "Lists the papers behind each mentor and mentee co-publication count, with their authors.",
+    origin: "external",
+  },
+  "Learner-Pubs-Import": {
+    label: "MD Learner Publications",
+    description: "Loads all publications by Areas of Concentration students, for the mentored-publications report.",
+    origin: "external",
+  },
+  "Publication-Citing-Import": {
+    label: "Cited-by Lists",
+    description: "Loads which papers cite each publication, for the publication detail view.",
+    origin: "external",
+  },
   Technology: {
     label: "Available Technologies",
     description: "Adds a scholar's licensable inventions from the WCM technology portfolio.",
