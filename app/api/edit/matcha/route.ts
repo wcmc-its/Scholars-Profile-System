@@ -95,6 +95,7 @@ import type {
   CulledConcept,
   MatchaCandidate,
   MatchaConcept,
+  MatchaEmergingWork,
 } from "@/lib/api/matcha-contract";
 import {
   askTitleFrom,
@@ -109,6 +110,11 @@ import {
   rankResearchersForDescription,
   type MatchaRankedScholar,
 } from "@/lib/api/matcha";
+import {
+  buildEmergingWork,
+  EMERGING_WINDOW_DAYS,
+  type EmergingWorkRow,
+} from "@/lib/api/matcha-emerging";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import {
   rankGrantsForDescriptionSpine,
@@ -533,9 +539,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(`${PATH}#retain`, err);
     }
 
+    // Emerging work: computed per response (not cached or stored with the run), so a replayed
+    // run shows this week's abstracts. Display only. Fail-soft: a read blip costs the panel's
+    // emerging lines, never the ranking.
+    const emergingWork = await loadEmergingWork(concepts, candidates);
+
     return editOk({
       concepts,
       candidates,
+      emergingWork,
       preferences,
       ask,
       titleSummary,
@@ -944,5 +956,35 @@ async function patchRequester(
   } catch (err) {
     logEditFailure(`${PATH}#requester`, err);
     return editError(500, "submissions_unavailable");
+  }
+}
+
+/** Last-two-years `fundable_work` rows matched to the ask (`buildEmergingWork`).
+ *  ponytail: reads the whole window (about 1,600 rows) and matches in memory; move the match to
+ *  SQL full-text if the table grows past a few tens of thousands. */
+async function loadEmergingWork(
+  concepts: MatchaConcept[],
+  candidates: MatchaCandidate[],
+): Promise<MatchaEmergingWork | undefined> {
+  if (concepts.length === 0) return undefined;
+  try {
+    const works: EmergingWorkRow[] = await db.read.fundableWork.findMany({
+      where: { publicationDate: { gte: new Date(Date.now() - EMERGING_WINDOW_DAYS * 86_400_000) } },
+      select: {
+        id: true,
+        type: true,
+        doi: true,
+        title: true,
+        abstract: true,
+        venue: true,
+        publicationDate: true,
+        score: true,
+        authors: { select: { cwid: true, scholar: { select: { preferredName: true, slug: true } } } },
+      },
+    });
+    return buildEmergingWork(works, concepts, new Set(candidates.map((c) => c.cwid)));
+  } catch (err) {
+    logEditFailure(`${PATH}#emerging`, err);
+    return undefined;
   }
 }

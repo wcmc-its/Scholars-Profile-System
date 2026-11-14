@@ -89,6 +89,7 @@ vi.mock("@/lib/db", () => {
         publicationTopic: { findMany: mockPublicationTopicFindMany },
         scholar: { findMany: mockScholarFindMany },
         scholarTechnology: { groupBy: mockTechnologyGroupBy },
+        fundableWork: { findMany: async () => [] },
         publication: { findMany: mockPublicationFindMany },
         topic: { findMany: mockTopicFindMany },
         sponsorMatchSubmission: {
