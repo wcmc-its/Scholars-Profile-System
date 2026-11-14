@@ -211,10 +211,10 @@ describe("2A writes", () => {
     expect(h.transaction).not.toHaveBeenCalled();
   });
 
-  it("a COE liaison (program leadership group, not a program lead) is refused (403)", async () => {
+  it("a COE liaison of a program PATCHes a note (200)", async () => {
     held = [{ ...PROGRAM_LEADER, roleKey: "coe_liaison" }];
-    expect((await PATCH(patch({ reviewerNote: "x" }), awardParams())).status).toBe(403);
-    expect(h.transaction).not.toHaveBeenCalled();
+    expect((await PATCH(patch({ reviewerNote: "x" }), awardParams())).status).toBe(200);
+    expect(h.txAwardUpdate).toHaveBeenCalled();
   });
 
   it("a program leader of ANOTHER center is refused (403)", async () => {
