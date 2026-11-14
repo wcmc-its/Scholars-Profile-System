@@ -1295,6 +1295,12 @@ export class EdgeStack extends Stack {
         },
       };
       const notSearchPath = { notStatement: { statement: searchPathMatch } };
+      const tokenAbsent = {
+        labelMatchStatement: {
+          scope: "LABEL",
+          key: "awswaf:managed:token:absent",
+        },
+      };
       // #3368 option 4: the Bot Control rules that every TARGETED instance
       // also carries at the common level. Kept in Count on /search* so the
       // targeted instance changes nothing about how self-identifying bots are
@@ -1719,11 +1725,20 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // Tokenless /search, split by how the request arrives.
+          //
           // Staging 11-13: the TGT_TokenAbsent -> Challenge override did not
           // fire (tokenless Chrome-UA /search got 200, labelled
-          // TGT_TokenAbsent_RC_COUNT). Challenge on the token label instead,
-          // the documented "block missing tokens" pattern. Runs after the
-          // Bot Control instances, which apply awswaf:managed:token:absent.
+          // TGT_TokenAbsent_RC_COUNT), so these rules challenge on the token
+          // label instead, the documented "block missing tokens" pattern.
+          // They run after the Bot Control instances, which apply
+          // awswaf:managed:token:absent.
+          //
+          // 1. Client navigations (`_rsc` query or `RSC` header): always
+          //    challenged. A browser can only make one from a page it has
+          //    already loaded, and every page carries the challenge SDK
+          //    (SdkInjectingWebAcl), so a real visitor holds a token by then.
+          //    Prod 11-13..14: 88% of tokenless /search (65k of 74k a day).
           {
             name: "search-challenge-tokenless",
             priority: managedGroups.length + 7,
@@ -1732,10 +1747,27 @@ export class EdgeStack extends Stack {
               andStatement: {
                 statements: [
                   searchPathMatch,
+                  tokenAbsent,
                   {
-                    labelMatchStatement: {
-                      scope: "LABEL",
-                      key: "awswaf:managed:token:absent",
+                    orStatement: {
+                      statements: [
+                        {
+                          byteMatchStatement: {
+                            searchString: "_rsc=",
+                            fieldToMatch: { queryString: {} },
+                            positionalConstraint: "CONTAINS",
+                            textTransformations: [{ priority: 0, type: "NONE" }],
+                          },
+                        },
+                        {
+                          sizeConstraintStatement: {
+                            fieldToMatch: { singleHeader: { Name: "rsc" } },
+                            comparisonOperator: "GT",
+                            size: 0,
+                            textTransformations: [{ priority: 0, type: "NONE" }],
+                          },
+                        },
+                      ],
                     },
                   },
                 ],
@@ -1744,6 +1776,37 @@ export class EdgeStack extends Stack {
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
               metricName: `sps-edge-${env}-search-challenge-tokenless`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // 2. Full page loads: a first-time visitor arriving on a /search
+          //    link (Google, an old VIVO link, a bookmark) has had no chance
+          //    to get a token, so these pass unchallenged until tokenless
+          //    /search page loads, counted across ALL clients, exceed the
+          //    limit. Counting in aggregate is the point: the 11-12 scraper
+          //    sent ~2 requests per IP, so no per-IP limit sees it. Past the
+          //    limit this is the blanket challenge again.
+          //    Limit: prod 11-13..14 saw median 29, p99 129, max 240 per
+          //    5 min, scraper baseline included. 300 is ~1 OpenSearch query a
+          //    second; the 11-12 outage ran at several times that.
+          // ponytail: one fixed limit; revisit if the baseline drifts up.
+          {
+            name: "search-challenge-tokenless-surge",
+            priority: managedGroups.length + 8,
+            action: { challenge: {} },
+            statement: {
+              rateBasedStatement: {
+                limit: 300,
+                evaluationWindowSec: 300,
+                aggregateKeyType: "CONSTANT",
+                scopeDownStatement: {
+                  andStatement: { statements: [searchPathMatch, tokenAbsent] },
+                },
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-challenge-tokenless-surge`,
               sampledRequestsEnabled: true,
             },
           },
@@ -1762,8 +1825,7 @@ export class EdgeStack extends Stack {
       // into every 200 text/html response, so a real browser picks up the
       // aws-waf-token in the background on its first page (home, a profile)
       // and keeps it refreshed. By the time it reaches /search it holds a
-      // token, and search-challenge-tokenless only ever fires for clients
-      // that run no JS or land cold on /search. Requires the TARGETED Bot
+      // token, so the search-challenge-tokenless rules never touch it. Requires the TARGETED Bot
       // Control instance above; AWS rejects an update that drops TARGETED
       // while this is set. The app CSP must allow https://*.awswaf.com
       // (lib/security-headers.ts) or the inserted script is blocked.

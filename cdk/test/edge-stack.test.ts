@@ -1987,6 +1987,24 @@ describe("EdgeStack", () => {
           expect(new Set(priorities).size).toBe(priorities.length);
         });
 
+        it("lets tokenless /search page loads through until they surge in aggregate", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const always = rules.find((r) => r.Name === "search-challenge-tokenless") as any;
+          // The always-on rule is limited to client navigations.
+          expect(JSON.stringify(always?.Statement)).toContain('"SearchString":"_rsc="');
+          expect(JSON.stringify(always?.Statement)).toContain('"Name":"rsc"');
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const surge = rules.find((r) => r.Name === "search-challenge-tokenless-surge") as any;
+          expect(surge?.Action).toHaveProperty("Challenge");
+          const rate = surge?.Statement.RateBasedStatement;
+          expect(rate?.AggregateKeyType).toBe("CONSTANT");
+          expect(rate?.Limit).toBe(300);
+          expect(rate?.ScopeDownStatement.AndStatement.Statements).toContainEqual({
+            LabelMatchStatement: { Scope: "LABEL", Key: "awswaf:managed:token:absent" },
+          });
+          expect(Number(surge?.Priority)).toBeGreaterThan(Number(always?.Priority));
+        });
+
         it("challenges /search requests carrying the token:absent label, after Bot Control", () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const rule = rules.find((r) => r.Name === "search-challenge-tokenless") as any;

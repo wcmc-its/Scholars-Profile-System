@@ -2058,12 +2058,96 @@ a{color:var(--slate)}
                       "Scope": "LABEL",
                     },
                   },
+                  {
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "ByteMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "PositionalConstraint": "CONTAINS",
+                            "SearchString": "_rsc=",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "SizeConstraintStatement": {
+                            "ComparisonOperator": "GT",
+                            "FieldToMatch": {
+                              "SingleHeader": {
+                                "Name": "rsc",
+                              },
+                            },
+                            "Size": 0,
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
                 ],
               },
             },
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
               "MetricName": "sps-edge-prod-search-challenge-tokenless",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless-surge",
+            "Priority": 11,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "CONSTANT",
+                "EvaluationWindowSec": 300,
+                "Limit": 300,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "LabelMatchStatement": {
+                          "Key": "awswaf:managed:token:absent",
+                          "Scope": "LABEL",
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-challenge-tokenless-surge",
               "SampledRequestsEnabled": true,
             },
           },
@@ -4302,12 +4386,96 @@ a{color:var(--slate)}
                       "Scope": "LABEL",
                     },
                   },
+                  {
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "ByteMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "PositionalConstraint": "CONTAINS",
+                            "SearchString": "_rsc=",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "SizeConstraintStatement": {
+                            "ComparisonOperator": "GT",
+                            "FieldToMatch": {
+                              "SingleHeader": {
+                                "Name": "rsc",
+                              },
+                            },
+                            "Size": 0,
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
                 ],
               },
             },
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
               "MetricName": "sps-edge-staging-search-challenge-tokenless",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless-surge",
+            "Priority": 11,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "CONSTANT",
+                "EvaluationWindowSec": 300,
+                "Limit": 300,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "LabelMatchStatement": {
+                          "Key": "awswaf:managed:token:absent",
+                          "Scope": "LABEL",
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-challenge-tokenless-surge",
               "SampledRequestsEnabled": true,
             },
           },
