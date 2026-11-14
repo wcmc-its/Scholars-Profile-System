@@ -26,7 +26,10 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockGetEditSession }));
 vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: h.mockCanViewUsage }));
-vi.mock("@/lib/api/usage-summary", () => ({ loadUsageSummary: h.mockLoadUsage }));
+vi.mock("@/lib/api/usage-summary", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/usage-summary")>()),
+  loadUsageSummary: h.mockLoadUsage,
+}));
 vi.mock("@/lib/api/service-health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
   loadServiceHealth: h.mockLoadHealth,
@@ -62,7 +65,13 @@ import {
   pctLabel,
   shortDay,
 } from "@/app/edit/usage/usage-format";
-import { PageviewsChart, UsageRangePicker } from "@/app/edit/usage/usage-widgets";
+import {
+  HourlyTrafficChart,
+  PageviewsChart,
+  UsageRangePicker,
+} from "@/app/edit/usage/usage-widgets";
+import { EMPTY_HOURLY } from "@/lib/api/usage-hourly";
+import { shapeHourly } from "@/lib/api/usage-summary";
 
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 
@@ -95,6 +104,7 @@ const SUMMARY = {
     { label: "desktop", hits: 990 },
     { label: "mobile", hits: 10 },
   ],
+  hourly: EMPTY_HOURLY,
 };
 
 // The raw CloudWatch reads (ServiceHealthData); the page windows them to the
@@ -442,6 +452,97 @@ describe("PageviewsChart gaps", () => {
     // 7 window days; the fixture has rows for Aug 26-29 only.
     expect(slots).toHaveLength(7);
     expect(slots.filter((s) => s.getAttribute("data-gap") === "true")).toHaveLength(3);
+  });
+});
+
+describe("Traffic by hour", () => {
+  // Two rolled UTC days. Nov 17 15Z = 10 AM Eastern has an outage (errors).
+  const ROWS = [
+    { dt: "2026-11-16", slot: "15|human", hits: "120" },
+    { dt: "2026-11-16", slot: "15|bot", hits: "40" },
+    { dt: "2026-11-17", slot: "15|human", hits: "10" },
+    { dt: "2026-11-17", slot: "15|error", hits: "300" },
+    { dt: "2026-11-17", slot: "16|bot", hits: "7" },
+  ];
+  const traffic = shapeHourly(ROWS);
+  const svgOf = (el: HTMLElement) => el.querySelector("svg[role='img']") as SVGSVGElement;
+  /** Click the bar at index `i` of `n` (jsdom has no layout, so stub the box). */
+  const clickBar = (svg: SVGSVGElement, i: number, n: number) => {
+    svg.getBoundingClientRect = () => ({ left: 0, width: n * 10 }) as DOMRect;
+    fireEvent.click(svg, { clientX: i * 10 + 5 });
+  };
+
+  it("shows an empty state on the page before hourly data exists", async () => {
+    const root = await renderPage();
+    expect(root.getByTestId("usage-hourly-empty").textContent).toContain(
+      "No hourly data in this range yet",
+    );
+    expect(root.queryByTestId("usage-hourly-chart")).toBeNull();
+  });
+
+  it("renders the chart on the page and says when hourly data starts", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-10-18", hourly: traffic });
+    const root = await renderPage();
+    const chart = root.getByTestId("usage-hourly-chart");
+    expect(root.queryByTestId("usage-hourly-empty")).toBeNull();
+    expect(chart.textContent).toContain("Hourly data starts Nov 16.");
+    // 48 hourly slots; three stacked series present.
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(48);
+    expect(svgOf(chart).querySelectorAll("rect[data-series='error']")).toHaveLength(1);
+  });
+
+  it("shows the hour's counts in Eastern time on hover/tap", () => {
+    const { getByTestId } = render(<HourlyTrafficChart traffic={traffic} since="2026-11-16" />);
+    const chart = getByTestId("usage-hourly-chart");
+    // Index 39 = Nov 17 15Z = Nov 17 10 AM EST.
+    clickBar(svgOf(chart), 39, 48);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Human 10 · Bot 0 · Error 300",
+    );
+    expect(chart.textContent).not.toContain("Hourly data starts");
+  });
+
+  it("toggles a series from the legend", () => {
+    const { getByTestId } = render(<HourlyTrafficChart traffic={traffic} since="2026-11-16" />);
+    const chart = getByTestId("usage-hourly-chart");
+    const legend = getByTestId("usage-hourly-legend-error");
+    expect(legend.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(legend);
+    expect(legend.getAttribute("aria-pressed")).toBe("false");
+    expect(svgOf(chart).querySelectorAll("rect[data-series='error']")).toHaveLength(0);
+    expect(svgOf(chart).querySelectorAll("rect[data-series='human']")).toHaveLength(2);
+    clickBar(svgOf(chart), 39, 48);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Human 10 · Bot 0",
+    );
+  });
+
+  it("folds the range into 24 hours of the day, averaged per day", () => {
+    const { getByTestId, getByRole } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    fireEvent.click(getByRole("button", { name: "By hour of day" }));
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(24);
+    expect(chart.textContent).toContain("Average per day over 2 days.");
+    clickBar(svgOf(chart), 10, 24);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "10 AM ET, average per day: Human 65 · Bot 20 · Error 150",
+    );
+  });
+
+  it("caps the timeline to the most recent 30 days and says so", () => {
+    const long = shapeHourly(
+      Array.from({ length: 40 }, (_, i) => ({
+        dt: new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10),
+        slot: "12|human",
+        hits: "1",
+      })),
+    );
+    const { getByTestId } = render(<HourlyTrafficChart traffic={long} since="2026-10-01" />);
+    const chart = getByTestId("usage-hourly-chart");
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(720);
+    expect(chart.textContent).toContain("Showing the most recent 30 days of the range.");
   });
 });
 

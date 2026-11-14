@@ -35,6 +35,9 @@ describe("buildUsageQueries", () => {
     expect(q.referrers).toContain("metric = 'referrer'");
     expect(q.geo).toContain("metric = 'geo'");
     expect(q.device).toContain("metric = 'device'");
+    expect(q.hourly).toContain("metric = 'hourly'");
+    expect(q.hourly).toContain("SELECT dt, dimension AS slot, SUM(cnt) AS hits");
+    expect(q.hourly).toContain("GROUP BY dt, dimension");
   });
 
   it("caps the ranked metrics at USAGE_TOP_N and leaves grouped ones uncapped", () => {
@@ -46,6 +49,7 @@ describe("buildUsageQueries", () => {
     expect(q.searchTotals).not.toContain("LIMIT");
     expect(q.geo).not.toContain("LIMIT");
     expect(q.device).not.toContain("LIMIT");
+    expect(q.hourly).not.toContain("LIMIT");
   });
 
   it("emits printable ASCII only (no smart quotes / control chars)", () => {
