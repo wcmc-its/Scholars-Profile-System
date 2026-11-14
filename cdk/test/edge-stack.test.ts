@@ -1572,7 +1572,9 @@ describe("EdgeStack", () => {
           Object.values(t.findResources("AWS::WAFv2::WebACL"))[0]
             ?.Properties as { Rules: Array<{ Name: string }> }
         ).Rules.map((r) => r.Name);
-      const prod = rulesOf(buildEdgeStack("prod").template);
+      const prod = rulesOf(
+        buildEdgeStack("prod", undefined, { edgePublic: true }).template,
+      );
       expect(prod).not.toContain("block-non-wcm");
       expect(prod).toEqual(
         expect.arrayContaining([

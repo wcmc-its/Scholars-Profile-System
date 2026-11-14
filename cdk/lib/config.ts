@@ -913,7 +913,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     edgeAliasDomains: ["vivo.weill.cornell.edu"],
     // #432: public launch Wed 2026-11-11, same Sps-Edge-prod deploy as the
     // VIVO alias. Takes effect only on that manual deploy.
-    edgePublic: true,
+    edgePublic: false, // ROLLBACK: WCM-only gate restored
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
     // #1507 -- HTTPS origin leg, two gates. Seeded for the NetScaler front
     // (mirrors staging): CloudFront dials the NetScaler VIP over HTTPS (carrying

@@ -1558,9 +1558,65 @@ a{color:var(--slate)}
         "DefaultAction": {
           "Allow": {},
         },
-        "Description": "SPS front end prod - public, AWS managed rule groups enforced, bot-aware rate limit",
+        "Description": "SPS front end prod - WCM-only IP allow, AWS managed rule groups enforced, bot-aware rate limit",
         "Name": "sps-edge-prod-wcm-only",
         "Rules": [
+          {
+            "Action": {
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "offNetwork",
+                  "ResponseCode": 403,
+                },
+              },
+            },
+            "Name": "block-non-wcm",
+            "Priority": 0,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "EXACTLY",
+                          "SearchString": "/edge-ip",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-block-non-wcm",
+              "SampledRequestsEnabled": true,
+            },
+          },
           {
             "Name": "AWSManagedRulesCommonRuleSet",
             "OverrideAction": {
