@@ -69,7 +69,7 @@ type ScholarLite = { slug: string; preferredName: string };
 type ImpersonatingBlock = {
   targetCwid: string;
   targetName: string;
-  role: "owner" | "curator" | "scholar" | "comms_steward" | GlobalRole;
+  role: "owner" | "curator" | "scholar" | "comms_steward" | "proxy" | GlobalRole;
   unitKind: ImpersonationUnitKind | null;
   unit: string | null;
   startedAt: number;
@@ -296,6 +296,23 @@ export async function GET(): Promise<NextResponse> {
             targetCwid,
             targetName: (await directoryName(targetCwid)) ?? targetCwid,
             role: globalRole,
+            unitKind: null,
+            unit: null,
+            startedAt: session.impersonating.startedAt,
+          };
+        } else if (
+          await db.read.scholarProxy
+            .findFirst({ where: { proxyCwid: targetCwid }, select: { proxyCwid: true } })
+            .then((row) => row !== null)
+            .catch(() => false)
+        ) {
+          // A proxy-only target (#3388 admits them at the POST gate): same
+          // stranding hazard as the branches above — without this the banner and
+          // its "Return to my view" exit never render.
+          impersonating = {
+            targetCwid,
+            targetName: (await directoryName(targetCwid)) ?? targetCwid,
+            role: "proxy",
             unitKind: null,
             unit: null,
             startedAt: session.impersonating.startedAt,

@@ -51,6 +51,7 @@ export type SubjectRole =
   | "curator"
   | "scholar"
   | "comms_steward"
+  | "proxy"
   | "honors_curator"
   | "data_sharing_viewer"
   | "development"
@@ -63,6 +64,7 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   curator: "Curator",
   scholar: "Scholar",
   comms_steward: "Communications Steward",
+  proxy: "Proxy editor",
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   development: "Development",
@@ -99,6 +101,8 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   // door; the steward's own AdminSubnav fans out to Method families and the
   // rest from there (incl. cores + access management since #2522).
   comms_steward: [{ label: "Admin console", href: "/edit/profiles" }],
+  // `/edit` routes a proxy to the scholar they edit (one grant) or a list (several).
+  proxy: [{ label: "Profiles they edit", href: "/edit" }],
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
   development: [
