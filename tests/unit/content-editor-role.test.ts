@@ -288,6 +288,8 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "slug-request": "deny",
   "sponsor-match": "deny",
   suppress: "allow",
+  // #3362 — the pin gate: superuser / comms steward only, never a content editor.
+  "title-accept": "deny",
   unit: "allow",
 };
 

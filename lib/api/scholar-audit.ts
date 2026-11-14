@@ -99,6 +99,7 @@ const ACTION_LABEL: Partial<Record<AuditAction, string>> = {
 const FIELD_LABEL_OVERRIDE: Record<string, string> = {
   overview: "Overview",
   primaryTitle: "Primary title",
+  primaryTitleAccepted: "Title discrepancy accepted",
   orcid: "ORCID",
   url: "URL",
   selectedHighlightPmids: "Selected highlights",

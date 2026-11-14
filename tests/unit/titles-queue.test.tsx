@@ -25,6 +25,7 @@ import { loadTitlesQueue, RUBRIC_ROWS, TitlesQueue } from "@/components/edit/tit
 import {
   classifyTitleRow,
   parseTitleDashboardParams,
+  titleAcceptFingerprint,
   titleDashboardCriteria,
   type TitleDashboardRow,
 } from "@/lib/edit/title-dashboard";
@@ -330,5 +331,50 @@ describe("Titles queue body", () => {
     });
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(String(init.body)).value).toBe("");
+  });
+});
+
+describe("Accept discrepancy (#3362)", () => {
+  it("an accepted row leaves Needs review: counted under its other tab, still listed", async () => {
+    h.load.mockResolvedValue([CHAIR, PINNED, { ...MISMATCH, accepted: true }, PIN_CLEAN]);
+    const { all, counts } = await loadTitlesQueue();
+    expect(all).toHaveLength(4);
+    expect(counts).toEqual({ review: 1, pinned: 1, fyi: 2, all: 4 });
+  });
+
+  it("a Needs review row offers Accept discrepancy; it posts the row's fingerprint and refreshes", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ accepted: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    const q = await renderBody(SUPER);
+    fireEvent.click(q.getByTestId("title-change-zzc9003"));
+    const button = q.getByTestId("title-accept-zzc9003");
+    expect(button.textContent).toBe("Accept discrepancy");
+    expect(button.getAttribute("title")).toBe(
+      "The auto-selected title is correct; clear this flag",
+    );
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/edit/title-accept");
+    expect(JSON.parse(String(init.body))).toEqual({
+      cwid: "zzc9003",
+      fingerprint: titleAcceptFingerprint(MISMATCH),
+      autoTitle: MISMATCH.winner?.value ?? null,
+    });
+    expect(h.refresh).toHaveBeenCalled();
+  });
+
+  it("is not offered on a row outside Needs review", async () => {
+    const q = await renderBody(SUPER, { tab: "fyi" });
+    fireEvent.click(q.getByTestId("title-change-zza9001"));
+    expect(q.queryByTestId("title-accept-zza9001")).toBeNull();
+  });
+
+  it("an accepted row says so in its notes", async () => {
+    h.load.mockResolvedValue([{ ...MISMATCH, accepted: true }]);
+    const q = await renderBody(SUPER, { tab: "all" });
+    expect(q.getByText(/Discrepancy accepted: auto title confirmed/)).toBeTruthy();
   });
 });
