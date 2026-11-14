@@ -1987,6 +1987,19 @@ describe("EdgeStack", () => {
           expect(new Set(priorities).size).toBe(priorities.length);
         });
 
+        // An expired or otherwise rejected token must count as no token, or a
+        // harvested token could be replayed past both rules after it expires.
+        const noValidToken = {
+          OrStatement: {
+            Statements: ["absent", "rejected"].map((state) => ({
+              LabelMatchStatement: {
+                Scope: "LABEL",
+                Key: `awswaf:managed:token:${state}`,
+              },
+            })),
+          },
+        };
+
         it("lets tokenless /search page loads through until they surge in aggregate", () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const always = rules.find((r) => r.Name === "search-challenge-tokenless") as any;
@@ -1999,20 +2012,16 @@ describe("EdgeStack", () => {
           const rate = surge?.Statement.RateBasedStatement;
           expect(rate?.AggregateKeyType).toBe("CONSTANT");
           expect(rate?.Limit).toBe(300);
-          expect(rate?.ScopeDownStatement.AndStatement.Statements).toContainEqual({
-            LabelMatchStatement: { Scope: "LABEL", Key: "awswaf:managed:token:absent" },
-          });
+          expect(rate?.ScopeDownStatement.AndStatement.Statements).toContainEqual(noValidToken);
           expect(Number(surge?.Priority)).toBeGreaterThan(Number(always?.Priority));
         });
 
-        it("challenges /search requests carrying the token:absent label, after Bot Control", () => {
+        it("challenges /search requests with no valid token (absent or rejected), after Bot Control", () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const rule = rules.find((r) => r.Name === "search-challenge-tokenless") as any;
           expect(rule?.Action).toHaveProperty("Challenge");
           const stmts = rule?.Statement.AndStatement?.Statements ?? [];
-          expect(stmts).toContainEqual({
-            LabelMatchStatement: { Scope: "LABEL", Key: "awswaf:managed:token:absent" },
-          });
+          expect(stmts).toContainEqual(noValidToken);
           expect(Number(rule?.Priority)).toBeGreaterThan(Number(targeted?.Priority));
         });
 

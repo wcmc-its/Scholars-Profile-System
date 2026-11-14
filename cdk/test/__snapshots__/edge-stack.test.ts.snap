@@ -2053,9 +2053,21 @@ a{color:var(--slate)}
                     },
                   },
                   {
-                    "LabelMatchStatement": {
-                      "Key": "awswaf:managed:token:absent",
-                      "Scope": "LABEL",
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:absent",
+                            "Scope": "LABEL",
+                          },
+                        },
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:rejected",
+                            "Scope": "LABEL",
+                          },
+                        },
+                      ],
                     },
                   },
                   {
@@ -2135,9 +2147,21 @@ a{color:var(--slate)}
                         },
                       },
                       {
-                        "LabelMatchStatement": {
-                          "Key": "awswaf:managed:token:absent",
-                          "Scope": "LABEL",
+                        "OrStatement": {
+                          "Statements": [
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:absent",
+                                "Scope": "LABEL",
+                              },
+                            },
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:rejected",
+                                "Scope": "LABEL",
+                              },
+                            },
+                          ],
                         },
                       },
                     ],
@@ -4381,9 +4405,21 @@ a{color:var(--slate)}
                     },
                   },
                   {
-                    "LabelMatchStatement": {
-                      "Key": "awswaf:managed:token:absent",
-                      "Scope": "LABEL",
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:absent",
+                            "Scope": "LABEL",
+                          },
+                        },
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:rejected",
+                            "Scope": "LABEL",
+                          },
+                        },
+                      ],
                     },
                   },
                   {
@@ -4463,9 +4499,21 @@ a{color:var(--slate)}
                         },
                       },
                       {
-                        "LabelMatchStatement": {
-                          "Key": "awswaf:managed:token:absent",
-                          "Scope": "LABEL",
+                        "OrStatement": {
+                          "Statements": [
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:absent",
+                                "Scope": "LABEL",
+                              },
+                            },
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:rejected",
+                                "Scope": "LABEL",
+                              },
+                            },
+                          ],
                         },
                       },
                     ],
