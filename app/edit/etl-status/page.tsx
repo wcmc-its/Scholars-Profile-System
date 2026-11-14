@@ -54,7 +54,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "ETL status — Scholars Console",
+  title: "Data sync — Scholars Console",
   robots: { index: false, follow: false },
 };
 
@@ -736,7 +736,7 @@ export default async function EtlStatusPage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">ETL status</h1>
+      <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">Data sync</h1>
       {unavailable ? (
         <p className="text-muted-foreground mt-8" data-testid="etl-status-unavailable">
           Import status is temporarily unavailable. Please try again later or contact ITS Support if

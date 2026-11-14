@@ -1,16 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  BULK_CONFIRM_ACTOR,
+  BULK_REQUEST_PREFIX,
   EDIT_ACTIVITY_RECENT_LIMIT,
   EDIT_ACTIVITY_WINDOW_DAYS,
   type EditActivitySummary,
+  automatedActorName,
   buildChanges,
   coerceValue,
   collectCwids,
   decodeCursor,
   easternOffset,
+  editorKind,
+  effectiveActor,
   encodeCursor,
+  entityNoun,
+  isBulkJobRequest,
+  isOpaqueId,
   isSystemActor,
+  shapeAnalytics,
+  unnamedEntityText,
   loadEditActivitySummary,
   loadEditActivityCsv,
   loadOlderEdits,
@@ -166,6 +176,7 @@ describe("collectCwids", () => {
     action: "field_update",
     entityType: "scholar",
     entityId: "sch0001",
+    requestId: null,
     changes: [],
     detail: null,
     ...over,
@@ -259,6 +270,102 @@ describe("activity redesign — KPIs, day buckets, entity names", () => {
     expect(isSystemActor("abc1234")).toBe(false);
   });
 
+  it("a bulk-job request_id makes a person's row automated, counted under the job", () => {
+    expect(isBulkJobRequest("bulk-strong-2026-11-13T15:00:00.000Z")).toBe(true);
+    expect(isBulkJobRequest("req-123")).toBe(false);
+    expect(isBulkJobRequest(null)).toBe(false);
+    expect(isBulkJobRequest(undefined)).toBe(false);
+    const base = { actorCwid: "abc1234", impersonatedCwid: null, entityType: "scholar", entityId: "sch0001" };
+    expect(editorKind({ ...base, requestId: "bulk-strong-2026-11-13T15:00:00.000Z" })).toBe("automated");
+    expect(editorKind({ ...base, requestId: null })).toBe("staff");
+    // Even the runner's OWN profile is not a self edit when the job wrote it.
+    expect(editorKind({ ...base, entityId: "abc1234", requestId: "bulk-strong-x" })).toBe("automated");
+    expect(effectiveActor({ actorCwid: "abc1234", requestId: "bulk-strong-x" })).toBe(BULK_CONFIRM_ACTOR);
+    expect(effectiveActor({ actorCwid: "abc1234", requestId: "req-1" })).toBe("abc1234");
+    expect(isSystemActor(BULK_CONFIRM_ACTOR)).toBe(true);
+    expect(automatedActorName(BULK_CONFIRM_ACTOR)).toBe("Bulk confirm job");
+  });
+
+  it("shapeAnalytics: a bulk job is not the runner's staff edits — no top staff credit", () => {
+    const row = (over: Record<string, unknown>) => ({
+      ts: "2026-11-13T15:00:00.000Z",
+      actor_cwid: "abc1234",
+      impersonated_cwid: null,
+      action: "honor_confirm",
+      target_entity_type: "scholar",
+      target_entity_id: "sch0001",
+      request_id: "bulk-strong-2026-11-13T15:00:00.000Z",
+      fields_changed: null,
+      before_values: null,
+      after_values: null,
+      ...over,
+    });
+    const a = shapeAnalytics([
+      row({}),
+      row({ target_entity_id: "sch0002" }),
+      row({ target_entity_id: "sch0003" }),
+      // One genuine staff edit by the same person.
+      row({ target_entity_id: "sch0004", request_id: "req-1", action: "field_override" }),
+    ]);
+    expect(a.kinds).toEqual({ self: 0, staff: 1, automated: 3 });
+    expect(a.topStaff).toEqual({ actorCwid: "abc1234", edits: 1 });
+    expect(a.automatedByActor).toEqual([{ actorCwid: BULK_CONFIRM_ACTOR, edits: 3 }]);
+    expect(a.editors[BULK_CONFIRM_ACTOR]).toEqual({ kind: "automated", profiles: 3 });
+    expect(a.editors.abc1234).toEqual({ kind: "staff", profiles: 1 });
+    expect(a.perDay[0]).toMatchObject({ automated: 3, staff: 1, topActor: BULK_CONFIRM_ACTOR });
+  });
+
+  it("the top-editor and editor-stats SQL apply the same bulk-job rule", async () => {
+    const sqls: string[] = [];
+    const client = {
+      $queryRaw: async (strings: TemplateStringsArray) => {
+        sqls.push(strings.join("?"));
+        return [];
+      },
+      scholar: { findMany: async () => [] },
+    } as never;
+    await loadEditActivitySummary(client, new Date("2026-11-14T15:00:00Z"));
+    // perDay, editors, entities, recent, stats, window rows — in that order.
+    const [, editors, , recent, stats, windowRows] = sqls;
+    const rule = `CASE WHEN request_id LIKE '${BULK_REQUEST_PREFIX}%' THEN '${BULK_CONFIRM_ACTOR}'`;
+    expect(editors).toContain(rule);
+    expect(editors).toMatch(/GROUP BY CASE WHEN request_id LIKE 'bulk-%'/);
+    expect(stats).toContain(rule);
+    expect(stats).toContain(`request_id LIKE '${BULK_REQUEST_PREFIX}%' OR actor_cwid LIKE 'system-%'`);
+    expect(recent).toContain("request_id");
+    expect(windowRows).toContain("request_id");
+  });
+
+  it("shapes request_id onto the feed row (null when the column is absent)", () => {
+    const base = {
+      id: 1,
+      ts: new Date("2026-11-13T15:00:00Z"),
+      actor_cwid: "abc1234",
+      impersonated_cwid: null,
+      action: "honor_confirm",
+      target_entity_type: "scholar",
+      target_entity_id: "sch0001",
+      fields_changed: null,
+      before_values: null,
+      after_values: null,
+    };
+    const s = shapeSummary([], [], [], [{ ...base, request_id: "bulk-strong-x" }, { ...base, id: 2 }]);
+    expect(s.recent.map((r) => r.requestId)).toEqual(["bulk-strong-x", null]);
+  });
+
+  it("unnamed opaque entity ids read as their kind plus a short id, never a bare UUID", () => {
+    const uuid = "cf58becd-63ec-4824-b24e-ba2535a6db11";
+    expect(isOpaqueId(uuid)).toBe(true);
+    expect(isOpaqueId("CTSC")).toBe(false);
+    expect(unnamedEntityText("reporter_profile_candidate", uuid)).toBe("Reporter profile candidate cf58becd");
+    expect(unnamedEntityText("center", "CTSC")).toBe("CTSC");
+    expect(unnamedEntityText("scholar", "abc1234")).toBe("abc1234");
+    expect(entityNoun(["scholar", "scholar"], 2)).toBe("profiles");
+    expect(entityNoun(["scholar"], 1)).toBe("profile");
+    expect(entityNoun(["reporter_profile_candidate"], 5)).toBe("records");
+    expect(entityNoun(["reporter_profile_candidate"], 1)).toBe("record");
+  });
+
   it("shapeSummary reads window-wide editor stats (bigint) and stamps generatedAt", () => {
     const now = new Date("2026-09-24T15:00:00Z");
     const s = shapeSummary(
@@ -313,7 +420,7 @@ describe("activity redesign — KPIs, day buckets, entity names", () => {
     const summary = await loadEditActivitySummary(client, new Date("2026-09-24T15:00:00Z"));
     expect(sqls[0]).toContain("CONVERT_TZ(ts, '+00:00', ?)");
     expect(params[0]![0]).toBe("-04:00");
-    expect(sqls[4]).toContain("COUNT(DISTINCT actor_cwid)");
+    expect(sqls[4]).toContain("COUNT(DISTINCT CASE WHEN request_id LIKE");
     expect(summary.editorStats.editors).toBe(1);
     expect(summary.entityNames).toEqual({ "center:ctr_one": "Center One", "core:7": "Core Seven" });
   });

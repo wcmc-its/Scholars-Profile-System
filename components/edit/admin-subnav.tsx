@@ -416,20 +416,6 @@ export function AdminSubnav({
         label: "Reports",
         activeIsLink: true,
       },
-      // COI is public data (decision 2026-10-01): `coiTab` admits observers,
-      // content editors and ad hoc grantees (the `coi` predicate).
-      {
-        show: (superuserSurfaces || coiTab) && isDataQualityDashboardEnabled(),
-        id: "coi",
-        href: "/edit/coi",
-        label: "COI",
-      },
-      {
-        show: dataSharingTab !== null && dataSharingTab !== undefined,
-        id: "data-sharing",
-        href: "/edit/data-sharing",
-        label: "Data sharing",
-      },
       // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
       // (`activityTab`); no separate flag.
       {
@@ -441,6 +427,15 @@ export function AdminSubnav({
       // Wider audience than the other superuser tabs: a superuser OR any unit admin
       // (via `usageTab`, set when `canViewUsage` passes).
       { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
+      // Read-only ETL health board, labelled "Data sync" (route and id keep
+      // `etl-status`). Superuser, or an ad hoc grantee (`etlStatusTab`); no
+      // separate flag.
+      {
+        show: superuserSurfaces || etlStatusTab,
+        id: "etl-status",
+        href: "/edit/etl-status",
+        label: "Data sync",
+      },
       {
         show: superuserSurfaces || orcidCoverageTab,
         id: "orcid-coverage",
@@ -455,13 +450,19 @@ export function AdminSubnav({
         label: "ORCID queue",
         count: pendingOrcidQueue ?? undefined,
       },
-      // Read-only ETL health board. Superuser, or an ad hoc grantee
-      // (`etlStatusTab`); no separate flag.
+      // COI is public data (decision 2026-10-01): `coiTab` admits observers,
+      // content editors and ad hoc grantees (the `coi` predicate).
       {
-        show: superuserSurfaces || etlStatusTab,
-        id: "etl-status",
-        href: "/edit/etl-status",
-        label: "ETL status",
+        show: (superuserSurfaces || coiTab) && isDataQualityDashboardEnabled(),
+        id: "coi",
+        href: "/edit/coi",
+        label: "COI",
+      },
+      {
+        show: dataSharingTab !== null && dataSharingTab !== undefined,
+        id: "data-sharing",
+        href: "/edit/data-sharing",
+        label: "Data sharing",
       },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).

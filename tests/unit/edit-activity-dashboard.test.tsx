@@ -29,6 +29,7 @@ const edit = (over: Partial<RecentEdit>): RecentEdit => ({
   action: "field_override",
   entityType: "scholar",
   entityId: "sch0001",
+  requestId: null,
   changes: [],
   detail: null,
   ...over,
@@ -371,6 +372,106 @@ describe("EditActivityDashboard", () => {
     // Each save's own change, not the row's net change.
     expect(back).toContain("Professor → Chief");
     expect(back).toContain("Chief → Professor");
+  });
+
+  it("a bulk-confirm job's rows show the job, run by the person — not the person as editor", () => {
+    const bulk = (id: string, entityId: string, ts: string) =>
+      edit({
+        id,
+        ts,
+        actorCwid: "stf0001",
+        action: "honor_confirm",
+        entityId,
+        requestId: "bulk-strong-2026-09-24T15:00:00.000Z",
+      });
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          topEditors: [
+            { actorCwid: "system-bulk-confirm", edits: 2 },
+            { actorCwid: "sch0002", edits: 1 },
+          ],
+          analytics: {
+            ...summary().analytics,
+            kinds: { self: 1, staff: 0, automated: 2 },
+            topStaff: null,
+            automatedByActor: [{ actorCwid: "system-bulk-confirm", edits: 2 }],
+            editors: {
+              "system-bulk-confirm": { kind: "automated", profiles: 2 },
+              sch0002: { kind: "self", profiles: 1 },
+            },
+          },
+          recent: [
+            bulk("k2", "sch0002", "2026-09-24T15:01:00.000Z"),
+            bulk("k1", "sch0001", "2026-09-24T15:00:00.000Z"),
+            edit({ id: "own", ts: "2026-09-24T14:00:00.000Z", actorCwid: "sch0002", entityId: "sch0002", changes: [ch("overview", "Overview", null, "x")] }),
+          ],
+        })}
+      />,
+    );
+    const row = screen.getByTestId("edit-activity-row-k2");
+    expect(row.getAttribute("data-kind")).toBe("automated");
+    expect(row.textContent).toContain("Bulk confirm job");
+    expect(row.textContent).toContain("run by Dana Staff");
+    expect(row.textContent).toContain("Automated");
+    expect(row.textContent).not.toContain("Staff, for");
+    expect(row.textContent).toContain("2 in one run");
+    const kpis = screen.getByTestId("edit-activity-kpis").textContent ?? "";
+    expect(kpis).toContain("bulk confirm 2");
+    expect(kpis).not.toContain("Largest: Dana Staff");
+    const editors = screen.getByTestId("edit-activity-top-editors");
+    const job = within(editors).getByTestId("edit-activity-editor-system-bulk-confirm");
+    expect(job.textContent).toContain("Bulk confirm job");
+    expect(job.textContent).toContain("Automated");
+    // Picking the job filters the feed to its rows.
+    fireEvent.click(job);
+    expect(screen.getByTestId("edit-activity-row-k2")).toBeTruthy();
+    expect(screen.queryByTestId("edit-activity-row-own")).toBeNull();
+    fireEvent.click(job);
+    // Hide automated drops the job's rows even though a person ran it.
+    fireEvent.click(screen.getByTestId("edit-activity-hide-system"));
+    expect(screen.queryByTestId("edit-activity-row-k2")).toBeNull();
+    expect(screen.getByTestId("edit-activity-row-own")).toBeTruthy();
+  });
+
+  it("never shows an unnamed record's raw UUID as a person, and lets long chips wrap", () => {
+    const uuid = (n: number) => `cf58bec${n}-63ec-4824-b24e-ba2535a6db11`;
+    const status = [ch("status", "Status", "draft", "published")];
+    render(
+      <EditActivityDashboard
+        summary={summary({
+          recent: [
+            edit({ id: "one", ts: "2026-09-24T19:00:00.000Z", actorCwid: "stf0001", entityType: "reporter_profile_candidate", entityId: uuid(1), changes: [ch("notes", "Notes", null, "x")] }),
+            // Newest first, as the feed delivers them.
+            ...[4, 3, 2].map((n) =>
+              edit({
+                id: `m${n}`,
+                ts: `2026-09-24T18:0${n}:00.000Z`,
+                actorCwid: "stf0001",
+                entityType: "reporter_profile_candidate",
+                entityId: uuid(n),
+                changes: status,
+              }),
+            ),
+          ],
+        })}
+      />,
+    );
+    const one = screen.getByTestId("edit-activity-row-one");
+    expect(one.textContent).toContain("Staff, for Reporter profile candidate cf58bec1");
+    expect(one.textContent).not.toContain(uuid(1));
+    const tag = within(one).getByText(/Staff, for/);
+    expect(tag.className).toContain("whitespace-normal");
+    expect(tag.className).not.toContain("whitespace-nowrap");
+    const many = screen.getByTestId("edit-activity-row-m4");
+    expect(many.textContent).toContain("Staff, for 3 records");
+    expect(many.textContent).toContain("on 3 records");
+    expect(many.textContent).not.toContain("profiles");
+    // The id list carries short ids only, never a full UUID.
+    for (const n of [2, 3, 4]) {
+      expect(many.textContent).not.toContain(uuid(n));
+      expect(many.textContent).toContain(`cf58bec${n}`);
+    }
   });
 
   it("names an ETL field_override run by its field, and highlights by title", () => {
