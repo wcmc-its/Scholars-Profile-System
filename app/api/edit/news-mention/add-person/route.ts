@@ -75,7 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       const scholar = await tx.scholar.findFirst({
-        where: { cwid: target, deletedAt: null },
+        where: { cwid: target, deletedAt: null, campus: "wcm" },
         select: { cwid: true, preferredName: true },
       });
       if (!scholar) return { kind: "unknown_cwid" as const };

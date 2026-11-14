@@ -265,6 +265,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Finds WCM scholars who probably also hold a Cornell Ithaca NetID, for a superuser report.",
     origin: "external", // sibling ReCiterDB (Cornell roster)
   },
+  "Ithaca-Roster": {
+    label: "Cornell Ithaca Roster",
+    description: "Loads Cornell Ithaca faculty, postdocs and grad students as hidden records for ORCID curation.",
+    origin: "external", // sibling ReCiterDB (Cornell roster)
+  },
   "InfoEd-Biosketch": {
     label: "NIH Biosketches",
     description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",

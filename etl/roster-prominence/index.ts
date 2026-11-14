@@ -41,6 +41,7 @@ function updateChunk(rows: readonly ProminenceUpdate[]): Prisma.Sql {
 async function main(): Promise<number> {
   const computed = await computeProminence(db.write, "all");
   const stored = await db.write.scholar.findMany({
+    where: { campus: "wcm" },
     select: { cwid: true, rosterProminence: true, rosterLeadershipTier: true },
   });
 

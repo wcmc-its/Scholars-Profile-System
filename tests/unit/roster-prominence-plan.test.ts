@@ -271,7 +271,7 @@ describe('computeProminence(client, "all")', () => {
 
     const out = await computeProminence(client, "all");
     expect(out.get("a")?.prominence).toBeCloseTo(Math.log1p(20) + 0.5 * Math.log1p(10) + 1.0);
-    expect((calls[0] as { where: unknown }).where).toEqual({ deletedAt: null });
+    expect((calls[0] as { where: unknown }).where).toEqual({ deletedAt: null, campus: "wcm" });
     for (const c of calls) expect(JSON.stringify(c)).not.toContain('"cwid":{"in"');
   });
 });

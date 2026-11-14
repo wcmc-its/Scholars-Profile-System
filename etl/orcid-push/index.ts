@@ -216,7 +216,8 @@ async function main(): Promise<number> {
   );
   const targets = (
     await db.write.scholar.findMany({
-      where: { deletedAt: null, orcid: { not: null } },
+      // Ithaca rows join when the Ithaca ORCID step makes SPS their sole writer.
+      where: { deletedAt: null, orcid: { not: null }, campus: "wcm" },
       select: { cwid: true, orcid: true },
       orderBy: { cwid: "asc" },
     })

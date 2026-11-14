@@ -135,7 +135,9 @@ async function mirrorOrcidCandidates(): Promise<number> {
 async function main(): Promise<number> {
   const backfill = process.argv.includes("--backfill");
   const scholars = new Set(
-    (await db.read.scholar.findMany({ select: { cwid: true } })).map((s) => s.cwid.toLowerCase()),
+    (await db.read.scholar.findMany({ where: { campus: "wcm" }, select: { cwid: true } })).map((s) =>
+      s.cwid.toLowerCase(),
+    ),
   );
   const docs = await listDocs(backfill);
   console.log(`${backfill ? "backfill" : `last ${WINDOW_DAYS}d`}: ${docs.length} documents`);

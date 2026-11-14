@@ -338,7 +338,8 @@ export async function resolveScholarNames(
   const unique = [...new Set(cwids.filter((c) => c.length > 0))];
   if (unique.length === 0) return out;
   const rows = await client.scholar.findMany({
-    where: { cwid: { in: unique } },
+    // Cornell members are NetID-keyed; a Cornell Ithaca scholar row is not their WCM record.
+    where: { cwid: { in: unique }, campus: "wcm" },
     select: {
       cwid: true,
       preferredName: true,

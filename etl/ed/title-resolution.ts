@@ -145,7 +145,7 @@ export async function loadTitleCandidates(
 ): Promise<TitleCandidates[]> {
   const [scholars, overrideRows] = await Promise.all([
     client.scholar.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, campus: "wcm" },
       select: { cwid: true, primaryTitle: true, edPrimaryTitle: true, workingTitle: true },
     }),
     client.fieldOverride.findMany({

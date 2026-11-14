@@ -439,7 +439,7 @@ async function main(): Promise<void> {
   const startedAt = Date.now();
   await assertNoLegacyOriginRows();
   const scholars = await db.write.scholar.findMany({
-    where: { deletedAt: null },
+    where: { deletedAt: null, campus: "wcm" },
     select: {
       cwid: true,
       fullName: true,

@@ -310,7 +310,7 @@ async function main(): Promise<void> {
   );
 
   // 2. Spine-table floors (mirror the PR-1 per-source guard floors).
-  const activeScholars = await db.read.scholar.count({ where: { deletedAt: null } });
+  const activeScholars = await db.read.scholar.count({ where: { deletedAt: null, campus: "wcm" } });
   if (activeScholars < 5000) {
     note("floor:scholars", `active scholars = ${activeScholars} (< 5000 floor)`);
   }

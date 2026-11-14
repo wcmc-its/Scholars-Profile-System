@@ -336,6 +336,7 @@ export async function fetchCtgovStudies(
  *  Used by the direct ETL and the import half. */
 export async function loadScholars(): Promise<Map<string, { cwid: string; name: string }>> {
   const scholars = await db.write.scholar.findMany({
+    where: { campus: "wcm" },
     select: { cwid: true, preferredName: true, fullName: true },
   });
   const m = new Map<string, { cwid: string; name: string }>();

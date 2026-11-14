@@ -264,7 +264,7 @@ export async function computeProminence(
 
   const [scholars, chairRows, chiefRows, piRows, nihPiRows, centerDirectors] = await Promise.all([
     client.scholar.findMany({
-      where: unique === null ? { deletedAt: null } : inCwids,
+      where: unique === null ? { deletedAt: null, campus: "wcm" } : inCwids,
       select: {
         cwid: true,
         hIndex: true,

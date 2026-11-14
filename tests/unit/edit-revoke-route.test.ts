@@ -130,7 +130,7 @@ describe("POST /api/edit/revoke", () => {
     expect(res.status).toBe(200);
     expect(mockSuppressionUpdate).toHaveBeenCalledTimes(1);
     expect(mockScholarUpdateMany).toHaveBeenCalledWith({
-      where: { cwid: "self01" },
+      where: { cwid: "self01", campus: "wcm" },
       data: { status: "active" },
     });
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1);

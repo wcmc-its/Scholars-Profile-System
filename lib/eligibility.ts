@@ -62,6 +62,19 @@ export const PUBLICLY_DISPLAYED_ROLES: ReadonlyArray<RoleCategory> = [
 ] as const;
 
 /**
+ * Cornell Ithaca people (`campus = 'ithaca'`, `status = 'external'`), loaded by
+ * etl/ithaca-roster so their ORCID iDs can be curated. Never public.
+ */
+export const ITHACA_ROLES = [
+  "ithaca_faculty",
+  "ithaca_rte_faculty",
+  "ithaca_emeritus",
+  "ithaca_postdoc",
+  "ithaca_researcher",
+  "ithaca_student_grad",
+] as const;
+
+/**
  * The concrete `scholar.role_category` values the #536 carve hides, spelled out
  * for use in a Prisma where-clause (`PEOPLE_INDEX_WHERE`). Prisma cannot express
  * the `doctoral_student*` prefix that `isPubliclyDisplayed` matches, so the
@@ -74,6 +87,7 @@ export const HIDDEN_ROLE_CATEGORIES: ReadonlyArray<string> = [
   "doctoral_student_phd",
   "doctoral_student_mdphd",
   "affiliate_alumni",
+  ...ITHACA_ROLES,
 ] as const;
 
 /** The `OR` arm shape {@link publicRoleWhere} produces. */

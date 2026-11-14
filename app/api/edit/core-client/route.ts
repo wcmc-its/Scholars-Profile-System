@@ -418,7 +418,7 @@ async function resolvePeople(cwids: string[]): Promise<ResolveOutcome> {
   const resolved = new Map<string, ResolvedPerson>();
   if (cwids.length === 0) return { people: resolved, directoryUnavailable: false };
   const scholars = await db.read.scholar.findMany({
-    where: { cwid: { in: cwids } },
+    where: { cwid: { in: cwids }, campus: "wcm" },
     select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
   });
   for (const scholar of scholars) {

@@ -49,11 +49,12 @@ async function main(): Promise<void> {
 
   const scholars = await db.write.scholar.findMany({
     where: full
-      ? { deletedAt: null }
+      ? { deletedAt: null, campus: "wcm" }
       : missing
-        ? { deletedAt: null, hasHeadshot: false }
+        ? { deletedAt: null, campus: "wcm", hasHeadshot: false }
         : {
             deletedAt: null,
+            campus: "wcm",
             OR: [{ headshotCheckedAt: null }, { headshotCheckedAt: { lt: staleBefore } }],
           },
     select: { cwid: true, hasHeadshot: true },
