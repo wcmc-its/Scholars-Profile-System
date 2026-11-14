@@ -105,6 +105,7 @@ import {
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
 import { ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
+import { unitReportAccess } from "@/lib/edit/unit-leader-access";
 import {
   isReportKey,
   loadReportMeta,
@@ -244,7 +245,7 @@ export default async function EditReportPage({
             audience: "Superusers",
             rule: "Only superusers can run the all-cores roll-up.",
           }
-        : { mode: "unit" };
+        : unitReportAccess();
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
     if (kind === "core") {
       loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n, ctx.viewOnly === true);
