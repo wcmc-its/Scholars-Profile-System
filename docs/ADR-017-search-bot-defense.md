@@ -2,7 +2,7 @@
 
 **Status:** Accepted 2026-11-14. Ships in #3397; live once the app release and `Sps-Edge-<env>` deploy land.
 **Date:** 2026-11-14
-**Revision:** 1
+**Revision:** 2 (2026-11-14: D4a, rejected tokens)
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
@@ -44,6 +44,12 @@ The CSP allows `https://*.awswaf.com` in `script-src` and `connect-src` for this
 `search-challenge-tokenless-surge` is a rate-based rule that counts tokenless `/search` page loads across all clients and challenges them only above 300 per 5 minutes. Below the limit a first-time visitor arriving from Google, a VIVO link or a bookmark is not challenged. Above it the blanket challenge returns on its own.
 
 The count is aggregate rather than per IP because the scraper sends about 2 requests per IP. The limit sits above the observed baseline (median 29, p99 129, max 240 per 5 minutes, scraper included) and is about one OpenSearch query a second; the 11-12 outage ran at several times that.
+
+### D4a. A rejected token counts as no token
+
+D3 and D4 apply to a request with no usable token: none sent, or one that WAF token management rejected (expired, invalid, wrong domain). Matching only an absent token would let a scraper harvest one real token and replay it after it expired.
+
+A returning visitor with an expired cookie is not affected in normal operation. Their page load passes under D4 and the page then fetches a fresh token. If a tab was left open long enough for the token to lapse, the next facet click is challenged under D3 and the browser falls back to a full page load, which passes under D4.
 
 ### D5. Low-rate scraping of public search results is tolerated
 

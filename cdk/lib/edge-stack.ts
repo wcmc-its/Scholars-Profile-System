@@ -1295,10 +1295,18 @@ export class EdgeStack extends Stack {
         },
       };
       const notSearchPath = { notStatement: { statement: searchPathMatch } };
-      const tokenAbsent = {
-        labelMatchStatement: {
-          scope: "LABEL",
-          key: "awswaf:managed:token:absent",
+      // No usable WAF token: none sent, or one sent that token management
+      // rejected (expired, invalid, wrong domain; each also carries the bare
+      // `rejected` label). Matching `absent` alone let a harvested token be
+      // replayed past the /search challenges once it expired.
+      const noValidToken = {
+        orStatement: {
+          statements: ["absent", "rejected"].map((state) => ({
+            labelMatchStatement: {
+              scope: "LABEL",
+              key: `awswaf:managed:token:${state}`,
+            },
+          })),
         },
       };
       // #3368 option 4: the Bot Control rules that every TARGETED instance
@@ -1732,7 +1740,7 @@ export class EdgeStack extends Stack {
           // TGT_TokenAbsent_RC_COUNT), so these rules challenge on the token
           // label instead, the documented "block missing tokens" pattern.
           // They run after the Bot Control instances, which apply
-          // awswaf:managed:token:absent.
+          // awswaf:managed:token:absent / :rejected (see noValidToken).
           //
           // 1. Client navigations (`_rsc` query or `RSC` header): always
           //    challenged. A browser can only make one from a page it has
@@ -1747,7 +1755,7 @@ export class EdgeStack extends Stack {
               andStatement: {
                 statements: [
                   searchPathMatch,
-                  tokenAbsent,
+                  noValidToken,
                   {
                     orStatement: {
                       statements: [
@@ -1800,7 +1808,7 @@ export class EdgeStack extends Stack {
                 evaluationWindowSec: 300,
                 aggregateKeyType: "CONSTANT",
                 scopeDownStatement: {
-                  andStatement: { statements: [searchPathMatch, tokenAbsent] },
+                  andStatement: { statements: [searchPathMatch, noValidToken] },
                 },
               },
             },
