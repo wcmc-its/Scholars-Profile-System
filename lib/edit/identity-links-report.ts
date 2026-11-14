@@ -36,7 +36,13 @@ export function parseIdentityLinkParams(
   };
 }
 
-export type IdentityLinkSignals = { ed?: boolean; orcid?: string; email?: string; name?: boolean };
+export type IdentityLinkSignals = {
+  ed?: boolean;
+  cornell?: boolean;
+  orcid?: string;
+  email?: string;
+  name?: boolean;
+};
 
 export type IdentityLinkRow = {
   cwid: string;

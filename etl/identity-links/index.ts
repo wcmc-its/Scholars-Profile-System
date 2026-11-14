@@ -4,6 +4,7 @@
  *
  *   Aurora    scholar (every row, soft-deleted included: people leave WCM for Ithaca)
  *   reciterdb identity_cornell_current (the whole Cornell roster, staff included)
+ *             identity_cornell_directory (Cornell directory: names, cornellEduCWID)
  *             pubsource_orcid_person   (ORCID iDs by CWID and by NetID)
  *        └──▶ match.ts ──▶ scholar_identity_link
  *
@@ -27,6 +28,11 @@ type RosterRow = {
   email_alt_cu: string | null;
   primary_department: string | null;
   primary_job_title: string | null;
+  // identity_cornell_directory (ReCiterDB nightly): Cornell's live directory.
+  display_name: string | null;
+  given_name: string | null;
+  surname: string | null;
+  cwid: string | null;
 };
 type OrcidRow = { personIdentifier: string; personIdentifierType: string; orcid: string };
 
@@ -35,8 +41,12 @@ const lc = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
 async function main(): Promise<number> {
   const { roster, orcidRows } = await withReciterConnection(async (conn) => ({
     roster: (await conn.query(
-      `SELECT netid, name, name_first, name_last, email, email_alt_cu, primary_department, primary_job_title
-         FROM identity_cornell_current WHERE netid REGEXP '^[A-Za-z]+[0-9]+$'`,
+      `SELECT c.netid, c.name, c.name_first, c.name_last, c.email, c.email_alt_cu,
+              c.primary_department, c.primary_job_title,
+              d.display_name, d.given_name, d.surname, d.cwid
+         FROM identity_cornell_current c
+         LEFT JOIN identity_cornell_directory d ON d.netid = c.netid
+        WHERE c.netid REGEXP '^[A-Za-z]+[0-9]+$'`,
     )) as RosterRow[],
     orcidRows: (await conn.query(
       `SELECT personIdentifier, personIdentifierType, orcid FROM pubsource_orcid_person
@@ -65,11 +75,13 @@ async function main(): Promise<number> {
     const netid = lc(r.netid);
     return {
       netid,
-      firstName: r.name_first ?? "",
-      lastName: r.name_last ?? "",
+      // ~10% of the roster (ORCID-only imports) has no name; the directory does.
+      firstName: r.name_first || r.given_name || "",
+      lastName: r.name_last || r.surname || "",
       emails: [r.email, r.email_alt_cu].map(lc).filter((e) => e.endsWith("@med.cornell.edu")),
       orcids: [...(netidOrcids.get(netid) ?? [])],
-      name: r.name,
+      cwid: lc(r.cwid) || null,
+      name: r.name || r.display_name,
       department: r.primary_department,
       title: r.primary_job_title,
     };
