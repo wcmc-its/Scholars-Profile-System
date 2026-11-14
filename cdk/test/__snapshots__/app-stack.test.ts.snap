@@ -7140,7 +7140,7 @@ service:
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d.zip",
+          "S3Key": "8fefc46b7a95598bbe46da69916e535333bc7d3258fc9c124ada1a0589b59bfb.zip",
         },
         "Handler": "__entrypoint__.handler",
         "MemorySize": 128,
@@ -8462,7 +8462,7 @@ service:
         "ClientIDList": [
           "sts.amazonaws.com",
         ],
-        "CodeHash": "c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d",
+        "CodeHash": "8fefc46b7a95598bbe46da69916e535333bc7d3258fc9c124ada1a0589b59bfb",
         "RejectUnauthorized": false,
         "ServiceToken": {
           "Fn::GetAtt": [

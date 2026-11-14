@@ -1490,7 +1490,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"widgets":[{"type":"text","width":24,"height":2,"x":0,"y":0,"properties":{"markdown":"# SPS reliability -- prod\\nALB / CloudFront / ECS / Aurora. Read-only mirror of the page-topic alarms. See docs/SLOs.md."}},{"type":"text","width":24,"height":1,"x":0,"y":2,"properties":{"markdown":"## Public ALB"}},{"type":"metric","width":12,"height":6,"x":0,"y":3,"properties":{"view":"timeSeries","title":"ALB latency p50/p90/p99 (s)","region":"",
+              "{"widgets":[{"type":"text","width":24,"height":2,"x":0,"y":0,"properties":{"markdown":"# SPS reliability -- prod\\nALB / CloudFront / ECS / Aurora. Read-only mirror of the page-topic alarms. See docs/SLOs.md.","background":"transparent"}},{"type":"text","width":24,"height":1,"x":0,"y":2,"properties":{"markdown":"## Public ALB","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":3,"properties":{"view":"timeSeries","title":"ALB latency p50/p90/p99 (s)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1498,7 +1498,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Requests","stat":"Sum"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Target 5xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Target 4xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
+              "","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Requests","stat":"Sum"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Target 5xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Target 4xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1510,7 +1510,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E28NKDFXC7K2ZL","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":1,"x":0,"y":16,"properties":{"markdown":"## ECS service"}},{"type":"metric","width":12,"height":6,"x":0,"y":17,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
+              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E28NKDFXC7K2ZL","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":1,"x":0,"y":16,"properties":{"markdown":"## ECS service","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":17,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1550,7 +1550,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":23,"properties":{"markdown":"## Aurora cluster"}},{"type":"metric","width":8,"height":6,"x":0,"y":24,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
+              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":23,"properties":{"markdown":"## Aurora cluster","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":24,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -2951,7 +2951,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"widgets":[{"type":"text","width":24,"height":2,"x":0,"y":0,"properties":{"markdown":"# SPS reliability -- staging\\nALB / CloudFront / ECS / Aurora. Read-only mirror of the page-topic alarms. See docs/SLOs.md."}},{"type":"text","width":24,"height":1,"x":0,"y":2,"properties":{"markdown":"## Public ALB"}},{"type":"metric","width":12,"height":6,"x":0,"y":3,"properties":{"view":"timeSeries","title":"ALB latency p50/p90/p99 (s)","region":"",
+              "{"widgets":[{"type":"text","width":24,"height":2,"x":0,"y":0,"properties":{"markdown":"# SPS reliability -- staging\\nALB / CloudFront / ECS / Aurora. Read-only mirror of the page-topic alarms. See docs/SLOs.md.","background":"transparent"}},{"type":"text","width":24,"height":1,"x":0,"y":2,"properties":{"markdown":"## Public ALB","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":3,"properties":{"view":"timeSeries","title":"ALB latency p50/p90/p99 (s)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -2959,7 +2959,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"Requests","stat":"Sum"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"Target 5xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"Target 4xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
+              "","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"Requests","stat":"Sum"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"Target 5xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"Target 4xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -2971,7 +2971,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E17NRWINXLP3B3","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":1,"x":0,"y":16,"properties":{"markdown":"## ECS service"}},{"type":"metric","width":12,"height":6,"x":0,"y":17,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
+              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E17NRWINXLP3B3","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":1,"x":0,"y":16,"properties":{"markdown":"## ECS service","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":17,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -3011,7 +3011,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":23,"properties":{"markdown":"## Aurora cluster"}},{"type":"metric","width":8,"height":6,"x":0,"y":24,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
+              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":23,"properties":{"markdown":"## Aurora cluster","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":24,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
