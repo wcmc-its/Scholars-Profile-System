@@ -121,7 +121,7 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   }
 
   if (v.isDeveloper && !v.isSuperuser) {
-    links.push({ id: "matcha", label: "Matcha", href: "/edit/matcha" });
+    links.push({ id: "matcha", label: "Matcha: Open search", href: "/edit/matcha" });
   }
 
   return links;

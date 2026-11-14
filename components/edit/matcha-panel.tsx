@@ -2660,7 +2660,7 @@ export function MatchaPanel({
             opaque until then, which is why BOTH hovers exist rather than one. (The idle-only
             subtitle below is different copy — paste-flow HOW-TO, not scope — per the Matcha
             Empty State artboard; it disappears once a search commits, the ⓘ never does.) */}
-        <h1 className="text-2xl font-bold tracking-tight">Matcha</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Matcha: Open search</h1>
         <HoverTooltip wide text={MATCHA_BLURB}>
           {/* tabIndex so the ⓘ is keyboard-reachable: this hover now carries the tool's scope copy
               that used to live in an always-visible subtitle, so focus-to-open + Radix's

@@ -61,7 +61,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     description: "Read-only console access for staff who support users.",
     source: "ed_group",
     groupCn: ED("observer"),
-    can: ["Read every profile and unit", "Read every queue and dashboard", "Download CVs", "View as (read-only)", "Matcha and Grant Matcha"],
+    can: ["Read every profile and unit", "Read every queue and dashboard", "Download CVs", "View as (read-only)", "Matcha: Open search and Grants"],
     cannot: ["Any edit (Matcha searches excepted)"],
   },
   {
@@ -71,7 +71,7 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     source: "ed_group",
     groupCn: ED("development"),
     alsoGrantedBy: "External Affairs · Development",
-    can: ["Matcha and Grant Matcha", "Every user's Matcha history"],
+    can: ["Matcha: Open search and Grants", "Every user's Matcha history"],
     cannot: ["Edit profiles"],
   },
   {

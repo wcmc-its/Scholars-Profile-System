@@ -66,7 +66,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   // Matcha is the front door; its console nav reaches Grant Matcha too.
-  development: { href: "/edit/matcha", label: "Matcha" },
+  development: { href: "/edit/matcha", label: "Matcha: Open search" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
   core_director: { href: "/edit/core", label: "Cores" },
   observer: { href: "/edit/profiles", label: "Profiles" },
