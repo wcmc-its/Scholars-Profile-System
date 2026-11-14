@@ -66,7 +66,9 @@ model Scholar {
   /// `docs/self-edit-spec.md` § Open questions 4.
   overviewUpdatedAt       DateTime? @map("overview_updated_at")
   slug                    String    @unique @db.VarChar(255)
-  status                  String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
+  status                  String    @default("active") @db.VarChar(32) // 'active' | 'suppressed' | 'external' (Cornell Ithaca)
+  // 'wcm' (ED owns the row) | 'ithaca' (etl/ithaca-roster owns it, status 'external').
+  campus                  String    @default("wcm") @db.VarChar(16)
   // Phase 2: derived in ED ETL per design-spec-v1.7.1.md:352-356.
   // Drives the algorithmic-surface eligibility carve (lib/eligibility.ts).
   // Nullable so the additive migration applies cleanly to existing rows;

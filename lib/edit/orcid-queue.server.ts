@@ -561,6 +561,7 @@ const loadAutoConfirmed = (client: ReadClient, cwid?: string) =>
       orcidConfirmMethod: "email_verified",
       orcid: { not: null },
       deletedAt: null,
+      campus: "wcm",
     },
     select: { cwid: true, orcid: true },
   });

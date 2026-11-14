@@ -33,7 +33,7 @@ WHERE nm.status = 'pending'
                   WHERE d.cwid = nm.cwid AND d.id <> nm.id
                     AND d.title = nm.title AND d.published_at <=> nm.published_at)
   AND NOT EXISTS (SELECT 1 FROM scholar s2
-                  WHERE s2.cwid <> nm.cwid AND s2.deleted_at IS NULL
+                  WHERE s2.cwid <> nm.cwid AND s2.deleted_at IS NULL AND s2.campus = 'wcm'
                     AND (s2.preferred_name = nm.detected_name OR s2.full_name = nm.detected_name))
   AND LOWER(nm.title) NOT REGEXP '(^|[^a-z])(in memoriam|obituar[a-z]*|remembering|tributes?|passed away|dies|died)([^a-z]|$)'
 ORDER BY nm.published_at IS NULL, nm.published_at DESC, nm.created_at ASC
