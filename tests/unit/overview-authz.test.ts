@@ -9,14 +9,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { ProxyLookup } from "@/lib/edit/proxy-authz";
 import type { UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 
-const { mockIsGrantedProxy, mockCheckConflict, mockResolveUnit, mockIsObserver } = vi.hoisted(
-  () => ({
+const { mockIsGrantedProxy, mockCheckConflict, mockResolveUnit, mockIsObserver, mockIsSuperuser } =
+  vi.hoisted(() => ({
+    mockIsSuperuser: vi.fn(),
     mockIsGrantedProxy: vi.fn(),
     mockCheckConflict: vi.fn(),
     mockResolveUnit: vi.fn(),
     mockIsObserver: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("@/lib/edit/proxy-authz", () => ({
   isGrantedProxy: mockIsGrantedProxy,
@@ -26,6 +26,7 @@ vi.mock("@/lib/edit/unit-scholar-authz", () => ({
   resolveEditableUnitViaUnitAdmin: mockResolveUnit,
 }));
 vi.mock("@/lib/auth/observer", () => ({ isObserver: mockIsObserver }));
+vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: mockIsSuperuser }));
 
 import { authorizeCvExport, authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 
@@ -49,6 +50,7 @@ function call(over: Partial<Parameters<typeof authorizeOverviewWrite>[0]> = {}) 
 beforeEach(() => {
   vi.clearAllMocks();
   mockIsObserver.mockResolvedValue(false);
+  mockIsSuperuser.mockResolvedValue(false);
   mockIsGrantedProxy.mockResolvedValue(false);
   mockCheckConflict.mockResolvedValue({ ok: true });
   mockResolveUnit.mockResolvedValue(null);
@@ -71,7 +73,8 @@ describe("authorizeOverviewWrite", () => {
     expect(mockIsGrantedProxy).not.toHaveBeenCalled();
   });
 
-  it("denies not_self when impersonating — the delegated legs are skipped (IS-1)", async () => {
+  it("denies not_self under View as when the real human is no longer a superuser", async () => {
+    mockIsGrantedProxy.mockResolvedValue(true);
     const r = await call({
       session: { cwid: "ovl", isSuperuser: false, isCommsSteward: false },
       realCwid: "real1",
@@ -79,8 +82,47 @@ describe("authorizeOverviewWrite", () => {
       impersonatedCwid: "ovl",
     });
     expect(r).toEqual({ ok: false, reason: "not_self" });
+    expect(mockIsSuperuser).toHaveBeenCalledWith("real1");
     expect(mockIsGrantedProxy).not.toHaveBeenCalled();
     expect(mockResolveUnit).not.toHaveBeenCalled();
+  });
+
+  it("allows View as a granted proxy — keyed on the viewed-as cwid", async () => {
+    mockIsSuperuser.mockResolvedValue(true);
+    mockIsGrantedProxy.mockResolvedValue(true);
+    const r = await call({
+      session: { cwid: "ovl", isSuperuser: false, isCommsSteward: false },
+      realCwid: "real1",
+      entityId: OTHER,
+      impersonatedCwid: "ovl",
+    });
+    expect(r).toEqual({ ok: true, viaUnitAdminUnit: null });
+    expect(mockIsGrantedProxy).toHaveBeenCalledWith("ovl", OTHER, PROXY_DB);
+    expect(mockCheckConflict).toHaveBeenCalledWith("ovl", PROXY_DB);
+  });
+
+  it("allows View as a unit admin — keyed on the viewed-as cwid", async () => {
+    mockIsSuperuser.mockResolvedValue(true);
+    mockResolveUnit.mockResolvedValue({ kind: "department", code: "D1" });
+    const r = await call({
+      session: { cwid: "ovl", isSuperuser: false, isCommsSteward: false },
+      realCwid: "real1",
+      entityId: OTHER,
+      impersonatedCwid: "ovl",
+    });
+    expect(r).toEqual({ ok: true, viaUnitAdminUnit: { kind: "department", code: "D1" } });
+    expect(mockResolveUnit).toHaveBeenCalledWith("ovl", OTHER, UNIT_DB);
+  });
+
+  it("denies View as someone with no grant", async () => {
+    mockIsSuperuser.mockResolvedValue(true);
+    const r = await call({
+      session: { cwid: "ovl", isSuperuser: false, isCommsSteward: false },
+      realCwid: "real1",
+      entityId: OTHER,
+      impersonatedCwid: "ovl",
+    });
+    expect(r).toEqual({ ok: false, reason: "not_self" });
   });
 
   it("allows a granted proxy whose conflict re-check passes — short-circuits unit leg", async () => {
