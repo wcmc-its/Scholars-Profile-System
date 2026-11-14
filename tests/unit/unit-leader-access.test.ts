@@ -257,7 +257,7 @@ describe("loadLedUnitRefs", () => {
 });
 
 describe("isCenterProgramLeader", () => {
-  it("a program leader passes; a COE liaison and a center-level leader do not", async () => {
+  it("a program leader and a COE liaison pass; a center-level leader does not", async () => {
     const leader = makeDb({
       assignments: [
         {
@@ -280,7 +280,7 @@ describe("isCenterProgramLeader", () => {
         },
       ],
     });
-    expect(await isCenterProgramLeader(ME, CENTER, liaison)).toBe(false);
+    expect(await isCenterProgramLeader(ME, CENTER, liaison)).toBe(true);
     const director = makeDb({
       assignments: [{ entityType: "center", entityId: CENTER, cwid: ME.cwid, roleKey: "director" }],
     });

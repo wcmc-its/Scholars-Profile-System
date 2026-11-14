@@ -42,6 +42,7 @@ import {
   DEPARTMENT_CHAIR_ROLE_KEY,
   DEPARTMENT_DIRECTOR_ROLE_KEY,
   DIVISION_CHIEF_ROLE_KEY,
+  COE_LIAISON_ROLE_KEY,
   PROGRAM_LEADER_ROLE_KEY,
 } from "@/lib/org-unit-roles";
 
@@ -211,10 +212,10 @@ export async function isUnitLeader(
 }
 
 /**
- * Whether the actor is a program LEADER of any program of this center (role
- * key `leader`, `entityType: "center_program"`). The only leadership that may
- * write NCI Table 2A. A COE Liaison sits in the program leadership group but is
- * not a program lead (see its vocabulary entry), so it views 2A only.
+ * Whether the actor is a program leader or COE Liaison of any program of this
+ * center (role key `leader` or `coe_liaison`, `entityType: "center_program"`).
+ * The only leadership that may write NCI Table 2A; center-level leaders
+ * (director, associate directors) view it only.
  */
 export async function isCenterProgramLeader(
   session: Pick<EditSession, "cwid">,
@@ -225,7 +226,7 @@ export async function isCenterProgramLeader(
     where: {
       cwid: session.cwid,
       entityType: CENTER_PROGRAM_ENTITY_TYPE,
-      roleKey: PROGRAM_LEADER_ROLE_KEY,
+      roleKey: { in: [PROGRAM_LEADER_ROLE_KEY, COE_LIAISON_ROLE_KEY] },
       entityId: { startsWith: `${centerCode}:` },
     },
     select: { entityId: true },
