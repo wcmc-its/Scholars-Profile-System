@@ -2,7 +2,7 @@
 
 **Status:** Accepted 2026-11-14. Ships in #3397; live once the app release and `Sps-Edge-<env>` deploy land.
 **Date:** 2026-11-14
-**Revision:** 2 (2026-11-14: D4a, rejected tokens)
+**Revision:** 3 (2026-11-14: D4a rejected tokens; D3a deep-facet page loads)
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
@@ -39,7 +39,23 @@ The CSP allows `https://*.awswaf.com` in `script-src` and `connect-src` for this
 
 `search-challenge-tokenless` challenges a tokenless `/search` request that carries an `_rsc` query parameter or an `RSC` header. A browser can only make such a request from a page it has already loaded, so under D2 a real visitor holds a token by then. This is 88% of tokenless `/search` traffic.
 
-### D4. Tokenless full page loads are challenged only during a surge
+### D3a. Tokenless page loads with four or more URL parameters are always challenged
+
+Within an hour of D4 going live in prod, a scraper walked facet combinations as plain page loads, one request per IP, at about 115 per 5 minutes, which is under the D4 limit. Tokenless `/search` page loads over the 24 hours to 2026-11-14, by referrer and URL depth:
+
+| Referrer | Four or more parameters | Fewer |
+|---|---|---|
+| None | 18,467 | 913 |
+| Google | 4,416 | 389 |
+| Old VIVO links | 0 | 1,766 |
+
+A real first visit is a shallow URL such as `?q=...`; a facet walk is not. So `search-challenge-tokenless` also matches a tokenless page load whose query string has three or more `&`.
+
+This corrects the Context table above. Most of the page loads counted there as arriving from Google carried deep facet URLs at one request per IP, which is a scraper sending a Google referrer, not people following search results. Real cold landings are about 3,000 a day.
+
+The cost: a person whose first page is a shared link with several filters sees the challenge once.
+
+### D4. Other tokenless page loads are challenged only during a surge
 
 `search-challenge-tokenless-surge` is a rate-based rule that counts tokenless `/search` page loads across all clients and challenges them only above 300 per 5 minutes. Below the limit a first-time visitor arriving from Google, a VIVO link or a bookmark is not challenged. Above it the blanket challenge returns on its own.
 

@@ -1742,11 +1742,22 @@ export class EdgeStack extends Stack {
           // They run after the Bot Control instances, which apply
           // awswaf:managed:token:absent / :rejected (see noValidToken).
           //
-          // 1. Client navigations (`_rsc` query or `RSC` header): always
-          //    challenged. A browser can only make one from a page it has
-          //    already loaded, and every page carries the challenge SDK
-          //    (SdkInjectingWebAcl), so a real visitor holds a token by then.
-          //    Prod 11-13..14: 88% of tokenless /search (65k of 74k a day).
+          // 1. Always challenged:
+          //    a. Client navigations (`_rsc` query or `RSC` header). A browser
+          //       can only make one from a page it has already loaded, and
+          //       every page carries the challenge SDK (SdkInjectingWebAcl),
+          //       so a real visitor holds a token by then. Prod 11-13..14:
+          //       88% of tokenless /search (65k of 74k a day).
+          //    b. Page loads whose URL carries four or more parameters (three
+          //       or more `&`). Within an hour of rule 2 going live a scraper
+          //       walked facet combinations as plain page loads, one request
+          //       per IP, under the surge limit. Prod, 24h to 11-14, tokenless
+          //       page loads: 22.9k with 4+ parameters (none from old VIVO
+          //       links, and the Google-referred ones came at one request per
+          //       IP) against 3.2k with fewer (VIVO 1.8k, no referrer 0.9k,
+          //       Google 0.4k). A real first visit is `?q=...`; a facet walk
+          //       is not. Cost: someone opening a shared deep-filter link as
+          //       their first page sees the challenge once.
           {
             name: "search-challenge-tokenless",
             priority: managedGroups.length + 7,
@@ -1775,6 +1786,13 @@ export class EdgeStack extends Stack {
                             textTransformations: [{ priority: 0, type: "NONE" }],
                           },
                         },
+                        {
+                          regexMatchStatement: {
+                            regexString: "(&[^&]*){3}",
+                            fieldToMatch: { queryString: {} },
+                            textTransformations: [{ priority: 0, type: "NONE" }],
+                          },
+                        },
                       ],
                     },
                   },
@@ -1787,7 +1805,7 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
-          // 2. Full page loads: a first-time visitor arriving on a /search
+          // 2. Other page loads: a first-time visitor arriving on a /search
           //    link (Google, an old VIVO link, a bookmark) has had no chance
           //    to get a token, so these pass unchallenged until tokenless
           //    /search page loads, counted across ALL clients, exceed the

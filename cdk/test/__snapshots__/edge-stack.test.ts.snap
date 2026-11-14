@@ -2105,6 +2105,20 @@ a{color:var(--slate)}
                             ],
                           },
                         },
+                        {
+                          "RegexMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "RegexString": "(&[^&]*){3}",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
                       ],
                     },
                   },
@@ -4449,6 +4463,20 @@ a{color:var(--slate)}
                               },
                             },
                             "Size": 0,
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "RegexMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "RegexString": "(&[^&]*){3}",
                             "TextTransformations": [
                               {
                                 "Priority": 0,
