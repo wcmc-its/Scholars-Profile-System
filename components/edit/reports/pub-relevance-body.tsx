@@ -30,6 +30,7 @@ const SEGMENTS: PubRelevanceStatusFilter[] = ["all", "ai", "rule", "confirmed", 
 export async function renderPubRelevanceReport({
   code,
   kind,
+  ctx,
   searchParams,
   basePath,
 }: UnitReportProps): Promise<ReportRender> {
@@ -126,6 +127,7 @@ export async function renderPubRelevanceReport({
             centerCode={code}
             rows={rows}
             resetKey={`${params.year}:${params.kind}:${params.status}`}
+            readOnly={ctx.viewOnly === true}
           />
         </section>
         <ReportCard>

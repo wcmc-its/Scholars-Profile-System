@@ -9,7 +9,8 @@
  *   - the center must be one report 5 serves: a `center` with a
  *     `CenterProgram` taxonomy (`resolveReportsCenterCode`'s rule; report 5
  *     is center-only in `REPORT_NUMBERS_BY_KIND`);
- *   - `canEditUnit`: superuser, comms_steward, or the center's Owner/Curator
+ *   - `authorizeUnitReportView`: superuser, comms_steward, or the center's
+ *     Owner/Curator, or with `LEADER_REPORT_ACCESS` on a leader of the center
  *     (a denial is logged);
  *   - `loadReportsContext`, the page's own gate, which also refuses a retired
  *     center to anyone but a superuser.
@@ -20,12 +21,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { loadClinicalTrialsReport } from "@/lib/center-collaboration/clinical-trials-report";
 import { db } from "@/lib/db";
-import {
-  canEditUnit,
-  getEffectiveUnitRole,
-  logEditDenial,
-  type UnitAdminLookup,
-} from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeUnitReportView } from "@/lib/edit/unit-leader-access";
 import { loadReportsContext } from "@/lib/edit/cancer-center-reports";
 import {
   filterTrials,
@@ -54,12 +51,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
   if (!center || !program) return editError(404, "unit_not_found", "center");
 
-  const effective = await getEffectiveUnitRole(
-    session,
-    { kind: "center", code: center.code },
-    db.read as unknown as UnitAdminLookup,
-  );
-  const authz = canEditUnit(session, effective);
+  // Report data: the unit's editors, or (LEADER_REPORT_ACCESS) its leaders.
+  const authz = await authorizeUnitReportView(session, { kind: "center", code: center.code }, db.read);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: realCwid,

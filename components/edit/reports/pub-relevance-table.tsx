@@ -36,7 +36,7 @@ const SLATE = "text-apollo-slate bg-apollo-slate-tint border-apollo-slate-tint-b
 type Write = { relevant: boolean; reason: string | null };
 type Save = (pmid: string, patch: Partial<Write>) => Promise<boolean>;
 
-function Row({ row, save }: { row: PubRelevanceRow; save: Save }) {
+function Row({ row, save, readOnly }: { row: PubRelevanceRow; save: Save; readOnly: boolean }) {
   const status = pubRelevanceStatus(row);
   const [busy, setBusy] = React.useState(false);
   const [draft, setDraft] = React.useState<string | undefined>(undefined);
@@ -113,10 +113,16 @@ function Row({ row, save }: { row: PubRelevanceRow; save: Save }) {
         ))}
       </td>
       <td className="p-3">
-        <div className="flex gap-1.5">
-          {choice(true)}
-          {choice(false)}
-        </div>
+        {readOnly ? (
+          <div className="text-sm" data-testid="pub-relevance-answer">
+            {row.relevant === true ? "Yes" : row.relevant === false ? "No" : "—"}
+          </div>
+        ) : (
+          <div className="flex gap-1.5">
+            {choice(true)}
+            {choice(false)}
+          </div>
+        )}
         <span
           className={cn(
             "mt-1.5 inline-block rounded border px-1.5 py-px text-[11px] font-semibold whitespace-nowrap",
@@ -128,7 +134,9 @@ function Row({ row, save }: { row: PubRelevanceRow; save: Save }) {
         </span>
       </td>
       <td className="py-3 pr-5 pl-3 text-[13px] leading-snug">
-        {draft !== undefined ? (
+        {readOnly ? (
+          (row.reason ?? <span className="text-muted-foreground">—</span>)
+        ) : draft !== undefined ? (
           <Textarea
             rows={3}
             autoFocus
@@ -173,8 +181,12 @@ export function PubRelevanceTable({
   centerCode,
   rows,
   resetKey,
+  readOnly = false,
 }: {
   centerCode: string;
+  /** A leader-only viewer (LEADER_REPORT_ACCESS): answers and notes as text.
+   *  The PATCH route refuses them regardless (`canEditUnit`). */
+  readOnly?: boolean;
   rows: ReadonlyArray<PubRelevanceRow>;
   /** The filter query; paging resets when it changes. */
   resetKey: string;
@@ -252,7 +264,7 @@ export function PubRelevanceTable({
             </thead>
             <tbody>
               {visible.map((r) => (
-                <Row key={r.pmid} row={r} save={save} />
+                <Row key={r.pmid} row={r} save={save} readOnly={readOnly} />
               ))}
             </tbody>
           </table>

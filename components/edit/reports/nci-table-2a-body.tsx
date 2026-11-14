@@ -2,7 +2,8 @@
  * Report 2 — "NCI Table 2a" body (reports redesign, 2026-09-25; mockup
  * `NCI Table 2a Redesign.dc.html`). Unit-gated, center-only
  * (`REPORT_NUMBERS_BY_KIND`); the page's unit gate (`loadReportsContext`)
- * admits the same actors as the API's `canEditUnit`.
+ * admits the same actors as the API's `canEditUnit`, plus (LEADER_REPORT_ACCESS)
+ * the center's leaders, view-only unless they lead a program.
  *
  * Top card: cycle-wide review progress, the banner, the headline numbers and
  * the CSV button. Results card: the status segments (All / Needs review /
@@ -40,8 +41,10 @@ import {
   type Nci2aSortKey,
   type Nci2aStatusFilter,
 } from "@/lib/edit/nci-2a-report";
+import { db } from "@/lib/db";
 import { loadNci2aReport } from "@/lib/edit/nci-2a-report.server";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
+import { isCenterProgramLeader } from "@/lib/edit/unit-leader-access";
 import { cn } from "@/lib/utils";
 
 const SELECT =
@@ -130,11 +133,21 @@ function QueryAndAssumptions({ cycle }: { cycle: string }) {
 export async function renderNciTable2aReport({
   code,
   kind,
+  ctx,
+  session,
   searchParams,
   basePath,
 }: UnitReportProps): Promise<ReportRender> {
   const params = parseNci2aParams(toSearchParams(searchParams));
-  const data = await loadNci2aReport(code);
+  // A leader-only viewer (`ctx.viewOnly`, LEADER_REPORT_ACCESS) may write 2A
+  // only as a program leader of this center (`authorizeNci2aWrite` is the
+  // real gate); anyone else of them gets the table without edit controls.
+  const [data, readOnly] = await Promise.all([
+    loadNci2aReport(code),
+    ctx.viewOnly === true
+      ? isCenterProgramLeader(session, code, db.read).then((leader) => !leader)
+      : Promise.resolve(false),
+  ]);
   const unitQuery = nci2aUnitQuery(code, kind);
   const href = (q: string) => nci2aHref(basePath, unitQuery, q);
 
@@ -327,6 +340,8 @@ export async function renderNciTable2aReport({
           </div>
           <Nci2aTable
             centerCode={code}
+            readOnly={readOnly}
+            showRosterLink={ctx.viewOnly !== true}
             rows={rows}
             resetKey={nci2aQueryString(params)}
             sort={params.sort}
@@ -338,12 +353,25 @@ export async function renderNciTable2aReport({
 
         <p className="text-muted-foreground max-w-[760px] text-[13px]" role="note">
           Relevant DC = direct costs × cancer-relevant %. Program is set by each person&apos;s
-          center membership and can&apos;t be changed here;{" "}
-          <Link href={`/edit/center/${encodeURIComponent(code)}`}>
-            edit it in the center roster
-          </Link>
-          . Press Enter or leave the field to save a percentage; Esc undoes. &ldquo;Accept … shown
-          suggestions&rdquo; confirms the AI-suggested rows on screen, up to 50 at a time.
+          center membership and can&apos;t be changed here
+          {ctx.viewOnly === true ? (
+            "."
+          ) : (
+            <>
+              ;{" "}
+              <Link href={`/edit/center/${encodeURIComponent(code)}`}>
+                edit it in the center roster
+              </Link>
+              .
+            </>
+          )}
+          {!readOnly && (
+            <>
+              {" "}
+              Press Enter or leave the field to save a percentage; Esc undoes. &ldquo;Accept …
+              shown suggestions&rdquo; confirms the AI-suggested rows on screen, up to 50 at a time.
+            </>
+          )}
         </p>
         <QueryAndAssumptions cycle={cycle} />
       </div>

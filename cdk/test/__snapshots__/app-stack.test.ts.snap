@@ -847,6 +847,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "LEADER_REPORT_ACCESS",
+                "Value": "off",
+              },
+              {
                 "Name": "ORCID_CONNECT_BASE",
                 "Value": "https://orcid.org",
               },
@@ -5916,6 +5920,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_CONNECT",
+                "Value": "on",
+              },
+              {
+                "Name": "LEADER_REPORT_ACCESS",
                 "Value": "on",
               },
               {
