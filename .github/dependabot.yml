@@ -13,6 +13,13 @@ version: 2
 # one PR per directory; majors as a second PR, since they usually need code
 # changes (e.g. vitest 3 -> 5). CVE-driven security PRs are grouped into one PR
 # per directory. No `ignore` rules: they can also suppress security updates.
+#
+# mariadb is excluded from the minor+patch groups (it still arrives as its own
+# PR). @prisma/adapter-mariadb pins mariadb to an exact version, so a newer
+# top-level copy splits the PoolConfig type and fails typecheck (#3371). In /cdk,
+# lambda/db-bootstrap-seed bundles from its own package-lock.json, which
+# Dependabot doesn't update, so a bump there fails `npm ci` (#3317). Take a
+# mariadb PR only once the adapter's pin moves, and refresh that lockfile by hand.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -37,6 +44,8 @@ updates:
           - "*"
       npm-minor-patch:
         applies-to: version-updates
+        exclude-patterns:
+          - "mariadb"
         update-types:
           - "minor"
           - "patch"
@@ -59,6 +68,8 @@ updates:
           - "*"
       cdk-minor-patch:
         applies-to: version-updates
+        exclude-patterns:
+          - "mariadb"
         update-types:
           - "minor"
           - "patch"
