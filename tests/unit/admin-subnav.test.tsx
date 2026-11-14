@@ -1042,6 +1042,10 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(sync!.textContent).toContain("Data sync");
     expect(sync!.textContent).not.toContain("ETL");
     expect(sync!.getAttribute("href")).toBe("/edit/etl-status");
+    // "ORCID" in the nav; the route and id stay `orcid-coverage`.
+    const orcid = menu.querySelector('[data-testid="admin-tab-orcid-coverage"]');
+    expect(orcid!.textContent?.trim()).toBe("ORCID");
+    expect(orcid!.getAttribute("href")).toBe("/edit/orcid-coverage");
   });
 
   it("is dark by default — the flag off reproduces the flat tab strip", () => {

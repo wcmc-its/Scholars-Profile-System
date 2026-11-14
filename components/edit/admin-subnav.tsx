@@ -440,7 +440,7 @@ export function AdminSubnav({
         show: superuserSurfaces || orcidCoverageTab,
         id: "orcid-coverage",
         href: "/edit/orcid-coverage",
-        label: "ORCID coverage",
+        label: "ORCID",
       },
       // The ORCID librarian confirmation queue, beside the coverage it closes.
       {
