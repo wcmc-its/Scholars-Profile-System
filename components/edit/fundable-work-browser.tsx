@@ -299,7 +299,7 @@ export function FundableWorkBrowser({ rows, truncated }: { rows: FundableWorkRow
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-3xl">
-          <h1 className="text-2xl font-semibold">Matcha: Emerging research</h1>
+          <h1 className="text-2xl font-semibold">Matcha for emerging research</h1>
           <p className="text-muted-foreground mt-1.5 text-sm">
             Conference abstracts, conference papers and preprints by full-time faculty from the last two years, with postdoc co-authors
             listed, scored 1–5 for industry and foundation funding potential. Scores, pitches and funder suggestions

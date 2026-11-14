@@ -478,7 +478,7 @@ export function AdminSubnav({
         show: (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled(),
         id: "matcha",
         href: "/edit/matcha",
-        label: "Matcha: Open search",
+        label: "Matcha",
       },
       // Grant Matcha — Matcha seeded from a funding opportunity. Same audience
       // as Matcha, additionally dark while GRANT_MATCHA is off (both flags read
@@ -490,7 +490,7 @@ export function AdminSubnav({
           (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled() && isGrantMatchaEnabled(),
         id: "grant-matcha",
         href: "/edit/grant-matcha",
-        label: "Matcha: Grants",
+        label: "Matcha for grants",
       },
       // Fundable work — scored WCM abstracts and preprints for CTL. Matcha's
       // audience, its own flag (FUNDABLE_WORK).
@@ -498,7 +498,7 @@ export function AdminSubnav({
         show: (superuserSurfaces || viewerCanUseMatcha) && isFundableWorkEnabled(),
         id: "fundable-work",
         href: "/edit/fundable-work",
-        label: "Matcha: Emerging research",
+        label: "Matcha for emerging research",
       },
     ] satisfies TabSpec[]
   ).filter((t) => t.show);

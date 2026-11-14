@@ -24,7 +24,7 @@ import { isFundableWorkEnabled, type FundableWorkFunder } from "@/lib/fundable-w
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Matcha: Emerging research — Scholars Console",
+  title: "Matcha for emerging research — Scholars Console",
   robots: { index: false, follow: false },
 };
 

@@ -295,8 +295,8 @@ describe("AccountMenu — identity and View as", () => {
     render(<AccountMenu scholar={paul} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
     expect(targetLinks()).toEqual([
-      ["Matcha: Open search", "/edit/matcha"],
-      ["Matcha: Grants", "/edit/grant-matcha"],
+      ["Matcha", "/edit/matcha"],
+      ["Matcha for grants", "/edit/grant-matcha"],
     ]);
   });
 

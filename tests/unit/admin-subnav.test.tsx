@@ -448,7 +448,7 @@ describe("AdminSubnav — the Grant Matcha tab", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} pendingHonors={null} />);
     const tab = screen.getByTestId("admin-tab-grant-matcha");
     expect(tab.tagName).toBe("A");
-    expect(tab.textContent).toContain("Matcha: Grants");
+    expect(tab.textContent).toContain("Matcha for grants");
     expect(tab.getAttribute("href")).toBe("/edit/grant-matcha");
     // …right next to the Matcha tab it layers on.
     expect(screen.getByTestId("admin-tab-matcha")).toBeTruthy();
