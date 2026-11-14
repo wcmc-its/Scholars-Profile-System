@@ -2183,7 +2183,8 @@ export class AppStack extends Stack {
         // Retire at full launch by setting this to "off" and `cdk deploy
         // Sps-App-<env>` -- no code revert (CD re-rolls the image only, so an
         // env-flag change requires an explicit cdk deploy).
-        SHOW_BETA_BADGE: "on",
+        // Retired at public launch (2026-11-14); set back to "on" + cdk deploy to restore.
+        SHOW_BETA_BADGE: "off",
         // #713 / #707 -- "Why this match" explanation lines. Brought to
         // local-dev parity (these were on in .env.local but never wired here, so
         // the features worked locally and were silently off in staging+prod):
