@@ -218,11 +218,9 @@ describe("etl-status state mapping", () => {
   // 🔴 The single most important rule on this page. The Spotlight and Hierarchy
   // loaders write a fresh SUCCESS row when the artifact's sha256 is unchanged, so
   // `completedAt` advances while the data underneath is frozen. Anchoring on
-  // completedAt would paint a dead producer green. Those two are also the ONLY
-  // sources that write `manifestGeneratedAt` (`grep -rn manifestGeneratedAt etl/`)
-  // — Tools short-circuits identically but stays completedAt-anchored on purpose,
-  // so a Tools fixture with a manifest timestamp would test a row production
-  // cannot produce.
+  // completedAt would paint a dead producer green. Tools also writes
+  // `manifestGeneratedAt` but grades on its run (`anchorOnRun`), like Spotlight,
+  // so Hierarchy is the fixture whose manifest timestamp actually drives grading.
   it("anchors freshness on the producer's manifest timestamp, not the row's completion time", () => {
     const row = toSourceRow(
       "Hierarchy",
@@ -495,10 +493,8 @@ describe("/edit/etl-status page", () => {
     expect(hierarchy.textContent).toContain("Never ran");
   });
 
-  // Hierarchy, not Tools: Hierarchy is one of the two loaders that actually
-  // writes `manifestGeneratedAt` (the other is Spotlight, which grades on its
-  // run via `anchorOnRun` and so ignores the manifest). Tools is completedAt-anchored by
-  // design, so a Tools fixture would assert on a row prod cannot emit.
+  // Hierarchy, not Tools or Spotlight: both of those grade on their run via
+  // `anchorOnRun` and so ignore the manifest timestamp.
   it("paints a frozen artifact as late even though the import finished minutes ago", async () => {
     fixtures = {
       Hierarchy: {

@@ -169,6 +169,8 @@ const CADENCE_LABEL: Record<Cadence, string> = {
   // That is a policy detail, not something to make somebody decode in a column.
   "nightly-mirrored": "Every night",
   weekly: "Every week",
+  // Same reasoning as "nightly-mirrored" above.
+  "weekly-mirrored": "Every week",
   monthly: "Every month",
   annual: "Once a year",
 };
@@ -178,6 +180,7 @@ const CADENCE_GROUP: Record<Cadence, NormalGroupKey> = {
   nightly: "nightly",
   "nightly-mirrored": "nightly",
   weekly: "weekly",
+  "weekly-mirrored": "weekly",
   monthly: "monthly",
   annual: "annual",
 };
