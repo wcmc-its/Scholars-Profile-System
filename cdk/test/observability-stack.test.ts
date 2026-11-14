@@ -146,8 +146,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 20 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 2 #2190 ETL heartbeat warns)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 20);
+    it("creates exactly 21 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 2 #2190 ETL heartbeat warns + 1 /search surge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 21);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -155,7 +155,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(20);
+      expect(names).toHaveLength(21);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
@@ -189,6 +189,7 @@ describe("SpsObservabilityStack", () => {
           "sps-opensearch-cluster-red-prod",
           "sps-opensearch-jvm-pressure-prod",
           "sps-oncall-relay-errors-prod",
+          "sps-search-challenge-surge-prod",
         ].sort(),
       );
     });
@@ -369,6 +370,9 @@ describe("SpsObservabilityStack", () => {
         // #1936 -- origin latency near the 30s read timeout is a leading
         // indicator of 504s, not an outage: warn tier, not a composite child.
         "sps-edge-origin-latency-p99-prod": warnId,
+        // ADR-017 -- the surge rule firing means visitors are being
+        // challenged, not that the site is down: warn tier.
+        "sps-search-challenge-surge-prod": warnId,
         "sps-alb-5xx-rate-prod": undefined,
         "sps-alb-unhealthy-hosts-prod": undefined,
         "sps-ecs-task-shortfall-prod": undefined,
@@ -395,8 +399,8 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      // 20 in prod; staging is 19 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(20);
+      // 21 in prod; staging is 20 — it gets no ACU alarm (see the note above).
+      expect(seen).toBe(21);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -1177,6 +1181,51 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
+    // --------------------------------------------------------------------
+    // Bot defense on /search (ADR-017)
+    // --------------------------------------------------------------------
+    it("warns when the /search surge rule challenges anyone", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-search-challenge-surge-prod",
+        Namespace: "AWS/WAFV2",
+        MetricName: "ChallengeRequests",
+        Dimensions: Match.arrayWith([
+          { Name: "Rule", Value: "sps-edge-prod-search-challenge-tokenless-surge" },
+          { Name: "WebACL", Value: "sps-edge-prod-wcm-only" },
+        ]),
+        Statistic: "Sum",
+        Threshold: 0,
+        ComparisonOperator: "GreaterThanThreshold",
+        // The rule matches nothing in normal operation, so no datapoints.
+        TreatMissingData: "notBreaching",
+      });
+    });
+
+    it("saves the WAF log queries against this env's log group", () => {
+      const defs = Object.values(
+        template.findResources("AWS::Logs::QueryDefinition"),
+      ).map((r) => r.Properties);
+      expect(defs.map((d) => d.Name).sort()).toEqual([
+        "sps-prod/waf/search-by-rule-and-action",
+        "sps-prod/waf/search-challenged-by-referrer",
+        "sps-prod/waf/search-tokenless-page-loads-by-client",
+        "sps-prod/waf/search-tokenless-page-loads-per-5m",
+      ]);
+      for (const d of defs) {
+        expect(d.LogGroupNames).toEqual(["aws-waf-logs-sps-prod"]);
+      }
+    });
+
+    it("dashboard has the bot-defense row with the edge WAF rule metrics", () => {
+      const body = JSON.stringify(
+        Object.values(template.findResources("AWS::CloudWatch::Dashboard"))[0]
+          ?.Properties?.DashboardBody,
+      );
+      expect(body).toContain("Bot defense on /search");
+      expect(body).toContain("sps-edge-prod-search-challenge-tokenless-surge");
+      expect(body).toContain("ChallengesSolvedSdk");
+    });
+
     it("dashboard body references a metric token for every surface", () => {
       const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
       const body = Object.values(dashboards)[0]?.Properties?.DashboardBody;
@@ -1233,8 +1282,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 19 CloudWatch alarms (11 platform + 1 B27 relay-errors + 5 edge + 2 #2190 ETL heartbeat warns)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 19);
+    it("creates exactly 20 CloudWatch alarms (11 platform + 1 B27 relay-errors + 5 edge + 2 #2190 ETL heartbeat warns + 1 /search surge)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 20);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -1242,7 +1291,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(19);
+      expect(names).toHaveLength(20);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -1336,6 +1385,7 @@ describe("SpsObservabilityStack", () => {
         "sps-edge-origin-cert-expiring-staging": warnId,
         "sps-edge-probe-stalled-staging": warnId,
         "sps-edge-origin-latency-p99-staging": warnId,
+        "sps-search-challenge-surge-staging": warnId,
         "sps-alb-5xx-rate-staging": undefined,
         "sps-alb-unhealthy-hosts-staging": undefined,
         "sps-ecs-task-shortfall-staging": undefined,
@@ -1360,7 +1410,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(19);
+      expect(seen).toBe(20);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
