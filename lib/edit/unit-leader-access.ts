@@ -29,6 +29,7 @@
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { EditSession } from "@/lib/auth/superuser";
+import { LEADER_UNIT_AUDIENCE, LEADER_UNIT_RULE } from "@/lib/edit/report-access-summary";
 import {
   canEditUnit,
   getEffectiveUnitRole,
@@ -47,6 +48,14 @@ import {
 /** `LEADER_REPORT_ACCESS=on` turns leader report access on. Read per call. */
 export function isLeaderReportAccessEnabled(): boolean {
   return process.env.LEADER_REPORT_ACCESS === "on";
+}
+
+/** The access badge for a unit-gated report: names leaders while the flag is
+ *  on, the plain Owner/Curator default otherwise. Server-only (reads env). */
+export function unitReportAccess(): { mode: "unit"; audience?: string; rule?: string } {
+  return isLeaderReportAccessEnabled()
+    ? { mode: "unit", audience: LEADER_UNIT_AUDIENCE, rule: LEADER_UNIT_RULE }
+    : { mode: "unit" };
 }
 
 /** The unit kinds a leader can be resolved for (the reports suite's kinds). */
