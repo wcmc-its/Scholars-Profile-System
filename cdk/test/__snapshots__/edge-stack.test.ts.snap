@@ -1492,6 +1492,11 @@ function handler(event) {
     },
     "EdgeWebAcl": {
       "Properties": {
+        "AssociationConfig": {
+          "ChallengeJavascriptSdkInjection": {
+            "CLOUDFRONT": {},
+          },
+        },
         "ChallengeConfig": {
           "ImmunityTimeProperty": {
             "ImmunityTime": 14400,
@@ -3675,6 +3680,11 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     },
     "EdgeWebAcl": {
       "Properties": {
+        "AssociationConfig": {
+          "ChallengeJavascriptSdkInjection": {
+            "CLOUDFRONT": {},
+          },
+        },
         "ChallengeConfig": {
           "ImmunityTimeProperty": {
             "ImmunityTime": 14400,

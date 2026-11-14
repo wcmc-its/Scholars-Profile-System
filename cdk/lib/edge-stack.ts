@@ -225,6 +225,28 @@ export interface EdgeStackProps extends StackProps {
 }
 
 /**
+ * CfnWebACL plus `AssociationConfig.ChallengeJavascriptSdkInjection`.
+ *
+ * aws-cdk-lib 2.275 does not type the property, and `addPropertyOverride`
+ * cannot express it: CDK's override merge deletes empty objects, and the
+ * value CloudFormation wants is `{ CLOUDFRONT: {} }`. Adding it in
+ * `renderProperties` bypasses that merge.
+ * ponytail: delete this class and pass `associationConfig` once CDK types it.
+ */
+class SdkInjectingWebAcl extends wafv2.CfnWebACL {
+  protected renderProperties(props: {
+    [key: string]: unknown;
+  }): { [key: string]: unknown } {
+    return {
+      ...super.renderProperties(props),
+      AssociationConfig: {
+        ChallengeJavascriptSdkInjection: { CLOUDFRONT: {} },
+      },
+    };
+  }
+}
+
+/**
  * EdgeStack — CloudFront distribution fronting the SPS public ALB (B07 + B14).
  *
  * Implements the behaviors in `docs/cloudfront-cache-spec.md`. Four classes:
@@ -1300,7 +1322,7 @@ export class EdgeStack extends Stack {
         "SignalKnownBotDataCenter",
         "SignalNonBrowserUserAgent",
       ];
-      const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
+      const webAcl = new SdkInjectingWebAcl(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
         scope: "CLOUDFRONT",
         // #3368 option 4: how long a solved challenge keeps a client out of
@@ -1736,6 +1758,16 @@ export class EdgeStack extends Stack {
         },
         description: `SPS front end ${env} - ${envConfig.edgePublic ? "public" : "WCM-only IP allow"}, AWS managed rule groups enforced, bot-aware rate limit`,
       });
+      // Automatic SDK integration: CloudFront inserts the WAF challenge SDK
+      // into every 200 text/html response, so a real browser picks up the
+      // aws-waf-token in the background on its first page (home, a profile)
+      // and keeps it refreshed. By the time it reaches /search it holds a
+      // token, and search-challenge-tokenless only ever fires for clients
+      // that run no JS or land cold on /search. Requires the TARGETED Bot
+      // Control instance above; AWS rejects an update that drops TARGETED
+      // while this is set. The app CSP must allow https://*.awswaf.com
+      // (lib/security-headers.ts) or the inserted script is blocked.
+      // Set by SdkInjectingWebAcl (top of file).
       webAclArn = webAcl.attrArn;
 
       // #1939: WAF logging. Without it the only record of WHICH rule fired

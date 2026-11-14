@@ -2003,6 +2003,12 @@ describe("EdgeStack", () => {
             ImmunityTimeProperty: { ImmunityTime: 14400 },
           });
         });
+
+        it("has CloudFront insert the challenge SDK so browsers get a token before /search", () => {
+          expect(acl.AssociationConfig).toEqual({
+            ChallengeJavascriptSdkInjection: { CLOUDFRONT: {} },
+          });
+        });
       });
 
       it("ENFORCES the per-IP rate rule, exempting verified bots (#1434 + #125)", () => {

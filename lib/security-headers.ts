@@ -50,8 +50,13 @@ export interface ResponseHeader {
 export function buildContentSecurityPolicy(opts: {
   isProduction: boolean;
 }): string {
-  const scriptSrc = ["'self'", "'unsafe-inline'"];
-  const connectSrc = ["'self'"];
+  // https://*.awswaf.com: the AWS WAF challenge SDK, which CloudFront inserts
+  // into every HTML page (edge-stack.ts, ChallengeJavascriptSdkInjection). It
+  // fetches the aws-waf-token in the background so a visitor already holds
+  // one before reaching /search and never sees the challenge interstitial.
+  // AWS documents the apex wildcard as the allowlist; hosts are not stable.
+  const scriptSrc = ["'self'", "'unsafe-inline'", "https://*.awswaf.com"];
+  const connectSrc = ["'self'", "https://*.awswaf.com"];
   if (!opts.isProduction) {
     scriptSrc.push("'unsafe-eval'");
     connectSrc.push("ws:", "wss:");
@@ -78,7 +83,8 @@ export function buildContentSecurityPolicy(opts: {
     // injection vector with no first-party regression. See docs/ADR-007.
     "script-src-attr": "'none'",
     "style-src": "'self' 'unsafe-inline'",
-    // Every client fetch targets a same-origin route handler.
+    // Every app fetch targets a same-origin route handler; the one external
+    // origin is the WAF challenge SDK's token endpoint (see above).
     "connect-src": connectSrc.join(" "),
     // Violations POST to the in-app collector (/api/csp-report), logged as
     // structured lines for the report-only observation window (#374).
