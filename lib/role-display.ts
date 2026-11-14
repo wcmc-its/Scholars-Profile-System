@@ -51,6 +51,12 @@ export const ROLE_DISPLAY: Record<string, string> = {
   non_faculty_academic: "Non-faculty academic",
   non_academic: "Non-academic",
   affiliate_alumni: "Affiliate alumni",
+  ithaca_faculty: "Cornell Ithaca faculty",
+  ithaca_rte_faculty: "Cornell Ithaca RTE faculty",
+  ithaca_emeritus: "Cornell Ithaca emeritus",
+  ithaca_postdoc: "Cornell Ithaca postdoc",
+  ithaca_researcher: "Cornell Ithaca research staff",
+  ithaca_student_grad: "Cornell Ithaca grad student",
 };
 
 export function formatRoleCategory(raw: string | null | undefined): string | null {

@@ -141,7 +141,10 @@ async function main(): Promise<number> {
   }
 
   const scholars = new Set(
-    (await db.write.scholar.findMany({ select: { cwid: true } })).map((s) => s.cwid.toLowerCase()),
+    // Cornell Ithaca rows opt in with the Ithaca ORCID step, not here.
+    (await db.write.scholar.findMany({ where: { campus: "wcm" }, select: { cwid: true } })).map((s) =>
+      s.cwid.toLowerCase(),
+    ),
   );
   const { keep, noScholar } = mergeForScholars(read.rows, scholars);
   console.log(

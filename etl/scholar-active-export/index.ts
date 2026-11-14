@@ -52,7 +52,9 @@ async function main(): Promise<number> {
   const force = process.argv.includes("--force");
   const rows: ActiveRow[] = (
     await db.write.scholar.findMany({
-      where: { deletedAt: null },
+      // WCM only: downstream ReCiter jobs read this as the WCM roster. The Ithaca
+      // ORCID step adds a campus column before Ithaca rows go in.
+      where: { deletedAt: null, campus: "wcm" },
       select: { cwid: true, orcid: true, orcidConfirmedAt: true },
       orderBy: { cwid: "asc" },
     })

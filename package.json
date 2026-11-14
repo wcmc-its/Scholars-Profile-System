@@ -111,6 +111,7 @@
     "etl:orcid-registry": "tsx etl/orcid-registry/index.ts",
     "etl:orcid-evidence": "tsx etl/orcid-evidence/index.ts",
     "etl:identity-links": "tsx etl/identity-links/index.ts",
+    "etl:ithaca-roster": "tsx etl/ithaca-roster/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
     "etl:mesh": "tsx etl/mesh-descriptors/index.ts",
     "etl:cancer-taxonomy": "tsx etl/cancer-taxonomy/index.ts",

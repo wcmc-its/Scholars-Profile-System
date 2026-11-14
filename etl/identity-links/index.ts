@@ -88,6 +88,8 @@ async function main(): Promise<number> {
   });
 
   const scholars = await db.write.scholar.findMany({
+    // The WCM side only: Cornell Ithaca rows are the other side of the pairs.
+    where: { campus: "wcm" },
     select: { cwid: true, netid: true, fullName: true, email: true, orcid: true },
   });
   const wcm: WcmPerson[] = scholars.map((s) => {

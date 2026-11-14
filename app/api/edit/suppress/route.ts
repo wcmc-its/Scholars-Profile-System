@@ -312,7 +312,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         // Denormalized projection of the suppression table (ADR-005).
         // updateMany — a suppression row may legitimately outlive its target.
         await tx.scholar.updateMany({
-          where: { cwid: entityId },
+          // WCM rows only: a Cornell Ithaca row's 'external' status is not a suppression state.
+          where: { cwid: entityId, campus: "wcm" },
           data: { status: "suppressed" },
         });
       }

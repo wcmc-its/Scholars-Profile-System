@@ -930,7 +930,7 @@ async function main() {
 
     // Existing scholars and slugs from the DB.
     const existing = await db.write.scholar.findMany({
-      select: { cwid: true, slug: true, deletedAt: true, createdAt: true },
+      select: { cwid: true, slug: true, deletedAt: true, createdAt: true, campus: true, status: true },
     });
     const existingByCwid = new Map(existing.map((s) => [s.cwid, s]));
     const existingSlugs = new Set(existing.map((s) => s.slug));
@@ -1255,6 +1255,9 @@ async function main() {
       incomingCwids.add(f.cwid);
       const existingScholar = existingByCwid.get(f.cwid);
       const roleCategory = deriveRoleCategory(f);
+      const ithaca = ithacaRowAction(existingScholar, roleCategory);
+      if (ithaca === "leave") continue;
+      const claimsIthacaRow = ithaca === "claim";
 
       // SOR is authoritative for dept + division (probe 2026-05-06: only the
       // SOR child role records carry `weillCornellEduOrgUnit;level2` for the
@@ -1299,6 +1302,8 @@ async function main() {
             // leaf; read by the Jenzabar GS import to normalize its titles.
             professorialRank: deriveProfessorialRank(f.personTypeCodes),
             ...(wasDeleted ? { deletedAt: null } : {}),
+            // The slug re-mints below (an `ithaca-<netid>` slug never matches the name).
+            ...(claimsIthacaRow ? { campus: "wcm", status: "active" } : {}),
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from
             // SOR primary active appointment (level1/level2 subtypes).
             deptCode: effectiveDeptCode,
@@ -1388,16 +1393,15 @@ async function main() {
     }
 
     // Soft-delete: scholars in DB but not in ED this run.
-    const departed = existing.filter(
-      (s) => !s.deletedAt && !incomingCwids.has(s.cwid),
-    );
+    const wcmRows = existing.filter((s) => s.campus === "wcm");
+    const departed = departedWcmScholars(existing, incomingCwids);
     // Normal nightly departures are a handful; hundreds at once means a
     // truncated feed (this also catches a swallowed doctoral-student fetch
     // failure, which would otherwise tombstone every PhD student). Bypass via
     // ETL_GUARD_BYPASS for a genuine bulk offboarding.
     assertPruneVolume("ed:scholar-soft-delete", {
       pruning: departed.length,
-      of: existing.filter((s) => !s.deletedAt).length,
+      of: wcmRows.filter((s) => !s.deletedAt).length,
       maxPct: 2,
     });
     let softDeleted = 0;
@@ -2384,6 +2388,28 @@ async function main() {
  * folded into the caller's `scholar.update` payload; `reconcileScholarSlug` does
  * its own `scholar.update`.
  */
+/**
+ * A Cornell Ithaca row (etl/ithaca-roster) under an ED person's cuid. ED claims it:
+ * the person is at WCM now, so the row turns WCM and public (same row, ORCID state
+ * kept). Except a WCM alumnus, whom ED would only soft-hide again while the roster
+ * revives them nightly: they are at Ithaca, so the row stays the roster's.
+ */
+export function ithacaRowAction(
+  existing: { campus: string } | undefined,
+  roleCategory: string | null,
+): "claim" | "leave" | null {
+  if (existing?.campus !== "ithaca") return null;
+  return roleCategory === "affiliate_alumni" ? "leave" : "claim";
+}
+
+/** Live WCM rows missing from tonight's ED. Ithaca rows are never in ED; etl/ithaca-roster prunes them. */
+export function departedWcmScholars<T extends { cwid: string; campus: string; deletedAt: Date | null }>(
+  existing: T[],
+  incoming: ReadonlySet<string>,
+): T[] {
+  return existing.filter((s) => s.campus === "wcm" && !s.deletedAt && !incoming.has(s.cwid));
+}
+
 export async function maybeUpdatedSlug(
   currentSlug: string,
   newName: string,

@@ -512,7 +512,7 @@ async function main(): Promise<number> {
   }
 
   const scholars = await db.write.scholar.findMany({
-    where: { deletedAt: null },
+    where: { deletedAt: null, campus: "wcm" },
     select: { cwid: true, fullName: true, preferredName: true, primaryTitle: true, primaryDepartment: true },
   });
   // Clips carry no VIVO cwids, so every row is a NAME match: `pending`.

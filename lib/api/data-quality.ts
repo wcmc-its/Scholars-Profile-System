@@ -425,7 +425,7 @@ function buildWhere(
   filterRosterCwids: readonly string[] = [],
 ): Prisma.ScholarWhereInput {
   const and: Prisma.ScholarWhereInput[] = [];
-  const where: Prisma.ScholarWhereInput = { deletedAt: null };
+  const where: Prisma.ScholarWhereInput = { deletedAt: null, campus: "wcm" };
 
   // Name / CWID free-text search (#3) — each whitespace token is its own AND
   // clause so it never clobbers the scope / unit / hidden-roles OR groups, and

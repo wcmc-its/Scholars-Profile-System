@@ -1054,6 +1054,11 @@ export class EtlStack extends Stack {
       // 322 shared_only->strong and 331 weak->moderate, reviewed and approved.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ORCID_HISTORY_BAND: "on",
+      // Ithaca ORCID plan, step 1 — etl:ithaca-roster writes Cornell Ithaca scholar
+      // rows only when this is exactly "on"; otherwise it logs the counts it would
+      // write. Staging on; prod off until the staging load is reviewed.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ITHACA_ROSTER: env === "prod" ? "off" : "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -1415,6 +1420,8 @@ export class EtlStack extends Stack {
       "etl:orcid-evidence",
       // Reads reciterdb identity_cornell_current + pubsource_orcid_person.
       "etl:identity-links",
+      // Reads reciterdb identity_cornell_current/_hr/_directory.
+      "etl:ithaca-roster",
       "etl:asms",
       "etl:infoed",
       "etl:infoed-biosketch",
@@ -1939,6 +1946,11 @@ export class EtlStack extends Stack {
       // scholar set it links against is tonight's. tier:"continue": a missed
       // night leaves last night's roster, and the step refuses a short feed.
       { id: "CtscRoster", npmScript: "etl:ctsc-roster", external: true, tier: "continue" },
+      // Ithaca ORCID plan, step 1 — Cornell Ithaca people as hidden scholar rows
+      // (campus 'ithaca', status 'external'). After Ed: ED claims a row first when
+      // someone joins WCM. Reads reciterdb, so the sources family. Writes only when
+      // ITHACA_ROSTER is "on" (else logs counts). tier:"continue": no public data.
+      { id: "IthacaRoster", npmScript: "etl:ithaca-roster", external: true, tier: "continue" },
       // #1679 — tier:"continue", NOT "abort". etl:reciter's source-volume guard
       // (lib/etl-guard.ts) REFUSES to write on a >20% source-row drop, so a
       // guard refusal leaves the publication table at its last-good rows —
