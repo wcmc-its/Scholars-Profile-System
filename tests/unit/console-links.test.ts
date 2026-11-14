@@ -95,7 +95,7 @@ describe("buildConsoleLinks", () => {
   it("developer (not a superuser) → 'Matcha', alongside any other role's rows", () => {
     expect(
       buildConsoleLinks({ isSuperuser: false, isCommsSteward: false, managesUnits: false, isDeveloper: true }),
-    ).toEqual([{ id: "matcha", label: "Matcha", href: "/edit/matcha" }]);
+    ).toEqual([{ id: "matcha", label: "Matcha: Open search", href: "/edit/matcha" }]);
     expect(
       buildConsoleLinks({ isSuperuser: false, isCommsSteward: true, managesUnits: false, isDeveloper: true }).map(
         (l) => l.id,

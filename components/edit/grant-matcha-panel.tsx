@@ -275,7 +275,7 @@ export function GrantMatchaPanel({
           admin={adminEnabled}
           header={
             <header className="flex min-w-0 flex-col gap-1.5">
-              <h1 className="text-2xl font-bold tracking-tight">Matcha for grants</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Matcha: Grants</h1>
               {/* Brand rule under the title (a sibling span in a flex-col header, not a
                   border-b, not a ::after), 32x3 per `Browse Redesign.dc.html`. The Matcha
                   surfaces (this, matcha-panel, opportunity-intake-panel) keep their

@@ -287,7 +287,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   FundingDigest: {
     label: "Funding Digest",
-    description: "Submits new opportunities from the Research Dean's weekly funding email to Matcha for grants.",
+    description: "Submits new opportunities from the Research Dean's weekly funding email to Matcha: Grants.",
     origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
   },
   "AreaSignal-inputs": {

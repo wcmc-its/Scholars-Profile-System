@@ -102,8 +102,8 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
   development: [
-    { label: "Matcha", href: "/edit/matcha" },
-    { label: "Matcha for grants", href: "/edit/grant-matcha" },
+    { label: "Matcha: Open search", href: "/edit/matcha" },
+    { label: "Matcha: Grants", href: "/edit/grant-matcha" },
   ],
   content_editor: [
     { label: "Profiles", href: "/edit/profiles" },
