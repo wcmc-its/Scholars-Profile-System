@@ -25,6 +25,11 @@ const PATH = "/api/edit/matcha/export";
 
 /** Far above a real export (a few hundred rows, briefs on a shortlist), far below abuse. */
 const EXPORT_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * Deliberately NOT `SCHOLAR_EXPORT_CAP` (50): Matcha is exempt from the bulk-export cap
+ * (decision of 2026-11-14, recorded beside the cap in `lib/api/export-scholars.ts`).
+ * Keep email addresses out of `RowSchema`; adding them would reopen that decision.
+ */
 const EXPORT_MAX_ROWS = 5000;
 
 const text = (max: number) => z.string().max(max);
