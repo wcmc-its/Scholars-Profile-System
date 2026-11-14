@@ -1825,8 +1825,8 @@ export class AppStack extends Stack {
         // CoreLeader director) VIEW that unit's /edit/reports, and a cancer
         // center's program leaders also edit NCI Table 2A
         // (`lib/edit/unit-leader-access.ts`). No other write is widened. ON in
-        // staging for the soak, OFF in prod until both journeys are checked.
-        LEADER_REPORT_ACCESS: envConfig.envName === "staging" ? "on" : "off",
+        // both envs (prod 2026-11-14, after the staging View-as walkthrough).
+        LEADER_REPORT_ACCESS: "on",
         ORCID_CONNECT_BASE:
           envConfig.envName === "prod" ? "https://orcid.org" : "https://sandbox.orcid.org",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
