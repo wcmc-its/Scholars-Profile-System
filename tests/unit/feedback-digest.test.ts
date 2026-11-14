@@ -154,6 +154,13 @@ describe("runFeedbackDigest", () => {
     expect(d.send).not.toHaveBeenCalled();
   });
 
+  it("an empty window sends nothing but records success, so the window advances", async () => {
+    const d = deps({ rowsBetween: vi.fn(async () => []) });
+    await expect(runFeedbackDigest(d)).resolves.toBe("empty");
+    expect(d.send).not.toHaveBeenCalled();
+    expect(d.finishRun).toHaveBeenCalledWith("run-1", "success", 0);
+  });
+
   it("a send failure records the run as failed and rethrows (so the window is retried next week)", async () => {
     const d = deps({ send: vi.fn(async () => Promise.reject(new Error("MessageRejected"))) });
     await expect(runFeedbackDigest(d)).rejects.toThrow("MessageRejected");
