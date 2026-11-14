@@ -63,6 +63,12 @@ import { institutionDisplayName } from "@/lib/institutions";
  * top-50.
  */
 export const SCHOLAR_EXPORT_CAP = 50;
+/*
+ * Exempt from `SCHOLAR_EXPORT_CAP` (decision of 2026-11-14): the Matcha researcher
+ * list export (`app/api/edit/matcha/export/route.ts`), up to its own row limit. It
+ * is a staff-only sponsor-matching tool behind the `MATCHA` flag and
+ * `canUseMatchaForWrite`, and it carries no email addresses. No other path is exempt.
+ */
 /**
  * The ONE carve-out from `SCHOLAR_EXPORT_CAP` for email addresses (decision of
  * 2026-10-29): a core owner may copy the addresses of their core's known users
