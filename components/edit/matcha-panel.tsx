@@ -133,7 +133,13 @@ import {
   type GrantCandidate,
 } from "@/lib/api/matcha-contract";
 import type { CareerStage } from "@/lib/career-stage";
-import { RESEARCH_TYPE_LABELS, RESEARCH_TYPE_MIN_PUBS, RESEARCH_TYPE_YEARS } from "@/lib/research-type";
+import {
+  RESEARCH_TYPE_LABELS,
+  RESEARCH_TYPE_MIN_PUBS,
+  RESEARCH_TYPE_YEARS,
+  isResearchTypeChecked,
+  toggleResearchTypeValue,
+} from "@/lib/research-type";
 import {
   briefExportFields,
   matchaExportFilename,
@@ -452,16 +458,10 @@ function researchKeys(m: MatchaMeasures | undefined): ResearchKey[] {
   return keys;
 }
 
-/** Toggle one Research box. Ticking a child unticks its parent, and ticking a parent unticks
- *  its children: "Laboratory research" plus "Laboratory research: Physician-scientist" would
- *  read as a narrowing that the OR never applies. */
+/** Toggle one Research box (`toggleResearchTypeValue`): a ticked parent reads as both children
+ *  ticked, unticking one child leaves the other, ticking both children is the parent. */
 function toggledResearch(set: ReadonlySet<string>, key: string): Set<string> {
-  const next = toggled(set, key);
-  if (!next.has(key)) return next;
-  const [parent, child] = key.split(":");
-  if (child) next.delete(parent);
-  else for (const c of RESEARCH_PARENTS.find((p) => p.key === key)?.children ?? []) next.delete(c.key);
-  return next;
+  return new Set(toggleResearchTypeValue([...set], key));
 }
 
 /** The export's Research kind cell: the kinds a person shows, joined with "; ". */
@@ -4379,7 +4379,7 @@ function ResearchFacetGroup({
     <label className="flex cursor-pointer items-center gap-2 text-sm">
       <input
         type="checkbox"
-        checked={selected.has(key)}
+        checked={isResearchTypeChecked([...selected], key)}
         onChange={() => onToggle(key)}
         aria-label={ariaLabel}
         className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"

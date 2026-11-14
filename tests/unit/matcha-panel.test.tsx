@@ -1078,21 +1078,28 @@ describe("MatchaPanel", () => {
     expect(box(/^Laboratory research ?\d/).checked).toBe(false);
   });
 
-  it("ticking a child unticks its parent, and ticking the parent unticks its children", async () => {
+  it("a ticked parent ticks its children; unticking one leaves the other; both children are the parent", async () => {
     await searchKindRun();
+    // Default: Laboratory research, so both its children read as ticked.
+    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
+    expect(box("Laboratory research: Physician-scientist").checked).toBe(true);
+    expect(box("Laboratory research: Basic scientist").checked).toBe(true);
+
     fireEvent.click(box("Laboratory research: Physician-scientist"));
     expect(box(/^Laboratory research ?\d/).checked).toBe(false);
-    expect(box("Laboratory research: Physician-scientist").checked).toBe(true);
-    expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
+    expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
+    expect(box("Laboratory research: Basic scientist").checked).toBe(true);
+    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha"]);
 
-    fireEvent.click(box("Laboratory research: Basic scientist"));
+    fireEvent.click(box("Laboratory research: Physician-scientist"));
+    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
     expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
 
     fireEvent.click(box(/^Laboratory research ?\d/));
-    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
+    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
     expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
     expect(box("Laboratory research: Basic scientist").checked).toBe(false);
-    expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
+    expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
   });
 
   it("a person with both kinds matches under either parent", async () => {
@@ -1111,6 +1118,7 @@ describe("MatchaPanel", () => {
 
   it("names a child chip with its parent, and the chip's remove unticks the child", async () => {
     await searchKindRun();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     fireEvent.click(box("Laboratory research: Physician-scientist"));
     expect(screen.getByText("Laboratory research: Physician-scientist", { selector: "span" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();

@@ -3845,7 +3845,7 @@ function FacetCheckbox({
    *  grants` checkbox when `pi=active|multi` is set. */
   disabled?: boolean;
   /** Indented child row under a parent checkbox (Research type children).
-   *  Applies to the default (truncating) row only. */
+   *  Applies to the default row only; its label wraps rather than truncates. */
   nested?: boolean;
   /** Accessible name for the default row, when the visible label is not enough on its own
    *  (a nested child names its parent: two "Physician-scientist" rows otherwise). */
@@ -3924,7 +3924,9 @@ function FacetCheckbox({
           scroll={false}
           title={tooltip ? undefined : fallbackTitle}
           aria-label={ariaLabel}
-          className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+          // min-w-0: without it the link cannot shrink below its text, so the label never
+          // truncates and the count spills past the rail (long nested labels).
+          className={`flex min-w-0 flex-1 ${nested ? "items-start" : "items-center"} gap-2 text-[#1a1a1a] no-underline hover:no-underline`}
         >
           {/* readOnly input: state lives in the URL; the link toggles it. */}
           <input
@@ -3933,14 +3935,16 @@ function FacetCheckbox({
             checked={!!isActive}
             tabIndex={-1}
             aria-hidden="true"
-            className="cursor-pointer accent-[#2c4f6e]"
+            className={`cursor-pointer accent-[#2c4f6e]${nested ? " mt-[3px]" : ""}`}
           />
           {/* Truncate keeps the count column straight when names are short
             and predictable. The title attribute surfaces the full label
             on hover for the rare overflow. */}
-          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {/* A nested child wraps instead: "Clinical or population researcher" is the
+            whole point of the row and loses its meaning cut short. */}
+          <span className={`min-w-0 flex-1 ${nested ? "break-words" : "truncate"}`}>{label}</span>
           {count !== undefined ? (
-            <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">
+            <span className={`shrink-0 text-[12px] text-muted-foreground tabular-nums${nested ? " mt-[1px]" : ""}`}>
               {count.toLocaleString()}
             </span>
           ) : null}
