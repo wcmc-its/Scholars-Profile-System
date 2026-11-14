@@ -10,39 +10,62 @@
  */
 import { createPool, type Pool, type PoolConnection } from "mariadb";
 
-let pool: Pool | null = null;
+// Cached on globalThis so dev hot reload (HMR) doesn't create a new pool on
+// every module re-evaluation and orphan the old one's connections. In
+// production there is no HMR, so this behaves like a plain module variable.
+const globalForReciter = globalThis as unknown as {
+  __reciterPool?: Pool;
+};
+
+function readConfig() {
+  const names = {
+    host: "SCHOLARS_RECITERDB_HOST",
+    user: "SCHOLARS_RECITERDB_USERNAME",
+    password: "SCHOLARS_RECITERDB_PASSWORD",
+    database: "SCHOLARS_RECITERDB_DATABASE",
+  } as const;
+
+  // Report all missing vars at once. Only names are listed, never values.
+  const missing = Object.values(names).filter((n) => !process.env[n]);
+  if (missing.length > 0) {
+    throw new Error(`Missing ReciterDB env vars: ${missing.join(", ")}`);
+  }
+
+  // parseInt returns NaN on garbage input, so validate instead of passing it
+  // to the driver and getting a confusing connection error later.
+  const port = Number.parseInt(process.env.SCHOLARS_RECITERDB_PORT ?? "3306", 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("SCHOLARS_RECITERDB_PORT must be a valid port number");
+  }
+
+  return {
+    // Non-null assertions are safe: the missing check above guarantees these.
+    host: process.env[names.host]!,
+    user: process.env[names.user]!,
+    password: process.env[names.password]!,
+    database: process.env[names.database]!,
+    port,
+  };
+}
 
 export function getReciterPool(): Pool {
-  if (pool !== null) return pool;
-  const host = process.env.SCHOLARS_RECITERDB_HOST;
-  const user = process.env.SCHOLARS_RECITERDB_USERNAME;
-  const password = process.env.SCHOLARS_RECITERDB_PASSWORD;
-  const database = process.env.SCHOLARS_RECITERDB_DATABASE;
-  const port = parseInt(process.env.SCHOLARS_RECITERDB_PORT ?? "3306", 10);
-  if (!host) throw new Error("SCHOLARS_RECITERDB_HOST is not set");
-  if (!user) throw new Error("SCHOLARS_RECITERDB_USERNAME is not set");
-  if (!password) throw new Error("SCHOLARS_RECITERDB_PASSWORD is not set");
-  if (!database) throw new Error("SCHOLARS_RECITERDB_DATABASE is not set");
-
-  const created = createPool({
-    host,
-    user,
-    password,
-    database,
-    port,
+  // Lazy: config is read on first use, not at import time, so `next build`
+  // doesn't fail when DB env vars are absent during the build.
+  return (globalForReciter.__reciterPool ??= createPool({
+    ...readConfig(),
+    // Per Node process. Total DB load is 4 x (Next.js instances + ETL), so
+    // check that against the DB's max_connections / per-user limit.
     connectionLimit: 4,
+
+    // BIGINT columns come back as numbers. Fine for PMIDs and counts, but
+    // precision is lost above 2^53, so don't read 64-bit IDs through this pool.
     bigIntAsNumber: true,
-    // Fail fast when ReciterDB is unreachable (it is WCM-side; the SPS VPC->WCM
-    // path can be down) instead of inheriting the mariadb driver defaults
-    // (connectTimeout 1000ms, acquireTimeout 10000ms) that otherwise stall every
-    // caller ~10s. The web mentoring path is additionally time-capped in
-    // mentoring-pmids.ts; these bounds also protect the other web callers
-    // (publication-detail, mentoring, popover-context) and the ETL.
+
+    // Fail fast when ReciterDB is unreachable (WCM-side; the SPS VPC->WCM
+    // path can be down) instead of stalling callers ~10s on driver defaults.
     connectTimeout: 2000,
     acquireTimeout: 3000,
-  });
-  pool = created;
-  return created;
+  }));
 }
 
 export async function withReciterConnection<T>(
@@ -52,15 +75,30 @@ export async function withReciterConnection<T>(
   try {
     return await fn(conn);
   } finally {
-    conn.release();
+    // Swallow release() failures. A throw inside `finally` would replace the
+    // callback's result or mask its real error. A failed release only means
+    // the connection is already broken, and the pool discards it, so there is
+    // nothing useful for the caller to do. Awaiting still keeps the
+    // rejection handled (no unhandledRejection).
+    try {
+      await conn.release();
+    } catch (err) {
+      console.warn(
+        "[reciterdb] conn.release() failed (ignored):",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 }
 
 export async function closeReciterPool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
-  }
+  const pool = globalForReciter.__reciterPool;
+
+  // Clear the reference before closing. If end() throws, we don't keep
+  // handing out a half-closed pool; the next call builds a fresh one, and
+  // the error still propagates to the caller.
+  globalForReciter.__reciterPool = undefined;
+  await pool?.end();
 }
 
 /**
@@ -69,13 +107,17 @@ export async function closeReciterPool(): Promise<void> {
  * "temporarily unavailable" on every request; say so once instead. Staging and
  * prod run both bridges on, so this is null there.
  */
-export function reciterDbConfigWarning(env: Record<string, string | undefined> = process.env): string | null {
+export function reciterDbConfigWarning(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
   if (env.SCHOLARS_RECITERDB_HOST) return null;
-  const live = ["MENTORING_COPUB_BRIDGE", "PUBLICATION_CITING_BRIDGE"].filter((f) => env[f] !== "on");
+  const live = ["MENTORING_COPUB_BRIDGE", "PUBLICATION_CITING_BRIDGE"].filter(
+    (f) => env[f] !== "on",
+  );
   if (live.length === 0) return null;
   return (
     `[reciterdb] SCHOLARS_RECITERDB_HOST is unset and ${live.join(", ")} not "on": ` +
-    "mentoring and cited-by data will show as unavailable. Set the flag(s) to \"on\" " +
+    'mentoring and cited-by data will show as unavailable. Set the flag(s) to "on" ' +
     "to read the local bridge tables (see .env.example)."
   );
 }
