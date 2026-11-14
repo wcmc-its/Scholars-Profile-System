@@ -1667,6 +1667,125 @@ export class SpsObservabilityStack extends Stack {
     );
     originLatencyAlarm.addAlarmAction(warnAction);
 
+    // ------------------------------------------------------------------
+    // Bot defense on /search (ADR-017)
+    // ------------------------------------------------------------------
+    /**
+     * An edge WAF metric as AWS publishes it for a CLOUDFRONT-scope web ACL:
+     * namespace AWS/WAFV2 in us-east-1, dimensions { WebACL, Rule }, where
+     * Rule is the rule's `metricName` in edge-stack.ts
+     * (`sps-edge-<env>-<rule name>`). Names are spelled out here rather than
+     * imported: this stack is decoupled from the manually deployed EdgeStack.
+     * A rule that has never matched publishes no datapoints at all.
+     */
+    const wafWebAclName = `sps-edge-${env}-wcm-only`;
+    const wafMetric = (
+      metricName: string,
+      rule: string | undefined,
+      label: string,
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: "AWS/WAFV2",
+        metricName,
+        dimensionsMap: {
+          WebACL: wafWebAclName,
+          ...(rule ? { Rule: `sps-edge-${env}-${rule}` } : {}),
+        },
+        statistic: "Sum",
+        period: Duration.minutes(5),
+        region: "us-east-1",
+        label,
+      });
+
+    // The surge rule challenging anything means a first-time visitor whose
+    // first page is a /search link is seeing the WAF interstitial: tokenless
+    // /search page loads across all clients passed 300 per 5 minutes
+    // (edge-stack.ts `search-challenge-tokenless-surge`). In normal operation
+    // the rule matches nothing and the metric has no datapoints, hence
+    // NOT_BREACHING and a threshold of zero. Warn tier: the site is up and
+    // the rule is doing its job; a person should look at who is surging.
+    const searchSurgeAlarm = new cloudwatch.Alarm(
+      this,
+      "SearchChallengeSurgeAlarm",
+      {
+        alarmName: `sps-search-challenge-surge-${env}`,
+        alarmDescription: `The /search surge rule is challenging visitors (${env}): tokenless /search page loads across all clients exceeded 300 per 5 minutes, so first-time visitors landing on a /search link now get the WAF interstitial until the surge ends. Next: run the saved Logs Insights query "sps-${env}/waf/search-tokenless-page-loads-by-client" to see who is surging (user agent, country, distinct IPs). A scraper wave needs no action unless it persists; real traffic growth means raising the limit in cdk/lib/edge-stack.ts. See docs/ADR-017-search-bot-defense.md.`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/WAFV2",
+          metricName: "ChallengeRequests",
+          dimensionsMap: {
+            WebACL: wafWebAclName,
+            Rule: `sps-edge-${env}-search-challenge-tokenless-surge`,
+          },
+          statistic: "Sum",
+          period: Duration.minutes(5),
+          region: "us-east-1",
+        }),
+        threshold: 0,
+        evaluationPeriods: 1,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    searchSurgeAlarm.addAlarmAction(warnAction);
+
+    // Saved Logs Insights queries over the edge WAF logs, for the question
+    // the metrics cannot answer: who is this. The log group is created by
+    // EdgeStack (`aws-waf-logs-sps-<env>`); a query definition only stores
+    // its name, so there is no cross-stack reference.
+    const wafLogGroupName = `aws-waf-logs-sps-${env}`;
+    const NO_VALID_TOKEN = "@message like /awswaf:managed:token:(absent|rejected)/";
+    const wafQueries: Array<{ id: string; name: string; query: string }> = [
+      {
+        id: "WafQuerySearchByRule",
+        name: "search-by-rule-and-action",
+        query: [
+          "filter httpRequest.uri like /^\\/search/",
+          'stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by action, terminatingRuleId, strcontains(httpRequest.args, "_rsc") as clientNavigation',
+          "sort requests desc",
+        ].join("\n| "),
+      },
+      {
+        id: "WafQueryTokenlessPageLoadsRate",
+        name: "search-tokenless-page-loads-per-5m",
+        query: [
+          `filter httpRequest.uri like /^\\/search/ and ${NO_VALID_TOKEN} and not strcontains(httpRequest.args, "_rsc")`,
+          "stats count(*) as pageLoads by bin(5m) as window, action",
+          "sort window desc",
+        ].join("\n| "),
+      },
+      {
+        id: "WafQueryTokenlessPageLoadsByClient",
+        name: "search-tokenless-page-loads-by-client",
+        query: [
+          `filter httpRequest.uri like /^\\/search/ and ${NO_VALID_TOKEN} and not strcontains(httpRequest.args, "_rsc")`,
+          'parse @message /"name":"[Uu]ser-[Aa]gent","value":"(?<userAgent>[^"]*)"/',
+          "stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by userAgent, httpRequest.country, action",
+          "sort requests desc",
+          "limit 50",
+        ].join("\n| "),
+      },
+      {
+        id: "WafQueryChallengedByReferrer",
+        name: "search-challenged-by-referrer",
+        query: [
+          'filter httpRequest.uri like /^\\/search/ and action = "CHALLENGE"',
+          'parse @message /"name":"[Rr]eferer","value":"https?:\\/\\/(?<referrerHost>[^\\/"]+)/',
+          'stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by terminatingRuleId, referrerHost, strcontains(httpRequest.args, "_rsc") as clientNavigation',
+          "sort requests desc",
+          "limit 50",
+        ].join("\n| "),
+      },
+    ];
+    for (const q of wafQueries) {
+      new logs.CfnQueryDefinition(this, q.id, {
+        name: `sps-${env}/waf/${q.name}`,
+        logGroupNames: [wafLogGroupName],
+        queryString: q.query,
+      });
+    }
+
     const dashboard = new cloudwatch.Dashboard(this, "ReliabilityDashboard", {
       dashboardName: `sps-reliability-${env}`,
     });
@@ -1901,6 +2020,58 @@ export class SpsObservabilityStack extends Stack {
       leftYAxis: { min: 0, label: "ms" },
     });
 
+    // Bot defense on /search (ADR-017). Three questions, left to right: is
+    // anyone being challenged, what is being blocked outright, and are real
+    // browsers earning tokens silently.
+    const wafChallengeWidget = new cloudwatch.GraphWidget({
+      title: "/search challenged, no valid token (5m sum)",
+      width: 8,
+      height: 6,
+      left: [
+        wafMetric(
+          "ChallengeRequests",
+          "search-challenge-tokenless",
+          "In-site navigation (always challenged)",
+        ),
+        wafMetric(
+          "ChallengeRequests",
+          "search-challenge-tokenless-surge",
+          "Page load during a surge (should be flat)",
+        ),
+      ],
+      leftYAxis: { min: 0, label: "requests" },
+    });
+
+    const wafBlockWidget = new cloudwatch.GraphWidget({
+      title: "/search blocked or CAPTCHA (5m sum)",
+      width: 8,
+      height: 6,
+      left: [
+        wafMetric("BlockedRequests", "search-block-bots", "Self-identified bots"),
+        wafMetric("BlockedRequests", "search-block-scraper-ua", "Scraper user agent"),
+        wafMetric("BlockedRequests", "search-rate-limit", "Per-IP rate limit"),
+        wafMetric(
+          "CaptchaRequests",
+          "AWSManagedRulesBotControlRuleSet-Targeted",
+          "Automation signals (CAPTCHA)",
+        ),
+      ],
+      leftYAxis: { min: 0, label: "requests" },
+    });
+
+    // Web-ACL-level (no Rule dimension): challenges run by the SDK that
+    // CloudFront inserts into every page, i.e. tokens earned in the background.
+    const wafSilentTokenWidget = new cloudwatch.GraphWidget({
+      title: "Silent WAF tokens, all pages (5m sum)",
+      width: 8,
+      height: 6,
+      left: [
+        wafMetric("ChallengesAttemptedSdk", undefined, "Attempted"),
+        wafMetric("ChallengesSolvedSdk", undefined, "Solved"),
+      ],
+      leftYAxis: { min: 0, label: "challenges" },
+    });
+
     // ---- Compose: a TextWidget header (full-width 24) forces a row break
     // before each section; addWidgets lays out left-to-right wrapping at the
     // 24-column grid edge. -------------------------------------------------
@@ -1923,6 +2094,17 @@ export class SpsObservabilityStack extends Stack {
       }),
     );
     dashboard.addWidgets(cfLatencyWidget, cfErrorWidget, cfVolumeWidget);
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown:
+          "## Bot defense on /search\nEdge WAF rules from docs/ADR-017. For who is behind a spike, run the saved Logs Insights queries under `sps-" +
+          env +
+          "/waf/`.",
+        width: 24,
+        height: 2,
+      }),
+    );
+    dashboard.addWidgets(wafChallengeWidget, wafBlockWidget, wafSilentTokenWidget);
     dashboard.addWidgets(
       new cloudwatch.TextWidget({ markdown: "## ECS service", width: 24, height: 1 }),
     );

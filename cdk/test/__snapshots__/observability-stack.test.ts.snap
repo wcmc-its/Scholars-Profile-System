@@ -1510,7 +1510,19 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E28NKDFXC7K2ZL","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":1,"x":0,"y":16,"properties":{"markdown":"## ECS service","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":17,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
+              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E28NKDFXC7K2ZL","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":2,"x":0,"y":16,"properties":{"markdown":"## Bot defense on /search\\nEdge WAF rules from docs/ADR-017. For who is behind a spike, run the saved Logs Insights queries under \`sps-prod/waf/\`.","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":18,"properties":{"view":"timeSeries","title":"/search challenged, no valid token (5m sum)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/WAFV2","ChallengeRequests","Rule","sps-edge-prod-search-challenge-tokenless","WebACL","sps-edge-prod-wcm-only",{"label":"In-site navigation (always challenged)","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","ChallengeRequests","Rule","sps-edge-prod-search-challenge-tokenless-surge","WebACL","sps-edge-prod-wcm-only",{"label":"Page load during a surge (should be flat)","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"requests"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":18,"properties":{"view":"timeSeries","title":"/search blocked or CAPTCHA (5m sum)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/WAFV2","BlockedRequests","Rule","sps-edge-prod-search-block-bots","WebACL","sps-edge-prod-wcm-only",{"label":"Self-identified bots","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","BlockedRequests","Rule","sps-edge-prod-search-block-scraper-ua","WebACL","sps-edge-prod-wcm-only",{"label":"Scraper user agent","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","BlockedRequests","Rule","sps-edge-prod-search-rate-limit","WebACL","sps-edge-prod-wcm-only",{"label":"Per-IP rate limit","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","CaptchaRequests","Rule","sps-edge-prod-AWSManagedRulesBotControlRuleSet-Targeted","WebACL","sps-edge-prod-wcm-only",{"label":"Automation signals (CAPTCHA)","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"requests"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":18,"properties":{"view":"timeSeries","title":"Silent WAF tokens, all pages (5m sum)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/WAFV2","ChallengesAttemptedSdk","WebACL","sps-edge-prod-wcm-only",{"label":"Attempted","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","ChallengesSolvedSdk","WebACL","sps-edge-prod-wcm-only",{"label":"Solved","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"challenges"}}}},{"type":"text","width":24,"height":1,"x":0,"y":24,"properties":{"markdown":"## ECS service","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":25,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1530,7 +1542,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Memory %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":17,"properties":{"view":"timeSeries","title":"ECS running vs desired tasks","region":"",
+              "",{"label":"Memory %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":25,"properties":{"view":"timeSeries","title":"ECS running vs desired tasks","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1550,15 +1562,15 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":23,"properties":{"markdown":"## Aurora cluster","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":24,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
+              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":31,"properties":{"markdown":"## Aurora cluster","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":32,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"CPU %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":24,"properties":{"view":"timeSeries","title":"Aurora connections","region":"",
+              "","metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"CPU %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":32,"properties":{"view":"timeSeries","title":"Aurora connections","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"Connections (max)","stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"connections"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":24,"properties":{"view":"timeSeries","title":"Aurora SelectLatency (ms)","region":"",
+              "","metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"Connections (max)","stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"connections"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":32,"properties":{"view":"timeSeries","title":"Aurora SelectLatency (ms)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1569,6 +1581,88 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "DashboardName": "sps-reliability-prod",
       },
       "Type": "AWS::CloudWatch::Dashboard",
+    },
+    "SearchChallengeSurgeAlarmEBD0F7D3": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The /search surge rule is challenging visitors (prod): tokenless /search page loads across all clients exceeded 300 per 5 minutes, so first-time visitors landing on a /search link now get the WAF interstitial until the surge ends. Next: run the saved Logs Insights query "sps-prod/waf/search-tokenless-page-loads-by-client" to see who is surging (user agent, country, distinct IPs). A scraper wave needs no action unless it persists; real traffic growth means raising the limit in cdk/lib/edge-stack.ts. See docs/ADR-017-search-bot-defense.md.",
+        "AlarmName": "sps-search-challenge-surge-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "Rule",
+            "Value": "sps-edge-prod-search-challenge-tokenless-surge",
+          },
+          {
+            "Name": "WebACL",
+            "Value": "sps-edge-prod-wcm-only",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ChallengeRequests",
+        "Namespace": "AWS/WAFV2",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "WafQueryChallengedByReferrer": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-prod",
+        ],
+        "Name": "sps-prod/waf/search-challenged-by-referrer",
+        "QueryString": "filter httpRequest.uri like /^\\/search/ and action = "CHALLENGE"
+| parse @message /"name":"[Rr]eferer","value":"https?:\\/\\/(?<referrerHost>[^\\/"]+)/
+| stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by terminatingRuleId, referrerHost, strcontains(httpRequest.args, "_rsc") as clientNavigation
+| sort requests desc
+| limit 50",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
+    },
+    "WafQuerySearchByRule": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-prod",
+        ],
+        "Name": "sps-prod/waf/search-by-rule-and-action",
+        "QueryString": "filter httpRequest.uri like /^\\/search/
+| stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by action, terminatingRuleId, strcontains(httpRequest.args, "_rsc") as clientNavigation
+| sort requests desc",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
+    },
+    "WafQueryTokenlessPageLoadsByClient": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-prod",
+        ],
+        "Name": "sps-prod/waf/search-tokenless-page-loads-by-client",
+        "QueryString": "filter httpRequest.uri like /^\\/search/ and @message like /awswaf:managed:token:(absent|rejected)/ and not strcontains(httpRequest.args, "_rsc")
+| parse @message /"name":"[Uu]ser-[Aa]gent","value":"(?<userAgent>[^"]*)"/
+| stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by userAgent, httpRequest.country, action
+| sort requests desc
+| limit 50",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
+    },
+    "WafQueryTokenlessPageLoadsRate": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-prod",
+        ],
+        "Name": "sps-prod/waf/search-tokenless-page-loads-per-5m",
+        "QueryString": "filter httpRequest.uri like /^\\/search/ and @message like /awswaf:managed:token:(absent|rejected)/ and not strcontains(httpRequest.args, "_rsc")
+| stats count(*) as pageLoads by bin(5m) as window, action
+| sort window desc",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
     },
     "WarnTopicFEEED862": {
       "Properties": {
@@ -2971,7 +3065,19 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E17NRWINXLP3B3","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":1,"x":0,"y":16,"properties":{"markdown":"## ECS service","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":17,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
+              "","metrics":[["AWS/CloudFront","BytesDownloaded","DistributionId","E17NRWINXLP3B3","Region","Global",{"label":"Bytes downloaded","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"bytes"}}}},{"type":"text","width":24,"height":2,"x":0,"y":16,"properties":{"markdown":"## Bot defense on /search\\nEdge WAF rules from docs/ADR-017. For who is behind a spike, run the saved Logs Insights queries under \`sps-staging/waf/\`.","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":18,"properties":{"view":"timeSeries","title":"/search challenged, no valid token (5m sum)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/WAFV2","ChallengeRequests","Rule","sps-edge-staging-search-challenge-tokenless","WebACL","sps-edge-staging-wcm-only",{"label":"In-site navigation (always challenged)","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","ChallengeRequests","Rule","sps-edge-staging-search-challenge-tokenless-surge","WebACL","sps-edge-staging-wcm-only",{"label":"Page load during a surge (should be flat)","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"requests"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":18,"properties":{"view":"timeSeries","title":"/search blocked or CAPTCHA (5m sum)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/WAFV2","BlockedRequests","Rule","sps-edge-staging-search-block-bots","WebACL","sps-edge-staging-wcm-only",{"label":"Self-identified bots","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","BlockedRequests","Rule","sps-edge-staging-search-block-scraper-ua","WebACL","sps-edge-staging-wcm-only",{"label":"Scraper user agent","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","BlockedRequests","Rule","sps-edge-staging-search-rate-limit","WebACL","sps-edge-staging-wcm-only",{"label":"Per-IP rate limit","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","CaptchaRequests","Rule","sps-edge-staging-AWSManagedRulesBotControlRuleSet-Targeted","WebACL","sps-edge-staging-wcm-only",{"label":"Automation signals (CAPTCHA)","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"requests"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":18,"properties":{"view":"timeSeries","title":"Silent WAF tokens, all pages (5m sum)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/WAFV2","ChallengesAttemptedSdk","WebACL","sps-edge-staging-wcm-only",{"label":"Attempted","region":"us-east-1","stat":"Sum"}],["AWS/WAFV2","ChallengesSolvedSdk","WebACL","sps-edge-staging-wcm-only",{"label":"Solved","region":"us-east-1","stat":"Sum"}]],"yAxis":{"left":{"min":0,"label":"challenges"}}}},{"type":"text","width":24,"height":1,"x":0,"y":24,"properties":{"markdown":"## ECS service","background":"transparent"}},{"type":"metric","width":12,"height":6,"x":0,"y":25,"properties":{"view":"timeSeries","title":"ECS CPU / Memory (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -2991,7 +3097,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Memory %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":17,"properties":{"view":"timeSeries","title":"ECS running vs desired tasks","region":"",
+              "",{"label":"Memory %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":25,"properties":{"view":"timeSeries","title":"ECS running vs desired tasks","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -3011,15 +3117,15 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":23,"properties":{"markdown":"## Aurora cluster","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":24,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
+              "",{"label":"Desired (max)","period":60,"stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"tasks"}}}},{"type":"text","width":24,"height":1,"x":0,"y":31,"properties":{"markdown":"## Aurora cluster","background":"transparent"}},{"type":"metric","width":8,"height":6,"x":0,"y":32,"properties":{"view":"timeSeries","title":"Aurora CPU (%)","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",{"label":"CPU %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":24,"properties":{"view":"timeSeries","title":"Aurora connections","region":"",
+              "","metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",{"label":"CPU %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":32,"properties":{"view":"timeSeries","title":"Aurora connections","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",{"label":"Connections (max)","stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"connections"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":24,"properties":{"view":"timeSeries","title":"Aurora SelectLatency (ms)","region":"",
+              "","metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",{"label":"Connections (max)","stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"connections"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":32,"properties":{"view":"timeSeries","title":"Aurora SelectLatency (ms)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -3030,6 +3136,88 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "DashboardName": "sps-reliability-staging",
       },
       "Type": "AWS::CloudWatch::Dashboard",
+    },
+    "SearchChallengeSurgeAlarmEBD0F7D3": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The /search surge rule is challenging visitors (staging): tokenless /search page loads across all clients exceeded 300 per 5 minutes, so first-time visitors landing on a /search link now get the WAF interstitial until the surge ends. Next: run the saved Logs Insights query "sps-staging/waf/search-tokenless-page-loads-by-client" to see who is surging (user agent, country, distinct IPs). A scraper wave needs no action unless it persists; real traffic growth means raising the limit in cdk/lib/edge-stack.ts. See docs/ADR-017-search-bot-defense.md.",
+        "AlarmName": "sps-search-challenge-surge-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "Rule",
+            "Value": "sps-edge-staging-search-challenge-tokenless-surge",
+          },
+          {
+            "Name": "WebACL",
+            "Value": "sps-edge-staging-wcm-only",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ChallengeRequests",
+        "Namespace": "AWS/WAFV2",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "WafQueryChallengedByReferrer": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-staging",
+        ],
+        "Name": "sps-staging/waf/search-challenged-by-referrer",
+        "QueryString": "filter httpRequest.uri like /^\\/search/ and action = "CHALLENGE"
+| parse @message /"name":"[Rr]eferer","value":"https?:\\/\\/(?<referrerHost>[^\\/"]+)/
+| stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by terminatingRuleId, referrerHost, strcontains(httpRequest.args, "_rsc") as clientNavigation
+| sort requests desc
+| limit 50",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
+    },
+    "WafQuerySearchByRule": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-staging",
+        ],
+        "Name": "sps-staging/waf/search-by-rule-and-action",
+        "QueryString": "filter httpRequest.uri like /^\\/search/
+| stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by action, terminatingRuleId, strcontains(httpRequest.args, "_rsc") as clientNavigation
+| sort requests desc",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
+    },
+    "WafQueryTokenlessPageLoadsByClient": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-staging",
+        ],
+        "Name": "sps-staging/waf/search-tokenless-page-loads-by-client",
+        "QueryString": "filter httpRequest.uri like /^\\/search/ and @message like /awswaf:managed:token:(absent|rejected)/ and not strcontains(httpRequest.args, "_rsc")
+| parse @message /"name":"[Uu]ser-[Aa]gent","value":"(?<userAgent>[^"]*)"/
+| stats count(*) as requests, count_distinct(httpRequest.clientIp) as ips by userAgent, httpRequest.country, action
+| sort requests desc
+| limit 50",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
+    },
+    "WafQueryTokenlessPageLoadsRate": {
+      "Properties": {
+        "LogGroupNames": [
+          "aws-waf-logs-sps-staging",
+        ],
+        "Name": "sps-staging/waf/search-tokenless-page-loads-per-5m",
+        "QueryString": "filter httpRequest.uri like /^\\/search/ and @message like /awswaf:managed:token:(absent|rejected)/ and not strcontains(httpRequest.args, "_rsc")
+| stats count(*) as pageLoads by bin(5m) as window, action
+| sort window desc",
+      },
+      "Type": "AWS::Logs::QueryDefinition",
     },
     "WarnTopicFEEED862": {
       "Properties": {
