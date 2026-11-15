@@ -184,14 +184,15 @@ export async function walkFeed(fetcher: Fetcher, floor: string | null): Promise<
 
 const CATEGORIES = ["ACADEMY_MEMBERSHIP", "INVESTIGATORSHIP", "PRIZE", "OTHER"] as const;
 
+// Required-but-nullable, not `nullish`: with @ai-sdk/amazon-bedrock 5.0.138 a Sonnet 5.5 call in native structured-output mode returned ONLY the required fields (or ran to max tokens on whitespace) when the rest were optional. A required key the model can set to null keeps the field filled.
 export const ExtractSchema = z.object({
   honors: z.array(
     z.object({
       scholarName: z.string(),
-      cwid: z.string().nullish(),
+      cwid: z.string().nullable(),
       honorName: z.string(),
       organization: z.string(),
-      year: z.number().int().nullish(),
+      year: z.number().int().nullable(),
       category: z.enum(CATEGORIES),
       /** False for an honor the post only recites from the person's past
        *  (a bio line in an appointment story): its year is unknowable here. */
