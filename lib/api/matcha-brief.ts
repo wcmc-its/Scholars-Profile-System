@@ -413,35 +413,38 @@ export const BRIEF_REVISE_SYSTEM_PROMPT = [
   "does or can do. Never replace a removed role with a consulting or advisory one.",
 ].join("\n");
 
+// Required-but-nullable, not `nullish`: with @ai-sdk/amazon-bedrock 5.0.138 a Sonnet 5.5 call in native structured-output mode returned ONLY the required fields (or ran to max tokens on whitespace) when the rest were optional. A required key the model can set to null keeps the field filled.
 const BriefSchema = z.object({
   why: z.string(),
-  angle: z.string().nullish(),
-  angleRole: z.string().nullish(),
+  angle: z.string().nullable(),
+  angleRole: z.string().nullable(),
   // No longer asked for (methodPills replaced it); still accepted, and the fallback when the
   // model returns no valid pill.
-  dataSources: z.array(z.string()).nullish(),
+  dataSources: z.array(z.string()).nullable(),
   // `kind` is a plain string, not an enum: anything but "data" reads as a method instead of
   // failing the whole draft on a schema error.
   methodPills: z
     .array(
       z.object({
         label: z.string(),
-        kind: z.string().nullish(),
-        from: z.array(z.string()).nullish(),
+        kind: z.string().nullable(),
+        from: z.array(z.string()).nullable(),
       }),
     )
-    .nullish(),
+    .nullable(),
   topics: z
     .array(
       z.object({
         concept: z.string(),
         text: z.string(),
-        sources: z.array(z.string()).nullish(),
+        sources: z.array(z.string()).nullable(),
       }),
     )
-    .nullish(),
+    .nullable(),
 });
-type RawBrief = z.infer<typeof BriefSchema>;
+/** What the post-check reads: the model's object, or a partial one (the revise pass hands in
+ *  only why / angle / topics). */
+type RawBrief = Partial<z.infer<typeof BriefSchema>> & { why: string };
 
 /** The shared, cacheable prefix: identical for every PI in one search. */
 export function buildAskBlock(askTitle: string | null, concepts: readonly MatchaConcept[]): string {
