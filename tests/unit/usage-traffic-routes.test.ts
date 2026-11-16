@@ -60,6 +60,7 @@ describe("GET /api/edit/usage/traffic", () => {
       "list=pages&ai=fetch,human",
       "list=referrers&offset=-1",
       "list=referrers&offset=1e3",
+      "list=referrers&offset=1000001",
     ]) {
       expect((await listGET(listReq(qs))).status, qs).toBe(400);
     }

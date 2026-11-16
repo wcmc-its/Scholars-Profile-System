@@ -7,7 +7,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TrafficSection } from "@/app/edit/usage/traffic-widgets";
+import { TrafficSection, isSitePath } from "@/app/edit/usage/traffic-widgets";
 import type { TrafficOverview } from "@/lib/analytics/traffic-view";
 
 const OVERVIEW: TrafficOverview = {
@@ -222,5 +222,17 @@ describe("TrafficSection", () => {
       "Traffic detail starts Dec 1, after this range ends.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("isSitePath", () => {
+  it("links only same-site paths", () => {
+    expect(isSitePath("/")).toBe(true);
+    expect(isSitePath("/topics/cancer")).toBe(true);
+    expect(isSitePath("//evil.example/x")).toBe(false);
+    expect(isSitePath("/\\evil.example")).toBe(false);
+    expect(isSitePath("/\t/evil.example")).toBe(false);
+    expect(isSitePath("(other)")).toBe(false);
+    expect(isSitePath("javascript:alert(1)")).toBe(false);
   });
 });

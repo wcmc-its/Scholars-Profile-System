@@ -52,6 +52,8 @@ export function rangeFromSearchParams(
 }
 
 const TRAFFIC_CACHE_TTL_SECONDS = 43_200;
+/** Matches traffic-queries' MAX_OFFSET. */
+const MAX_LIST_OFFSET = 1_000_000;
 const CACHE_VERSION = "v1";
 
 export type TrafficWindow = { since: string; until: string };
@@ -111,6 +113,8 @@ export function parseTrafficListRequest(sp: URLSearchParams): TrafficListRequest
   const offsetRaw = sp.get("offset") ?? "0";
   if (!/^\d{1,7}$/.test(offsetRaw)) return null;
   const offset = Number(offsetRaw);
+  // The SQL builder rejects offsets past its own bound; 400 here, not a 500 there.
+  if (offset > MAX_LIST_OFFSET) return null;
   const cats = csv(sp.get("cats"));
   if (!cats.every(isReferrerCategory)) return null;
   const categories = [...new Set(cats)].sort() as ReferrerCategory[];

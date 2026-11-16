@@ -143,6 +143,17 @@ function Chip({
   );
 }
 
+/**
+ * A logged request path that is safe to link as a same-site URL. Paths come
+ * from request logs (anyone can send `//evil.example` or `/\evil.example`,
+ * which browsers resolve to another host), so only a single leading slash
+ * with no control characters links.
+ */
+export function isSitePath(p: string): boolean {
+  // Browsers also drop tabs and newlines inside a URL ("/\t/evil" -> "//evil").
+  return /^\/(?![/\\])/.test(p) && !/[\u0000-\u001f\u007f]/.test(p);
+}
+
 function toggle<T>(list: readonly T[], v: T): T[] {
   return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
 }
@@ -721,14 +732,18 @@ function TopPages({ rangeQuery, exportHref }: { rangeQuery: string; exportHref: 
             key={r.label}
             className="border-apollo-border grid grid-cols-[minmax(0,1fr)_minmax(80px,30%)_80px] items-center gap-3 border-t py-[7px] text-sm"
           >
-            <a
-              href={r.label}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-apollo-slate [overflow-wrap:anywhere]"
-            >
-              {r.label}
-            </a>
+            {isSitePath(r.label) ? (
+              <a
+                href={r.label}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-apollo-slate [overflow-wrap:anywhere]"
+              >
+                {r.label}
+              </a>
+            ) : (
+              <span className="[overflow-wrap:anywhere]">{r.label}</span>
+            )}
             <span className="bg-apollo-page block h-2.5 rounded" aria-hidden="true">
               <span
                 className="bg-apollo-slate block h-2.5 rounded"
