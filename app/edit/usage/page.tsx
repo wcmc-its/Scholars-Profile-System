@@ -11,10 +11,13 @@
  * Also carries service health (uptime + alarm-firing KPI tiles and a monthly
  * "Uptime since launch" card), read from CloudWatch via
  * lib/api/service-health.ts — independent of the Athena data above, with its
- * own fail-soft.
+ * own fail-soft. The hourly card's profile-edits line reads the audit log
+ * (lib/api/usage-edits.ts) and fails soft on its own too: a DB error drops the
+ * line and says so, leaving the traffic bars.
  *
  * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
- * chart card, the "Traffic by hour" card (human / bot / error, Eastern time),
+ * chart card, the "Traffic by hour" card (served / bot or challenged / error,
+ * Eastern time, plus a profile-edits line),
  * Top profiles + Top typed search terms side by side (Suggested
  * searches wraps below), three Traffic
  * sources cards, then the uptime card. The interactive bits (chart hover, Show
@@ -37,6 +40,8 @@ import {
   summarizeServiceHealth,
 } from "@/lib/api/service-health";
 import { SEARCH_STATS_START } from "@/lib/analytics/usage-queries";
+import { loadEditsByHour } from "@/lib/api/usage-edits";
+import type { EditHour } from "@/lib/api/usage-hourly";
 import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
 import {
   type NamedCount,
@@ -390,9 +395,12 @@ async function resolveProfileNames(
 function UsageBody({
   summary,
   names,
+  edits,
 }: {
   summary: UsageSummary;
   names: Map<string, { cwid: string; name: string }>;
+  /** Profile edits by hour; null when the audit-log read failed. */
+  edits: EditHour[] | null;
 }) {
   const profileRows: RankRow[] = summary.topProfiles.map((p) => {
     const hit = names.get(p.slug);
@@ -425,13 +433,13 @@ function UsageBody({
         <section className={cn(cardClass, "px-[22px] py-5")}>
           <h2 className="text-[17px] font-semibold">Traffic by hour</h2>
           <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-hourly-empty">
-            No hourly data in this range yet. Hourly traffic (human, bot and error requests by hour)
-            is recorded from the first nightly rollup after it shipped in November 2026; earlier
-            days have none.
+            No hourly data in this range yet. Hourly traffic (served, bot or challenged, and error
+            requests by hour) is recorded from the first nightly rollup after it shipped in November
+            2026; earlier days have none.
           </p>
         </section>
       ) : (
-        <HourlyTrafficChart traffic={summary.hourly} since={summary.since} />
+        <HourlyTrafficChart traffic={summary.hourly} since={summary.since} edits={edits} />
       )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">
@@ -543,6 +551,25 @@ export default async function EditUsagePage({
     );
   }
 
+  // Profile edits by hour for the hourly card, from the audit log: its own
+  // source, so its own fail-soft (a DB error drops the line, never the card).
+  // Read only when the card will draw.
+  let edits: EditHour[] | null = [];
+  if (summary && summary.hourly.buckets.length > 0) {
+    try {
+      edits = await loadEditsByHour(db.read, range);
+    } catch (err) {
+      edits = null;
+      console.error(
+        JSON.stringify({
+          event: "usage_edits_by_hour_failed",
+          path: "/edit/usage",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
   const names = summary
     ? await resolveProfileNames(summary.topProfiles.map((p) => p.slug))
     : new Map<string, { cwid: string; name: string }>();
@@ -589,7 +616,7 @@ export default async function EditUsagePage({
             this persists.
           </p>
         ) : (
-          <UsageBody summary={summary!} names={names} />
+          <UsageBody summary={summary!} names={names} edits={edits} />
         )}
 
         {serviceHealth ? <UptimeCard monthly={serviceHealth.monthly} /> : null}

@@ -22,9 +22,11 @@ import {
 } from "@/lib/api/usage-range";
 import {
   type ClassCounts,
+  type EditHour,
   type HourlyTraffic,
   TRAFFIC_CLASSES,
   type TrafficClass,
+  editsHourOfDayAverages,
   hourLabel,
   hourOfDayAverages,
   hourlyTimeline,
@@ -280,13 +282,15 @@ export function PageviewsChart({ data }: { data: ChartDay[] }) {
 }
 
 /** Series styling for the hourly chart: error stacks at the baseline in the
- *  warm brick red so an outage reads at a glance; human is the slate the
- *  pageviews chart uses; bot a muted tan. */
+ *  warm brick red so an outage reads at a glance; served (the `human` class)
+ *  is the slate the pageviews chart uses; bot or challenged a muted tan. The
+ *  labels say what the edge can actually tell apart: a "human" request is one
+ *  the firewall served, which includes automation that got past it. */
 const SERIES: Record<TrafficClass, { label: string; fill: string; swatch: string }> = {
   error: { label: "Error", fill: "fill-apollo-brick", swatch: "bg-apollo-brick" },
-  human: { label: "Human", fill: "fill-apollo-slate", swatch: "bg-apollo-slate" },
+  human: { label: "Served", fill: "fill-apollo-slate", swatch: "bg-apollo-slate" },
   bot: {
-    label: "Bot",
+    label: "Bot or challenged",
     fill: "fill-[var(--apollo-signal-affinity)]",
     swatch: "bg-[var(--apollo-signal-affinity)]",
   },
@@ -301,23 +305,39 @@ function fmtCount(v: number, avg: boolean): string {
   return v >= 10 ? Math.round(v).toLocaleString() : (Math.round(v * 10) / 10).toLocaleString();
 }
 
-/** "Human 120 · Bot 40 · Error 2" over the visible series. */
+/** "Served 120 · Bot or challenged 40 · Error 2" over the visible series. */
 function countsLine(c: ClassCounts, shown: TrafficClass[], avg: boolean): string {
   return TRAFFIC_CLASSES.filter((k) => shown.includes(k))
     .map((k) => `${SERIES[k].label} ${fmtCount(c[k], avg)}`)
     .join(" · ");
 }
 
-/** "Traffic by hour": page requests per Eastern hour, stacked human / bot /
- *  error, across the range (capped to the last 30 days), or folded into 24
- *  hours of the day (average per day). The legend toggles series; hover (or
- *  tap) a bar for its counts. An hour with no rollup data is a gap. */
-export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic; since: string }) {
+const EDITS_LABEL = "Profile edits";
+
+/** "Traffic by hour": page requests per Eastern hour, stacked served / bot or
+ *  challenged / error, across the range (capped to the last 30 days), or
+ *  folded into 24 hours of the day (average per day), with people's profile
+ *  edits as a line on its own right-hand scale. The legend toggles series;
+ *  hover (or tap) a bar for its counts. An hour with no rollup data is a gap.
+ *  `edits` null means the audit-log read failed: no line, a short note. */
+export function HourlyTrafficChart({
+  traffic,
+  since,
+  edits,
+}: {
+  traffic: HourlyTraffic;
+  since: string;
+  /** Profile edits by hour; null when unavailable, omitted for no line. */
+  edits?: EditHour[] | null;
+}) {
   const [mode, setMode] = useState<"timeline" | "hourOfDay">("timeline");
   const [hidden, setHidden] = useState<TrafficClass[]>([]);
+  const [editsHidden, setEditsHidden] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
   const shown = TRAFFIC_CLASSES.filter((k) => !hidden.includes(k));
   const avg = mode === "hourOfDay";
+  const hasEdits = Array.isArray(edits);
+  const showEdits = hasEdits && !editsHidden;
 
   const { slots, capped } = hourlyTimeline(traffic.buckets, HOURLY_TIMELINE_DAYS);
   const bars: { key: number; counts: ClassCounts | null; tip: string }[] = avg
@@ -337,6 +357,29 @@ export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic;
   const n = Math.max(bars.length, 1);
   const pad = n > 120 ? 0 : 0.12;
   const hb = hover === null ? null : (bars[hover] ?? null);
+
+  // The edits line: one value per bar, on its own scale.
+  const editValues: number[] = !hasEdits
+    ? []
+    : avg
+      ? editsHourOfDayAverages(edits, traffic)
+      : (() => {
+          const byAt = new Map(edits.map((e) => [e.at, e.edits]));
+          return slots.map((s) => byAt.get(s.at) ?? 0);
+        })();
+  const editTop = niceCeil(Math.max(...editValues, 1));
+  const editTicks = [0, editTop / 2, editTop];
+  const editPoints = editValues.map((v, i) => `${i + 0.5},${100 - (v / editTop) * 100}`).join(" ");
+  const readout = (b: (typeof bars)[number], i: number): string => {
+    const parts: string[] = [];
+    if (b.counts === null) parts.push("no data");
+    else {
+      const line = countsLine(b.counts, shown, avg);
+      if (line) parts.push(line);
+    }
+    if (showEdits) parts.push(`${EDITS_LABEL} ${fmtCount(editValues[i] ?? 0, avg)}`);
+    return `${b.tip}: ${parts.join(" · ") || "all series hidden"}`;
+  };
 
   // X labels: hour of day every 3 hours; the timeline at Eastern midnights,
   // about eight across.
@@ -417,19 +460,48 @@ export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic;
             </button>
           );
         })}
+        {hasEdits ? (
+          <button
+            type="button"
+            aria-pressed={!editsHidden}
+            onClick={() => setEditsHidden(!editsHidden)}
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[13px]",
+              editsHidden ? "text-muted-foreground line-through" : "text-foreground",
+            )}
+            data-testid="usage-hourly-legend-edits"
+          >
+            <span
+              className={cn(
+                "h-0.5 w-3 rounded-full",
+                editsHidden ? "bg-apollo-border-strong" : "bg-[var(--apollo-ink)]",
+              )}
+              aria-hidden="true"
+            />
+            {EDITS_LABEL} (right scale)
+          </button>
+        ) : edits === null ? (
+          <span
+            className="text-muted-foreground text-[13px]"
+            data-testid="usage-hourly-edits-unavailable"
+          >
+            Profile edits unavailable right now.
+          </span>
+        ) : null}
         <span
           className="text-muted-foreground text-[13px]"
           aria-live="polite"
           data-testid="usage-hourly-readout"
         >
-          {hb
-            ? hb.counts === null
-              ? `${hb.tip}: no data`
-              : `${hb.tip}: ${countsLine(hb.counts, shown, avg) || "all series hidden"}`
-            : "Hover a bar for the counts"}
+          {hb && hover !== null ? readout(hb, hover) : "Hover a bar for the counts"}
         </span>
       </div>
-      <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-2">
+      <div
+        className={cn(
+          "grid gap-2",
+          hasEdits ? "grid-cols-[40px_minmax(0,1fr)_32px]" : "grid-cols-[40px_minmax(0,1fr)]",
+        )}
+      >
         <div className="text-muted-foreground relative h-[220px] text-[11.5px] tabular-nums">
           {ticks.map((t) => (
             <span
@@ -459,9 +531,10 @@ export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic;
               preserveAspectRatio="none"
               role="img"
               aria-label={
-                avg
-                  ? "Average page requests per day by hour of day (Eastern): human, bot and error"
-                  : `Page requests per hour (Eastern): human, bot and error, ${bars.length} hours`
+                (avg
+                  ? "Average page requests per day by hour of day (Eastern): served, bot or challenged, and error"
+                  : `Page requests per hour (Eastern): served, bot or challenged, and error, ${bars.length} hours`) +
+                (hasEdits ? "; profile edits as a line on the right-hand scale" : "")
               }
               onMouseMove={pick}
               onClick={pick}
@@ -494,6 +567,17 @@ export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic;
                   </g>
                 );
               })}
+              {showEdits && editValues.length > 0 ? (
+                <polyline
+                  points={editPoints}
+                  fill="none"
+                  className="stroke-[var(--apollo-ink)]"
+                  strokeWidth={1.75}
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                  data-series="edits"
+                />
+              ) : null}
             </svg>
           </div>
           <div className="text-muted-foreground relative h-4 text-[11.5px]" aria-hidden="true">
@@ -512,6 +596,22 @@ export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic;
             ))}
           </div>
         </div>
+        {hasEdits ? (
+          <div
+            className="text-muted-foreground relative h-[220px] text-[11.5px] tabular-nums"
+            data-testid="usage-hourly-edits-axis"
+          >
+            {editTicks.map((t) => (
+              <span
+                key={t}
+                className="absolute left-0 translate-y-1/2"
+                style={{ bottom: `${(t / editTop) * 100}%` }}
+              >
+                {fmtCount(t, avg)}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
       <p className="text-muted-foreground text-[12.5px] leading-normal">
         Page requests (not assets or API calls), Eastern time.{" "}
@@ -520,8 +620,13 @@ export function HourlyTrafficChart({ traffic, since }: { traffic: HourlyTraffic;
           : capped
             ? `Showing the most recent ${HOURLY_TIMELINE_DAYS} days of the range. `
             : ""}
-        Bot is declared crawlers plus requests the edge firewall challenged, blocked or
-        rate-limited. Error is a server error (5xx), which is what an outage looks like.
+        Bot or challenged is declared crawlers plus requests the edge firewall challenged, blocked
+        or rate-limited. Served traffic still includes automated clients that passed the firewall,
+        so a flat curve around the clock suggests automation. Error is a server error (5xx), which
+        is what an outage looks like.
+        {hasEdits
+          ? " Profile edits are saves people made in the edit console (automated and bulk-job edits left out), on the right-hand scale."
+          : ""}
         {traffic.firstDay && traffic.firstDay > since
           ? ` Hourly data starts ${shortDay(traffic.firstDay)}.`
           : ""}
