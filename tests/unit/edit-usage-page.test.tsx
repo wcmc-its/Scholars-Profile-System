@@ -12,6 +12,8 @@ const h = vi.hoisted(() => ({
   mockCanViewUsage: vi.fn(),
   mockLoadUsage: vi.fn(),
   mockLoadHealth: vi.fn(),
+  mockLoadTraffic: vi.fn(),
+  mockLoadEdits: vi.fn(),
   mockFindMany: vi.fn(),
   mockPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -30,10 +32,12 @@ vi.mock("@/lib/api/usage-summary", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/usage-summary")>()),
   loadUsageSummary: h.mockLoadUsage,
 }));
+vi.mock("@/lib/api/usage-traffic", () => ({ loadTrafficOverview: h.mockLoadTraffic }));
 vi.mock("@/lib/api/service-health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
   loadServiceHealth: h.mockLoadHealth,
 }));
+vi.mock("@/lib/api/usage-edits", () => ({ loadEditsByHour: h.mockLoadEdits }));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -70,7 +74,7 @@ import {
   PageviewsChart,
   UsageRangePicker,
 } from "@/app/edit/usage/usage-widgets";
-import { EMPTY_HOURLY } from "@/lib/api/usage-hourly";
+import { EMPTY_HOURLY, shapeEditsByHour } from "@/lib/api/usage-hourly";
 import { shapeHourly } from "@/lib/api/usage-summary";
 
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
@@ -106,6 +110,17 @@ const SUMMARY = {
   hourly: EMPTY_HOURLY,
 };
 
+const TRAFFIC_EMPTY = {
+  since: "2026-08-26",
+  until: "2026-09-24",
+  firstDt: null,
+  kpi: { hits: 0, pageviews: 0, visitorsAvg: 0, visitorDays: 0 },
+  sourcesDaily: [],
+  referrers: { total: 0, other: 0, siteOnly: 0 },
+  aiDaily: [],
+  vendors: [],
+};
+
 // The raw CloudWatch reads (ServiceHealthData); the page windows them to the
 // selected range with the real summarizeServiceHealth. The clock is pinned to
 // 2026-09-25 below, so "Last 7 days" = Sep 18-24, "Last 30 days" = Aug 26 -
@@ -139,6 +154,10 @@ beforeEach(() => {
   h.mockCanViewUsage.mockResolvedValue(true);
   h.mockLoadUsage.mockResolvedValue(SUMMARY);
   h.mockLoadHealth.mockResolvedValue(HEALTH);
+  // Traffic sections have their own tests (usage-traffic-widgets); here they
+  // render their empty state so no list fetch fires.
+  h.mockLoadTraffic.mockResolvedValue(TRAFFIC_EMPTY);
+  h.mockLoadEdits.mockResolvedValue([]);
   h.mockFindMany.mockResolvedValue([
     { slug: "test-person-1", cwid: "tst0001", preferredName: "Test Person One" },
   ]);
@@ -283,6 +302,26 @@ describe("/edit/usage", () => {
     expect(traffic.getByText("1.0%")).toBeTruthy();
   });
 
+  it("replaces the old Referrers card with the traffic sections, read for the page's range", async () => {
+    const root = await renderPage({ range: "7" });
+    expect(within(root.getByTestId("usage-traffic-sources")).queryByText("Referrers")).toBeNull();
+    expect(root.getByTestId("usage-traffic")).toBeTruthy();
+    expect(root.getByTestId("traffic-empty").textContent).toContain("No traffic detail yet");
+    expect(root.getByTestId("traffic-download-excel").getAttribute("href")).toBe(
+      "/api/edit/usage/traffic/export?range=7&grain=week",
+    );
+    expect(h.mockLoadTraffic).toHaveBeenCalledWith({ since: "2026-09-18", until: "2026-09-24" });
+  });
+
+  it("fails soft when the traffic rollup can't be read", async () => {
+    h.mockLoadTraffic.mockRejectedValue(new Error("athena"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    expect(root.getByTestId("usage-traffic-unavailable")).toBeTruthy();
+    expect(root.getByTestId("usage-total-pageviews")).toBeTruthy();
+    expect(root.getByTestId("usage-traffic-sources")).toBeTruthy();
+  });
+
   it("renders the uptime card with month labels and a lighter low-traffic bar", async () => {
     const root = await renderPage();
     const card = root.getByTestId("service-health-trend");
@@ -339,7 +378,9 @@ describe("/edit/usage range", () => {
     h.mockLoadUsage.mockImplementation(async (range: { since: string }) => ({
       ...SUMMARY,
       searchVolume:
-        range.since === "2026-09-18" ? { typed: 30, suggested: 70 } : { typed: 1200, suggested: 300 },
+        range.since === "2026-09-18"
+          ? { typed: 30, suggested: 70 }
+          : { typed: 1200, suggested: 300 },
     }));
     const week = await renderPage({ range: "7" });
     expect(week.getByTestId("usage-searches").textContent).toBe("100");
@@ -469,6 +510,9 @@ describe("Traffic by hour", () => {
     expect(root.getByTestId("usage-hourly-empty").textContent).toContain(
       "No hourly data in this range yet",
     );
+    expect(root.getByTestId("usage-hourly-empty").textContent).toContain(
+      "(served, bot or challenged, and error requests by hour)",
+    );
     expect(root.queryByTestId("usage-hourly-chart")).toBeNull();
   });
 
@@ -489,9 +533,125 @@ describe("Traffic by hour", () => {
     // Index 39 = Nov 17 15Z = Nov 17 10 AM EST.
     clickBar(svgOf(chart), 39, 48);
     expect(getByTestId("usage-hourly-readout").textContent).toBe(
-      "Nov 17, 10 AM ET: Human 10 · Bot 0 · Error 300",
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0 · Error 300",
     );
     expect(chart.textContent).not.toContain("Hourly data starts");
+  });
+
+  it("labels the classes honestly in the legend, aria label and help text", () => {
+    const { getByTestId } = render(<HourlyTrafficChart traffic={traffic} since="2026-11-16" />);
+    const chart = getByTestId("usage-hourly-chart");
+    expect(getByTestId("usage-hourly-legend-human").textContent).toBe("Served");
+    expect(getByTestId("usage-hourly-legend-bot").textContent).toBe("Bot or challenged");
+    expect(getByTestId("usage-hourly-legend-error").textContent).toBe("Error");
+    expect(svgOf(chart).getAttribute("aria-label")).toBe(
+      "Page requests per hour (Eastern): served, bot or challenged, and error, 48 hours",
+    );
+    expect(chart.textContent).toContain(
+      "Served traffic still includes automated clients that passed the firewall, so a flat curve around the clock suggests automation.",
+    );
+    expect(chart.textContent).not.toMatch(/\bHuman\b|\bBot\b(?! or challenged)/);
+    // No edits prop: no line, no legend entry, no right axis.
+    expect(chart.querySelector("[data-testid='usage-hourly-legend-edits']")).toBeNull();
+    expect(chart.querySelector("[data-testid='usage-hourly-edits-axis']")).toBeNull();
+  });
+
+  // Nov 17 15Z (10 AM EST) has 4 edits; 16Z has 2; Nov 16 15Z has 2.
+  const EDITS = shapeEditsByHour([
+    { hour: "2026-11-16 15", edits: 2n },
+    { hour: "2026-11-17 15", edits: 4n },
+    { hour: "2026-11-17 16", edits: "2" },
+  ]);
+
+  it("draws profile edits as a line on a right-hand scale and reads them out", () => {
+    const { getByTestId } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" edits={EDITS} />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    const line = svgOf(chart).querySelector("polyline[data-series='edits']");
+    expect(line).not.toBeNull();
+    // One point per hourly slot; the 4-edit hour peaks at the scale top.
+    const points = line!.getAttribute("points")!.split(" ");
+    expect(points).toHaveLength(48);
+    expect(points[39]).toBe("39.5,0");
+    expect(points[40]).toBe("40.5,50");
+    expect(points[0]).toBe("0.5,100");
+    expect(getByTestId("usage-hourly-edits-axis").textContent).toBe("024");
+    expect(getByTestId("usage-hourly-legend-edits").textContent).toBe(
+      "Profile edits (right scale)",
+    );
+    clickBar(svgOf(chart), 39, 48);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0 · Error 300 · Profile edits 4",
+    );
+    expect(svgOf(chart).getAttribute("aria-label")).toContain(
+      "profile edits as a line on the right-hand scale",
+    );
+    // Toggle the line off from the legend.
+    fireEvent.click(getByTestId("usage-hourly-legend-edits"));
+    expect(svgOf(chart).querySelector("polyline")).toBeNull();
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0 · Error 300",
+    );
+  });
+
+  it("averages edits per day by hour of day over the traffic's covered days", () => {
+    const { getByTestId, getByRole } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" edits={EDITS} />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    fireEvent.click(getByRole("button", { name: "By hour of day" }));
+    clickBar(svgOf(chart), 10, 24);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "10 AM ET, average per day: Served 65 · Bot or challenged 20 · Error 150 · Profile edits 3",
+    );
+  });
+
+  it("shows a short note instead of the line when edits are unavailable", () => {
+    const { getByTestId } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" edits={null} />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    expect(getByTestId("usage-hourly-edits-unavailable").textContent).toBe(
+      "Profile edits unavailable right now.",
+    );
+    expect(svgOf(chart).querySelector("polyline")).toBeNull();
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(48);
+  });
+
+  it("reads edits for the range on the page and draws the line", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-10-18", hourly: traffic });
+    h.mockLoadEdits.mockResolvedValue(EDITS);
+    const root = await renderPage();
+    expect(h.mockLoadEdits).toHaveBeenCalledTimes(1);
+    expect(h.mockLoadEdits.mock.calls[0][1]).toMatchObject({
+      since: "2026-08-26",
+      until: "2026-09-24",
+    });
+    const chart = root.getByTestId("usage-hourly-chart");
+    expect(svgOf(chart).querySelector("polyline[data-series='edits']")).not.toBeNull();
+  });
+
+  it("fails soft when the edits read throws: the card still draws, the line is dropped", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-10-18", hourly: traffic });
+    h.mockLoadEdits.mockRejectedValue(new Error("audit read denied"));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    const chart = root.getByTestId("usage-hourly-chart");
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(48);
+    expect(svgOf(chart).querySelector("polyline")).toBeNull();
+    expect(root.getByTestId("usage-hourly-edits-unavailable")).toBeTruthy();
+    // The rest of the page is untouched.
+    expect(root.getByTestId("usage-total-pageviews").textContent).toBe("900");
+    expect(errSpy.mock.calls.some((c) => String(c[0]).includes("usage_edits_by_hour_failed"))).toBe(
+      true,
+    );
+    errSpy.mockRestore();
+  });
+
+  it("skips the edits read when the card has no hourly data", async () => {
+    await renderPage();
+    expect(h.mockLoadEdits).not.toHaveBeenCalled();
   });
 
   it("toggles a series from the legend", () => {
@@ -505,7 +665,7 @@ describe("Traffic by hour", () => {
     expect(svgOf(chart).querySelectorAll("rect[data-series='human']")).toHaveLength(2);
     clickBar(svgOf(chart), 39, 48);
     expect(getByTestId("usage-hourly-readout").textContent).toBe(
-      "Nov 17, 10 AM ET: Human 10 · Bot 0",
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0",
     );
   });
 
@@ -519,7 +679,7 @@ describe("Traffic by hour", () => {
     expect(chart.textContent).toContain("Average per day over 2 days.");
     clickBar(svgOf(chart), 10, 24);
     expect(getByTestId("usage-hourly-readout").textContent).toBe(
-      "10 AM ET, average per day: Human 65 · Bot 20 · Error 150",
+      "10 AM ET, average per day: Served 65 · Bot or challenged 20 · Error 150",
     );
   });
 

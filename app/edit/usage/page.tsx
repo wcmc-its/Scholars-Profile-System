@@ -2,8 +2,11 @@
  * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over a
  * chosen range (the header's Range dropdown: last 7 / 30 / 90 days, since
  * launch, or custom; default last 30) — pageviews trend, top profiles, typed
- * and suggested search terms (+ a searches tile), referrers, geo, device — read from the durable `daily_usage` Athena
- * rollup via a daily-cached loader keyed per range.
+ * and suggested search terms (+ a searches tile), geo, device — read from the durable `daily_usage` Athena
+ * rollup via a daily-cached loader keyed per range. The traffic sections (hits,
+ * pageviews, visitors, where visits come from, referring sites and pages, top
+ * and landing pages, AI) read the `daily_traffic` rollup (lib/api/usage-traffic)
+ * with their own fail-soft; their client island is ./traffic-widgets.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
  * and stay operator-restricted).
@@ -11,13 +14,16 @@
  * Also carries service health (uptime + alarm-firing KPI tiles and a monthly
  * "Uptime since launch" card), read from CloudWatch via
  * lib/api/service-health.ts — independent of the Athena data above, with its
- * own fail-soft.
+ * own fail-soft. The hourly card's profile-edits line reads the audit log
+ * (lib/api/usage-edits.ts) and fails soft on its own too: a DB error drops the
+ * line and says so, leaving the traffic bars.
  *
  * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
- * chart card, the "Traffic by hour" card (human / bot / error, Eastern time),
+ * chart card, the "Traffic by hour" card (served / bot or challenged / error,
+ * Eastern time, plus a profile-edits line),
  * Top profiles + Top typed search terms side by side (Suggested
- * searches wraps below), three Traffic
- * sources cards, then the uptime card. The interactive bits (chart hover, Show
+ * searches wraps below), the traffic sections (./traffic-widgets), the
+ * Geography and Device cards, then the uptime card. The interactive bits (chart hover, Show
  * all, client-side CSV, the uptime ⓘ) are client islands in ./usage-widgets.
  *
  * Audience: a **superuser** or **any unit administrator** (owner/curator) —
@@ -37,7 +43,11 @@ import {
   summarizeServiceHealth,
 } from "@/lib/api/service-health";
 import { SEARCH_STATS_START } from "@/lib/analytics/usage-queries";
+import { loadEditsByHour } from "@/lib/api/usage-edits";
+import type { EditHour } from "@/lib/api/usage-hourly";
 import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
+import type { TrafficOverview } from "@/lib/analytics/traffic-view";
+import { loadTrafficOverview } from "@/lib/api/usage-traffic";
 import {
   type NamedCount,
   type SearchVolume,
@@ -52,6 +62,7 @@ import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { cn } from "@/lib/utils";
 
+import { TrafficSection } from "./traffic-widgets";
 import { fillDayGaps, monthLabel, pctLabel, shortDay } from "./usage-format";
 import {
   HourlyTrafficChart,
@@ -286,7 +297,6 @@ function TrafficSources({ summary }: { summary: UsageSummary }) {
         </span>
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] items-start gap-5">
-        <SplitCard title="Referrers" rows={summary.referrers} emptyLabel="No referrer data." />
         <SplitCard title="Geography" rows={summary.geo} emptyLabel="No geo data." />
         <SplitCard
           title="Device"
@@ -390,9 +400,12 @@ async function resolveProfileNames(
 function UsageBody({
   summary,
   names,
+  edits,
 }: {
   summary: UsageSummary;
   names: Map<string, { cwid: string; name: string }>;
+  /** Profile edits by hour; null when the audit-log read failed. */
+  edits: EditHour[] | null;
 }) {
   const profileRows: RankRow[] = summary.topProfiles.map((p) => {
     const hit = names.get(p.slug);
@@ -425,13 +438,13 @@ function UsageBody({
         <section className={cn(cardClass, "px-[22px] py-5")}>
           <h2 className="text-[17px] font-semibold">Traffic by hour</h2>
           <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-hourly-empty">
-            No hourly data in this range yet. Hourly traffic (human, bot and error requests by hour)
-            is recorded from the first nightly rollup after it shipped in November 2026; earlier
-            days have none.
+            No hourly data in this range yet. Hourly traffic (served, bot or challenged, and error
+            requests by hour) is recorded from the first nightly rollup after it shipped in November
+            2026; earlier days have none.
           </p>
         </section>
       ) : (
-        <HourlyTrafficChart traffic={summary.hourly} since={summary.since} />
+        <HourlyTrafficChart traffic={summary.hourly} since={summary.since} edits={edits} />
       )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">
@@ -466,8 +479,6 @@ function UsageBody({
           note={`Home-page Try chips and concepts picked from the search box suggestions. ${SEARCH_START_NOTE}`}
         />
       </div>
-
-      <TrafficSources summary={summary} />
     </>
   );
 }
@@ -489,7 +500,12 @@ export default async function EditUsagePage({
       reason: "not_superuser_or_unit_admin",
     });
     return (
-      <ConsoleShell active="usage" session={session} pendingSlugRequests={null} pendingHonors={null}>
+      <ConsoleShell
+        active="usage"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
         <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
@@ -502,9 +518,7 @@ export default async function EditUsagePage({
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
-  const pendingHonors = isHonorsQueueTabVisible(session)
-    ? await countPendingHonors(db.read)
-    : null;
+  const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
 
   // The header's Range dropdown (`?range=`, `?from=`/`?to=`); a bad or missing
   // param falls back to the last 30 days.
@@ -541,6 +555,43 @@ export default async function EditUsagePage({
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+  }
+
+  // The traffic sections read their own rollup (daily_traffic) and fail soft
+  // on their own: an error there blanks only those sections.
+  let traffic: TrafficOverview | null = null;
+  try {
+    traffic = await loadTrafficOverview({ since: range.since, until: range.until });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "usage_traffic_read_failed",
+        path: "/edit/usage",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+  const rangeQuery =
+    range.key === "custom"
+      ? `range=custom&from=${range.since}&to=${range.until}`
+      : `range=${range.key}`;
+  // Profile edits by hour for the hourly card, from the audit log: its own
+  // source, so its own fail-soft (a DB error drops the line, never the card).
+  // Read only when the card will draw.
+  let edits: EditHour[] | null = [];
+  if (summary && summary.hourly.buckets.length > 0) {
+    try {
+      edits = await loadEditsByHour(db.read, range);
+    } catch (err) {
+      edits = null;
+      console.error(
+        JSON.stringify({
+          event: "usage_edits_by_hour_failed",
+          path: "/edit/usage",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   }
 
   const names = summary
@@ -589,8 +640,18 @@ export default async function EditUsagePage({
             this persists.
           </p>
         ) : (
-          <UsageBody summary={summary!} names={names} />
+          <UsageBody summary={summary!} names={names} edits={edits} />
         )}
+
+        {traffic ? (
+          <TrafficSection overview={traffic} rangeQuery={rangeQuery} />
+        ) : (
+          <p className="text-muted-foreground" data-testid="usage-traffic-unavailable">
+            Traffic and referrer detail is temporarily unavailable.
+          </p>
+        )}
+
+        {summary ? <TrafficSources summary={summary} /> : null}
 
         {serviceHealth ? <UptimeCard monthly={serviceHealth.monthly} /> : null}
       </div>

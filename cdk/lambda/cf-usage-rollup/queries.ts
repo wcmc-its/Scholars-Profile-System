@@ -10,8 +10,10 @@
 // (set by CDK), not from the event. Do not interpolate event fields into SQL
 // without validation.
 //
-// The rollup emits aggregates ONLY (counts by dimension). It never selects
-// c_ip / x_forwarded_for, so no raw client IP is ever written to daily_usage.
+// The rollup emits aggregates ONLY (counts by dimension). The daily_usage
+// builder never selects c_ip / x_forwarded_for; the daily_traffic builder reads
+// c_ip only inside approx_distinct (the per-day visitor estimate), so no raw
+// client IP is ever written to either table.
 
 /** Strict ISO calendar-date shape; the only event-derived value in any SQL. */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -206,11 +208,17 @@ const DEVICE_CASE = [
  * = '-' (CloudFront's "no referrer" sentinel) and a same-host referrer both
  * collapse to direct/internal; a real external referrer reduces to its host so
  * the dimension stays low-cardinality and PII-free (no full URLs / query strings).
+ *
+ * "Same host" compares against x_host_header (the Host the viewer asked for,
+ * i.e. the public site host), NOT cs_host (the distribution's
+ * *.cloudfront.net domain, which no browser ever navigates from). Days rolled
+ * before this fix show in-site navigation as an external referrer equal to the
+ * public host; they are deliberately not re-rolled.
  */
 const REFERRER_CASE = [
   "CASE",
   "  WHEN cs_referrer = '-' OR cs_referrer IS NULL THEN '(direct)'",
-  "  WHEN url_extract_host(cs_referrer) = cs_host THEN '(internal)'",
+  "  WHEN lower(url_extract_host(cs_referrer)) = lower(x_host_header) THEN '(internal)'",
   "  WHEN url_extract_host(cs_referrer) = '' THEN '(direct)'",
   "  ELSE url_extract_host(cs_referrer)",
   "END",
@@ -514,4 +522,325 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
 
     ")",
   ].join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// daily_traffic -- site-traffic rollup (hits / pageviews / visitors, referrer
+// pages, landing pages, top pages, declared AI agents). A SEPARATE table from
+// daily_usage so it can be backfilled on its own (`tables: ["traffic"]`)
+// without re-rolling daily_usage history. Same (metric, dimension, cnt, dt)
+// shape and the same delete-then-insert idempotency (index.ts purges
+// rollup/daily-traffic/dt=<date>/ before the INSERT).
+// ----------------------------------------------------------------------------
+
+/** The Glue coordinates of the daily_traffic INSERT (CDK-set Lambda env). */
+export interface TrafficConfig {
+  readonly database: string;
+  readonly rawTable: string;
+  readonly trafficTable: string;
+}
+
+/** Rows kept per high-cardinality metric per day; the rest fold into OTHER_DIMENSION. */
+export const TOP_N = 5000;
+
+/** The single row a top-N metric's long tail collapses into. */
+export const OTHER_DIMENSION = "(other)";
+
+/**
+ * A page response that rendered: a 200 GET to a page path (PAGE_PATH_PREDICATE:
+ * not /_next/, /api/, or a dotted static file), not an edge error, and not a
+ * response a CloudFront Function synthesized (the /edge-ip echo is a dot-free
+ * 200 that never reaches the origin). `?_rsc=` client navigations are page
+ * requests too, so they count -- the query string is not inspected.
+ */
+const PAGE_OK = [
+  "cs_method = 'GET' AND sc_status = 200",
+  `    AND ${NOT_EDGE_ERROR}`,
+  "    AND x_edge_result_type <> 'FunctionGeneratedResponse'",
+  `    AND ${PAGE_PATH_PREDICATE}`,
+].join("\n");
+
+/** PAGE_OK from a non-bot User-Agent (the same bot rule as daily_usage). */
+const PAGE_HUMAN = `${PAGE_OK}\n    AND ${NOT_BOT_UA}`;
+
+/**
+ * The request path, url-decoded. try(): url_decode throws on a malformed
+ * %-sequence, which would fail the whole INSERT; such a path is kept raw.
+ */
+const PATH_EXPR = "coalesce(try(url_decode(cs_uri_stem)), cs_uri_stem)";
+
+/** Lower-cased referrer host; NULL for '-' or an unparseable referrer. */
+const REF_HOST_EXPR = "lower(url_extract_host(cs_referrer))";
+
+/**
+ * An external referrer: a parseable host that is neither the site itself
+ * (x_host_header, the public host the viewer requested) nor a CloudFront
+ * distribution domain. A NULL host ('-', empty, unparseable) fails the first
+ * test, and a NULL comparison is not true, so those rows drop out.
+ */
+const EXTERNAL_REFERRER = [
+  `${REF_HOST_EXPR} <> ''`,
+  `    AND ${REF_HOST_EXPR} <> lower(coalesce(x_host_header, ''))`,
+  `    AND ${REF_HOST_EXPR} NOT LIKE '%.cloudfront.net'`,
+].join("\n");
+
+/**
+ * Referring page: host + path, query string and fragment dropped
+ * (url_extract_path excludes both). An empty path reads as '/'.
+ */
+const REFERRER_PAGE_EXPR = `${REF_HOST_EXPR} || coalesce(nullif(url_extract_path(cs_referrer), ''), '/')`;
+
+/** Landing page from an external referrer: '<referrer host>|<request path>'. */
+const LANDING_EXPR = `${REF_HOST_EXPR} || '|' || ${PATH_EXPR}`;
+
+/** One declared AI agent: the UA token, its class, and its vendor. */
+export interface AiAgent {
+  readonly token: string;
+  readonly agentClass: "fetch" | "crawler";
+  readonly vendor: string;
+}
+
+/**
+ * Declared AI agents, matched case-insensitively as a token in the User-Agent.
+ * `fetch` = a user-triggered fetch (an assistant reading a page for someone);
+ * `crawler` = bulk collection for training or an AI search index. Order is the
+ * CASE order (first match wins); no token is a substring of another.
+ *
+ * Google-Extended and Applebot-Extended are robots.txt product tokens their
+ * vendors document rather than distinct crawlers, so they are listed for
+ * completeness and may never match a request.
+ */
+export const AI_AGENTS: readonly AiAgent[] = [
+  { token: "ChatGPT-User", agentClass: "fetch", vendor: "OpenAI" },
+  { token: "Claude-User", agentClass: "fetch", vendor: "Anthropic" },
+  { token: "Perplexity-User", agentClass: "fetch", vendor: "Perplexity" },
+  { token: "MistralAI-User", agentClass: "fetch", vendor: "Mistral" },
+  { token: "GPTBot", agentClass: "crawler", vendor: "OpenAI" },
+  { token: "OAI-SearchBot", agentClass: "crawler", vendor: "OpenAI" },
+  { token: "ClaudeBot", agentClass: "crawler", vendor: "Anthropic" },
+  { token: "Claude-SearchBot", agentClass: "crawler", vendor: "Anthropic" },
+  { token: "PerplexityBot", agentClass: "crawler", vendor: "Perplexity" },
+  { token: "CCBot", agentClass: "crawler", vendor: "Common Crawl" },
+  { token: "Google-Extended", agentClass: "crawler", vendor: "Google" },
+  { token: "Bytespider", agentClass: "crawler", vendor: "ByteDance" },
+  { token: "Amazonbot", agentClass: "crawler", vendor: "Amazon" },
+  { token: "meta-externalagent", agentClass: "crawler", vendor: "Meta" },
+  { token: "Applebot-Extended", agentClass: "crawler", vendor: "Apple" },
+  { token: "DuckAssistBot", agentClass: "crawler", vendor: "DuckDuckGo" },
+];
+
+/** Escape a literal token for a Java/Joni regex inside a SQL string literal. */
+function regexLiteral(token: string): string {
+  return token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/'/g, "''");
+}
+
+/**
+ * Matched against the RAW cs_user_agent: CloudFront URL-encodes the field, but
+ * every token is plain ASCII letters and hyphens, which it never encodes, and
+ * the raw match cannot fail on a malformed %-sequence the way url_decode can.
+ */
+function uaMatches(tokens: readonly string[]): string {
+  return `regexp_like(cs_user_agent, '(?i)(${tokens.map(regexLiteral).join("|")})')`;
+}
+
+/** '<class>|<vendor>' of a declared AI agent; NULL for any other UA. */
+const AI_AGENT_CASE = [
+  "CASE",
+  ...AI_AGENTS.map(
+    (a) => `  WHEN ${uaMatches([a.token])} THEN '${a.agentClass}|${a.vendor}'`,
+  ),
+  "END",
+].join("\n");
+
+/** 'fetch' / 'crawler' for a declared AI agent; NULL for any other UA. */
+const AI_CLASS_CASE = [
+  "CASE",
+  ...(["fetch", "crawler"] as const).map(
+    (cls) =>
+      `  WHEN ${uaMatches(AI_AGENTS.filter((a) => a.agentClass === cls).map((a) => a.token))} THEN '${cls}'`,
+  ),
+  "END",
+].join("\n");
+
+/** '<class>|<path>' of an AI agent's page fetch; NULL for any other UA. */
+const AI_LANDING_EXPR = `${AI_CLASS_CASE} || '|' || ${PATH_EXPR}`;
+
+/**
+ * One top-N arm: count rows by `dimExpr`, keep the TOP_N largest dimensions
+ * (ties broken by dimension, so a re-roll is deterministic), and fold the rest
+ * into a single OTHER_DIMENSION row. A NULL or empty dimension is dropped
+ * before ranking. The fold CASE is emitted identically in SELECT and GROUP BY
+ * (Trino's grouped-expression rule).
+ *
+ * The kept dimension has TAB / CR / LF replaced by a space: daily_traffic is
+ * TSV with no escaping, and a decoded path (`%09`, `%0A`) would otherwise
+ * split or shift its row.
+ */
+function topNArm(
+  metric: string,
+  dimExpr: string,
+  from: string,
+  where: string,
+  dtLit: string,
+): string[] {
+  const fold = `CASE WHEN rn <= ${TOP_N} THEN regexp_replace(dimension, '[\\t\\r\\n]', ' ') ELSE '${OTHER_DIMENSION}' END`;
+  return [
+    `  SELECT '${metric}' AS metric, ${fold} AS dimension,`,
+    `    SUM(cnt) AS cnt, ${dtLit} AS dt`,
+    "  FROM (",
+    "    SELECT dimension, cnt,",
+    "      row_number() OVER (ORDER BY cnt DESC, dimension) AS rn",
+    "    FROM (",
+    `      SELECT ${dimExpr} AS dimension, COUNT(*) AS cnt`,
+    `      FROM ${from}`,
+    `      WHERE ${where}`,
+    `      GROUP BY ${dimExpr}`,
+    `      HAVING ${dimExpr} IS NOT NULL AND ${dimExpr} <> ''`,
+    "    )",
+    "  )",
+    `  GROUP BY ${fold}`,
+  ];
+}
+
+/**
+ * INSERT INTO daily_traffic every site-traffic metric for one dt partition:
+ *
+ * - traffic: 'hits' (every request), 'pageviews' (PAGE_HUMAN), 'visitors'
+ *   (approx_distinct of ip|UA over PAGE_HUMAN; a per-day estimate -- only the
+ *   count is written, never the key).
+ * - referrer_page: external referring page (host + path), PAGE_HUMAN. Top N.
+ * - landing: '<referrer host>|<path>' for PAGE_HUMAN with an external referrer. Top N.
+ * - page: decoded path, PAGE_HUMAN. Top N.
+ * - ai_agent: '<class>|<vendor>' over ALL requests by a declared AI agent.
+ * - ai_landing: '<class>|<path>' for PAGE_OK requests by a declared AI agent. Top N.
+ *
+ * Referrer source categories are NOT stored: the dashboard derives them from
+ * the host at read time, so a category rule change needs no backfill.
+ */
+export function buildTrafficInsert(cfg: TrafficConfig, dt: string): string {
+  assertIsoDate(dt);
+  const { database, rawTable, trafficTable } = cfg;
+  const from = `"${database}"."${rawTable}"`;
+  const into = `"${database}"."${trafficTable}"`;
+  const day = `"date" = DATE '${dt}'`;
+  const dtLit = `'${dt}'`;
+  const externalPageWhere = `${day} AND ${PAGE_HUMAN}\n    AND ${EXTERNAL_REFERRER}`;
+
+  return [
+    `INSERT INTO ${into}`,
+    "SELECT metric, dimension, cnt, dt FROM (",
+
+    // (1) traffic -- three totals from one scan, unpivoted to rows.
+    `  SELECT 'traffic' AS metric, t.dimension, t.cnt, ${dtLit} AS dt`,
+    "  FROM (",
+    "    SELECT COUNT(*) AS hits,",
+    `      count_if(${PAGE_HUMAN}) AS pageviews,`,
+    `      approx_distinct(CASE WHEN ${PAGE_HUMAN} THEN c_ip || '|' || cs_user_agent END) AS visitors`,
+    `    FROM ${from}`,
+    `    WHERE ${day}`,
+    "  ) totals",
+    "  CROSS JOIN UNNEST(",
+    "    ARRAY['hits', 'pageviews', 'visitors'],",
+    "    ARRAY[totals.hits, totals.pageviews, totals.visitors]",
+    "  ) AS t (dimension, cnt)",
+
+    "  UNION ALL",
+
+    // (2) referrer_page -- external referring page.
+    ...topNArm("referrer_page", REFERRER_PAGE_EXPR, from, externalPageWhere, dtLit),
+
+    "  UNION ALL",
+
+    // (3) landing -- where external referrals land.
+    ...topNArm("landing", LANDING_EXPR, from, externalPageWhere, dtLit),
+
+    "  UNION ALL",
+
+    // (4) page -- human pageviews by path.
+    ...topNArm("page", PATH_EXPR, from, `${day} AND ${PAGE_HUMAN}`, dtLit),
+
+    "  UNION ALL",
+
+    // (5) ai_agent -- every request by a declared AI agent, any status.
+    `  SELECT 'ai_agent' AS metric, ${AI_AGENT_CASE} AS dimension,`,
+    `    COUNT(*) AS cnt, ${dtLit} AS dt`,
+    `  FROM ${from}`,
+    `  WHERE ${day}`,
+    `  GROUP BY ${AI_AGENT_CASE}`,
+    `  HAVING ${AI_AGENT_CASE} IS NOT NULL`,
+
+    "  UNION ALL",
+
+    // (6) ai_landing -- pages AI agents fetched successfully.
+    ...topNArm("ai_landing", AI_LANDING_EXPR, from, `${day} AND ${PAGE_OK}`, dtLit),
+
+    ")",
+  ].join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// Which tables a run rolls. The handler takes an optional event `tables` list
+// so an operator can backfill daily_traffic alone; validated here (SDK-free)
+// so the rule is unit-testable.
+// ----------------------------------------------------------------------------
+
+/** A rollup target: daily_usage ('usage') or daily_traffic ('traffic'). */
+export type RollupTable = "usage" | "traffic";
+
+/** Every rollup target, in the order a run rolls them. */
+export const ROLLUP_TABLES: readonly RollupTable[] = ["usage", "traffic"];
+
+/**
+ * Validate the event's `tables` field. Absent = every table. Otherwise it must
+ * be a non-empty array of known names; the result is deduplicated and in
+ * ROLLUP_TABLES order. Throws `invalid_tables` before any partition is purged.
+ */
+export function resolveTables(tables: unknown): RollupTable[] {
+  if (tables === undefined) return [...ROLLUP_TABLES];
+  if (
+    !Array.isArray(tables) ||
+    tables.length === 0 ||
+    !tables.every(
+      (t) =>
+        typeof t === "string" &&
+        (ROLLUP_TABLES as readonly string[]).includes(t),
+    )
+  ) {
+    throw new Error(
+      `invalid_tables: expected a non-empty array of ${ROLLUP_TABLES.map((t) => `"${t}"`).join(" | ")}`,
+    );
+  }
+  return ROLLUP_TABLES.filter((t) => (tables as unknown[]).includes(t));
+}
+
+/** One unit of rollup work: purge then re-insert `table`'s partition for `dt`. */
+export interface RollupStep {
+  readonly dt: string;
+  readonly table: RollupTable;
+}
+
+/**
+ * The ordered work for a run: each selected table, each rerollable date --
+ * TABLE-major, so every daily_usage day is rolled before any daily_traffic
+ * query runs. The handler stops at the first failure (and the Lambda timeout
+ * caps the whole run), so a failing or slow traffic query must not keep the
+ * newer day's daily_usage from being rolled. Dates older than
+ * MAX_REROLL_AGE_DAYS are returned in `skipped` and never purged.
+ */
+export function planRollup(
+  dates: readonly string[],
+  tables: readonly RollupTable[],
+  today: string,
+): { steps: RollupStep[]; skipped: string[] } {
+  const rerollable: string[] = [];
+  const skipped: string[] = [];
+  for (const dt of dates) {
+    if (isRerollable(dt, today)) rerollable.push(dt);
+    else skipped.push(dt);
+  }
+  const steps: RollupStep[] = [];
+  for (const table of tables) {
+    for (const dt of rerollable) steps.push({ dt, table });
+  }
+  return { steps, skipped };
 }
