@@ -4,7 +4,8 @@
  *   - an item with a stage but NO impact_score still yields a stage write
  *   - an item without a stage (or with an unrecognized one) yields no write,
  *     so nothing can be nulled over a stored stage
- *   - confidence is optional; an unknown confidence stores null
+ *   - confidence is optional; a row with an unknown stage or confidence value
+ *     is skipped and counted
  *   - "NA" is stored raw
  *   - pmid from the attribute or the PK; unknown publications are counted
  *   - grouping by (stage, confidence) for the batched updateMany
@@ -41,6 +42,7 @@ describe("buildTranslationalStageWrites", () => {
     expect(buildTranslationalStageWrites([item], KNOWN)).toEqual({
       writes: [{ pmid: "1001", translationalStage: "T1", translationalStageConfidence: "high" }],
       skippedMissingPublication: 0,
+      skippedUnrecognized: 0,
     });
   });
 
@@ -54,6 +56,7 @@ describe("buildTranslationalStageWrites", () => {
     expect(buildTranslationalStageWrites(items, KNOWN)).toEqual({
       writes: [],
       skippedMissingPublication: 0,
+      skippedUnrecognized: 0,
     });
   });
 
@@ -62,20 +65,33 @@ describe("buildTranslationalStageWrites", () => {
       { PK: "IMPACT#pmid_1001", translational_stage: "T5", translational_stage_confidence: "high" },
       { PK: "IMPACT#pmid_1002", translational_stage: 2 },
     ];
-    expect(buildTranslationalStageWrites(items, KNOWN).writes).toEqual([]);
+    const plan = buildTranslationalStageWrites(items, KNOWN);
+    expect(plan.writes).toEqual([]);
+    // Counted, so a changed spelling upstream is visible in the ETL log.
+    expect(plan.skippedUnrecognized).toBe(2);
   });
 
-  it("stores a missing or unknown confidence as null, and NA raw", () => {
+  it("stores a missing confidence as null, and NA raw", () => {
     const items: ImpactStageInput[] = [
       { PK: "IMPACT#pmid_1001", translational_stage: "T2" },
-      { PK: "IMPACT#pmid_1002", translational_stage: "T0", translational_stage_confidence: "certain" },
       { PK: "IMPACT#pmid_1003", translational_stage: "NA", translational_stage_confidence: "low" },
     ];
     expect(buildTranslationalStageWrites(items, KNOWN).writes).toEqual([
       { pmid: "1001", translationalStage: "T2", translationalStageConfidence: null },
-      { pmid: "1002", translationalStage: "T0", translationalStageConfidence: null },
       { pmid: "1003", translationalStage: "NA", translationalStageConfidence: "low" },
     ]);
+  });
+
+  it("skips and counts a row whose confidence is present but not a known value", () => {
+    // Writing NULL here would make a stored (stage, low) pair displayable.
+    const items: ImpactStageInput[] = [
+      { PK: "IMPACT#pmid_1002", translational_stage: "T0", translational_stage_confidence: "certain" },
+    ];
+    expect(buildTranslationalStageWrites(items, KNOWN)).toEqual({
+      writes: [],
+      skippedMissingPublication: 0,
+      skippedUnrecognized: 1,
+    });
   });
 
   it("counts staged items whose publication we do not have, and skips them", () => {
@@ -104,6 +120,7 @@ describe("buildTranslationalStageWrites", () => {
     expect(buildTranslationalStageWrites([], KNOWN)).toEqual({
       writes: [],
       skippedMissingPublication: 0,
+      skippedUnrecognized: 0,
     });
   });
 });

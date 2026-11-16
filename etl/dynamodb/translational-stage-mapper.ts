@@ -56,7 +56,15 @@ export type TranslationalStageWritePlan = {
   writes: TranslationalStageWrite[];
   /** Items carrying a valid stage whose pmid is not in our publication table. */
   skippedMissingPublication: number;
+  /** Items whose stage or confidence is present but not a value we know. They
+   *  are skipped, not written: a changed spelling upstream must show up as a
+   *  count in the log, and must never turn a hidden low-confidence stage into
+   *  a displayable one by writing NULL over its confidence. */
+  skippedUnrecognized: number;
 };
+
+const present = (v: unknown): boolean =>
+  v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "");
 
 /**
  * One write per IMPACT# item that carries a valid stage and whose pmid we
@@ -69,9 +77,18 @@ export function buildTranslationalStageWrites(
 ): TranslationalStageWritePlan {
   const byPmid = new Map<string, TranslationalStageWrite>();
   let skippedMissingPublication = 0;
+  let skippedUnrecognized = 0;
   for (const it of items) {
     const stage = parseTranslationalStage(it.translational_stage);
-    if (!stage) continue;
+    if (!stage) {
+      if (present(it.translational_stage)) skippedUnrecognized += 1;
+      continue;
+    }
+    const confidence = parseTranslationalStageConfidence(it.translational_stage_confidence);
+    if (!confidence && present(it.translational_stage_confidence)) {
+      skippedUnrecognized += 1;
+      continue;
+    }
     const pmid = impactRecordPmid(it);
     if (!pmid) continue;
     if (!knownPmids.has(pmid)) {
@@ -81,12 +98,10 @@ export function buildTranslationalStageWrites(
     byPmid.set(pmid, {
       pmid,
       translationalStage: stage,
-      translationalStageConfidence: parseTranslationalStageConfidence(
-        it.translational_stage_confidence,
-      ),
+      translationalStageConfidence: confidence,
     });
   }
-  return { writes: [...byPmid.values()], skippedMissingPublication };
+  return { writes: [...byPmid.values()], skippedMissingPublication, skippedUnrecognized };
 }
 
 /**

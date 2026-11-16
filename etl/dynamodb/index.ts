@@ -786,7 +786,7 @@ async function main() {
       }
     }
     console.log(
-      `publication translational stage: ${stageRowsWritten} rows written from ${stagePlan.writes.length} IMPACT# items with a stage (skipped: ${stagePlan.skippedMissingPublication} missing publication).`,
+      `publication translational stage: ${stageRowsWritten} rows written from ${stagePlan.writes.length} IMPACT# items with a stage (skipped: ${stagePlan.skippedMissingPublication} missing publication, ${stagePlan.skippedUnrecognized} unrecognized stage or confidence value).`,
     );
 
     // ===================================================================
