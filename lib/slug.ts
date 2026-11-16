@@ -117,6 +117,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set<string>([
   "contact",
   // `/scholars/*` sub-segment a slug override must not shadow (legacy entry)
   "by-cwid",
+  "by-pmid",
 ]);
 
 /**

@@ -10,23 +10,30 @@ vi.mock("@/lib/db", () => ({
     scholar: { findFirst: vi.fn() },
     slugHistory: { findUnique: vi.fn() },
     cwidAlias: { findUnique: vi.fn() },
+    publicationAuthor: { findMany: vi.fn() },
   },
 }));
 
 import { prisma } from "@/lib/db";
 import { HIDDEN_ROLE_CATEGORIES } from "@/lib/eligibility";
-import { resolveByCwidOrAlias, resolveBySlugOrHistory } from "@/lib/url-resolver";
+import {
+  resolveByCwidOrAlias,
+  resolveBySlugOrHistory,
+  resolvePubAuthorSlug,
+} from "@/lib/url-resolver";
 
 const mockedPrisma = prisma as unknown as {
   scholar: { findFirst: ReturnType<typeof vi.fn> };
   slugHistory: { findUnique: ReturnType<typeof vi.fn> };
   cwidAlias: { findUnique: ReturnType<typeof vi.fn> };
+  publicationAuthor: { findMany: ReturnType<typeof vi.fn> };
 };
 
 beforeEach(() => {
   mockedPrisma.scholar.findFirst.mockReset();
   mockedPrisma.slugHistory.findUnique.mockReset();
   mockedPrisma.cwidAlias.findUnique.mockReset();
+  mockedPrisma.publicationAuthor.findMany.mockReset();
 });
 
 afterEach(() => {
@@ -277,5 +284,39 @@ describe("#2268 url-resolver — hidden identity classes do not resolve", () => 
       cwid: "zzz9999",
       slug: "test-person",
     });
+  });
+});
+
+describe("resolvePubAuthorSlug", () => {
+  const row = (o: Partial<{ cwid: string; position: number; isFirst: boolean; isLast: boolean; slug: string; roleCategory: string | null }>) => ({
+    cwid: o.cwid ?? "zzz9001",
+    position: o.position ?? 2,
+    isFirst: o.isFirst ?? false,
+    isLast: o.isLast ?? false,
+    scholar: { slug: o.slug ?? "test-person-1", roleCategory: o.roleCategory ?? "full_time_faculty" },
+  });
+
+  it("queries confirmed, live, publicly displayed authorships of that PMID", async () => {
+    mockedPrisma.publicationAuthor.findMany.mockResolvedValueOnce([]);
+    await resolvePubAuthorSlug("37423492");
+    const where = mockedPrisma.publicationAuthor.findMany.mock.calls[0]![0].where;
+    expect(where).toMatchObject({ pmid: "37423492", isConfirmed: true, cwid: { not: null } });
+    expect(where.scholar.is).toMatchObject({ deletedAt: null, status: "active" });
+    expect(where.scholar.is.OR).toBeDefined();
+  });
+
+  it("picks the first author over the senior author", async () => {
+    mockedPrisma.publicationAuthor.findMany.mockResolvedValueOnce([
+      row({ cwid: "zzz9002", slug: "test-person-2", isLast: true, position: 9 }),
+      row({ cwid: "zzz9001", slug: "test-person-1", isFirst: true, position: 1 }),
+    ]);
+    expect(await resolvePubAuthorSlug("1")).toBe("test-person-1");
+  });
+
+  it("returns null when no author survives the public-display check", async () => {
+    mockedPrisma.publicationAuthor.findMany.mockResolvedValueOnce([
+      row({ roleCategory: [...HIDDEN_ROLE_CATEGORIES][0] }),
+    ]);
+    expect(await resolvePubAuthorSlug("1")).toBeNull();
   });
 });

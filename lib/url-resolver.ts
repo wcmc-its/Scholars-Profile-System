@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { pickPubAuthorSlug } from "@/lib/vivo-pub-author";
 
 /**
  * Result of resolving a URL path component to a scholar.
@@ -89,4 +90,40 @@ export async function resolveByCwidOrAlias(cwid: string): Promise<ResolveResult>
   }
 
   return { type: "not-found" };
+}
+
+/**
+ * Resolve a legacy VIVO publication id (`/display/pubid<PMID>`; the VIVO pubid
+ * IS the PMID) to the profile slug of the WCM author it belongs to, by the
+ * D-07 pick (first author, else senior author, else earliest position) over
+ * confirmed authorships of live, publicly displayed scholars. Null when no
+ * such author exists.
+ */
+export async function resolvePubAuthorSlug(pmid: string): Promise<string | null> {
+  const rows = await prisma.publicationAuthor.findMany({
+    where: {
+      pmid,
+      isConfirmed: true,
+      cwid: { not: null },
+      scholar: { is: { deletedAt: null, status: "active", ...publicRoleWhere() } },
+    },
+    select: {
+      cwid: true,
+      position: true,
+      isFirst: true,
+      isLast: true,
+      scholar: { select: { slug: true, roleCategory: true } },
+    },
+  });
+  return pickPubAuthorSlug(
+    rows
+      .filter((r) => r.scholar && r.cwid && isPubliclyDisplayed(r.scholar.roleCategory))
+      .map((r) => ({
+        cwid: r.cwid!,
+        slug: r.scholar!.slug,
+        isFirst: r.isFirst,
+        isLast: r.isLast,
+        position: r.position,
+      })),
+  );
 }

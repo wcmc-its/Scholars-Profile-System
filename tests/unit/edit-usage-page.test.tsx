@@ -98,10 +98,6 @@ const SUMMARY = {
   ],
   suggestedSearchTerms: [{ term: "sprockets", searches: 5 }],
   searchVolume: { typed: 120, suggested: 40 },
-  referrers: [
-    { label: "(direct)", hits: 900 },
-    { label: "example.org", hits: 100 },
-  ],
   geo: [{ label: "North America", hits: 1000 }],
   device: [
     { label: "desktop", hits: 990 },

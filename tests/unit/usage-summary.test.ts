@@ -38,11 +38,11 @@ describe("loadUsageSummary", () => {
     await loadUsageSummary(launch);
 
     expect(h.cacheKeys).toEqual([
-      ["usage-summary", "v6", "2026-12-18", "2026-12-24"],
-      ["usage-summary", "v6", "2026-11-20", "2026-12-24"],
+      ["usage-summary", "v7", "2026-12-18", "2026-12-24"],
+      ["usage-summary", "v7", "2026-11-20", "2026-12-24"],
     ]);
-    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 9).map((c) => c[0] as string);
-    expect(firstWindow).toHaveLength(9);
+    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 8).map((c) => c[0] as string);
+    expect(firstWindow).toHaveLength(8);
     expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_suggested'"))).toBe(true);
     for (const sql of firstWindow) {
       expect(sql).toContain("dt >= '2026-12-18' AND dt <= '2026-12-24'");
@@ -103,7 +103,6 @@ describe("shapeUsageRows", () => {
         { metric: "typed", searches: "30" },
         { metric: "suggested", searches: "7" },
       ],
-      referrers: [{ referrer: "(direct)", hits: "200" }],
       geo: [{ region: "North America", hits: "180" }],
       device: [{ device: "desktop", hits: "150" }],
       hourly: [],
@@ -119,7 +118,6 @@ describe("shapeUsageRows", () => {
     expect(summary.searchTerms).toEqual([{ term: "cancer", searches: 30 }]);
     expect(summary.suggestedSearchTerms).toEqual([{ term: "immunotherapy", searches: 7 }]);
     expect(summary.searchVolume).toEqual({ typed: 30, suggested: 7 });
-    expect(summary.referrers).toEqual([{ label: "(direct)", hits: 200 }]);
     expect(summary.geo).toEqual([{ label: "North America", hits: 180 }]);
     expect(summary.device).toEqual([{ label: "desktop", hits: 150 }]);
   });
@@ -131,7 +129,6 @@ describe("shapeUsageRows", () => {
       searchTerms: [],
       suggestedSearchTerms: [],
       searchTotals: [],
-      referrers: [],
       geo: [],
       device: [],
       hourly: [],

@@ -28,6 +28,8 @@ import {
  * direct by-cwid request would not.
  */
 const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)\/?$/;
+/** Legacy VIVO publication pages: the VIVO pubid is the PMID (see /scholars/by-pmid). */
+const VIVO_PUB_RE = /^\/(?:display|individual)\/pubid(\d{1,9})\/?$/;
 
 /**
  * B01 — SSO gate for the editing surfaces (issue #100).
@@ -255,6 +257,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       headers: {
         Location: absoluteLocation(request, `/scholars/by-cwid/${cwid}`),
       },
+    });
+  }
+  const pubMatch = VIVO_PUB_RE.exec(request.nextUrl.pathname);
+  if (pubMatch) {
+    // Digits only, so safe in the header; returned directly like the cwid case.
+    return new NextResponse(null, {
+      status: 301,
+      headers: { Location: absoluteLocation(request, `/scholars/by-pmid/${pubMatch[1]}`) },
     });
   }
   // Any other legacy VIVO path (org/publication pages like `/display/n123`,

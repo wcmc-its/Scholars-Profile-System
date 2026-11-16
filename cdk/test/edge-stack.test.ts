@@ -1525,6 +1525,10 @@ describe("EdgeStack", () => {
         ["/", "/"],
         ["/vivosearch", "/"],
         ["/display/cwid-aer2006/extra", "/"],
+        ["/display/pubid37423492", "/scholars/by-pmid/37423492"],
+        ["/individual/pubid123/", "/scholars/by-pmid/123"],
+        ["/display/pubid12x", "/"],
+        ["/display/pubid1234567890", "/"],
       ])("vivo host %s -> 301 %s", (uri, path) => {
         const res = run("VIVO.weill.cornell.edu", uri);
         expect(res.statusCode).toBe(301);
