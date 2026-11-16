@@ -14,7 +14,8 @@
  * own fail-soft.
  *
  * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
- * chart card, Top profiles + Top typed search terms side by side (Suggested
+ * chart card, the "Traffic by hour" card (human / bot / error, Eastern time),
+ * Top profiles + Top typed search terms side by side (Suggested
  * terms clicked wraps below), three Traffic
  * sources cards, then the uptime card. The interactive bits (chart hover, Show
  * all, client-side CSV, the uptime ⓘ) are client islands in ./usage-widgets.
@@ -52,6 +53,7 @@ import { cn } from "@/lib/utils";
 
 import { fillDayGaps, monthLabel, pctLabel, shortDay } from "./usage-format";
 import {
+  HourlyTrafficChart,
   PageviewsChart,
   RankTable,
   UptimeInfoButton,
@@ -415,6 +417,19 @@ function UsageBody({
         </section>
       ) : (
         <PageviewsChart data={fillDayGaps(summary.pageviewsByDay, summary.since, summary.until)} />
+      )}
+
+      {summary.hourly.buckets.length === 0 ? (
+        <section className={cn(cardClass, "px-[22px] py-5")}>
+          <h2 className="text-[17px] font-semibold">Traffic by hour</h2>
+          <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-hourly-empty">
+            No hourly data in this range yet. Hourly traffic (human, bot and error requests by hour)
+            is recorded from the first nightly rollup after it shipped in November 2026; earlier
+            days have none.
+          </p>
+        </section>
+      ) : (
+        <HourlyTrafficChart traffic={summary.hourly} since={summary.since} />
       )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">

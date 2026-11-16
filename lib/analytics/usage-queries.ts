@@ -43,6 +43,12 @@ export interface UsageQueries {
   readonly referrers: string;
   readonly geo: string;
   readonly device: string;
+  /**
+   * Page requests per UTC hour and traffic class (`hourly`: dimension
+   * `'<HH>|<human|bot|error>'`), one row per (dt, dimension). Uncapped: at
+   * most 72 rows a day.
+   */
+  readonly hourly: string;
 }
 
 /**
@@ -97,5 +103,12 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
     referrers: grouped("referrer", "referrer", "hits"),
     geo: grouped("geo", "region", "hits"),
     device: grouped("device", "device", "hits"),
+    hourly: [
+      "SELECT dt, dimension AS slot, SUM(cnt) AS hits",
+      "FROM daily_usage",
+      `WHERE metric = 'hourly' AND ${since}`,
+      "GROUP BY dt, dimension",
+      "ORDER BY dt, dimension",
+    ].join("\n"),
   };
 }

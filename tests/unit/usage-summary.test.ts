@@ -14,7 +14,12 @@ vi.mock("next/cache", () => ({
 }));
 vi.mock("@/lib/analytics/athena-client", () => ({ runUsageQuery: h.runUsageQuery }));
 
-import { USAGE_WINDOW_DAYS, loadUsageSummary, shapeUsageRows } from "@/lib/api/usage-summary";
+import {
+  USAGE_WINDOW_DAYS,
+  loadUsageSummary,
+  shapeHourly,
+  shapeUsageRows,
+} from "@/lib/api/usage-summary";
 
 describe("loadUsageSummary", () => {
   beforeEach(() => {
@@ -33,11 +38,11 @@ describe("loadUsageSummary", () => {
     await loadUsageSummary(launch);
 
     expect(h.cacheKeys).toEqual([
-      ["usage-summary", "v4", "2026-09-18", "2026-09-24"],
-      ["usage-summary", "v4", "2026-07-01", "2026-09-24"],
+      ["usage-summary", "v5", "2026-09-18", "2026-09-24"],
+      ["usage-summary", "v5", "2026-07-01", "2026-09-24"],
     ]);
-    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 9).map((c) => c[0] as string);
-    expect(firstWindow).toHaveLength(9);
+    const firstWindow = h.runUsageQuery.mock.calls.slice(0, 10).map((c) => c[0] as string);
+    expect(firstWindow).toHaveLength(10);
     expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_suggested'"))).toBe(true);
     expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_bot'"))).toBe(true);
     for (const sql of firstWindow) {
@@ -104,6 +109,7 @@ describe("shapeUsageRows", () => {
       referrers: [{ referrer: "(direct)", hits: "200" }],
       geo: [{ region: "North America", hits: "180" }],
       device: [{ device: "desktop", hits: "150" }],
+      hourly: [],
     });
 
     expect(summary.windowDays).toBe(USAGE_WINDOW_DAYS);
@@ -133,11 +139,84 @@ describe("shapeUsageRows", () => {
       referrers: [],
       geo: [],
       device: [],
+      hourly: [],
     });
     expect(summary.totalPageviews).toBe(0);
     expect(summary.pageviewsByDay).toEqual([{ day: "2026-07-03", views: 0 }]);
     expect(summary.topProfiles).toEqual([{ slug: "x", views: 0 }]);
     expect(summary.searchTerms).toEqual([]);
     expect(summary.searchVolume).toEqual({ human: 0, bot: 0 });
+    expect(summary.hourly).toEqual({ buckets: [], firstDay: null, days: 0 });
+  });
+});
+
+describe("shapeHourly", () => {
+  it("returns an empty result before the hourly rollup began", () => {
+    expect(shapeHourly([])).toEqual({ buckets: [], firstDay: null, days: 0 });
+  });
+
+  it("converts UTC hours to Eastern and fills every hour of a covered day", () => {
+    const h = shapeHourly([
+      // 2026-11-16 is EST (UTC-5): 15Z = 10 AM, 03Z = 10 PM the evening before.
+      { dt: "2026-11-16", slot: "15|human", hits: "120" },
+      { dt: "2026-11-16", slot: "15|bot", hits: "40" },
+      { dt: "2026-11-16", slot: "15|error", hits: "2" },
+      { dt: "2026-11-16", slot: "03|human", hits: "7" },
+    ]);
+    expect(h.days).toBe(1);
+    expect(h.firstDay).toBe("2026-11-16");
+    expect(h.buckets).toHaveLength(24);
+    // Sorted by instant: 00Z is 7 PM Eastern on Nov 15.
+    expect(h.buckets[0]).toMatchObject({ day: "2026-11-15", hour: 19 });
+    expect(h.buckets.find((b) => b.day === "2026-11-16" && b.hour === 10)).toMatchObject({
+      at: Date.parse("2026-11-16T15:00:00Z"),
+      human: 120,
+      bot: 40,
+      error: 2,
+    });
+    expect(h.buckets.find((b) => b.day === "2026-11-15" && b.hour === 22)).toMatchObject({
+      human: 7,
+      bot: 0,
+      error: 0,
+    });
+    // An hour with no row on a covered day is a real zero.
+    expect(h.buckets.find((b) => b.day === "2026-11-16" && b.hour === 3)).toMatchObject({
+      human: 0,
+      bot: 0,
+      error: 0,
+    });
+  });
+
+  it("uses EDT (UTC-4) in summer", () => {
+    const h = shapeHourly([{ dt: "2026-07-01", slot: "14|error", hits: "9" }]);
+    expect(h.buckets.find((b) => b.error === 9)).toMatchObject({ day: "2026-07-01", hour: 10 });
+  });
+
+  it("keeps the two 1 AM hours of the fall-back day apart", () => {
+    // 2026-11-01: 05Z = 1 AM EDT, 06Z = 1 AM EST.
+    const h = shapeHourly([
+      { dt: "2026-11-01", slot: "05|human", hits: "3" },
+      { dt: "2026-11-01", slot: "06|human", hits: "4" },
+    ]);
+    const oneAm = h.buckets.filter((b) => b.day === "2026-11-01" && b.hour === 1);
+    expect(oneAm.map((b) => b.human)).toEqual([3, 4]);
+  });
+
+  it("counts covered days, orders buckets across days, and skips malformed rows", () => {
+    const h = shapeHourly([
+      { dt: "2026-11-17", slot: "00|bot", hits: "5" },
+      { dt: "2026-11-16", slot: "23|bot", hits: "6" },
+      { dt: "bad", slot: "01|bot", hits: "1" },
+      { dt: "2026-11-18", slot: "24|bot", hits: "1" },
+      { dt: "2026-11-18", slot: "01|robot", hits: "1" },
+      { dt: "2026-11-18", slot: "01", hits: "1" },
+    ]);
+    expect(h.days).toBe(2);
+    expect(h.firstDay).toBe("2026-11-16");
+    expect(h.buckets).toHaveLength(48);
+    expect(h.buckets.every((b, i) => i === 0 || b.at - h.buckets[i - 1].at === 3_600_000)).toBe(
+      true,
+    );
+    expect(h.buckets.reduce((a, b) => a + b.bot, 0)).toBe(11);
   });
 });

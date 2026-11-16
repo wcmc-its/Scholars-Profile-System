@@ -45,6 +45,9 @@ describe("assertIsoDate", () => {
 
 describe("buildRollupInsert", () => {
   const sql = buildRollupInsert(CFG, "2026-05-22");
+  // The six pageview/search/traffic-shape arms, without the hourly arm (which
+  // has its own status classes and tests below).
+  const marketing = sql.split("UNION ALL").slice(0, 6).join("UNION ALL");
 
   it("validates the date (rejects a bad dt before building SQL)", () => {
     expect(() => buildRollupInsert(CFG, "bad")).toThrow(/invalid_date/);
@@ -66,15 +69,15 @@ describe("buildRollupInsert", () => {
     expect(sql).toContain("SELECT metric, dimension, cnt, dt FROM (");
   });
 
-  it("emits all six marketing metric arms", () => {
-    for (const metric of ["'pageviews'", "'profile'", "'referrer'", "'geo'", "'device'"]) {
+  it("emits all seven metric arms", () => {
+    for (const metric of ["'pageviews'", "'profile'", "'referrer'", "'geo'", "'device'", "'hourly'"]) {
       expect(sql).toContain(`${metric} AS metric`);
     }
     // search_term / search_term_suggested / search_term_bot come from one
     // arm's metric CASE.
     expect(sql).toContain("THEN 'search_term'\nEND AS metric");
-    // Five UNION ALL joins between six arms.
-    expect(sql.match(/UNION ALL/g)).toHaveLength(5);
+    // Six UNION ALL joins between seven arms.
+    expect(sql.match(/UNION ALL/g)).toHaveLength(6);
   });
 
   it("uses the AWS cs_referrer spelling and double-quoted reserved word date", () => {
@@ -117,7 +120,7 @@ describe("buildRollupInsert", () => {
   });
 
   it("excludes CloudFront-Function synthetic 200s (/edge-ip) from the profile arms", () => {
-    const guards = sql.match(/x_edge_result_type <> 'FunctionGeneratedResponse'/g) ?? [];
+    const guards = marketing.match(/x_edge_result_type <> 'FunctionGeneratedResponse'/g) ?? [];
     expect(guards).toHaveLength(2);
     // ...and by name: a client hang-up mid-response is logged Error/ClientCommError, not
     // FunctionGeneratedResponse, so the structural guard alone let 10 of 267 hits through.
@@ -129,8 +132,8 @@ describe("buildRollupInsert", () => {
     // e.g. bot probes to /docs, /actuator getting a 301 -- is not a view and
     // must not count. The geo/device/referrer traffic-shape arms keep the wider
     // range. So: exactly 2 arms at 200-299, exactly 3 at 200-399.
-    const twoxx = sql.match(/sc_status BETWEEN 200 AND 299/g) ?? [];
-    const upTo3xx = sql.match(/sc_status BETWEEN 200 AND 399/g) ?? [];
+    const twoxx = marketing.match(/sc_status BETWEEN 200 AND 299/g) ?? [];
+    const upTo3xx = marketing.match(/sc_status BETWEEN 200 AND 399/g) ?? [];
     expect(twoxx).toHaveLength(2);
     expect(upTo3xx).toHaveLength(3);
   });
@@ -255,6 +258,68 @@ describe("buildRollupInsert typed vs suggested vs bot search terms", () => {
     expect(where).not.toContain("sc_status");
     expect(where).not.toContain("x_edge_result_type");
     expect(where).not.toContain("cs_user_agent");
+  });
+});
+
+describe("buildRollupInsert hourly human / bot / error arm", () => {
+  const sql = buildRollupInsert(CFG, "2026-11-15");
+  const hourly = sql.split("UNION ALL")[6];
+  // The dimension expression, exactly as SELECT emits it (GROUP BY and HAVING repeat it).
+  const dimStart = hourly.indexOf("SELECT 'hourly' AS metric, ") + "SELECT 'hourly' AS metric, ".length;
+  const DIM = hourly.slice(dimStart, hourly.indexOf(" AS dimension,"));
+  const branches = DIM.split("\n  WHEN ").slice(1);
+
+  it("is the last arm and emits (metric, dimension, cnt, dt)", () => {
+    expect(hourly).toContain("SELECT 'hourly' AS metric, ");
+    expect(hourly).toContain("COUNT(*) AS cnt, '2026-11-15' AS dt");
+    expect(hourly.trimEnd().endsWith(")")).toBe(true);
+  });
+
+  it("keys the dimension on the two-digit UTC hour from the quoted time column", () => {
+    expect(DIM.startsWith(`substr("time", 1, 2) || '|' || CASE\n`)).toBe(true);
+    expect(DIM.endsWith("\nEND")).toBe(true);
+  });
+
+  it("classifies error first, then bot, then human, with no ELSE", () => {
+    expect(branches).toHaveLength(3);
+    // 1. error: any 5xx, so an outage shows whoever was asking.
+    expect(branches[0]).toBe("sc_status >= 500 THEN 'error'");
+    // 2. bot: declared UA (NULL-safe), a WAF answer, or another edge Error 4xx.
+    expect(branches[1]).toContain("coalesce((regexp_like(url_decode(cs_user_agent), '(?i)(bot|crawl|spider|");
+    expect(branches[1]).toContain(`'${KNOWN_SCRAPER_UAS[0]}'`);
+    expect(branches[1]).toContain(`OR sc_status IN (${BOT_SEARCH_STATUSES.join(", ")})`);
+    expect(branches[1]).toContain(
+      "OR (x_edge_result_type = 'Error' AND sc_status BETWEEN 400 AND 499) THEN 'bot'",
+    );
+    // 3. human: a served 2xx/3xx that no CloudFront Function synthesized.
+    expect(branches[2]).toContain("sc_status BETWEEN 200 AND 399");
+    expect(branches[2]).toContain("x_edge_result_type <> 'FunctionGeneratedResponse' THEN 'human'");
+    expect(DIM).not.toContain("ELSE");
+  });
+
+  it("never classes a WAF answer as an error (none of them is a 5xx)", () => {
+    for (const status of BOT_SEARCH_STATUSES) expect(status).toBeLessThan(500);
+  });
+
+  it("groups and filters on the character-identical dimension (Trino)", () => {
+    expect(hourly).toContain(`GROUP BY ${DIM}\n`);
+    expect(hourly).toContain(`HAVING ${DIM} IS NOT NULL`);
+    expect(sql.split(DIM)).toHaveLength(4); // SELECT + GROUP BY + HAVING
+  });
+
+  it("counts page GETs of any status (not the success-only filters)", () => {
+    const where = hourly.slice(hourly.indexOf("  WHERE"), hourly.indexOf("  GROUP BY"));
+    expect(where).toContain(`"date" = DATE '2026-11-15' AND cs_method = 'GET'`);
+    expect(where).toContain("NOT starts_with(cs_uri_stem, '/_next/')");
+    expect(where).toContain("NOT starts_with(cs_uri_stem, '/api/')");
+    expect(where).toContain("NOT regexp_like(cs_uri_stem, '[.][^/]*$')");
+    expect(where).not.toContain("sc_status");
+    expect(where).not.toContain("x_edge_result_type");
+  });
+
+  it("never selects a raw client-IP column (PII guard)", () => {
+    expect(hourly).not.toContain("c_ip");
+    expect(hourly).not.toContain("x_forwarded_for");
   });
 });
 

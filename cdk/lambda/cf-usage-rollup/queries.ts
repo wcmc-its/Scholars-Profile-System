@@ -282,6 +282,41 @@ const SEARCH_METRIC_CASE = [
 ].join("\n");
 
 /**
+ * Traffic class of one page request, for the `hourly` arm. Order matters:
+ *
+ * 1. `error` -- a 5xx, whoever asked. During an outage CloudFront still logs
+ *    every request (502/503/504, edge result `Error` when the origin is
+ *    unreachable), so this is the series that shows a downtime. None of the
+ *    WAF answers (BOT_SEARCH_STATUSES) is a 5xx, so a firewall block never
+ *    lands here.
+ * 2. `bot` -- a declared bot UA (IS_BOT_UA, NULL-safe), a WAF answer (one of
+ *    BOT_SEARCH_STATUSES), or any other edge `Error` with a 4xx.
+ * 3. `human` -- everything else the site served (2xx/3xx), minus responses a
+ *    CloudFront Function synthesized at the edge (the /edge-ip echo).
+ *
+ * Anything else (a non-bot 4xx such as a 404) is NULL, and the arm's HAVING
+ * drops it.
+ */
+const HOURLY_CLASS_CASE = [
+  "CASE",
+  "  WHEN sc_status >= 500 THEN 'error'",
+  `  WHEN coalesce(${IS_BOT_UA}, false)`,
+  `    OR sc_status IN (${BOT_SEARCH_STATUSES.join(", ")})`,
+  "    OR (x_edge_result_type = 'Error' AND sc_status BETWEEN 400 AND 499) THEN 'bot'",
+  "  WHEN sc_status BETWEEN 200 AND 399",
+  "    AND x_edge_result_type <> 'FunctionGeneratedResponse' THEN 'human'",
+  "END",
+].join("\n");
+
+/**
+ * The `hourly` arm's dimension: `'<HH>|<class>'`, HH the two-digit UTC hour
+ * from the raw log's `time` column ('HH:MM:SS', UTC like `date`; quoted, since
+ * TIME is a Trino keyword). NULL whenever the class is NULL (Trino's `||` is
+ * NULL-propagating), so one `IS NOT NULL` drops the unclassified rows.
+ */
+const HOURLY_DIMENSION_EXPR = `substr("time", 1, 2) || '|' || ${HOURLY_CLASS_CASE}`;
+
+/**
  * Reserved top-level route segments that are NOT scholar profiles. SPS serves a
  * profile at a ROOT vanity slug (`app/(public)/[slug]`, e.g. `/carl-f-nathan`) —
  * there is no `/scholar/<cwid>` path — so a profile pageview is a single-segment
@@ -350,7 +385,7 @@ const PROFILE_VIEW_FILTERS = [
 /**
  * INSERT INTO daily_usage the aggregated marketing metrics for a single dt
  * partition: pageviews, profile, search_term (+ search_term_suggested and
- * search_term_bot, from the same arm), referrer, geo, device. Every arm
+ * search_term_bot, from the same arm), referrer, geo, device, hourly. Every arm
  * emits (metric, dimension, cnt, dt) with dt LAST (the partition-projection
  * column-order rule -- the partition key is the final column of the SELECT),
  * and dt is the literal validated date string.
@@ -460,6 +495,22 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
     `    AND ${PAGE_PATH_PREDICATE}`,
     `  GROUP BY ${DEVICE_CASE}`,
+
+    "  UNION ALL",
+
+    // (7) hourly -- dimension = '<HH>|<human|bot|error>' (UTC hour), cnt =
+    // page requests. Page paths only (as the traffic-shape arms), any status:
+    // the error and bot classes are the point (downtime and WAF load), so
+    // this arm deliberately skips SUCCESS_GET / NOT_EDGE_ERROR. Starts the
+    // night after it deploys; past days are NOT re-rolled for it (re-rolling
+    // pre-#3368 days would inflate their profile pageviews).
+    `  SELECT 'hourly' AS metric, ${HOURLY_DIMENSION_EXPR} AS dimension,`,
+    `    COUNT(*) AS cnt, ${dtLit} AS dt`,
+    `  FROM ${from}`,
+    `  WHERE "date" = ${day} AND cs_method = 'GET'`,
+    `    AND ${PAGE_PATH_PREDICATE}`,
+    `  GROUP BY ${HOURLY_DIMENSION_EXPR}`,
+    `  HAVING ${HOURLY_DIMENSION_EXPR} IS NOT NULL`,
 
     ")",
   ].join("\n");
