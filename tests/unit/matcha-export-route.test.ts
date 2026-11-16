@@ -46,7 +46,7 @@ const ROW = {
   clinician: "",
   personType: "",
   researcherType: "Basic scientist",
-  researchKind: "Laboratory research",
+  researchKind: "Laboratory researcher",
   profileUrl: "https://example.org/alice-alpha",
 };
 

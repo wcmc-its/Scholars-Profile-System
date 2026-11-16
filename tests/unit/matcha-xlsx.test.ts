@@ -27,7 +27,7 @@ const ROW: MatchaExportRow = {
   careerStage: "Senior",
   clinician: "Yes",
   researcherType: "Physician-scientist",
-  researchKind: "Laboratory research",
+  researchKind: "Laboratory researcher",
   technologyCount: 2,
   profileUrl: "https://example.org/alice-alpha",
 };

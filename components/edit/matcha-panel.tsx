@@ -432,7 +432,7 @@ const RESEARCH_PARENTS: readonly {
   { key: "none", label: KIND_NONE, children: [] },
 ];
 
-/** Chip text: "Laboratory research" or "Laboratory research: Physician-scientist". */
+/** Chip text: "Laboratory researcher" or "Laboratory researcher: Physician-scientist". */
 const RESEARCH_CHIP_LABEL: ReadonlyMap<string, string> = new Map(
   RESEARCH_PARENTS.flatMap((p) => [
     [p.key, p.label] as const,
@@ -4371,11 +4371,11 @@ function FacetGroup({
 
 /** The Research group's hover. Matcha-only behaviour lives here; the shared definitions live on
  *  /about (`methodologyHref("researchType")`), linked under the group. */
-const RESEARCH_FACET_TITLE = `Laboratory and Clinical research come from a person's own papers: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_TYPE_YEARS} years. A person can show both, so counts can add up to more than the total. Physician-scientist means a medical degree on file. "${KIND_FUNDED}" is a PI on a research award whose papers show neither kind. "${KIND_NONE}" is everyone else. Laboratory research is selected by default. Each person's own label is on their card.`;
+const RESEARCH_FACET_TITLE = `Laboratory researcher and Clinical researcher come from a person's own papers: ${RESEARCH_TYPE_MIN_PUBS}+ first/last-author papers of that kind in the last ${RESEARCH_TYPE_YEARS} years. A person can show both, so counts can add up to more than the total. Physician-scientist means a medical degree on file. "${KIND_FUNDED}" is a PI on a research award whose papers show neither kind. "${KIND_NONE}" is everyone else. Laboratory research is selected by default. Each person's own label is on their card.`;
 
 /**
  * The nested Research group. Same row shape as `FacetGroup`, children indented under their
- * parent. A child's accessible name carries its parent ("Laboratory research: Physician-scientist")
+ * parent. A child's accessible name carries its parent ("Laboratory researcher: Physician-scientist")
  * because "Physician-scientist" appears under both parents.
  */
 function ResearchFacetGroup({
