@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { USAGE_TOP_N, assertIsoDate, buildUsageQueries } from "@/lib/analytics/usage-queries";
+import {
+  SEARCH_STATS_START,
+  USAGE_TOP_N,
+  assertIsoDate,
+  buildUsageQueries,
+} from "@/lib/analytics/usage-queries";
 import { HERO_SEARCH_SUGGESTIONS } from "@/lib/hero-search-suggestions";
 
 describe("assertIsoDate", () => {
@@ -15,11 +20,12 @@ describe("assertIsoDate", () => {
 });
 
 describe("buildUsageQueries", () => {
-  const q = buildUsageQueries("2026-06-03");
+  // After SEARCH_STATS_START, so the search queries carry the same window.
+  const q = buildUsageQueries("2026-12-03");
 
   it("windows every query by the given since-date", () => {
     for (const sql of Object.values(q)) {
-      expect(sql).toContain("dt >= '2026-06-03'");
+      expect(sql).toContain("dt >= '2026-12-03'");
     }
   });
 
@@ -27,8 +33,8 @@ describe("buildUsageQueries", () => {
     expect(q.pageviewsByDay).toContain("metric = 'pageviews'");
     expect(q.topProfiles).toContain("metric = 'profile'");
     expect(q.searchTerms).toContain("metric = 'search_term' AND dimension NOT IN (");
-    expect(q.suggestedSearchTerms).toContain("metric = 'search_term_suggested' OR");
-    expect(q.searchTotals).toContain("metric IN ('search_term', 'search_term_suggested')");
+    expect(q.suggestedSearchTerms).toContain("metric = 'search_term_suggested' AND");
+    expect(q.searchTotals).toContain("metric = 'search_term_suggested' OR (metric = 'search_term' AND dimension NOT IN (");
     // Searches the edge challenged or blocked were never served; not counted.
     for (const sql of Object.values(q)) expect(sql).not.toContain("search_term_bot");
     expect(q.referrers).toContain("metric = 'referrer'");
@@ -62,9 +68,9 @@ describe("buildUsageQueries", () => {
   });
 
   it("bounds every query by an inclusive until-date when given", () => {
-    const bounded = buildUsageQueries("2026-07-01", "2026-07-31");
+    const bounded = buildUsageQueries("2027-01-01", "2027-01-31");
     for (const sql of Object.values(bounded)) {
-      expect(sql).toContain("dt >= '2026-07-01' AND dt <= '2026-07-31'");
+      expect(sql).toContain("dt >= '2027-01-01' AND dt <= '2027-01-31'");
     }
     // Without one, there is no upper bound.
     for (const sql of Object.values(q)) {
@@ -74,21 +80,39 @@ describe("buildUsageQueries", () => {
 
 });
 
-describe("home-chip terms count as likely suggestion clicks", () => {
-  const q = buildUsageQueries("2026-06-03");
-  const chip = HERO_SEARCH_SUGGESTIONS.find((t) => t.includes("-"))!.toLowerCase();
+describe("search metrics start at SEARCH_STATS_START", () => {
+  const searchSqls = (q: ReturnType<typeof buildUsageQueries>) => [
+    q.searchTerms,
+    q.suggestedSearchTerms,
+    q.searchTotals,
+  ];
 
-  it("moves an untagged exact chip term out of typed and into suggested", () => {
-    expect(q.searchTerms).toMatch(new RegExp(`NOT IN \\([^)]*'${chip}'`));
-    expect(q.suggestedSearchTerms).toMatch(
-      new RegExp(`metric = 'search_term' AND dimension IN \\([^)]*'${chip}'`),
-    );
-    expect(q.searchTotals).toContain("THEN 'suggested' ELSE 'typed' END AS metric");
+  it("clamps an earlier window's search queries, not the others", () => {
+    const q = buildUsageQueries("2026-10-01", "2026-11-20");
+    for (const sql of searchSqls(q)) {
+      expect(sql).toContain(`dt >= '${SEARCH_STATS_START}' AND dt <= '2026-11-20'`);
+    }
+    expect(q.pageviewsByDay).toContain("dt >= '2026-10-01'");
   });
 
-  it("uses every chip, lower-cased, with quotes escaped", () => {
+  it("leaves a window that starts later alone", () => {
+    const q = buildUsageQueries("2026-12-01");
+    for (const sql of searchSqls(q)) expect(sql).toContain("dt >= '2026-12-01'");
+  });
+});
+
+describe("untagged exact Try-chip terms are not typed searches", () => {
+  const q = buildUsageQueries("2026-12-01");
+
+  it("excludes every chip, lower-cased and quote-escaped, from typed and the totals", () => {
     for (const t of HERO_SEARCH_SUGGESTIONS) {
-      expect(q.searchTerms).toContain(`'${t.trim().toLowerCase().replace(/'/g, "''")}'`);
+      const lit = `'${t.trim().toLowerCase().replace(/'/g, "''")}'`;
+      expect(q.searchTerms).toContain(lit);
+      expect(q.searchTotals).toContain(lit);
     }
+  });
+
+  it("leaves tagged suggestion clicks alone", () => {
+    expect(q.suggestedSearchTerms).not.toContain("NOT IN");
   });
 });

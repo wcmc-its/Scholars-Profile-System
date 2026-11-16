@@ -2,7 +2,7 @@
  * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over a
  * chosen range (the header's Range dropdown: last 7 / 30 / 90 days, since
  * launch, or custom; default last 30) — pageviews trend, top profiles, typed
- * and likely-suggested search terms (+ a searches tile), referrers, geo, device — read from the durable `daily_usage` Athena
+ * and suggested search terms (+ a searches tile), referrers, geo, device — read from the durable `daily_usage` Athena
  * rollup via a daily-cached loader keyed per range.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
@@ -15,8 +15,8 @@
  *
  * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
  * chart card, the "Traffic by hour" card (human / bot / error, Eastern time),
- * Top profiles + Top typed search terms side by side (Likely from
- * suggestions wraps below), three Traffic
+ * Top profiles + Top typed search terms side by side (Suggested
+ * searches wraps below), three Traffic
  * sources cards, then the uptime card. The interactive bits (chart hover, Show
  * all, client-side CSV, the uptime ⓘ) are client islands in ./usage-widgets.
  *
@@ -36,6 +36,7 @@ import {
   loadServiceHealth,
   summarizeServiceHealth,
 } from "@/lib/api/service-health";
+import { SEARCH_STATS_START } from "@/lib/analytics/usage-queries";
 import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
 import {
   type NamedCount,
@@ -115,11 +116,14 @@ function alarmSub(health: ServiceHealthSummary, range: UsageRange): string {
     : `fired in ${rangePhrase(range)}`;
 }
 
-/** The searches tile's sub-line: typed vs likely suggestion clicks. */
+/** Search counts start at SEARCH_STATS_START; say so wherever they show. */
+const SEARCH_START_NOTE = `Counted from ${shortDay(SEARCH_STATS_START)}: earlier days were inflated by link prefetching and can't be corrected.`;
+
+/** The searches tile's sub-line: typed vs suggestion clicks. */
 function searchSplitSub({ typed, suggested }: SearchVolume): string {
   return typed + suggested === 0
     ? "no searches recorded"
-    : `${typed.toLocaleString()} typed · ${suggested.toLocaleString()} likely from suggestions`;
+    : `${typed.toLocaleString()} typed · ${suggested.toLocaleString()} from suggestions`;
 }
 
 /** Headline row: pageviews + busiest day + searches (Athena rollup), uptime + alarm
@@ -449,17 +453,17 @@ function UsageBody({
           csvName="usage-top-search-terms"
           rows={toTermRows(summary.searchTerms)}
           emptyLabel="No searches in the window."
-          note="Searches that didn't come from a suggestion, including paging and filtering. Can include automated traffic that passed the firewall."
+          note={`Searches typed into the search box, including paging and filtering. Untagged searches for exactly a Try chip term are left out as automated. Can still include automated traffic that passed the firewall. ${SEARCH_START_NOTE}`}
         />
         <RankTable
           testId="usage-suggested-search-terms"
-          title="Likely from suggestions"
+          title="Suggested searches"
           unit="Clicks"
           labelHeader="Term"
           csvName="usage-suggested-search-terms"
           rows={toTermRows(summary.suggestedSearchTerms)}
           emptyLabel="No suggestion clicks in the window."
-          note="Home-page Try chips and concepts picked from the search box suggestions, plus any search that exactly matches a Try chip (usually a click, not always)."
+          note={`Home-page Try chips and concepts picked from the search box suggestions. ${SEARCH_START_NOTE}`}
         />
       </div>
 

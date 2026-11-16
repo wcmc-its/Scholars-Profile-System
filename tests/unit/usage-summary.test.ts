@@ -31,44 +31,44 @@ describe("loadUsageSummary", () => {
   });
 
   it("queries the requested window and keys the cache per range", async () => {
-    const week = { since: "2026-09-18", until: "2026-09-24", days: 7 };
-    const launch = { since: "2026-07-01", until: "2026-09-24", days: 86 };
+    const week = { since: "2026-12-18", until: "2026-12-24", days: 7 };
+    const launch = { since: "2026-11-20", until: "2026-12-24", days: 35 };
 
     const summary = await loadUsageSummary(week);
     await loadUsageSummary(launch);
 
     expect(h.cacheKeys).toEqual([
-      ["usage-summary", "v6", "2026-09-18", "2026-09-24"],
-      ["usage-summary", "v6", "2026-07-01", "2026-09-24"],
+      ["usage-summary", "v6", "2026-12-18", "2026-12-24"],
+      ["usage-summary", "v6", "2026-11-20", "2026-12-24"],
     ]);
     const firstWindow = h.runUsageQuery.mock.calls.slice(0, 9).map((c) => c[0] as string);
     expect(firstWindow).toHaveLength(9);
     expect(firstWindow.some((sql) => sql.includes("metric = 'search_term_suggested'"))).toBe(true);
     for (const sql of firstWindow) {
-      expect(sql).toContain("dt >= '2026-09-18' AND dt <= '2026-09-24'");
+      expect(sql).toContain("dt >= '2026-12-18' AND dt <= '2026-12-24'");
     }
     expect(summary).toMatchObject({
       windowDays: 7,
-      since: "2026-09-18",
-      until: "2026-09-24",
+      since: "2026-12-18",
+      until: "2026-12-24",
       totalPageviews: 5,
     });
   });
 
-  it("totals typed and likely-suggested searches per range", async () => {
+  it("totals typed and suggested searches per range", async () => {
     // Different search_term* totals per window, as the rollup would hold them.
     const TOTALS: Record<string, Record<string, string>> = {
-      "2026-09-18": { typed: "40", suggested: "10" },
-      "2026-07-01": { typed: "900", suggested: "100" },
+      "2026-12-18": { typed: "40", suggested: "10" },
+      "2026-11-20": { typed: "900", suggested: "100" },
     };
     h.runUsageQuery.mockImplementation(async (sql: string) => {
-      if (!sql.includes("metric IN (")) return [];
+      if (!sql.includes("END AS metric")) return [];
       const since = /dt >= '([\d-]+)'/.exec(sql)![1];
       return Object.entries(TOTALS[since]).map(([metric, searches]) => ({ metric, searches }));
     });
 
-    const week = await loadUsageSummary({ since: "2026-09-18", until: "2026-09-24", days: 7 });
-    const launch = await loadUsageSummary({ since: "2026-07-01", until: "2026-09-24", days: 86 });
+    const week = await loadUsageSummary({ since: "2026-12-18", until: "2026-12-24", days: 7 });
+    const launch = await loadUsageSummary({ since: "2026-11-20", until: "2026-12-24", days: 35 });
 
     expect(week.searchVolume).toEqual({ typed: 40, suggested: 10 });
     expect(launch.searchVolume).toEqual({ typed: 900, suggested: 100 });

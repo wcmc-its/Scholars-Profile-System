@@ -31,7 +31,7 @@ export type DayViews = { day: string; views: number };
 export type ProfileViews = { slug: string; views: number };
 export type TermCount = { term: string; searches: number };
 export type NamedCount = { label: string; hits: number };
-/** Range search totals: typed vs likely suggestion clicks (served searches only). */
+/** Range search totals from SEARCH_STATS_START on: typed vs suggestion clicks (served searches only). */
 export type SearchVolume = { typed: number; suggested: number };
 
 export type UsageSummary = {
@@ -42,9 +42,9 @@ export type UsageSummary = {
   totalPageviews: number;
   pageviewsByDay: DayViews[];
   topProfiles: ProfileViews[];
-  /** Terms people typed (untagged searches that aren't an exact home-chip term). */
+  /** Terms people typed (no `src=` tag), from SEARCH_STATS_START on. */
   searchTerms: TermCount[];
-  /** Likely suggestion clicks (`src=` tagged, or an exact home-chip term). */
+  /** Suggestion clicks (home chips, typeahead concept picks), from SEARCH_STATS_START on. */
   suggestedSearchTerms: TermCount[];
   searchVolume: SearchVolume;
   referrers: NamedCount[];

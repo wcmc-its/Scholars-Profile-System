@@ -228,12 +228,12 @@ describe("/edit/usage", () => {
     const root = await renderPage();
     const typed = within(root.getByTestId("usage-top-search-terms"));
     expect(typed.getByText("Top typed search terms")).toBeTruthy();
-    expect(typed.getByText(/Can include automated traffic/)).toBeTruthy();
+    expect(typed.getByText(/left out as automated/)).toBeTruthy();
+    expect(typed.getByText(/Counted from Nov 14/)).toBeTruthy();
     expect(typed.queryByText("sprockets")).toBeNull();
 
     const suggested = within(root.getByTestId("usage-suggested-search-terms"));
-    expect(suggested.getByText("Likely from suggestions")).toBeTruthy();
-    expect(suggested.getByText(/exactly matches a Try chip/)).toBeTruthy();
+    expect(suggested.getByText("Suggested searches")).toBeTruthy();
     expect(suggested.getByText("sprockets")).toBeTruthy();
     expect(suggested.queryByText("widgets")).toBeNull();
   });
@@ -254,10 +254,10 @@ describe("/edit/usage", () => {
     expect(root.queryByTestId("usage-bot-search-terms")).toBeNull();
   });
 
-  it("shows search volume split into typed and likely-suggested", async () => {
+  it("shows search volume split into typed and suggested", async () => {
     const root = await renderPage();
     expect(root.getByTestId("usage-searches").textContent).toBe("160");
-    expect(root.getByText("120 typed · 40 likely from suggestions")).toBeTruthy();
+    expect(root.getByText("120 typed · 40 from suggestions")).toBeTruthy();
   });
 
   it("says so when the range has no searches at all", async () => {
@@ -343,11 +343,11 @@ describe("/edit/usage range", () => {
     }));
     const week = await renderPage({ range: "7" });
     expect(week.getByTestId("usage-searches").textContent).toBe("100");
-    expect(week.getByText("30 typed · 70 likely from suggestions")).toBeTruthy();
+    expect(week.getByText("30 typed · 70 from suggestions")).toBeTruthy();
     cleanup();
     const launch = await renderPage({ range: "launch" });
     expect(launch.getByTestId("usage-searches").textContent).toBe("1,500");
-    expect(launch.getByText("1,200 typed · 300 likely from suggestions")).toBeTruthy();
+    expect(launch.getByText("1,200 typed · 300 from suggestions")).toBeTruthy();
   });
 
   it("shows a custom range's dates on the trigger", async () => {
