@@ -1070,6 +1070,7 @@ AWS console, Athena, workgroup `sps-usage-<env>` (top right), **Saved queries** 
 | Saved query (add `-<env>`) | Answers | Reads |
 |---|---|---|
 | `sps-usage-daily-pageviews`, `-top-profiles`, `-search-terms`, `-referrers`, `-geo`, `-device` | Page views, top profiles, search terms, referrers, location, device | Daily rollup (aggregates only) |
+| `sps-traffic-daily-totals`, `-referrer-pages`, `-ai-agents` | Hits, human page views and estimated visitors by day; top external referring pages; requests by declared AI agent | `daily_traffic` rollup (aggregates only) |
 | `sps-perf-slow-routes` | p50, p95, p99 time and p95 time-to-first-byte by route (50+ hits) | Raw logs, last 7 days |
 | `sps-perf-errors-by-route` | 4xx and 5xx counts and 5xx rate by route | Raw logs, last 7 days |
 | `sps-perf-cache-hit` | Mix of edge cache outcomes (hit, miss, refresh, error) | Raw logs, last 7 days |
@@ -1084,6 +1085,7 @@ AWS console, Athena, workgroup `sps-usage-<env>` (top right), **Saved queries** 
 - **Usage** (`/edit/usage`): page views by day, top profiles, search terms, referrers, location and device, for the last 7, 30 or 90 days, since launch, or a custom range (from 2026-05-22). Open to superusers and unit admins. Also the **Usage** tab in the admin menu. Shows "unavailable" if Athena fails, or if `Sps-App-<env>` and `Sps-Analytics-<env>` haven't both been deployed with the usage settings.
 - **Edit activity** (`/edit/activity`): edits per day, top editors and most-edited records over 30 days. Superusers only, not linked in the menu. Shows "unavailable" if the read-only database role lacks access to `scholars_audit`.
 - Profile counts are keyed on the root URL (`/carl-f-nathan`). If a new top-level site section starts being counted as a profile, add it to the reserved-route list in `cdk/lambda/cf-usage-rollup/queries.ts` and backfill. Raw logs expire after 90 days, so a backfill can only fix roughly the last 85 days; use `scripts/backfills/2026-09-25-usage-rollup-history.ts --env=<env> --dry-run` first.
+- The rollup Lambda writes two tables per day: `daily_usage` and `daily_traffic` (totals, referrer and landing pages, top pages, AI agents). Its event takes an optional `"tables": ["usage"]` or `["traffic"]` (default both), so `daily_traffic` can be re-rolled without touching `daily_usage`, e.g. `{"date":"2026-11-15","tables":["traffic"]}`. Each day runs one Athena query per table inside the Lambda's 10-minute timeout, so roll a long range one day per invocation rather than as a single `backfillFrom`/`backfillTo` event.
 
 ### Cost guardrails
 

@@ -81,8 +81,8 @@ describe("AnalyticsStack", () => {
         });
       });
 
-      it("creates exactly two Glue tables (cf_access_logs + daily_usage)", () => {
-        template.resourceCountIs("AWS::Glue::Table", 2);
+      it("creates exactly three Glue tables (cf_access_logs + daily_usage + daily_traffic)", () => {
+        template.resourceCountIs("AWS::Glue::Table", 3);
         const tables = template.findResources("AWS::Glue::Table");
         const names = Object.values(tables)
           .map(
@@ -92,7 +92,7 @@ describe("AnalyticsStack", () => {
           )
           .filter((n): n is string => typeof n === "string")
           .sort();
-        expect(names).toEqual(["cf_access_logs", "daily_usage"]);
+        expect(names).toEqual(["cf_access_logs", "daily_traffic", "daily_usage"]);
       });
 
       it("raw table skips 2 header lines + TAB delim + 33 CF columns", () => {
@@ -141,6 +141,66 @@ describe("AnalyticsStack", () => {
         expect(ti?.PartitionKeys).toEqual([{ Name: "dt", Type: "string" }]);
         const cols = (ti?.StorageDescriptor?.Columns ?? []).map((c) => c.Name);
         expect(cols).toEqual(["metric", "dimension", "cnt"]);
+      });
+
+      it("daily_traffic mirrors daily_usage under its own rollup/daily-traffic prefix", () => {
+        const tables = template.findResources("AWS::Glue::Table");
+        const byName = (name: string) =>
+          (
+            Object.values(tables).find(
+              (t) =>
+                (t.Properties as { TableInput?: { Name?: string } })?.TableInput
+                  ?.Name === name,
+            )?.Properties as { TableInput: Record<string, unknown> }
+          ).TableInput as {
+            Parameters: Record<string, unknown>;
+            PartitionKeys: unknown;
+            StorageDescriptor: { Columns: unknown; Location: unknown };
+          };
+        const usage = byName("daily_usage");
+        const traffic = byName("daily_traffic");
+        expect(traffic.PartitionKeys).toEqual(usage.PartitionKeys);
+        expect(traffic.StorageDescriptor.Columns).toEqual(
+          usage.StorageDescriptor.Columns,
+        );
+        for (const k of [
+          "projection.enabled",
+          "projection.dt.type",
+          "projection.dt.range",
+          "projection.dt.format",
+        ]) {
+          expect(traffic.Parameters[k]).toEqual(usage.Parameters[k]);
+        }
+        const template_ = JSON.stringify(
+          traffic.Parameters["storage.location.template"],
+        );
+        expect(template_).toContain("/rollup/daily-traffic/dt=${dt}/");
+        expect(JSON.stringify(traffic.StorageDescriptor.Location)).toContain(
+          "/rollup/daily-traffic",
+        );
+      });
+
+      it("rollup Lambda gets the daily_traffic table + prefix and can write it", () => {
+        template.hasResourceProperties("AWS::Lambda::Function", {
+          Environment: {
+            Variables: {
+              ROLLUP_TABLE: "daily_usage",
+              ROLLUP_PREFIX: "rollup/daily-usage",
+              TRAFFIC_TABLE: "daily_traffic",
+              TRAFFIC_PREFIX: "rollup/daily-traffic",
+            },
+          },
+        });
+        const policies = template.findResources("AWS::IAM::Policy");
+        const json = JSON.stringify(
+          Object.values(policies).filter(
+            (p) =>
+              (p.Properties as { PolicyName?: string }).PolicyName !==
+              `sps-usage-app-query-${env}`,
+          ),
+        );
+        expect(json).toContain("/rollup/daily-traffic/*");
+        expect(json).toContain('"rollup/daily-traffic/*"'); // ListBucket s3:prefix
       });
 
       // ---- Athena ----------------------------------------------------
@@ -211,8 +271,8 @@ describe("AnalyticsStack", () => {
         expect(cfg?.BytesScannedCutoffPerQuery).toBeUndefined();
       });
 
-      it("creates the six marketing + three perf saved named queries", () => {
-        template.resourceCountIs("AWS::Athena::NamedQuery", 9);
+      it("creates the six marketing + three traffic + three perf saved named queries", () => {
+        template.resourceCountIs("AWS::Athena::NamedQuery", 12);
         const qs = template.findResources("AWS::Athena::NamedQuery");
         const names = Object.values(qs)
           .map((q) => (q.Properties as { Name?: string })?.Name)
@@ -226,6 +286,9 @@ describe("AnalyticsStack", () => {
             `sps-usage-referrers-${env}`,
             `sps-usage-search-terms-${env}`,
             `sps-usage-top-profiles-${env}`,
+            `sps-traffic-daily-totals-${env}`,
+            `sps-traffic-referrer-pages-${env}`,
+            `sps-traffic-ai-agents-${env}`,
             `sps-perf-slow-routes-${env}`,
             `sps-perf-errors-by-route-${env}`,
             `sps-perf-cache-hit-${env}`,
@@ -255,6 +318,9 @@ describe("AnalyticsStack", () => {
         // S3 read on results is scoped to the app's OWN prefix (athena-results/app/),
         // never the shared athena-results/ root, and never the raw `cf/` log prefix.
         expect(json).toContain("rollup/daily-usage/*");
+        // ...and the daily_traffic rollup (Glue table + S3 prefix).
+        expect(json).toContain("daily_traffic");
+        expect(json).toContain("rollup/daily-traffic/*");
         expect(json).toContain("athena-results/app/*");
         expect(json).not.toMatch(/"[^"]*athena-results\/\*"/);
         expect(json).not.toMatch(/"[^"]*\/cf\/\*?"/);
