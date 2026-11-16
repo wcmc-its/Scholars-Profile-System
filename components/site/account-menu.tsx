@@ -83,6 +83,7 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   units: Building2Icon,
   profiles: UsersIcon,
   matcha: HandCoinsIcon,
+  proxy: UsersIcon,
 };
 
 /** Generational / degree suffixes that stay whole and aren't the surname. */
