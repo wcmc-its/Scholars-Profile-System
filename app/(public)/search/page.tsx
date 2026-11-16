@@ -56,6 +56,7 @@ import {
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
   EMPTY_QUERY_PEOPLE_SORT,
   resolveSearchPeopleResearchTypeNested,
+  resolveSearchPubsTranslationalStageFacet,
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
@@ -120,6 +121,7 @@ import {
   researchTypeLabel,
   toggleResearchTypeValue,
 } from "@/lib/research-type";
+import { isTranslationalStage, translationalStageLabel } from "@/lib/translational-stage";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -456,6 +458,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // tabs is active at a time). Only forwarded to `searchPublications` when the
   // flag is on; otherwise the array is dropped so a stale URL is inert.
   const pubDepartment = resolvePublicationDepartmentFilter() ? parseList(sp.department) : [];
+  // Translational stage facet — repeated `?translationalStage=` values (T0 /
+  // T1 / T2 / T3-4). Same gating as the Department filter above: dropped while
+  // `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off so a stale URL is inert (no
+  // filter, no chip, nothing carried into links or the export); values outside
+  // the four stages are dropped always.
+  const translationalStage = resolveSearchPubsTranslationalStageFacet()
+    ? parseList(sp.translationalStage).filter(isTranslationalStage)
+    : [];
   // Issue #396 — "Show only MeSH-tagged matches". The flag gates whether the
   // toggle renders at all; activation additionally needs `?searchMode=mesh-only`
   // present, so a stale param is inert when the flag is off (same gating shape
@@ -691,6 +701,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
             department: pubDepartment.length > 0 ? pubDepartment : undefined,
             institution: institution.length > 0 ? institution : undefined,
+            translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
             meshOnly: pubMeshOnly || undefined,
             mentoringPrograms:
               mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -807,6 +818,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: pubDepartment.length > 0 ? pubDepartment : undefined,
         institution: institution.length > 0 ? institution : undefined,
+        translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
         meshOnly: pubMeshOnly || undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
@@ -986,6 +998,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
                 institution={institution}
+                translationalStage={translationalStage}
                 meshOnly={pubMeshOnly}
                 meshOnlyFilterEnabled={meshOnlyFilterEnabled}
                 mentoringProgram={mentoringProgram}
@@ -1702,6 +1715,7 @@ async function PublicationsResults({
   wcmAuthor,
   department,
   institution,
+  translationalStage,
   meshOnly,
   meshOnlyFilterEnabled,
   mentoringProgram,
@@ -1728,6 +1742,9 @@ async function PublicationsResults({
   /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
    *  same shape as `department`. */
   institution: string[];
+  /** Active translational stages ("T0" / "T1" / "T2" / "T3-4"); empty when
+   *  `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off (the page drops the param). */
+  translationalStage: string[];
   /** Issue #396 — "Show only MeSH-tagged matches" active state (true only when
    *  the flag is on AND `?searchMode=mesh-only` is present). */
   meshOnly: boolean;
@@ -1809,6 +1826,7 @@ async function PublicationsResults({
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: department.length > 0 ? department : undefined,
         institution: institution.length > 0 ? institution : undefined,
+        translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
         meshOnly: meshOnly || undefined,
         mentoringPrograms:
           mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -1876,6 +1894,7 @@ async function PublicationsResults({
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     for (const v of department) sp.append("department", v);
     for (const v of institution) sp.append("institution", v);
+    for (const v of translationalStage) sp.append("translationalStage", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
     // Issue #396 — preserve the MeSH-only filter across every facet/sort/page
     // link so toggling another filter doesn't silently drop it. The toggle's
@@ -1958,6 +1977,12 @@ async function PublicationsResults({
     chips.push({
       label: displayPublicationType(publicationType),
       removeHref: buildUrl((sp) => sp.delete("publicationType")),
+    });
+  }
+  for (const v of translationalStage) {
+    chips.push({
+      label: translationalStageLabel(v),
+      removeHref: removeMulti("translationalStage", v),
     });
   }
   for (const v of wcmAuthorRole) {
@@ -2089,6 +2114,8 @@ async function PublicationsResults({
         yearMin={yearMin}
         activePublicationType={publicationType}
         publicationTypes={result.facets.publicationTypes}
+        translationalStages={result.facets.translationalStages}
+        activeTranslationalStage={translationalStage}
         journalItems={journalItems}
         authorItems={authorItems}
         authorTotalDistinct={result.facets.wcmAuthorsTotal}
@@ -2153,6 +2180,8 @@ async function PublicationsResults({
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
                 department: department.length > 0 ? department : undefined,
                 institution: institution.length > 0 ? institution : undefined,
+                translationalStage:
+                  translationalStage.length > 0 ? translationalStage : undefined,
                 // Issue #396 — keep the export in lockstep with the displayed
                 // count: when MeSH-only is active the export carries it too, so
                 // the exported set equals the "N MeSH-tagged matches" shown.
@@ -3521,6 +3550,8 @@ function FacetSidebarPubs({
   yearMin,
   activePublicationType,
   publicationTypes,
+  translationalStages,
+  activeTranslationalStage,
   journalItems,
   authorItems,
   authorTotalDistinct,
@@ -3544,6 +3575,11 @@ function FacetSidebarPubs({
   yearMin?: number;
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
+  /** Translational stage facet — buckets already in the fixed T0 → T3-4 order
+   *  (labelled here via `translationalStageLabel`). Empty while
+   *  `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off / pre-reindex ⇒ no group. */
+  translationalStages: SearchFacetBucket[];
+  activeTranslationalStage: string[];
   journalItems: import("@/components/search/journal-facet").JournalFacetItem[];
   authorItems: import("@/components/search/author-facet").AuthorFacetItem[];
   authorTotalDistinct: number;
@@ -3709,6 +3745,30 @@ function FacetSidebarPubs({
               })}
             />
           ))}
+        </FacetGroup>
+      ) : null}
+
+      {/* Translational stage — ReciterAI's per-paper stage on the bench-to-
+          population spectrum (lib/translational-stage.ts). Multi-select; rows
+          stay in stage order rather than active-first or count order. Renders
+          only when the response carries buckets (flag off / pre-reindex ⇒ no
+          group). */}
+      {translationalStages.length > 0 ? (
+        <FacetGroup label="Translational stage">
+          {translationalStages.map((b) => (
+            <FacetCheckbox
+              key={b.value}
+              label={translationalStageLabel(b.value)}
+              count={b.count}
+              isActive={activeTranslationalStage.includes(b.value)}
+              href={toggleHref("translationalStage", b.value)}
+            />
+          ))}
+          <li className="pt-1 text-[12.5px]">
+            <Link href={methodologyHref("translationalStage")} prefetch={false} className="text-[#2c4f6e] hover:underline">
+              How these are defined
+            </Link>
+          </li>
         </FacetGroup>
       ) : null}
 

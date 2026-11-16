@@ -2384,6 +2384,12 @@ export class AppStack extends Stack {
         // field. Prod ON 2026-11-13 after staging verified (q=Palliative care: Lab
         // Physician-scientist 14 / Basic scientist 2, filter narrows to its count).
         SEARCH_PEOPLE_RESEARCH_TYPE_NESTED: "on",
+        // Publications-tab "Translational stage" facet (pub doc `translationalStage`
+        // from Publication.translationalStage, lib/translational-stage.ts). DARK in
+        // both envs at merge. Flip only AFTER the DynamoDB ETL has filled the
+        // columns and the nightly publications alias rebuild carries the keyword
+        // mapping. Staging first.
+        SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET: envConfig.envName === "staging" ? "off" : "off",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.

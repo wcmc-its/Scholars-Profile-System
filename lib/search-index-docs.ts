@@ -61,6 +61,7 @@ import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { publicRoleWhere } from "@/lib/eligibility";
 import { researchTypesFrom } from "@/lib/research-type";
+import { displayStage } from "@/lib/translational-stage";
 import { isPhysicianFrom } from "@/lib/medical-degree";
 import {
   DEPARTMENT_CHAIR_ROLE_KEY,
@@ -886,12 +887,19 @@ export function buildPublicationDoc(
   // independently; fully empty pubs write neither.
   const pubImpactFields = buildPubImpactFields(p.impactScore, p.publicationTopics);
 
+  // Translational stage facet — the stage to show, or null (NA, low
+  // confidence, never classified). The rule lives in `displayStage`.
+  const translationalStage = displayStage(p.translationalStage, p.translationalStageConfidence);
+
   return {
     pmid: p.pmid,
     title: p.title,
     journal: p.journal,
     year: p.year,
     publicationType: p.publicationType,
+    // OMIT-on-empty keyword: only pubs with a displayable translational stage
+    // write this field (`SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`).
+    ...(translationalStage ? { translationalStage } : {}),
     citationCount: p.citationCount,
     dateAddedToEntrez: p.dateAddedToEntrez,
     doi: p.doi,

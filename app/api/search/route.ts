@@ -52,6 +52,7 @@ import {
   resolveSearchTypoFallback,
   resolvePublicationDepartmentFilter,
   resolvePublicationMeshOnlyFilter,
+  resolveSearchPubsTranslationalStageFacet,
   resolveConceptFallbackSparseEnabled,
   resolveMeshEntryTierParityEnabled,
   computeConceptFallback,
@@ -60,6 +61,7 @@ import {
   EMPTY_QUERY_PEOPLE_SORT,
 } from "@/lib/api/search-flags";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
+import { isTranslationalStage } from "@/lib/translational-stage";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import { serverTimingHeader } from "@/lib/api/search-timing";
@@ -359,6 +361,12 @@ async function handleSearch(request: NextRequest) {
     const department = resolvePublicationDepartmentFilter()
       ? params.getAll("department")
       : [];
+    // Translational stage facet — repeated `?translationalStage=` values
+    // (T0 / T1 / T2 / T3-4). Dropped while the flag is off, and anything
+    // outside the four stages is dropped always, so a stale URL is inert.
+    const translationalStage = resolveSearchPubsTranslationalStageFacet()
+      ? params.getAll("translationalStage").filter(isTranslationalStage)
+      : [];
     // Issue #396 — "Show only MeSH-tagged matches". Activated only when the
     // flag is on AND `?searchMode=mesh-only` is present, so a stale param is
     // inert when the flag is off (same gating shape as the department filter).
@@ -383,6 +391,7 @@ async function handleSearch(request: NextRequest) {
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         department: department.length > 0 ? department : undefined,
         institution: institution.length > 0 ? institution : undefined,
+        translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
         meshOnly: meshOnly || undefined,
       },
       // Issue #259 §5 — pass the MeSH resolution computed at the top of
@@ -445,6 +454,7 @@ async function handleSearch(request: NextRequest) {
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
           department: department.length > 0 ? department : undefined,
           institution: institution.length > 0 ? institution : undefined,
+          translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
           meshOnly: meshOnly || undefined,
         },
         // Perf (B4) — this branch reads only `broad.total` (hits are discarded
@@ -496,6 +506,7 @@ async function handleSearch(request: NextRequest) {
           wcmAuthorRole,
           department,
           institution,
+          translationalStage,
           meshOnly,
         },
         meshResolutionDescriptorUi,

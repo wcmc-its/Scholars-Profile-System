@@ -46,6 +46,8 @@ export const METHODOLOGY_ANCHORS = {
   // Laboratory / Clinical research and Physician-scientist: the public "Research type"
   // facet and Matcha's Research filter share one definition.
   researchType: "research-type",
+  // Translational stage (T0 to T3-4) on the Publications-tab facet.
+  translationalStage: "translational-stage",
 } as const;
 
 export const METHODOLOGY_BASE = "/about" as const;
