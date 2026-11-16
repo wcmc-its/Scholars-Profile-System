@@ -454,7 +454,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "6b7026e33805e963c93219b8623bb5e4efd42eb8ae7cfaaed6dc9f1cc92f0960.zip",
+          "S3Key": "10b691528c181e82c9624555e9c84bd8dc08fab9df7548a0853cccb39197960b.zip",
         },
         "Environment": {
           "Variables": {
@@ -1168,7 +1168,7 @@ LIMIT 50",
         "Name": "sps-traffic-referrer-pages-prod",
         "QueryString": "SELECT dimension AS referrer_page, SUM(cnt) AS pageviews
 FROM daily_traffic
-WHERE metric = 'referrer_page'
+WHERE metric = 'referrer_page' AND dimension <> '(other)'
 GROUP BY dimension
 ORDER BY pageviews DESC
 LIMIT 100",
@@ -1796,7 +1796,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "6b7026e33805e963c93219b8623bb5e4efd42eb8ae7cfaaed6dc9f1cc92f0960.zip",
+          "S3Key": "10b691528c181e82c9624555e9c84bd8dc08fab9df7548a0853cccb39197960b.zip",
         },
         "Environment": {
           "Variables": {
@@ -2510,7 +2510,7 @@ LIMIT 50",
         "Name": "sps-traffic-referrer-pages-staging",
         "QueryString": "SELECT dimension AS referrer_page, SUM(cnt) AS pageviews
 FROM daily_traffic
-WHERE metric = 'referrer_page'
+WHERE metric = 'referrer_page' AND dimension <> '(other)'
 GROUP BY dimension
 ORDER BY pageviews DESC
 LIMIT 100",

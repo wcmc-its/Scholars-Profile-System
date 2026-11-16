@@ -610,6 +610,18 @@ describe("planRollup", () => {
     ]);
   });
 
+  it("rolls every usage day before any traffic day (a failing traffic query cannot block daily_usage)", () => {
+    expect(
+      planRollup(["2026-11-15", "2026-11-14"], resolveTables(undefined), today)
+        .steps,
+    ).toEqual([
+      { dt: "2026-11-15", table: "usage" },
+      { dt: "2026-11-14", table: "usage" },
+      { dt: "2026-11-15", table: "traffic" },
+      { dt: "2026-11-14", table: "traffic" },
+    ]);
+  });
+
   it("skips (never purges) days past the raw-log retention margin, for every table", () => {
     // 2026-08-23 is exactly MAX_REROLL_AGE_DAYS (85) before 2026-11-16.
     const { steps, skipped } = planRollup(

@@ -506,7 +506,7 @@ export class AnalyticsStack extends Stack {
         sql: [
           "SELECT dimension AS referrer_page, SUM(cnt) AS pageviews",
           "FROM daily_traffic",
-          "WHERE metric = 'referrer_page'",
+          "WHERE metric = 'referrer_page' AND dimension <> '(other)'",
           "GROUP BY dimension",
           "ORDER BY pageviews DESC",
           "LIMIT 100",

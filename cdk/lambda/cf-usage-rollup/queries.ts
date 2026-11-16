@@ -820,22 +820,27 @@ export interface RollupStep {
 }
 
 /**
- * The ordered work for a run: each rerollable date, each selected table. Dates
- * older than MAX_REROLL_AGE_DAYS are returned in `skipped` and never purged.
+ * The ordered work for a run: each selected table, each rerollable date --
+ * TABLE-major, so every daily_usage day is rolled before any daily_traffic
+ * query runs. The handler stops at the first failure (and the Lambda timeout
+ * caps the whole run), so a failing or slow traffic query must not keep the
+ * newer day's daily_usage from being rolled. Dates older than
+ * MAX_REROLL_AGE_DAYS are returned in `skipped` and never purged.
  */
 export function planRollup(
   dates: readonly string[],
   tables: readonly RollupTable[],
   today: string,
 ): { steps: RollupStep[]; skipped: string[] } {
-  const steps: RollupStep[] = [];
+  const rerollable: string[] = [];
   const skipped: string[] = [];
   for (const dt of dates) {
-    if (!isRerollable(dt, today)) {
-      skipped.push(dt);
-      continue;
-    }
-    for (const table of tables) steps.push({ dt, table });
+    if (isRerollable(dt, today)) rerollable.push(dt);
+    else skipped.push(dt);
+  }
+  const steps: RollupStep[] = [];
+  for (const table of tables) {
+    for (const dt of rerollable) steps.push({ dt, table });
   }
   return { steps, skipped };
 }
