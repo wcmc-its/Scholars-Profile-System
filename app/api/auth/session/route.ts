@@ -137,7 +137,7 @@ export async function GET(): Promise<NextResponse> {
   // this route was half the prod ALB p99 tail (p90 1.8 s, 2026-10-13). A
   // superuser now pays for the lookups it ignores below, in parallel and at no
   // latency cost. All are fail-closed: a directory hiccup just hides a surface.
-  const [superuser, developerRaw, contentEditorRaw, observer, commsStewardRaw, manageable] =
+  const [superuser, developerRaw, contentEditorRaw, observer, commsStewardRaw, manageable, proxyFor] =
     await Promise.all([
       isSuperuser(session.cwid).catch(() => false),
       // isDeveloper is self-gated by DEVELOPMENT_ENABLED.
@@ -150,6 +150,26 @@ export async function GET(): Promise<NextResponse> {
       isCoreDirector(session.cwid)
         .then((cd) => loadManageableUnits(session.cwid, db.read, { allCores: cd }))
         .catch(() => null),
+      // Scholars this cwid serves as an assigned proxy (#779) — one indexed
+      // lookup on `scholar_proxy.proxy_cwid`, then live scholar names.
+      Promise.resolve()
+        .then(() =>
+          db.read.scholarProxy.findMany({
+            where: { proxyCwid: session.cwid },
+            select: { scholarCwid: true },
+          }),
+        )
+        .then((rows) =>
+          rows.length === 0
+            ? []
+            : db.read.scholar.findMany({
+                where: { cwid: { in: rows.map((r) => r.scholarCwid) }, deletedAt: null },
+                select: { cwid: true, preferredName: true },
+                orderBy: { preferredName: "asc" },
+              }),
+        )
+        .then((rows) => rows.map((r) => ({ cwid: r.cwid, name: r.preferredName })))
+        .catch(() => []),
     ]);
 
   // GrantRecs Phase 4 — the top-nav "Researchers for funding" link is gated to the
@@ -191,6 +211,7 @@ export async function GET(): Promise<NextResponse> {
       isCommsSteward: commsSteward,
       managesUnits,
       isDeveloper: developer,
+      proxyFor,
     });
   }
 

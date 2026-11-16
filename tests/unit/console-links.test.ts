@@ -110,4 +110,31 @@ describe("buildConsoleLinks", () => {
       ),
     ).toEqual(["manage-profiles"]);
   });
+
+  it("proxy for one scholar → direct link to that scholar's editor", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      isCommsSteward: false,
+      managesUnits: false,
+      isDeveloper: false,
+      proxyFor: [{ cwid: "abc1234", name: "Jane Doe" }],
+    });
+    expect(links).toEqual([
+      { id: "proxy", label: "Edit Jane Doe's profile", href: "/edit/scholar/abc1234" },
+    ]);
+  });
+
+  it("proxy for several scholars → /edit chooser", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      isCommsSteward: false,
+      managesUnits: false,
+      isDeveloper: false,
+      proxyFor: [
+        { cwid: "a", name: "A" },
+        { cwid: "b", name: "B" },
+      ],
+    });
+    expect(links).toEqual([{ id: "proxy", label: "Profiles I edit", href: "/edit" }]);
+  });
 });
