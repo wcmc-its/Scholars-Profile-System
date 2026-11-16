@@ -1927,6 +1927,12 @@ model Publication {
   /// when the upstream model bumps.
   impactScoreModel      String?   @map("impact_score_model") @db.VarChar(64)
   impactRefreshedAt     DateTime? @map("impact_refreshed_at")
+  /// ReCiterAI translational stage for the paper ("T0" | "T1" | "T2" | "T3-4" |
+  /// "NA") and the model's confidence in it ("high" | "medium" | "low"), from
+  /// the same DynamoDB `IMPACT#pmid_<pmid>` record as `impactScore`. Stored raw;
+  /// what is shown is decided by `displayStage` in lib/translational-stage.ts.
+  translationalStage           String? @map("translational_stage") @db.VarChar(8)
+  translationalStageConfidence String? @map("translational_stage_confidence") @db.VarChar(8)
   /// NIH iCite Relative Citation Ratio (field- and time-normalized citation
   /// influence; ~1.0 = NIH-funded median for the field/year). Sourced from
   /// `reciterdb.analysis_nih.relative_citation_ratio`, keyed by pmid, refreshed

@@ -9,7 +9,8 @@
  *                                          didn't write)
  *   2. TOPIC#     → publication_topic      (~78,103 rows; per-pub × scholar × parent_topic triples)
  *   3. FACULTY#   → topic_assignment       (Q6 minimal projection — preserved unchanged)
- *   4. IMPACT#    → publication             (issue #316; global per-pmid impact score + GPT justification)
+ *   4. IMPACT#    → publication             (issue #316; global per-pmid impact score + GPT justification;
+ *                                          also the translational stage, ./translational-stage-mapper.ts)
  *
  * The TAXONOMY# + TOPIC# blocks are the Phase 2 D-02 candidate (e) projection
  * locked in .planning/phases/02-algorithmic-surfaces-and-home-composition/02-SCHEMA-DECISION.md.
@@ -65,6 +66,11 @@ import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { planPublicationTopicPrune } from "./publication-topic-prune";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
+import {
+  buildTranslationalStageWrites,
+  groupTranslationalStageWrites,
+  impactRecordPmid,
+} from "./translational-stage-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
 import { projectPublicationCores } from "./publication-core-mapper";
 import { planPublicationCorePrune } from "./publication-core-prune";
@@ -694,14 +700,7 @@ async function main() {
 
     const impactWrites: ImpactWrite[] = [];
     for (const it of impactItems) {
-      const pmidStr =
-        typeof it.pmid === "number" && Number.isFinite(it.pmid)
-          ? String(it.pmid)
-          : typeof it.pmid === "string" && /^\d+$/.test(it.pmid.trim())
-            ? it.pmid.trim()
-            : it.PK.startsWith("IMPACT#pmid_")
-              ? it.PK.slice("IMPACT#pmid_".length)
-              : "";
+      const pmidStr = impactRecordPmid(it);
       const scoreNum = typeof it.impact_score === "number" ? it.impact_score : NaN;
       if (!pmidStr || !Number.isFinite(scoreNum)) {
         impactSkippedMissingFields += 1;
@@ -762,6 +761,32 @@ async function main() {
         : 0;
     console.log(
       `publication impact updates complete: ${impactRowsUpserted} rows; avg justification length ${avgJustificationLen} chars across ${impactJustificationCount} non-null justifications.`,
+    );
+
+    // Block 4b: translational stage, from the same IMPACT# items. Planned
+    // separately from the impact writes above on purpose: an item with a stage
+    // but no numeric impact_score is skipped there and must still land here.
+    // Only items carrying a valid stage produce a write -- an item without one
+    // is left alone, never nulled, so a degraded or partial scan cannot wipe
+    // stages already stored. One updateMany per (stage, confidence) pair and
+    // pmid chunk; re-running writes the same values.
+    const stagePlan = buildTranslationalStageWrites(impactItems, knownPmidSet);
+    const STAGE_BATCH = 1000;
+    let stageRowsWritten = 0;
+    for (const g of groupTranslationalStageWrites(stagePlan.writes)) {
+      for (let i = 0; i < g.pmids.length; i += STAGE_BATCH) {
+        const res = await db.write.publication.updateMany({
+          where: { pmid: { in: g.pmids.slice(i, i + STAGE_BATCH) } },
+          data: {
+            translationalStage: g.translationalStage,
+            translationalStageConfidence: g.translationalStageConfidence,
+          },
+        });
+        stageRowsWritten += res.count;
+      }
+    }
+    console.log(
+      `publication translational stage: ${stageRowsWritten} rows written from ${stagePlan.writes.length} IMPACT# items with a stage (skipped: ${stagePlan.skippedMissingPublication} missing publication, ${stagePlan.skippedUnrecognized} unrecognized stage or confidence value).`,
     );
 
     // ===================================================================

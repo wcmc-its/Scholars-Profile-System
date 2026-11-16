@@ -9,6 +9,7 @@ import {
   RESEARCH_TYPE_YEARS,
 } from "@/lib/research-type";
 import { RESEARCH_ACTIVE_YEARS, RESEARCHER_TYPE_LABEL } from "@/lib/api/matcha-contract";
+import { TRANSLATIONAL_STAGE_LABELS } from "@/lib/translational-stage";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -64,6 +65,7 @@ const NAV: NavGroup[] = [
       { id: "search", label: "Search" },
       { id: "research-type", label: "Laboratory and clinical researchers", sub: true },
       { id: "researcher-type", label: "Researcher type", sub: true },
+      { id: "translational-stage", label: "Translational stage", sub: true },
       { id: "showcase", label: "Spotlight & Selected research" },
       { id: "mentees", label: "Mentees" },
       { id: "profile-url", label: "Your profile URL" },
@@ -1277,6 +1279,40 @@ export default async function DocsPage() {
           . A missing or wrong degree is corrected through Request a change on your education. A
           missing award or role goes to Sponsored Research through Request a change on your funding. Labels update after
           the next nightly refresh.
+        </p>
+
+        {/* The Publications-tab "Translational stage" facet. Labels render from
+            lib/translational-stage.ts; the one-line descriptions are prose. */}
+        <h3 id="translational-stage" className="scroll-mt-28 lg:scroll-mt-20">
+          Translational stage
+        </h3>
+        <p>
+          The Translational stage filter in publication search groups papers by where they sit
+          between the laboratory and the community. There are four stages:
+        </p>
+        <ul>
+          <li>
+            <strong>{TRANSLATIONAL_STAGE_LABELS.T0}</strong> (T0): how biology and disease work,
+            studied in cells, animals or models.
+          </li>
+          <li>
+            <strong>{TRANSLATIONAL_STAGE_LABELS.T1}</strong> (T1): moving a discovery toward people,
+            including first studies in humans.
+          </li>
+          <li>
+            <strong>{TRANSLATIONAL_STAGE_LABELS.T2}</strong> (T2): testing whether an intervention
+            works in patients.
+          </li>
+          <li>
+            <strong>{TRANSLATIONAL_STAGE_LABELS["T3-4"]}</strong> (T3-4): how care is delivered in
+            practice and what it does for the health of populations.
+          </li>
+        </ul>
+        <p>
+          ReciterAI assigns the stage automatically, using an AI model that reads the
+          paper&apos;s synopsis or abstract. Nobody reviews the stages by hand. A paper shows no
+          stage when the model is unsure or when the paper does not fit this spectrum. Only
+          publications that ReciterAI has summarized have a stage.
         </p>
 
         <h2 id="showcase">Spotlight &amp; Selected research</h2>

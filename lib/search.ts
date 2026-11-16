@@ -478,6 +478,11 @@ export const publicationsIndexMapping = {
       journal: { type: "text", fields: { keyword: { type: "keyword" } } },
       year: { type: "integer" },
       publicationType: { type: "keyword" },
+      // Translational stage facet (`SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`).
+      // Display-ready: one of "T0" | "T1" | "T2" | "T3-4", already filtered by
+      // `displayStage` (lib/translational-stage.ts). OMITTED on docs with no
+      // displayable stage.
+      translationalStage: { type: "keyword" },
       citationCount: { type: "integer" },
       dateAddedToEntrez: { type: "date" },
       doi: { type: "keyword" },

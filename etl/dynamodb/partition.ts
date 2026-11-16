@@ -80,6 +80,10 @@ export type ImpactRecord = {
   impact_score?: number;
   justification?: string;
   model?: string;
+  /** "T0" | "T1" | "T2" | "T3-4" | "NA"; may be present without impact_score. */
+  translational_stage?: string;
+  /** "high" | "medium" | "low"; optional. */
+  translational_stage_confidence?: string;
   [key: string]: unknown;
 };
 
