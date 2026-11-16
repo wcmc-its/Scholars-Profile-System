@@ -93,8 +93,7 @@ const SUMMARY = {
     { term: "gizmos", searches: 3 },
   ],
   suggestedSearchTerms: [{ term: "sprockets", searches: 5 }],
-  botSearchTerms: [{ term: "cogs", searches: 40 }],
-  searchVolume: { human: 160, bot: 40 },
+  searchVolume: { typed: 120, suggested: 40 },
   referrers: [
     { label: "(direct)", hits: 900 },
     { label: "example.org", hits: 100 },
@@ -229,13 +228,12 @@ describe("/edit/usage", () => {
     const root = await renderPage();
     const typed = within(root.getByTestId("usage-top-search-terms"));
     expect(typed.getByText("Top typed search terms")).toBeTruthy();
-    expect(
-      typed.getByText(/Days before suggestion tracking began count every search here/),
-    ).toBeTruthy();
+    expect(typed.getByText(/Can include automated traffic/)).toBeTruthy();
     expect(typed.queryByText("sprockets")).toBeNull();
 
     const suggested = within(root.getByTestId("usage-suggested-search-terms"));
-    expect(suggested.getByText("Suggested terms clicked")).toBeTruthy();
+    expect(suggested.getByText("Likely from suggestions")).toBeTruthy();
+    expect(suggested.getByText(/exactly matches a Try chip/)).toBeTruthy();
     expect(suggested.getByText("sprockets")).toBeTruthy();
     expect(suggested.queryByText("widgets")).toBeNull();
   });
@@ -251,27 +249,21 @@ describe("/edit/usage", () => {
     expect(within(root.getByTestId("usage-top-search-terms")).getByText("widgets")).toBeTruthy();
   });
 
-  it("lists bot search terms apart from the human lists", async () => {
+  it("drops the bot search terms table", async () => {
     const root = await renderPage();
-    const bot = within(root.getByTestId("usage-bot-search-terms"));
-    expect(bot.getByText("Top bot search terms")).toBeTruthy();
-    expect(bot.getByText("cogs")).toBeTruthy();
-    expect(bot.getByText(/only declared bots count/)).toBeTruthy();
-    expect(bot.getByRole("button", { name: /Download CSV/ })).toBeTruthy();
-    expect(within(root.getByTestId("usage-top-search-terms")).queryByText("cogs")).toBeNull();
-    expect(within(root.getByTestId("usage-suggested-search-terms")).queryByText("cogs")).toBeNull();
+    expect(root.queryByTestId("usage-bot-search-terms")).toBeNull();
   });
 
-  it("shows human vs bot search volume, with bot share", async () => {
+  it("shows search volume split into typed and likely-suggested", async () => {
     const root = await renderPage();
-    expect(root.getByTestId("usage-human-searches").textContent).toBe("160");
-    expect(root.getByText("plus 40 bot (20.0% of all)")).toBeTruthy();
+    expect(root.getByTestId("usage-searches").textContent).toBe("160");
+    expect(root.getByText("120 typed · 40 likely from suggestions")).toBeTruthy();
   });
 
   it("says so when the range has no searches at all", async () => {
-    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, searchVolume: { human: 0, bot: 0 } });
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, searchVolume: { typed: 0, suggested: 0 } });
     const root = await renderPage();
-    expect(root.getByTestId("usage-human-searches").textContent).toBe("0");
+    expect(root.getByTestId("usage-searches").textContent).toBe("0");
     expect(root.getByText("no searches recorded")).toBeTruthy();
   });
 
@@ -343,19 +335,19 @@ describe("/edit/usage range", () => {
     expect(root.getByTestId("usage-range-trigger").textContent).toContain("Since launch");
   });
 
-  it("shows each range's own human vs bot search totals", async () => {
+  it("shows each range's own search totals", async () => {
     h.mockLoadUsage.mockImplementation(async (range: { since: string }) => ({
       ...SUMMARY,
       searchVolume:
-        range.since === "2026-09-18" ? { human: 30, bot: 70 } : { human: 1200, bot: 300 },
+        range.since === "2026-09-18" ? { typed: 30, suggested: 70 } : { typed: 1200, suggested: 300 },
     }));
     const week = await renderPage({ range: "7" });
-    expect(week.getByTestId("usage-human-searches").textContent).toBe("30");
-    expect(week.getByText("plus 70 bot (70.0% of all)")).toBeTruthy();
+    expect(week.getByTestId("usage-searches").textContent).toBe("100");
+    expect(week.getByText("30 typed · 70 likely from suggestions")).toBeTruthy();
     cleanup();
     const launch = await renderPage({ range: "launch" });
-    expect(launch.getByTestId("usage-human-searches").textContent).toBe("1,200");
-    expect(launch.getByText("plus 300 bot (20.0% of all)")).toBeTruthy();
+    expect(launch.getByTestId("usage-searches").textContent).toBe("1,500");
+    expect(launch.getByText("1,200 typed · 300 likely from suggestions")).toBeTruthy();
   });
 
   it("shows a custom range's dates on the trigger", async () => {
