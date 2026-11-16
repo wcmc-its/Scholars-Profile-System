@@ -55,7 +55,11 @@ function loadPins(): Pin[] {
 /** Pages + dedupes + re-sorts by relevanceScore, mirroring lib.sh's fetch_combined
  *  — bounded to MAX_PAGES since a pin only needs the top handful of results. */
 async function fetchTopHits(q: string): Promise<Hit[]> {
-  const headers = { "X-Origin-Verify": ORIGIN_VERIFY as string };
+  // identity: since next 16.4.6 the direct-origin path returns a body gzipped
+  // twice under one `content-encoding: gzip`, so fetch's single decode leaves
+  // gzip bytes and res.json() throws. CloudFront never forwards the header, so
+  // public traffic is unaffected; only this origin-direct canary sees it.
+  const headers = { "X-Origin-Verify": ORIGIN_VERIFY as string, "Accept-Encoding": "identity" };
   const enc = encodeURIComponent(q);
   const all: Hit[] = [];
   let pages = 1;
