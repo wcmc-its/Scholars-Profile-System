@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   mockCanViewUsage: vi.fn(),
   mockLoadUsage: vi.fn(),
   mockLoadHealth: vi.fn(),
+  mockLoadTraffic: vi.fn(),
   mockFindMany: vi.fn(),
   mockPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -30,6 +31,7 @@ vi.mock("@/lib/api/usage-summary", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/usage-summary")>()),
   loadUsageSummary: h.mockLoadUsage,
 }));
+vi.mock("@/lib/api/usage-traffic", () => ({ loadTrafficOverview: h.mockLoadTraffic }));
 vi.mock("@/lib/api/service-health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
   loadServiceHealth: h.mockLoadHealth,
@@ -106,6 +108,17 @@ const SUMMARY = {
   hourly: EMPTY_HOURLY,
 };
 
+const TRAFFIC_EMPTY = {
+  since: "2026-08-26",
+  until: "2026-09-24",
+  firstDt: null,
+  kpi: { hits: 0, pageviews: 0, visitorsAvg: 0, visitorDays: 0 },
+  sourcesDaily: [],
+  referrers: { total: 0, other: 0, siteOnly: 0 },
+  aiDaily: [],
+  vendors: [],
+};
+
 // The raw CloudWatch reads (ServiceHealthData); the page windows them to the
 // selected range with the real summarizeServiceHealth. The clock is pinned to
 // 2026-09-25 below, so "Last 7 days" = Sep 18-24, "Last 30 days" = Aug 26 -
@@ -139,6 +152,9 @@ beforeEach(() => {
   h.mockCanViewUsage.mockResolvedValue(true);
   h.mockLoadUsage.mockResolvedValue(SUMMARY);
   h.mockLoadHealth.mockResolvedValue(HEALTH);
+  // Traffic sections have their own tests (usage-traffic-widgets); here they
+  // render their empty state so no list fetch fires.
+  h.mockLoadTraffic.mockResolvedValue(TRAFFIC_EMPTY);
   h.mockFindMany.mockResolvedValue([
     { slug: "test-person-1", cwid: "tst0001", preferredName: "Test Person One" },
   ]);
@@ -283,6 +299,26 @@ describe("/edit/usage", () => {
     expect(traffic.getByText("1.0%")).toBeTruthy();
   });
 
+  it("replaces the old Referrers card with the traffic sections, read for the page's range", async () => {
+    const root = await renderPage({ range: "7" });
+    expect(within(root.getByTestId("usage-traffic-sources")).queryByText("Referrers")).toBeNull();
+    expect(root.getByTestId("usage-traffic")).toBeTruthy();
+    expect(root.getByTestId("traffic-empty").textContent).toContain("No traffic detail yet");
+    expect(root.getByTestId("traffic-download-excel").getAttribute("href")).toBe(
+      "/api/edit/usage/traffic/export?range=7&grain=week",
+    );
+    expect(h.mockLoadTraffic).toHaveBeenCalledWith({ since: "2026-09-18", until: "2026-09-24" });
+  });
+
+  it("fails soft when the traffic rollup can't be read", async () => {
+    h.mockLoadTraffic.mockRejectedValue(new Error("athena"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    expect(root.getByTestId("usage-traffic-unavailable")).toBeTruthy();
+    expect(root.getByTestId("usage-total-pageviews")).toBeTruthy();
+    expect(root.getByTestId("usage-traffic-sources")).toBeTruthy();
+  });
+
   it("renders the uptime card with month labels and a lighter low-traffic bar", async () => {
     const root = await renderPage();
     const card = root.getByTestId("service-health-trend");
@@ -339,7 +375,9 @@ describe("/edit/usage range", () => {
     h.mockLoadUsage.mockImplementation(async (range: { since: string }) => ({
       ...SUMMARY,
       searchVolume:
-        range.since === "2026-09-18" ? { typed: 30, suggested: 70 } : { typed: 1200, suggested: 300 },
+        range.since === "2026-09-18"
+          ? { typed: 30, suggested: 70 }
+          : { typed: 1200, suggested: 300 },
     }));
     const week = await renderPage({ range: "7" });
     expect(week.getByTestId("usage-searches").textContent).toBe("100");
