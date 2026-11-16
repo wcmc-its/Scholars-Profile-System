@@ -107,17 +107,19 @@ export const ALLOWLIST_GRANTER = "ALLOWLIST";
 /** The wildcard scope: everything the role covers (Reporting only). */
 export const ALL_SCOPE = "*";
 
-/** The `/edit` dashboards a Reporting grant can admit, one by one. COI is
- *  public data (decision 2026-10-01); its page has no actions. */
-export const DASHBOARDS = ["coi", "usage", "orcid-coverage", "etl-status", "activity", "data-sharing"] as const;
+/** The `/edit` dashboards a Reporting grant can admit, one by one, in the
+ *  Insights menu's order. COI is public data (decision 2026-10-01); its page
+ *  has no actions. */
+export const DASHBOARDS = ["activity", "usage", "etl-status", "orcid-coverage", "coi", "data-sharing"] as const;
 export type Dashboard = (typeof DASHBOARDS)[number];
 
 export const DASHBOARD_LABEL: Record<Dashboard, string> = {
-  coi: "COI",
-  usage: "Usage",
-  "orcid-coverage": "ORCID coverage",
-  "etl-status": "ETL status",
   activity: "Activity",
+  usage: "Usage",
+  // The route and id stay `etl-status`; "Data sync" is what users see.
+  "etl-status": "Data sync",
+  "orcid-coverage": "ORCID coverage",
+  coi: "COI",
   "data-sharing": "Data sharing",
 };
 

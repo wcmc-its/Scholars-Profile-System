@@ -416,6 +416,40 @@ export function AdminSubnav({
         label: "Reports",
         activeIsLink: true,
       },
+      // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
+      // (`activityTab`); no separate flag.
+      {
+        show: superuserSurfaces || activityTab,
+        id: "activity",
+        href: "/edit/activity",
+        label: "Activity",
+      },
+      // Wider audience than the other superuser tabs: a superuser OR any unit admin
+      // (via `usageTab`, set when `canViewUsage` passes).
+      { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
+      // Read-only ETL health board, labelled "Data sync" (route and id keep
+      // `etl-status`). Superuser, or an ad hoc grantee (`etlStatusTab`); no
+      // separate flag.
+      {
+        show: superuserSurfaces || etlStatusTab,
+        id: "etl-status",
+        href: "/edit/etl-status",
+        label: "Data sync",
+      },
+      {
+        show: superuserSurfaces || orcidCoverageTab,
+        id: "orcid-coverage",
+        href: "/edit/orcid-coverage",
+        label: "ORCID",
+      },
+      // The ORCID librarian confirmation queue, beside the coverage it closes.
+      {
+        show: orcidQueueTab,
+        id: "orcid-queue",
+        href: "/edit/orcid-queue",
+        label: "ORCID queue",
+        count: pendingOrcidQueue ?? undefined,
+      },
       // COI is public data (decision 2026-10-01): `coiTab` admits observers,
       // content editors and ad hoc grantees (the `coi` predicate).
       {
@@ -429,39 +463,6 @@ export function AdminSubnav({
         id: "data-sharing",
         href: "/edit/data-sharing",
         label: "Data sharing",
-      },
-      // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
-      // (`activityTab`); no separate flag.
-      {
-        show: superuserSurfaces || activityTab,
-        id: "activity",
-        href: "/edit/activity",
-        label: "Activity",
-      },
-      // Wider audience than the other superuser tabs: a superuser OR any unit admin
-      // (via `usageTab`, set when `canViewUsage` passes).
-      { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
-      {
-        show: superuserSurfaces || orcidCoverageTab,
-        id: "orcid-coverage",
-        href: "/edit/orcid-coverage",
-        label: "ORCID coverage",
-      },
-      // The ORCID librarian confirmation queue, beside the coverage it closes.
-      {
-        show: orcidQueueTab,
-        id: "orcid-queue",
-        href: "/edit/orcid-queue",
-        label: "ORCID queue",
-        count: pendingOrcidQueue ?? undefined,
-      },
-      // Read-only ETL health board. Superuser, or an ad hoc grantee
-      // (`etlStatusTab`); no separate flag.
-      {
-        show: superuserSurfaces || etlStatusTab,
-        id: "etl-status",
-        href: "/edit/etl-status",
-        label: "ETL status",
       },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).

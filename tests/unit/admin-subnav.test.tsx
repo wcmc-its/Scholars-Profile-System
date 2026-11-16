@@ -1009,16 +1009,43 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
       "admin-tab-administrators",
       "admin-tab-methods",
     ]);
-    // Insights gained ETL status at the END of the group; Reports is its own
-    // single-member group now (left of Insights, not inside it — see the
-    // tier-1 order test above), so it never appears in this menu.
+    // Reports is its own single-member group now (left of Insights, not
+    // inside it — see the tier-1 order test above), so it never appears in
+    // this menu.
     fireEvent.focus(screen.getByTestId("admin-group-insights"));
     expect(order(await screen.findByTestId("admin-group-menu-insights"))).toEqual([
       "admin-tab-activity",
       "admin-tab-usage",
-      "admin-tab-orcid-coverage",
       "admin-tab-etl-status",
+      "admin-tab-orcid-coverage",
     ]);
+  });
+
+  // The Insights menu reads Activity, Usage, Data sync, ORCID, COI, Data
+  // sharing (2026-11-14). "Data sync" is the label only — the id and route
+  // stay `etl-status`.
+  it("orders the full Insights menu Activity · Usage · Data sync · ORCID · COI · Data sharing", async () => {
+    grouped();
+    vi.stubEnv("EDIT_DATA_QUALITY_DASHBOARD", "on");
+    render(<AdminSubnav active="profiles" {...allOn} dataSharingTab={0} />);
+    fireEvent.focus(screen.getByTestId("admin-group-insights"));
+    const menu = await screen.findByTestId("admin-group-menu-insights");
+    expect(order(menu)).toEqual([
+      "admin-tab-activity",
+      "admin-tab-usage",
+      "admin-tab-etl-status",
+      "admin-tab-orcid-coverage",
+      "admin-tab-coi",
+      "admin-tab-data-sharing",
+    ]);
+    const sync = menu.querySelector('[data-testid="admin-tab-etl-status"]');
+    expect(sync!.textContent).toContain("Data sync");
+    expect(sync!.textContent).not.toContain("ETL");
+    expect(sync!.getAttribute("href")).toBe("/edit/etl-status");
+    // "ORCID" in the nav; the route and id stay `orcid-coverage`.
+    const orcid = menu.querySelector('[data-testid="admin-tab-orcid-coverage"]');
+    expect(orcid!.textContent?.trim()).toBe("ORCID");
+    expect(orcid!.getAttribute("href")).toBe("/edit/orcid-coverage");
   });
 
   it("is dark by default — the flag off reproduces the flat tab strip", () => {
@@ -1028,7 +1055,7 @@ describe("AdminSubnav — two-tier grouping (CONSOLE_SUBNAV_GROUPED)", () => {
     expect(order(screen.getByTestId("admin-subnav-tier1"))).toEqual(
       [
         "profiles", "units", "honors-queue", "news-queue", "slugs",
-        "administrators", "methods", "reports", "activity", "usage", "orcid-coverage", "etl-status", "cores",
+        "administrators", "methods", "reports", "activity", "usage", "etl-status", "orcid-coverage", "cores",
       ].map((id) => `admin-tab-${id}`),
     );
     for (const g of ["queues", "registries", "insights", "tools"])

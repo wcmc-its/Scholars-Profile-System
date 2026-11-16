@@ -37,12 +37,19 @@ import {
   type EditActivitySummary,
   type EditorKind,
   type RecentEdit,
+  BULK_CONFIRM_ACTOR,
+  automatedActorName,
   easternDayKey,
   editorKind,
+  effectiveActor,
+  entityNoun,
   fieldId,
   fieldIdLabel,
+  isBulkJobRequest,
   isEmptyValue,
+  isOpaqueId,
   isSystemActor,
+  unnamedEntityText,
 } from "@/lib/api/edit-activity";
 import { humanizeField, labelForAction } from "@/lib/api/scholar-audit";
 import { cn } from "@/lib/utils";
@@ -215,8 +222,9 @@ const KIND: Record<EditorKind, { tag: string; legend: string; bar: string; chip:
 };
 const KIND_ORDER: EditorKind[] = ["self", "staff", "automated"];
 
-/** "system-autolock" → "autolock"; "ETL" stays. */
+/** "system-autolock" → "autolock"; the bulk job → "bulk confirm"; "ETL" stays. */
 function automatedLabel(cwid: string): string {
+  if (cwid === BULK_CONFIRM_ACTOR) return "bulk confirm";
   return cwid.replace(/^system-/, "");
 }
 
@@ -416,7 +424,11 @@ function joinMode(row: FeedRow, prev: RecentEdit, e: RecentEdit, kind: FeedRow["
       : null;
   }
   if (kind === "automated" || row.mode === "run") {
-    return kind === "automated" && row.mode === "run" && prev.actorCwid === e.actorCwid && prev.action === e.action
+    return kind === "automated" &&
+      row.mode === "run" &&
+      prev.actorCwid === e.actorCwid &&
+      effectiveActor(prev) === effectiveActor(e) &&
+      prev.action === e.action
       ? "run"
       : null;
   }
@@ -489,6 +501,9 @@ function historyHref(entityType: string, entityId: string): string | null {
 const CARD = "bg-apollo-surface border-apollo-border rounded-xl border";
 const SMALL_CAPS = "text-muted-foreground text-xs font-medium tracking-[0.06em] uppercase";
 const PILL = "rounded border px-1.5 text-xs whitespace-nowrap";
+/** For a pill whose text can be long (a name, an entity): it wraps inside its
+ *  grid column instead of running under the next one. */
+const PILL_WRAP = "max-w-full whitespace-normal break-words [overflow-wrap:anywhere]";
 const LINKISH = "text-apollo-slate text-[13px] hover:underline";
 
 /** Older feed pages loaded on demand, with the names they brought. */
@@ -592,10 +607,16 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   // ── Names ──────────────────────────────────────────────────────────────────
   const personName = (cwid: string) => people[cwid]?.name ?? null;
   const actorName = (cwid: string) =>
-    isSystemActor(cwid) ? cwid : (personName(cwid) ?? cwid);
+    isSystemActor(cwid) ? automatedActorName(cwid) : (personName(cwid) ?? cwid);
   function entityText(type: string, id: string): string {
     if (type === "scholar") return personName(id) ?? id;
-    return entityNames[`${type}:${id}`] ?? id;
+    return entityNames[`${type}:${id}`] ?? unnamedEntityText(type, id);
+  }
+  /** Like {@link entityText}, but an unnamed opaque id is just its first 8
+   *  characters — for lists, where the row already says what kind it is. */
+  function entityListText(type: string, id: string): string {
+    if (type !== "scholar" && !entityNames[`${type}:${id}`] && isOpaqueId(id)) return id.slice(0, 8);
+    return entityText(type, id);
   }
 
   // ── Tiles ──────────────────────────────────────────────────────────────────
@@ -683,6 +704,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     [
       e.actorCwid,
       actorName(e.actorCwid),
+      actorName(effectiveActor(e)),
       e.entityId,
       entityText(e.entityType, e.entityId),
       labelForAction(e.action),
@@ -692,8 +714,10 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   const filtered = recent.filter(
     (e) =>
       cat.test(e.action) &&
-      (!hideAutomated || !isSystemActor(e.actorCwid)) &&
-      (!editor || e.actorCwid === editor) &&
+      (!hideAutomated || !isSystemActor(effectiveActor(e))) &&
+      // Editors are keyed by the effective actor, so picking the bulk job
+      // shows its rows and picking the person who ran it does not.
+      (!editor || effectiveActor(e) === editor) &&
       (!field || e.changes.some((c) => fieldId(e.entityType, c.key) === field)) &&
       (!gainedOnly || !field || gainedIn(e, field)) &&
       (!day || bucketOf(easternDayKey(e.ts)) === day) &&
@@ -892,10 +916,10 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
   /** Entity names with a Show all toggle (runs and bulk rows). */
   function entityList(r: FeedRow) {
     const k = `${r.key}:ents`;
-    const names = [...new Set(r.edits.map((x) => entityText(x.entityType, x.entityId)))];
+    const names = [...new Set(r.edits.map((x) => entityListText(x.entityType, x.entityId)))];
     const shown = open.has(k) ? names : names.slice(0, ITEMS_SHOWN);
     return (
-      <span className="text-muted-foreground [overflow-wrap:anywhere]">
+      <span className="text-muted-foreground block min-w-0 max-w-full [overflow-wrap:anywhere] break-words">
         {shown.join(", ")}
         {names.length > ITEMS_SHOWN && (
           <>
@@ -922,19 +946,43 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
       const actors = [...new Set(r.edits.map((x) => x.actorCwid))].reverse();
       return (
         <div className="flex min-w-0 flex-col items-start gap-1">
-          <span className="text-[14px] font-medium">{andList(actors.map(actorName))}</span>
-          <span className={cn(PILL, "bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber")}>
+          <span className="max-w-full text-[14px] font-medium [overflow-wrap:anywhere]">
+            {andList(actors.map(actorName))}
+          </span>
+          <span
+            className={cn(PILL, PILL_WRAP, "bg-apollo-amber-tint border-apollo-amber-tint-border text-apollo-amber")}
+          >
             Back-and-forth on {entityText(e.entityType, e.entityId)}
           </span>
+        </div>
+      );
+    }
+    // A backend bulk job (`bulk-` request_id) ran under a person's CWID: show
+    // the job as the editor, with the person as "run by".
+    if (isBulkJobRequest(e.requestId)) {
+      return (
+        <div className="flex min-w-0 flex-col items-start gap-1">
+          <span className="max-w-full text-[14px] font-medium [overflow-wrap:anywhere]">
+            {automatedActorName(BULK_CONFIRM_ACTOR)}
+            <span className="text-muted-foreground block text-[13px] font-normal">
+              run by {actorName(e.actorCwid)}
+            </span>
+          </span>
+          <span className={cn(PILL, PILL_WRAP, KIND.automated.chip)}>Automated</span>
         </div>
       );
     }
     const person = people[e.actorCwid];
     const forHref = historyHref(e.entityType, e.entityId);
     const forText = entityText(e.entityType, e.entityId);
-    const profiles = new Set(r.edits.map((x) => `${x.entityType}:${x.entityId}`)).size;
+    const entityKeys = new Set(r.edits.map((x) => `${x.entityType}:${x.entityId}`));
+    const profiles = entityKeys.size;
+    const noun = entityNoun(
+      r.edits.map((x) => x.entityType),
+      profiles,
+    );
     let tag: React.ReactNode;
-    if (r.mode === "bulk") tag = `Staff, for ${fmt(profiles)} profiles`;
+    if (r.mode === "bulk") tag = `Staff, for ${fmt(profiles)} ${noun}`;
     else if (r.kind === "self") tag = "Own profile";
     else if (r.kind === "automated") tag = "Automated";
     else if (r.kind === "audit") tag = "Audit";
@@ -954,7 +1002,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     const selfHref = r.kind === "self" && r.mode === "session" ? forHref : null;
     return (
       <div className="flex min-w-0 flex-col items-start gap-1">
-        <span className="text-[14px] font-medium" title={person?.title ?? undefined}>
+        <span className="max-w-full text-[14px] font-medium [overflow-wrap:anywhere]" title={person?.title ?? undefined}>
           {selfHref ? (
             <Link href={selfHref} className="hover:underline">
               {actorName(e.actorCwid)}
@@ -969,6 +1017,7 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
         <span
           className={cn(
             PILL,
+            PILL_WRAP,
             r.kind === "self"
               ? KIND.self.chip
               : r.kind === "staff"
@@ -1019,14 +1068,18 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     if (r.mode === "bulk") {
       const c = e.changes[0]!;
       const profiles = new Set(r.edits.map((x) => `${x.entityType}:${x.entityId}`)).size;
+      const noun = entityNoun(
+        r.edits.map((x) => x.entityType),
+        profiles,
+      );
       const to = c.after === null ? null : plainText(c.after);
       return (
         <div className="flex min-w-0 flex-col gap-1">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span>
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="min-w-0 [overflow-wrap:anywhere]">
               Changed <span className="font-medium">{andList(e.changes.map((x) => x.field))}</span>
               {e.changes.length === 1 && to && to.length <= LONG_TEXT ? <> to &ldquo;{to}&rdquo;</> : null} on{" "}
-              {fmt(profiles)} profiles <span className="text-muted-foreground">({fmt(n)} edits)</span>
+              {fmt(profiles)} {noun} <span className="text-muted-foreground">({fmt(n)} edits)</span>
             </span>
             {e.changes.some((x) => SOURCE_MANAGED.has(x.key)) && <LockedBadge label="Managed at its source" />}
           </span>
