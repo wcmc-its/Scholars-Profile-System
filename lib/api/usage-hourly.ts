@@ -103,3 +103,48 @@ export function hourOfDayAverages(traffic: HourlyTraffic): (ClassCounts & { hour
   }
   return out;
 }
+
+/**
+ * People's profile edits in one hour, from the app's audit log
+ * (lib/api/usage-edits.ts). Keyed by the UTC instant like {@link HourBucket},
+ * so it lines up with the traffic slots and the two 1 AM hours of a fall-back
+ * day stay apart.
+ */
+export type EditHour = { at: number; day: string; hour: number; edits: number };
+
+/** A raw audit-log row: the UTC hour as 'YYYY-MM-DD HH' and its edit count. */
+export type RawEditHour = { hour: string; edits: bigint | number | string };
+
+const UTC_HOUR = /^(\d{4}-\d{2}-\d{2}) (\d{2})$/;
+
+/** Raw per-UTC-hour edit counts -> {@link EditHour}s in Eastern time, sorted.
+ *  Malformed rows are skipped. */
+export function shapeEditsByHour(rows: readonly RawEditHour[]): EditHour[] {
+  const byAt = new Map<number, EditHour>();
+  for (const r of rows) {
+    const m = UTC_HOUR.exec(r.hour ?? "");
+    const at = m ? Date.parse(`${m[1]}T${m[2]}:00:00Z`) : NaN;
+    const edits = Number(r.edits);
+    if (!Number.isFinite(at) || !Number.isFinite(edits)) continue;
+    const prev = byAt.get(at);
+    if (prev) prev.edits += edits;
+    else byAt.set(at, { at, ...easternHour(at), edits });
+  }
+  return [...byAt.values()].sort((a, b) => a.at - b.at);
+}
+
+/**
+ * Edits folded into 24 Eastern hours of the day, each the average per day over
+ * the same covered (UTC) days as the traffic bars, so the line and the bars
+ * share a divisor. Edits in hours the traffic rollup never covered are left out.
+ */
+export function editsHourOfDayAverages(
+  edits: readonly EditHour[],
+  traffic: HourlyTraffic,
+): number[] {
+  const out = Array.from({ length: 24 }, () => 0);
+  if (traffic.days === 0) return out;
+  const covered = new Set(traffic.buckets.map((b) => b.at));
+  for (const e of edits) if (covered.has(e.at)) out[e.hour] += e.edits;
+  return out.map((v) => v / traffic.days);
+}
