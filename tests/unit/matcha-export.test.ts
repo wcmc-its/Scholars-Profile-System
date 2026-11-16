@@ -42,7 +42,7 @@ const HEADER = [
   "Career stage",
   "Clinician",
   "Researcher type",
-  "Research kind",
+  "Laboratory or clinical researcher",
   "CTL technologies",
   "Profile URL",
 ];
