@@ -21,7 +21,9 @@
  * Who is listed, and why, is `lib/edit/title-dashboard.ts`; the download route
  * (`/edit/titles-queue/export`) takes the same query string through the same
  * `parseTitleDashboardParams`. The pin panel posts the same `/api/edit/field`
- * write as `TitleField` — this page adds no write path. The page's gate
+ * write as `TitleField`. A "Needs review" row also offers "Accept discrepancy"
+ * (`/api/edit/title-accept`, #3362): a marker keyed to the row's inputs that
+ * moves it out of "Needs review" without pinning. The page's gate
  * (`canReviewTitles`) also admits observers and content editors, who read but
  * never pin, so the pin control and pin wording follow `canPinTitles`.
  */
@@ -52,6 +54,7 @@ import {
   TITLE_TAB_NOTE_READ_ONLY,
   TITLE_TABS,
   titleDashboardQueryString,
+  titleAcceptFingerprint,
   titleRowNotes,
   titleRuleLabel,
   titleTabOf,
@@ -523,6 +526,8 @@ export function TitlesQueue({
               pinned={r.pin !== null}
               canSet={canSet}
               gridClass={grid}
+              acceptFingerprint={titleTabOf(r) === "review" ? titleAcceptFingerprint(r) : null}
+              autoTitle={r.winner?.value ?? null}
             >
               <TitleRowCells r={r} />
             </TitleRowDisclosure>

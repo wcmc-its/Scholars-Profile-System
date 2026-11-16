@@ -13,9 +13,11 @@
  *                       Unpin when a pin is set.
  *
  * The pin panel posts `/api/edit/field` with `primaryTitle` — the SAME write
- * (and audit row) as `TitleField` on `/edit`; this page adds no write path.
- * The route accepts only a title on record (never free text) and `""` to
- * un-pin. After a save the page refreshes so the row, its reasons and the tab
+ * (and audit row) as `TitleField` on `/edit`. The route accepts only a title
+ * on record (never free text) and `""` to un-pin. On a "Needs review" row the
+ * panel also offers "Accept discrepancy" (#3362), which posts
+ * `/api/edit/title-accept`: the auto title is right, so clear the flag without
+ * pinning. After a save the page refreshes so the row, its reasons and the tab
  * counts come back from the server.
  *
  * Imports only `@/lib/scholar-title` and `@/lib/edit/title-dashboard`'s pure
@@ -100,6 +102,12 @@ export type TitleRowDisclosureProps = {
   canSet: boolean;
   /** The md+ grid template, shared with the header row. */
   gridClass: string;
+  /** Set on a "Needs review" row: the fingerprint of the inputs that flagged
+   *  it (`titleAcceptFingerprint`), which "Accept discrepancy" records (#3362).
+   *  Null hides the action. */
+  acceptFingerprint?: string | null;
+  /** The ladder's own pick (ignoring any pin): the title being accepted. */
+  autoTitle?: string | null;
   /** The row's cells (server-rendered). */
   children: React.ReactNode;
 };
@@ -112,6 +120,8 @@ export function TitleRowDisclosure({
   pinned,
   canSet,
   gridClass,
+  acceptFingerprint = null,
+  autoTitle = null,
   children,
 }: TitleRowDisclosureProps) {
   const router = useRouter();
@@ -129,19 +139,28 @@ export function TitleRowDisclosure({
   });
 
   async function post(value: string) {
+    await send("/api/edit/field", {
+      op: "set",
+      entityType: "scholar",
+      entityId: cwid,
+      fieldName: "primaryTitle",
+      value,
+    });
+  }
+
+  /** "Accept discrepancy": the auto title is right; clear the flag, no pin. */
+  async function accept() {
+    await send("/api/edit/title-accept", { cwid, fingerprint: acceptFingerprint, autoTitle });
+  }
+
+  async function send(url: string, payload: Record<string, unknown>) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/edit/field", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          op: "set",
-          entityType: "scholar",
-          entityId: cwid,
-          fieldName: "primaryTitle",
-          value,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -192,6 +211,29 @@ export function TitleRowDisclosure({
           className="bg-apollo-page border-apollo-border mx-[18px] mb-4 flex flex-col gap-2.5 rounded-[10px] border px-4 py-3.5"
           data-testid={`title-pin-panel-${cwid}`}
         >
+          {acceptFingerprint && (
+            <div
+              className="border-apollo-border flex flex-wrap items-center gap-3 border-b pb-3"
+              data-testid={`title-accept-block-${cwid}`}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => accept()}
+                title="The auto-selected title is correct; clear this flag"
+                className="border-apollo-border-strong bg-apollo-surface text-[13px]"
+                data-testid={`title-accept-${cwid}`}
+              >
+                Accept discrepancy
+              </Button>
+              <span className="text-muted-foreground min-w-[200px] flex-1 text-[12.5px]">
+                The auto-selected title is correct; clear this flag. Nothing is pinned, and the
+                row comes back if the title or the roles behind the flag change.
+              </span>
+            </div>
+          )}
           <p className="text-muted-foreground text-[13px]">
             Pin a title to override the ladder for {name}. Pins are logged and can be removed any
             time.
