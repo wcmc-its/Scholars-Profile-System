@@ -87,12 +87,12 @@ describe("nested research type values", () => {
   });
 
   it("chip labels: parent alone, child as 'Parent: Child', unknown passes through", () => {
-    expect(researchTypeLabel("lab")).toBe("Laboratory research");
-    expect(researchTypeLabel("lab:physician")).toBe("Laboratory research: Physician-scientist");
-    expect(researchTypeLabel("lab:other")).toBe("Laboratory research: Basic scientist");
-    expect(researchTypeLabel("clinical:physician")).toBe("Clinical research: Physician-scientist");
+    expect(researchTypeLabel("lab")).toBe("Laboratory researcher");
+    expect(researchTypeLabel("lab:physician")).toBe("Laboratory researcher: Physician-scientist");
+    expect(researchTypeLabel("lab:other")).toBe("Laboratory researcher: Basic scientist");
+    expect(researchTypeLabel("clinical:physician")).toBe("Clinical researcher: Physician-scientist");
     expect(researchTypeLabel("clinical:other")).toBe(
-      "Clinical research: Clinical or population researcher",
+      "Clinical researcher: Clinical or population researcher",
     );
     expect(researchTypeLabel("bogus")).toBe("bogus");
   });

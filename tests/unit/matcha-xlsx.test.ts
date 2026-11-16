@@ -27,7 +27,7 @@ const ROW: MatchaExportRow = {
   careerStage: "Senior",
   clinician: "Yes",
   researcherType: "Physician-scientist",
-  researchKind: "Laboratory research",
+  researchKind: "Laboratory researcher",
   technologyCount: 2,
   profileUrl: "https://example.org/alice-alpha",
 };
@@ -149,7 +149,7 @@ describe("About these columns sheet", () => {
     expect(ws).toBeTruthy();
     expect(ws.getCell(1, 1).font?.bold).toBe(true);
     const cols = [2, 3, 4].map((r) => ws.getCell(r, 1).text);
-    expect(cols).toEqual(["Fit", "Research kind", "Researcher type"]);
+    expect(cols).toEqual(["Fit", "Laboratory or clinical researcher", "Researcher type"]);
     const link = ws.getCell(6, 2).value as { hyperlink?: string };
     expect(link.hyperlink).toBe(`${new URL(ROW.profileUrl).origin}/about#research-type`);
   });

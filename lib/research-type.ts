@@ -18,8 +18,8 @@ export const RESEARCH_TYPE_YEARS = 5;
 export const RESEARCH_TYPE_MIN_PUBS = 3;
 
 export const RESEARCH_TYPE_LABELS = {
-  lab: "Laboratory research",
-  clinical: "Clinical research",
+  lab: "Laboratory researcher",
+  clinical: "Clinical researcher",
 } as const;
 export type ResearchType = keyof typeof RESEARCH_TYPE_LABELS;
 /**
@@ -45,7 +45,7 @@ export function parseResearchTypeValue(
 }
 
 /** Display label for a facet value; unknown values pass through. A child reads
- *  "Laboratory research: Physician-scientist". */
+ *  "Laboratory researcher: Physician-scientist". */
 export function researchTypeLabel(v: string): string {
   const p = parseResearchTypeValue(v);
   if (!p) return v;
@@ -66,7 +66,7 @@ export function collapseResearchTypeChildren(values: readonly string[]): string[
 }
 
 /** Whether a facet row reads as ticked. A ticked parent ticks its children too:
- *  "Laboratory research" is every laboratory researcher, both kinds. */
+ *  "Laboratory researcher" is every laboratory researcher, both kinds. */
 export function isResearchTypeChecked(active: readonly string[], value: string): boolean {
   if (active.includes(value)) return true;
   const p = parseResearchTypeValue(value);

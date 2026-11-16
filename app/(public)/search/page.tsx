@@ -3261,7 +3261,7 @@ function FacetSidebar({
           Renders only when the response carries buckets (flag off /
           pre-reindex ⇒ no group). */}
       {researchTypes.length > 0 ? (
-        <FacetGroup label="Research type">
+        <FacetGroup label="Researcher type">
           {sortActiveFirst(researchTypes, (b) =>
             activeResearchType.some((v) => parseResearchTypeValue(v)?.kind === b.value),
           ).flatMap((b) => [

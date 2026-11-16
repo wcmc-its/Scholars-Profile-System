@@ -1003,7 +1003,7 @@ describe("MatchaPanel", () => {
     // Clearing restores both; the Research child then narrows to the physician.
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(screen.getByText("Bob Beta")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Laboratory research: Physician-scientist" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Laboratory researcher: Physician-scientist" }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
   });
@@ -1039,33 +1039,33 @@ describe("MatchaPanel", () => {
       l.querySelector("span.tabular-nums")!.textContent,
     ]);
     expect(rows).toEqual([
-      ["Laboratory research", "2"],
+      ["Laboratory researcher", "2"],
       ["Physician-scientist", "1"],
       ["Basic scientist", "1"],
-      ["Clinical research", "2"],
+      ["Clinical researcher", "2"],
       ["Physician-scientist", "1"],
       ["Clinical or population researcher", "1"],
       ["Funded, kind not evident", "1"],
       ["No research signal", "2"],
     ]);
     // The children sit inside their parent's list item.
-    const lab = box(/^Laboratory research ?\d/).closest("li")!;
-    expect(within(lab).getByRole("checkbox", { name: "Laboratory research: Basic scientist" })).toBeTruthy();
+    const lab = box(/^Laboratory researcher ?\d/).closest("li")!;
+    expect(within(lab).getByRole("checkbox", { name: "Laboratory researcher: Basic scientist" })).toBeTruthy();
     expect(researchFacet()!.textContent).toContain("How research and researcher types are defined");
     expect(
       within(researchFacet()!).getByRole("link", { name: "How research and researcher types are defined" }).getAttribute("href"),
     ).toBe("/about#research-type");
   });
 
-  it("defaults to Laboratory research, as a removable chip that Clear filters drops", async () => {
+  it("defaults to Laboratory researcher, as a removable chip that Clear filters drops", async () => {
     await searchKindRun();
     expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
-    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
-    expect(box(/^Clinical research ?\d/).checked).toBe(false);
-    expect(screen.getByRole("button", { name: "Remove Laboratory research filter" })).toBeTruthy();
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(true);
+    expect(box(/^Clinical researcher ?\d/).checked).toBe(false);
+    expect(screen.getByRole("button", { name: "Remove Laboratory researcher filter" })).toBeTruthy();
 
     // OR within the group.
-    fireEvent.click(box(/^Clinical research ?\d/));
+    fireEvent.click(box(/^Clinical researcher ?\d/));
     expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Bob Beta", "Erin Epsilon"]);
     fireEvent.click(box(/^Funded, kind not evident/));
     expect(screen.getByText("Carol Gamma")).toBeTruthy();
@@ -1074,59 +1074,59 @@ describe("MatchaPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
-    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
-    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove Laboratory researcher filter" })).toBeNull();
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(false);
   });
 
   it("a ticked parent ticks its children; unticking one leaves the other; both children are the parent", async () => {
     await searchKindRun();
-    // Default: Laboratory research, so both its children read as ticked.
-    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
-    expect(box("Laboratory research: Physician-scientist").checked).toBe(true);
-    expect(box("Laboratory research: Basic scientist").checked).toBe(true);
+    // Default: Laboratory researcher, so both its children read as ticked.
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(true);
+    expect(box("Laboratory researcher: Physician-scientist").checked).toBe(true);
+    expect(box("Laboratory researcher: Basic scientist").checked).toBe(true);
 
-    fireEvent.click(box("Laboratory research: Physician-scientist"));
-    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
-    expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
-    expect(box("Laboratory research: Basic scientist").checked).toBe(true);
+    fireEvent.click(box("Laboratory researcher: Physician-scientist"));
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(false);
+    expect(box("Laboratory researcher: Physician-scientist").checked).toBe(false);
+    expect(box("Laboratory researcher: Basic scientist").checked).toBe(true);
     expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha"]);
 
-    fireEvent.click(box("Laboratory research: Physician-scientist"));
-    expect(box(/^Laboratory research ?\d/).checked).toBe(true);
+    fireEvent.click(box("Laboratory researcher: Physician-scientist"));
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(true);
     expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
 
-    fireEvent.click(box(/^Laboratory research ?\d/));
-    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
-    expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
-    expect(box("Laboratory research: Basic scientist").checked).toBe(false);
+    fireEvent.click(box(/^Laboratory researcher ?\d/));
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(false);
+    expect(box("Laboratory researcher: Physician-scientist").checked).toBe(false);
+    expect(box("Laboratory researcher: Basic scientist").checked).toBe(false);
     expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
   });
 
   it("a person with both kinds matches under either parent", async () => {
     await searchKindRun();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    fireEvent.click(box("Clinical research: Physician-scientist"));
+    fireEvent.click(box("Clinical researcher: Physician-scientist"));
     expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
-    fireEvent.click(box("Clinical research: Physician-scientist"));
-    fireEvent.click(box("Laboratory research: Physician-scientist"));
+    fireEvent.click(box("Clinical researcher: Physician-scientist"));
+    fireEvent.click(box("Laboratory researcher: Physician-scientist"));
     expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
     // Erin is a physician, so neither "other" child holds her.
-    fireEvent.click(box("Laboratory research: Physician-scientist"));
-    fireEvent.click(box("Clinical research: Clinical or population researcher"));
+    fireEvent.click(box("Laboratory researcher: Physician-scientist"));
+    fireEvent.click(box("Clinical researcher: Clinical or population researcher"));
     expect(shown(ALL_KIND_RUN)).toEqual(["Bob Beta"]);
   });
 
   it("names a child chip with its parent, and the chip's remove unticks the child", async () => {
     await searchKindRun();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    fireEvent.click(box("Laboratory research: Physician-scientist"));
-    expect(screen.getByText("Laboratory research: Physician-scientist", { selector: "span" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    fireEvent.click(box("Laboratory researcher: Physician-scientist"));
+    expect(screen.getByText("Laboratory researcher: Physician-scientist", { selector: "span" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove Laboratory researcher filter" })).toBeNull();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Remove Laboratory research: Physician-scientist filter" }),
+      screen.getByRole("button", { name: "Remove Laboratory researcher: Physician-scientist filter" }),
     );
-    expect(box("Laboratory research: Physician-scientist").checked).toBe(false);
+    expect(box("Laboratory researcher: Physician-scientist").checked).toBe(false);
     // An explicit empty selection: everyone, not the default back.
     expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
   });
@@ -1137,7 +1137,7 @@ describe("MatchaPanel", () => {
     expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
 
     fireEvent.click(screen.getByRole("button", { name: "Re-run match" }));
-    await waitFor(() => expect(box(/^Laboratory research ?\d/).checked).toBe(true));
+    await waitFor(() => expect(box(/^Laboratory researcher ?\d/).checked).toBe(true));
     expect(shown(ALL_KIND_RUN)).toEqual(["Alice Alpha", "Erin Epsilon"]);
   });
 
@@ -1145,18 +1145,18 @@ describe("MatchaPanel", () => {
     // Nobody shows laboratory research.
     await searchKindRun(undefined, [KIND_RUN[1], KIND_RUN[2], KIND_RUN[3]]);
     expect(researchFacet()).not.toBeNull();
-    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
-    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove Laboratory researcher filter" })).toBeNull();
     expect(shown(["Bob Beta", "Carol Gamma", "Dan Delta"])).toEqual(["Bob Beta", "Carol Gamma", "Dan Delta"]);
   });
 
   it("ANDs Research with the other facets", async () => {
     await searchKindRun();
-    // Laboratory research (the default) AND Surgery leaves only the lab person in Surgery.
+    // Laboratory researcher (the default) AND Surgery leaves only the lab person in Surgery.
     fireEvent.click(box(/^Surgery/));
     expect(shown(ALL_KIND_RUN)).toEqual(["Erin Epsilon"]);
     // OR within Research, still AND with Surgery: Bob (clinical, Surgery) joins.
-    fireEvent.click(box(/^Clinical research ?\d/));
+    fireEvent.click(box(/^Clinical researcher ?\d/));
     expect(shown(ALL_KIND_RUN)).toEqual(["Bob Beta", "Erin Epsilon"]);
   });
 
@@ -1170,8 +1170,8 @@ describe("MatchaPanel", () => {
       },
     ]);
     expect(researchFacet()).not.toBeNull();
-    expect(box(/^Laboratory research ?\d/).checked).toBe(false);
-    expect(screen.queryByRole("button", { name: "Remove Laboratory research filter" })).toBeNull();
+    expect(box(/^Laboratory researcher ?\d/).checked).toBe(false);
+    expect(screen.queryByRole("button", { name: "Remove Laboratory researcher filter" })).toBeNull();
     expect(shown(ALL_KIND_RUN)).toEqual(ALL_KIND_RUN);
   });
 

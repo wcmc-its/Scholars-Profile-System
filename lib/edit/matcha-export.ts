@@ -49,7 +49,7 @@ export type MatchaExportRow = {
   personType: string;
   /** Researcher type label ("Physician-scientist"), or "" when absent. Blank is unknown. */
   researcherType: string;
-  /** Research kind labels joined with "; " ("Laboratory research; Clinical research"),
+  /** Research kind labels joined with "; " ("Laboratory researcher; Clinical researcher"),
    *  "None evident" when computed and empty, or "" when absent. Blank is unknown. */
   researchKind: string;
   /** Absolute profile URL, so the cell is clickable when pasted anywhere. */
@@ -106,7 +106,7 @@ const HEADERS = [
   "Career stage",
   "Clinician",
   "Researcher type",
-  "Research kind",
+  "Laboratory or clinical researcher",
   "CTL technologies",
   "Profile URL",
 ] as const;

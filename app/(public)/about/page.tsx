@@ -62,7 +62,7 @@ const NAV: NavGroup[] = [
       { id: "methods", label: "Methods & tools" },
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
-      { id: "research-type", label: "Research type", sub: true },
+      { id: "research-type", label: "Laboratory and clinical researchers", sub: true },
       { id: "researcher-type", label: "Researcher type", sub: true },
       { id: "showcase", label: "Spotlight & Selected research" },
       { id: "mentees", label: "Mentees" },
@@ -1053,10 +1053,11 @@ export default async function DocsPage() {
             use (lib/research-type.ts, lib/api/matcha-contract.ts); the award and degree lists
             below are prose and must be updated with RESEARCH_MECHANISM / MEDICAL_DEGREES. */}
         <h3 id="research-type" className="scroll-mt-28 lg:scroll-mt-20">
-          Research type
+          Laboratory and clinical researchers
         </h3>
         <p>
-          People search can filter by the kind of research a scholar does. The label is computed
+          The Researcher type filter in people search starts from the kind of research a scholar
+          does: laboratory, clinical or both. The label is computed
           from the scholar&apos;s own recent papers. It does not come from a title, a department,
           an appointment or anything the scholar declares, and nobody assigns it by hand.
         </p>
@@ -1110,9 +1111,9 @@ export default async function DocsPage() {
         <p>
           The Scholars console also gives each person one researcher type. It is not shown on
           profiles. Staff tools that match researchers to sponsors and funding opportunities use
-          all eight types, and people search uses three of them to narrow the Research type
+          all eight types, and people search uses three of them to narrow the Researcher type
           filter, as described below. The type is built from three facts, each defined below: the
-          research type labels above, whether the person is a physician, and whether they
+          laboratory and clinical labels above, whether the person is a physician, and whether they
           currently lead a research award. The rules run in order, and the first one that fits
           decides the type.
         </p>
@@ -1134,17 +1135,17 @@ export default async function DocsPage() {
               <tr>
                 <td>2</td>
                 <td>{RESEARCHER_TYPE_LABEL.physician_scientist}</td>
-                <td>Has {RESEARCH_TYPE_LABELS.lab} or {RESEARCH_TYPE_LABELS.clinical}, and is a physician</td>
+                <td>Is a {RESEARCH_TYPE_LABELS.lab} or a {RESEARCH_TYPE_LABELS.clinical}, and is a physician</td>
               </tr>
               <tr>
                 <td>3</td>
                 <td>{RESEARCHER_TYPE_LABEL.basic_scientist}</td>
-                <td>Has {RESEARCH_TYPE_LABELS.lab}, and is not a physician</td>
+                <td>Is a {RESEARCH_TYPE_LABELS.lab}, and is not a physician</td>
               </tr>
               <tr>
                 <td>4</td>
                 <td>{RESEARCHER_TYPE_LABEL.clinical_researcher}</td>
-                <td>Has {RESEARCH_TYPE_LABELS.clinical} only, and is not a physician</td>
+                <td>Is a {RESEARCH_TYPE_LABELS.clinical} only, and is not a physician</td>
               </tr>
               <tr>
                 <td>5</td>
@@ -1170,14 +1171,14 @@ export default async function DocsPage() {
           </table>
         </div>
         <p>
-          A physician-scientist can do laboratory work, clinical work or both; the research type
-          labels say which. That is why the console filter puts {RESEARCHER_TYPE_LABEL.physician_scientist}{" "}
+          A physician-scientist can do laboratory work, clinical work or both; the laboratory and
+          clinical labels say which. That is why the console filter puts {RESEARCHER_TYPE_LABEL.physician_scientist}{" "}
           under both {RESEARCH_TYPE_LABELS.lab} and {RESEARCH_TYPE_LABELS.clinical}. A basic
-          scientist who also publishes clinical papers stays a basic scientist and also shows{" "}
+          scientist who also publishes clinical papers stays a basic scientist and is also a{" "}
           {RESEARCH_TYPE_LABELS.clinical}.
         </p>
         <p>
-          In people search, each Research type option can be narrowed by whether the scholar is a
+          In people search, each Researcher type option can be narrowed by whether the scholar is a
           physician. Under {RESEARCH_TYPE_LABELS.lab} the choices are{" "}
           {RESEARCHER_TYPE_LABEL.physician_scientist} and {RESEARCHER_TYPE_LABEL.basic_scientist};
           under {RESEARCH_TYPE_LABELS.clinical} they are {RESEARCHER_TYPE_LABEL.physician_scientist}{" "}
@@ -1499,9 +1500,9 @@ export default async function DocsPage() {
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies NIH abstract text and the portfolio link, and adds NIH awards InfoEd never held. NSF and Gates Foundation abstracts come from those funders’ public records." },
             { term: "Grant roles (PI, MPI, Co-I)", def: (<>Your role on an award, as recorded in InfoEd. PI is the principal investigator. MPI marks an NIH <a href={NIH_MPI} className={LINK}>multiple-principal-investigator</a> award, where two or more investigators hold principal-investigator standing equally; NIH names one of them the contact PI for correspondence only, which carries no seniority. Co-I is a co-investigator, Sub-PI leads a subaward, and KP is other key personnel. MPI is not a lesser form of PI, and it is not the same as co-PI, which is an NSF term not used on NIH awards. Corrections go to Sponsored Research through Request a change. A grant shown “via NIH RePORTER” always lists the role as PI and is corrected through NIH, not Sponsored Research.</>) },
             { term: "Available technologies", def: "Licensable inventions a scholar holds in the WCM Center for Technology Licensing portfolio, shown on their profile with a link to the public technology page (innovation.weill.cornell.edu). Sourced from the Center for Technology Licensing and refreshed weekly." },
-            { term: "Laboratory research", def: `A Research type label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as laboratory work. A scholar can also show Clinical research. See Research type under Search.` },
-            { term: "Clinical research", def: `A Research type label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as human or clinical research. A scholar can also show Laboratory research. See Research type under Search.` },
-            { term: "Researcher type", def: "The one type the Scholars console gives each person (Physician-scientist, Basic scientist, Clinical or population researcher, Funded investigator, Clinician, Trainee, Research staff or Unclassified), built from their research type labels, whether they are a physician, and whether they lead a research award. Used by staff matching tools; three of the types also narrow the Research type filter in people search. Not shown on profiles. See Researcher type under Search." },
+            { term: "Laboratory researcher", def: `A Researcher type filter label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as laboratory work. A scholar can also be a Clinical researcher. See Laboratory and clinical researchers under Search.` },
+            { term: "Clinical researcher", def: `A Researcher type filter label: at least ${RESEARCH_TYPE_MIN_PUBS} first or last author research articles in the last ${RESEARCH_TYPE_YEARS} years that NIH iCite classifies as human or clinical research. A scholar can also be a Laboratory researcher. See Laboratory and clinical researchers under Search.` },
+            { term: "Researcher type", def: "The one type the Scholars console gives each person (Physician-scientist, Basic scientist, Clinical or population researcher, Funded investigator, Clinician, Trainee, Research staff or Unclassified), built from their laboratory and clinical labels, whether they are a physician, and whether they lead a research award. Used by staff matching tools; three of the types also narrow the Researcher type filter in people search. Not shown on profiles. See Researcher type under Search." },
             { term: "Physician-scientist", def: "A scholar who shows laboratory or clinical research and holds a medical degree (MD, DO, MBBS or an equivalent) in the education on their profile; a clinical profile stands in when no education is listed. Dental and psychology degrees do not count as medical degrees." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
             { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Scholars is the SOR for the institutional data it curates directly (center membership, unit and division metadata, and manually-created division rosters), and that set may grow; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
