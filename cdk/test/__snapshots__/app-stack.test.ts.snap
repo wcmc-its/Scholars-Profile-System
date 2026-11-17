@@ -763,6 +763,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "UNIT_LEADERSHIP_ROLES",
+                "Value": "off",
+              },
+              {
                 "Name": "ORG_UNIT_ROLE_CONSOLE",
                 "Value": "on",
               },
@@ -5852,6 +5856,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_DISEASE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "UNIT_LEADERSHIP_ROLES",
                 "Value": "on",
               },
               {

@@ -184,3 +184,32 @@ function originalSlice(original: string, area: string): string {
 export function isFullTimeFaculty(roleCategory: string | null | undefined): boolean {
   return roleCategory === "full_time_faculty";
 }
+
+/** One Vice Chair row as the `/edit` Leadership card renders it. */
+export type UnitLeadershipRoleView = {
+  id: string;
+  cwid: string;
+  name: string | null;
+  /** The holder's own profile title, for the line under the name. */
+  title: string | null;
+  fullTimeFaculty: boolean;
+  displayTitle: string;
+  tier: LeadershipTier;
+  functions: LeadershipFunction[];
+  areaText: string | null;
+  site: LeadershipSite | null;
+  /** `YYYY-MM-DD`. */
+  startDate: string | null;
+  source: string;
+  sourceUrl: string | null;
+  note: string | null;
+};
+
+/** Tier order (Executive first), then name. */
+export function sortLeadershipRoles<T extends { tier: LeadershipTier; name: string | null }>(rows: readonly T[]): T[] {
+  return [...rows].sort(
+    (a, b) =>
+      LEADERSHIP_TIERS.indexOf(a.tier) - LEADERSHIP_TIERS.indexOf(b.tier) ||
+      (a.name ?? "").localeCompare(b.name ?? ""),
+  );
+}
