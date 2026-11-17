@@ -64,7 +64,6 @@ export interface UsageQueries {
   readonly suggestedSearchTerms: string;
   /** Range totals (`metric` = 'typed' | 'suggested', `searches`), not capped at top-N. */
   readonly searchTotals: string;
-  readonly referrers: string;
   readonly geo: string;
   readonly device: string;
   /**
@@ -131,7 +130,6 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
       `WHERE (metric = 'search_term_suggested' OR (${TYPED})) AND ${searchSince}`,
       "GROUP BY 1",
     ].join("\n"),
-    referrers: grouped("referrer", "referrer", "hits"),
     geo: grouped("geo", "region", "hits"),
     device: grouped("device", "device", "hits"),
     hourly: [

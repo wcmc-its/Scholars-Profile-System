@@ -34,7 +34,8 @@ const EDGE_IP_PATH = "/edge-ip";
  * Viewer-request CloudFront Function source for the legacy-host redirect
  * (#945). On an alias host it 301s to the canonical host: a legacy VIVO
  * profile path (same shapes as `VIVO_PATH_RE` in proxy.ts) goes straight to
- * `/scholars/by-cwid/{cwid}`, anything else to the home page. Any other host
+ * `/scholars/by-cwid/{cwid}`, a publication path (`/display/pubid{PMID}`) to
+ * `/scholars/by-pmid/{pmid}`, anything else to the home page. Any other host
  * passes through untouched. Answering at the POP means the alias never reaches
  * the origin, so it can't serve Scholars pages under the VIVO name or share a
  * cache entry with the canonical host (the default cache key omits Host).
@@ -46,16 +47,18 @@ export function legacyHostRedirectCode(
   return `var ALIASES = ${JSON.stringify(aliasHosts)};
 var CANONICAL = ${JSON.stringify(`https://${canonicalHost}`)};
 var VIVO_PROFILE = /^\\/(?:display|individual|profile)\\/cwid-([A-Za-z0-9._\\-]+)\\/?$/;
+var VIVO_PUB = /^\\/(?:display|individual)\\/pubid(\\d{1,9})\\/?$/;
 function handler(event) {
   var request = event.request;
   var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
   if (ALIASES.indexOf(host) === -1) return request;
   var m = request.uri.match(VIVO_PROFILE);
+  var p = m ? null : request.uri.match(VIVO_PUB);
   return {
     statusCode: 301,
     statusDescription: "Moved Permanently",
     headers: {
-      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : "/") },
+      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : p ? "/scholars/by-pmid/" + p[1] : "/") },
       "cache-control": { value: "max-age=86400" },
     },
   };

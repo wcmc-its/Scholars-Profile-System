@@ -37,7 +37,6 @@ describe("buildUsageQueries", () => {
     expect(q.searchTotals).toContain("metric = 'search_term_suggested' OR (metric = 'search_term' AND dimension NOT IN (");
     // Searches the edge challenged or blocked were never served; not counted.
     for (const sql of Object.values(q)) expect(sql).not.toContain("search_term_bot");
-    expect(q.referrers).toContain("metric = 'referrer'");
     expect(q.geo).toContain("metric = 'geo'");
     expect(q.device).toContain("metric = 'device'");
     expect(q.hourly).toContain("metric = 'hourly'");

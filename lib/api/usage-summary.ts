@@ -9,7 +9,7 @@
  * The Athena queries are wrapped in `unstable_cache` (daily revalidate), keyed
  * per window (`since` + `until`), so each range caches on its own: the rollup
  * only changes nightly, so a per-request Athena round-trip would be pure
- * waste. On a cache miss the nine queries run in parallel (~1-2s); every other
+ * waste. On a cache miss the eight queries run in parallel (~1-2s); every other
  * view is served from cache. Any Athena failure throws out of the uncached
  * loader (never cached) and the page renders an "unavailable" notice.
  *
@@ -47,7 +47,6 @@ export type UsageSummary = {
   /** Suggestion clicks (home chips, typeahead concept picks), from SEARCH_STATS_START on. */
   suggestedSearchTerms: TermCount[];
   searchVolume: SearchVolume;
-  referrers: NamedCount[];
   geo: NamedCount[];
   device: NamedCount[];
   /** Page requests per hour (Eastern) by traffic class; empty before the hourly rollup began. */
@@ -61,7 +60,6 @@ export type UsageRows = {
   searchTerms: AthenaRow[];
   suggestedSearchTerms: AthenaRow[];
   searchTotals: AthenaRow[];
-  referrers: AthenaRow[];
   geo: AthenaRow[];
   device: AthenaRow[];
   hourly: AthenaRow[];
@@ -133,7 +131,6 @@ export function shapeUsageRows(rows: UsageRows, window?: UsageWindow): UsageSumm
     searchTerms: terms(rows.searchTerms),
     suggestedSearchTerms: terms(rows.suggestedSearchTerms),
     searchVolume: { typed: total("typed"), suggested: total("suggested") },
-    referrers: rows.referrers.map((r) => ({ label: r.referrer ?? "", hits: n(r.hits) })),
     geo: rows.geo.map((r) => ({ label: r.region ?? "", hits: n(r.hits) })),
     device: rows.device.map((r) => ({ label: r.device ?? "", hits: n(r.hits) })),
     hourly: shapeHourly(rows.hourly),
@@ -148,7 +145,6 @@ async function loadUsageSummaryUncached(window: UsageWindow): Promise<UsageSumma
     searchTerms,
     suggestedSearchTerms,
     searchTotals,
-    referrers,
     geo,
     device,
     hourly,
@@ -158,7 +154,6 @@ async function loadUsageSummaryUncached(window: UsageWindow): Promise<UsageSumma
     runUsageQuery(q.searchTerms),
     runUsageQuery(q.suggestedSearchTerms),
     runUsageQuery(q.searchTotals),
-    runUsageQuery(q.referrers),
     runUsageQuery(q.geo),
     runUsageQuery(q.device),
     runUsageQuery(q.hourly),
@@ -170,7 +165,6 @@ async function loadUsageSummaryUncached(window: UsageWindow): Promise<UsageSumma
       searchTerms,
       suggestedSearchTerms,
       searchTotals,
-      referrers,
       geo,
       device,
       hourly,
@@ -183,15 +177,15 @@ async function loadUsageSummaryUncached(window: UsageWindow): Promise<UsageSumma
  * Cached loader for the page, one cache entry per window: the key carries the
  * window's `since` and `until`, so "Last 7 days" and "Since launch" never share
  * an entry and a custom range gets its own. Daily revalidate, so each window's
- * nine-query Athena round-trip runs at most ~twice a day per app instance. A
+ * eight-query Athena round-trip runs at most ~twice a day per app instance. A
  * thrown Athena error propagates (never cached) so the page can fail soft. The
  * dates are validated to strict YYYY-MM-DD by buildUsageQueries before any SQL.
  */
 export function loadUsageSummary(window: UsageWindow): Promise<UsageSummary> {
   return unstable_cache(
     () => loadUsageSummaryUncached(window),
-    // v5: + hourly (a cached v4 entry lacks it).
-    ["usage-summary", "v6", window.since, window.until],
+    // v7: the referrer list moved to daily_traffic (a cached v6 entry still carries it).
+    ["usage-summary", "v7", window.since, window.until],
     { revalidate: USAGE_CACHE_TTL_SECONDS, tags: ["usage-summary"] },
   )();
 }
