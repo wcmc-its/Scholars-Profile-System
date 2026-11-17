@@ -357,6 +357,18 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Sources tab), so this detects the schedule dying or every list failing,
   // not one list quietly failing.
   HonorsLists: { cadence: "weekly" },
+  // Deployed steps that wrote etl_run rows but were never registered here, so
+  // /edit/etl-status (TRACKED x etl_run) never showed them. All continue-tier
+  // (or, for FeedbackDigest, their own machine), so freshness is their net.
+  CenterPubRelevance: { cadence: "nightly" }, // CenterPubRelevanceNightly
+  HeadshotMissing: { cadence: "nightly" }, // HeadshotMissingNightly
+  CancerCenterDiseaseAssignment: { cadence: "weekly" }, // CancerCenterDiseaseAssignmentsWeekly
+  JournalImpactFactor: { cadence: "weekly" }, // JournalImpactFactorWeekly
+  FundableWork: { cadence: "weekly" }, // FundableWorkWeekly
+  FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
+  // ED email-visibility bridge (export -> S3 -> import). Only the import writes a
+  // row; built only where edEmailVisibilityBridgeEnabled (staging today).
+  "ED-EmailVisibility-Import": { cadence: "weekly", envs: ["staging"] },
   // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
   // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
   // the SLA here has to track the PRODUCER's schedule, not our loader's. That
