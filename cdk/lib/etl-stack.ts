@@ -1013,6 +1013,14 @@ export class EtlStack extends Stack {
         this,
         `/sps/${env}/etl/feedback-digest-recipient`,
       ),
+      // OpenAlex "polite pool" contact (lib/seo/openalex.ts mailtoFromEnv), read by
+      // etl:fundable-work. From SSM at deploy time for the same reason as the
+      // digest recipient above: no address in this public repo. Create
+      // `/sps/<env>/etl/openalex-mailto` before deploying, or the deploy fails.
+      OPENALEX_MAILTO: ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/etl/openalex-mailto`,
+      ),
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
       // the task well under the container limit; pin the heap to ~85% of the

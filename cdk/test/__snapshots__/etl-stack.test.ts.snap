@@ -106,6 +106,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Default": "/sps/prod/etl/feedback-digest-recipient",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/etl/openalex-mailto",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AnnualScheduleRuleF1823588": {
@@ -2184,6 +2188,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -2885,6 +2895,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -3523,6 +3539,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -4089,6 +4111,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -5097,6 +5125,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -11892,6 +11926,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       "Default": "/sps/staging/etl/feedback-digest-recipient",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/etl/openalex-mailto",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AnnualScheduleRuleF1823588": {
@@ -14614,6 +14652,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -15315,6 +15359,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -15953,6 +16003,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -16519,6 +16575,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -17527,6 +17589,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
