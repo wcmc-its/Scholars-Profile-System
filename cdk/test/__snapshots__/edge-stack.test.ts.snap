@@ -1656,16 +1656,36 @@ a{color:var(--slate)}
                 "ScopeDownStatement": {
                   "NotStatement": {
                     "Statement": {
-                      "ByteMatchStatement": {
-                        "FieldToMatch": {
-                          "UriPath": {},
-                        },
-                        "PositionalConstraint": "STARTS_WITH",
-                        "SearchString": "/search",
-                        "TextTransformations": [
+                      "AndStatement": {
+                        "Statements": [
                           {
-                            "Priority": 0,
-                            "Type": "LOWERCASE",
+                            "ByteMatchStatement": {
+                              "FieldToMatch": {
+                                "UriPath": {},
+                              },
+                              "PositionalConstraint": "STARTS_WITH",
+                              "SearchString": "/search",
+                              "TextTransformations": [
+                                {
+                                  "Priority": 0,
+                                  "Type": "LOWERCASE",
+                                },
+                              ],
+                            },
+                          },
+                          {
+                            "NotStatement": {
+                              "Statement": {
+                                "IPSetReferenceStatement": {
+                                  "Arn": {
+                                    "Fn::GetAtt": [
+                                      "WcmIpAllowSet",
+                                      "Arn",
+                                    ],
+                                  },
+                                },
+                              },
+                            },
                           },
                         ],
                       },
@@ -1827,16 +1847,36 @@ a{color:var(--slate)}
                   },
                 ],
                 "ScopeDownStatement": {
-                  "ByteMatchStatement": {
-                    "FieldToMatch": {
-                      "UriPath": {},
-                    },
-                    "PositionalConstraint": "STARTS_WITH",
-                    "SearchString": "/search",
-                    "TextTransformations": [
+                  "AndStatement": {
+                    "Statements": [
                       {
-                        "Priority": 0,
-                        "Type": "LOWERCASE",
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
                       },
                     ],
                   },
@@ -2056,6 +2096,20 @@ a{color:var(--slate)}
                     },
                   },
                   {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
                     "OrStatement": {
                       "Statements": [
                         {
@@ -2161,6 +2215,20 @@ a{color:var(--slate)}
                               "Type": "LOWERCASE",
                             },
                           ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
                         },
                       },
                       {
@@ -4022,16 +4090,36 @@ a{color:var(--slate)}
                 "ScopeDownStatement": {
                   "NotStatement": {
                     "Statement": {
-                      "ByteMatchStatement": {
-                        "FieldToMatch": {
-                          "UriPath": {},
-                        },
-                        "PositionalConstraint": "STARTS_WITH",
-                        "SearchString": "/search",
-                        "TextTransformations": [
+                      "AndStatement": {
+                        "Statements": [
                           {
-                            "Priority": 0,
-                            "Type": "LOWERCASE",
+                            "ByteMatchStatement": {
+                              "FieldToMatch": {
+                                "UriPath": {},
+                              },
+                              "PositionalConstraint": "STARTS_WITH",
+                              "SearchString": "/search",
+                              "TextTransformations": [
+                                {
+                                  "Priority": 0,
+                                  "Type": "LOWERCASE",
+                                },
+                              ],
+                            },
+                          },
+                          {
+                            "NotStatement": {
+                              "Statement": {
+                                "IPSetReferenceStatement": {
+                                  "Arn": {
+                                    "Fn::GetAtt": [
+                                      "WcmIpAllowSet",
+                                      "Arn",
+                                    ],
+                                  },
+                                },
+                              },
+                            },
                           },
                         ],
                       },
@@ -4193,16 +4281,36 @@ a{color:var(--slate)}
                   },
                 ],
                 "ScopeDownStatement": {
-                  "ByteMatchStatement": {
-                    "FieldToMatch": {
-                      "UriPath": {},
-                    },
-                    "PositionalConstraint": "STARTS_WITH",
-                    "SearchString": "/search",
-                    "TextTransformations": [
+                  "AndStatement": {
+                    "Statements": [
                       {
-                        "Priority": 0,
-                        "Type": "LOWERCASE",
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
                       },
                     ],
                   },
@@ -4422,6 +4530,20 @@ a{color:var(--slate)}
                     },
                   },
                   {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
                     "OrStatement": {
                       "Statements": [
                         {
@@ -4527,6 +4649,20 @@ a{color:var(--slate)}
                               "Type": "LOWERCASE",
                             },
                           ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
                         },
                       },
                       {

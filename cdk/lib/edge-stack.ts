@@ -1297,7 +1297,6 @@ export class EdgeStack extends Stack {
           textTransformations: [{ priority: 0, type: "LOWERCASE" }],
         },
       };
-      const notSearchPath = { notStatement: { statement: searchPathMatch } };
       // No usable WAF token: none sent, or one sent that token management
       // rejected (expired, invalid, wrong domain; each also carries the bare
       // `rejected` label). Matching `absent` alone let a harvested token be
@@ -1312,6 +1311,24 @@ export class EdgeStack extends Stack {
           })),
         },
       };
+      // Campus (the WCM allowlist) skips the /search bot defenses below, as it
+      // already skips search-rate-limit. One token session behind a campus
+      // NAT looked like a volume anomaly: prod 11-17, TGT_VolumetricSession
+      // served a visible CAPTCHA to two campus IPs, one mid-demo.
+      // ponytail: a scraper on a campus IP is not challenged; the app-level
+      // limits still apply. Revisit if one shows up in the WAF logs.
+      const notWcm = {
+        notStatement: {
+          statement: { ipSetReferenceStatement: { arn: ipAllowSet.attrArn } },
+        },
+      };
+      // TARGETED Bot Control runs on off-campus /search; COMMON takes exactly
+      // the rest (campus /search included), so every request still gets one
+      // Bot Control pass for its labels and none is billed twice.
+      const targetedScope = {
+        andStatement: { statements: [searchPathMatch, notWcm] },
+      };
+      const commonScope = { notStatement: { statement: targetedScope } };
       // #3368 option 4: the Bot Control rules that every TARGETED instance
       // also carries at the common level. Kept in Count on /search* so the
       // targeted instance changes nothing about how self-identifying bots are
@@ -1510,7 +1527,7 @@ export class EdgeStack extends Stack {
                     },
                   },
                 ],
-                scopeDownStatement: notSearchPath,
+                scopeDownStatement: commonScope,
               },
             },
             visibilityConfig: {
@@ -1574,7 +1591,7 @@ export class EdgeStack extends Stack {
                     actionToUse: { count: {} },
                   },
                 ],
-                scopeDownStatement: searchPathMatch,
+                scopeDownStatement: targetedScope,
               },
             },
             visibilityConfig: {
@@ -1769,6 +1786,7 @@ export class EdgeStack extends Stack {
               andStatement: {
                 statements: [
                   searchPathMatch,
+                  notWcm,
                   noValidToken,
                   {
                     orStatement: {
@@ -1829,7 +1847,9 @@ export class EdgeStack extends Stack {
                 evaluationWindowSec: 300,
                 aggregateKeyType: "CONSTANT",
                 scopeDownStatement: {
-                  andStatement: { statements: [searchPathMatch, noValidToken] },
+                  andStatement: {
+                    statements: [searchPathMatch, notWcm, noValidToken],
+                  },
                 },
               },
             },
