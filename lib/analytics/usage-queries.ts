@@ -14,8 +14,12 @@
  * server-side (utcDaysAgo), never from user input; the guard is defense in depth
  * against a future caller. Every other token in these strings is a literal,
  * except the Try-chip term list, which comes from a checked-in source file
- * (HERO_SEARCH_SUGGESTIONS) and is quote-escaped.
+ * (HERO_SEARCH_SUGGESTIONS) and is quote-escaped, and a unit-scoped viewer's
+ * slug list ({@link buildScopedProfileQueries}), which comes from our own
+ * database and is allowlisted, never escaped ({@link safeSlugs}).
  */
+import { createHash } from "node:crypto";
+
 import { HERO_SEARCH_SUGGESTIONS } from "@/lib/hero-search-suggestions";
 
 /** Strict ISO calendar-date shape; the only interpolated value in any query. */
@@ -58,13 +62,6 @@ export const USAGE_TOP_N = 25;
 export interface UsageQueries {
   readonly pageviewsByDay: string;
   readonly topProfiles: string;
-  /**
-   * Profile views per day and slug (`profile`), uncapped: one row per (dt,
-   * slug). The source a unit-scoped page is filtered from in the app. Never
-   * carries a slug list: Athena SQL is not parameterized, and one read per
-   * range serves every viewer.
-   */
-  readonly profileViewsByDay: string;
   /** Typed searches (`search_term`: no `src=` tag), minus untagged exact Try-chip terms. */
   readonly searchTerms: string;
   /** Suggestion clicks (`search_term_suggested`: home chips, typeahead concept picks). */
@@ -126,12 +123,6 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
       "ORDER BY dt",
     ].join("\n"),
     topProfiles: ranked("profile", "slug", "views"),
-    profileViewsByDay: [
-      "SELECT dt, dimension AS slug, SUM(cnt) AS views",
-      "FROM daily_usage",
-      `WHERE metric = 'profile' AND ${since}`,
-      "GROUP BY dt, dimension",
-    ].join("\n"),
     searchTerms: rankedWhere(TYPED, "term", "searches", searchSince),
     suggestedSearchTerms: ranked("search_term_suggested", "term", "searches", searchSince),
     // search_term_bot (requests the edge challenged or blocked, or declared
@@ -151,6 +142,92 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
       `WHERE metric = 'hourly' AND ${since}`,
       "GROUP BY dt, dimension",
       "ORDER BY dt, dimension",
+    ].join("\n"),
+  };
+}
+
+/**
+ * The only slugs that may be inlined into Athena SQL: the shape the slug
+ * validator enforces (`SLUG_PATTERN` / `SLUG_MAX_LENGTH`, lib/edit/validators.ts;
+ * pinned equal by a unit test) — lowercase letters, digits and inner hyphens,
+ * at most 64 characters. No quote, backslash, space or other metacharacter can
+ * pass, so nothing needs escaping.
+ */
+export const SAFE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+export const SAFE_SLUG_MAX_LENGTH = 64;
+
+function isSafeSlug(slug: string): boolean {
+  return slug.length <= SAFE_SLUG_MAX_LENGTH && SAFE_SLUG.test(slug);
+}
+
+/**
+ * The slugs fit to inline: allowlisted ({@link SAFE_SLUG}), de-duplicated and
+ * sorted (a stable order, so equal sets build equal SQL and share a cache
+ * entry). A slug that fails is DROPPED, never escaped: its views go uncounted
+ * rather than an odd string reaching SQL.
+ */
+export function safeSlugs(slugs: Iterable<string>): string[] {
+  return [...new Set(slugs)].filter(isSafeSlug).sort();
+}
+
+/** `'a', 'b'` (each slug behind `prefix`, e.g. "/" for a path). Throws on any
+ *  slug that is not allowlisted — the last line of defense, after {@link safeSlugs}. */
+export function slugSqlList(slugs: readonly string[], prefix: "" | "/" = ""): string {
+  for (const slug of slugs) if (!isSafeSlug(slug)) throw new Error("invalid_slug");
+  return slugs.map((slug) => `'${prefix}${slug}'`).join(", ");
+}
+
+/**
+ * Bytes of slug list one query may carry. Athena rejects a query over 262,144
+ * bytes; a list this size appears at most twice in one query (the two arms of
+ * a landing read), keeping every query under about 200 KB.
+ */
+export const SLUG_LIST_MAX_BYTES = 80_000;
+
+/** Split a slug list so each chunk's SQL list stays within {@link SLUG_LIST_MAX_BYTES}.
+ *  The caller runs one query per chunk and sums the results. */
+export function chunkSlugs(slugs: readonly string[]): string[][] {
+  const chunks: string[][] = [];
+  let bytes = 0;
+  for (const slug of slugs) {
+    const cost = slug.length + 5; // quotes, comma, space, a path's slash
+    if (chunks.length === 0 || bytes + cost > SLUG_LIST_MAX_BYTES) {
+      chunks.push([]);
+      bytes = 0;
+    }
+    chunks[chunks.length - 1].push(slug);
+    bytes += cost;
+  }
+  return chunks;
+}
+
+/** A stable cache-key part for a slug list: the hash of the sorted list, so
+ *  two admins of the same unit share an entry and no key names a viewer. */
+export function slugListKey(slugs: readonly string[]): string {
+  return createHash("sha256").update([...slugs].sort().join(",")).digest("hex");
+}
+
+/**
+ * Profile views for one set of slugs (a unit-scoped viewer's people), already
+ * aggregated in Athena: `byDay` is at most one row per day (dt, views) and
+ * `byProfile` at most one row per slug (slug, views). The match is on the
+ * lower-cased slug, as CloudFront logs the path as typed.
+ */
+export function buildScopedProfileQueries(
+  sinceDt: string,
+  untilDt: string,
+  slugs: readonly string[],
+): { byDay: string; byProfile: string } {
+  assertIsoDate(sinceDt);
+  assertIsoDate(untilDt);
+  const where = `WHERE metric = 'profile' AND dt >= '${sinceDt}' AND dt <= '${untilDt}' AND lower(dimension) IN (${slugSqlList(slugs)})`;
+  return {
+    byDay: ["SELECT dt, SUM(cnt) AS views", "FROM daily_usage", where, "GROUP BY dt"].join("\n"),
+    byProfile: [
+      "SELECT lower(dimension) AS slug, SUM(cnt) AS views",
+      "FROM daily_usage",
+      where,
+      "GROUP BY lower(dimension)",
     ].join("\n"),
   };
 }

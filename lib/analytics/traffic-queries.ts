@@ -16,9 +16,10 @@
  * and AI classes against fixed allowlists, offsets and limits to bounded
  * integers, and free-text search through {@link sqlSearchLiteral} (control
  * characters stripped, length capped, single quotes doubled), matched with
- * `strpos` so LIKE wildcards never apply.
+ * `strpos` so LIKE wildcards never apply. A unit-scoped viewer's slug list
+ * (from our own database) is allowlisted, never escaped (`slugSqlList`).
  */
-import { assertIsoDate } from "@/lib/analytics/usage-queries";
+import { assertIsoDate, slugSqlList } from "@/lib/analytics/usage-queries";
 import {
   type ReferrerCategory,
   isReferrerCategory,
@@ -248,9 +249,17 @@ export type PageListParams = {
   categories: readonly ReferrerCategory[];
   aiClasses: readonly AiClass[];
   q?: string | null;
+  /** A unit-scoped viewer's people: only their profile pages (`/<slug>`,
+   *  matched lower-cased). Allowlisted slugs only; an empty list matches nothing. */
+  slugs?: readonly string[];
   offset: number;
   limit: number | null;
 };
+
+/** `<col>` is the profile page of one of `slugs`; FALSE for an empty list. */
+function profilePathIn(col: string, slugs: readonly string[]): string {
+  return slugs.length === 0 ? "FALSE" : `lower(${col}) IN (${slugSqlList(slugs, "/")})`;
+}
 
 /**
  * Top pages, busiest first. With no "Arrived from" filter, every human page
@@ -297,6 +306,7 @@ export function buildPageListQuery(p: PageListParams): string {
   const where = [pageKindPredicate(p.kind, "page")];
   const q = sqlSearchLiteral(p.q);
   if (q) where.push(`strpos(lower(page), ${q}) > 0`);
+  if (p.slugs) where.push(profilePathIn("page", p.slugs));
   return [
     "SELECT page, visits, COUNT(*) OVER () AS total FROM (",
     source,
@@ -312,10 +322,17 @@ export function buildPageListQuery(p: PageListParams): string {
 /**
  * Every landing page with where it came from, for the Excel export: source
  * (a referrer category, or an AI class), referrer_host ('' for AI), page,
- * visits. Busiest first.
+ * visits. Busiest first. With `slugs` (a unit-scoped viewer's people), only
+ * landings on their profile pages.
  */
-export function buildLandingExportQuery(since: string, until: string): string {
-  const w = dtWindow(since, until);
+export function buildLandingExportQuery(
+  since: string,
+  until: string,
+  slugs?: readonly string[],
+): string {
+  const w = slugs
+    ? `${dtWindow(since, until)} AND ${profilePathIn(AFTER_PIPE, slugs)}`
+    : dtWindow(since, until);
   return [
     "SELECT source, referrer_host, page, SUM(cnt) AS visits FROM (",
     `  SELECT ${toSqlCase(LANDING_HOST)} AS source, ${LANDING_HOST} AS referrer_host, ${AFTER_PIPE} AS page, cnt`,

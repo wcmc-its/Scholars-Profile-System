@@ -35,7 +35,7 @@ vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: h.mockCanViewUsage }))
 vi.mock("@/lib/api/usage-summary", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/usage-summary")>()),
   loadUsageSummary: h.mockLoadUsage,
-  loadProfileViewsByDay: h.mockProfileViews,
+  loadScopedProfileViews: h.mockProfileViews,
 }));
 vi.mock("@/lib/edit/dashboard-access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/dashboard-access")>()),
@@ -170,7 +170,7 @@ beforeEach(() => {
   h.mockLoadEditsUncached.mockResolvedValue([]);
   h.mockScope.mockResolvedValue({ all: true });
   h.mockScopeSlugs.mockResolvedValue(new Map());
-  h.mockProfileViews.mockResolvedValue([]);
+  h.mockProfileViews.mockResolvedValue({ byDay: [], bySlug: [] });
   h.mockFindMany.mockResolvedValue([
     { slug: "test-person-1", cwid: "tst0001", preferredName: "Test Person One" },
   ]);
@@ -381,12 +381,17 @@ describe("/edit/usage for a unit admin", () => {
         ["test-person-2", "test-person-2"],
       ]),
     );
-    h.mockProfileViews.mockResolvedValue([
-      ["2026-08-26", "test-person-1", 30],
-      ["2026-08-27", "test-person-1-old", 5],
-      ["2026-08-27", "test-person-2", 10],
-      ["2026-08-27", "test-person-9", 600],
-    ]);
+    h.mockProfileViews.mockResolvedValue({
+      byDay: [
+        { day: "2026-08-27", views: 15 },
+        { day: "2026-08-26", views: 30 },
+      ],
+      bySlug: [
+        { slug: "test-person-2", views: 10 },
+        { slug: "test-person-1", views: 30 },
+        { slug: "test-person-1-old", views: 5 },
+      ],
+    });
   });
 
   it("a site-wide viewer's page has no Site-wide heading and the plain title", async () => {
@@ -420,6 +425,10 @@ describe("/edit/usage for a unit admin", () => {
     expect(profiles.queryByText("/test-person-9")).toBeNull();
     expect(profiles.queryByText("/test-person-3")).toBeNull();
     expect(h.mockFindMany.mock.calls[0][0].where.slug.in).toEqual(["test-person-1", "test-person-2"]);
+    // The read is for the unit's own slugs, from the scope, over the page's range.
+    const [window, slugs] = h.mockProfileViews.mock.calls[0];
+    expect(window).toMatchObject({ since: "2026-08-26", until: "2026-09-24" });
+    expect([...slugs]).toEqual(["test-person-1", "test-person-1-old", "test-person-2"]);
   });
 
   it("keeps every other section, unchanged, after a Site-wide heading", async () => {
