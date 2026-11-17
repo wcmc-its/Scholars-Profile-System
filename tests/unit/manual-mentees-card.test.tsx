@@ -124,6 +124,48 @@ describe("ManualMenteesCard", () => {
     expect(JSON.parse(String(init.body)).fieldName).toBe("manualMentees");
   });
 
+  it("saves a typed current position and shows it in the row meta", async () => {
+    const fetchMock = mockPost();
+    renderCard([]);
+
+    fireEvent.click(screen.getByTestId("manual-mentee-add"));
+    expect(screen.getByText("Current position (optional)")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("manual-mentee-name-add"), {
+      target: { value: "Rowan Ellis" },
+    });
+    fireEvent.change(screen.getByTestId("manual-mentee-position-add"), {
+      target: { value: "  Assistant Professor, Example University " },
+    });
+    fireEvent.click(screen.getByTestId("manual-mentee-submit-add"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(postedValue(fetchMock)).toEqual([
+      { name: "Rowan Ellis", currentPosition: "Assistant Professor, Example University" },
+    ]);
+    await waitFor(() =>
+      expect(screen.getByTestId("manual-mentee-0").textContent).toContain(
+        "Now: Assistant Professor, Example University",
+      ),
+    );
+  });
+
+  it("prefills the stored current position on Edit and keeps it through a save", async () => {
+    const fetchMock = mockPost();
+    renderCard([{ name: "Rowan Ellis", year: 2019, currentPosition: "Staff Scientist" }]);
+    expect(screen.getByTestId("manual-mentee-0").textContent).toContain("2019 · Now: Staff Scientist");
+
+    fireEvent.click(screen.getByTestId("manual-mentee-edit-0"));
+    expect((screen.getByTestId("manual-mentee-position-edit-0") as HTMLInputElement).value).toBe(
+      "Staff Scientist",
+    );
+    fireEvent.click(screen.getByTestId("manual-mentee-submit-edit-0"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(postedValue(fetchMock)).toEqual([
+      { name: "Rowan Ellis", year: 2019, currentPosition: "Staff Scientist" },
+    ]);
+  });
+
   it("normalizes the draft: lowercased cwid, numeric year, blanks dropped", async () => {
     const fetchMock = mockPost();
     renderCard([]);

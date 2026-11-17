@@ -37,9 +37,19 @@ const okJson = (body: unknown) => ({ ok: true, json: async () => body }) as unkn
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.unstubAllGlobals());
 
-function renderCard(mentees: EditContextMentee[], mode: "self" | "superuser" = "self") {
+function renderCard(
+  mentees: EditContextMentee[],
+  mode: "self" | "superuser" = "self",
+  currentPositions?: Record<string, string>,
+) {
   return render(
-    <MenteesCard cwid="self01" mode={mode} scholarName="Alex Self" mentees={mentees} />,
+    <MenteesCard
+      cwid="self01"
+      mode={mode}
+      scholarName="Alex Self"
+      mentees={mentees}
+      currentPositions={currentPositions}
+    />,
   );
 }
 
@@ -71,6 +81,82 @@ describe("MenteesCard — suppressible mentees", () => {
   it("shows the superuser empty state", () => {
     renderCard([], "superuser");
     expect(screen.getByText("This scholar has no recorded mentees.")).toBeTruthy();
+  });
+
+  it("shows a stored current position, and an Add button on a row without one", () => {
+    renderCard(MENTEES, "self", { m1: "Assistant Professor, Example University" });
+    expect(screen.getByTestId("mentee-position-self01:m1").textContent).toContain(
+      "Now: Assistant Professor, Example University",
+    );
+    expect(screen.getByTestId("mentee-position-self01:m1-edit").textContent).toBe("Edit");
+    expect(screen.getByTestId("mentee-position-self01:m2-edit").textContent).toBe(
+      "Add current position",
+    );
+    // The position stays out of the hide checkbox's accessible name.
+    expect(
+      screen.getByRole("checkbox", { name: "Select Jordan Mentee, Immunology (PhD)" }),
+    ).toBeTruthy();
+  });
+
+  it("saving one row POSTs the WHOLE map — other mentees' positions survive", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    // `gone9` is a mentee no longer on the roster; its entry must round-trip.
+    renderCard(MENTEES, "self", { m2: "Fellow", gone9: "Staff Scientist" });
+
+    fireEvent.click(screen.getByTestId("mentee-position-self01:m1-edit"));
+    fireEvent.change(screen.getByTestId("mentee-position-self01:m1-input"), {
+      target: { value: "  Group Leader, Example Institute " },
+    });
+    fireEvent.click(screen.getByTestId("mentee-position-self01:m1-save"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/edit/field");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      entityType: "scholar",
+      entityId: "self01",
+      fieldName: "menteeCurrentPositions",
+      value: { m1: "Group Leader, Example Institute", m2: "Fellow", gone9: "Staff Scientist" },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("mentee-position-self01:m1").textContent).toContain(
+        "Now: Group Leader, Example Institute",
+      ),
+    );
+  });
+
+  it("clearing the input removes that mentee's entry", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderCard(MENTEES, "self", { m1: "Fellow", m2: "Staff Scientist" });
+
+    fireEvent.click(screen.getByTestId("mentee-position-self01:m1-edit"));
+    fireEvent.change(screen.getByTestId("mentee-position-self01:m1-input"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByTestId("mentee-position-self01:m1-save"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string).value).toEqual({ m2: "Staff Scientist" });
+  });
+
+  it("keeps the input open with an error when the save is rejected", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, json: async () => ({ ok: false, error: "not_self" }) }),
+    );
+    renderCard([MENTEES[0]]);
+
+    fireEvent.click(screen.getByTestId("mentee-position-self01:m1-edit"));
+    fireEvent.change(screen.getByTestId("mentee-position-self01:m1-input"), {
+      target: { value: "Fellow" },
+    });
+    fireEvent.click(screen.getByTestId("mentee-position-self01:m1-save"));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("couldn’t save");
+    expect(screen.getByTestId("mentee-position-self01:m1-input")).toBeTruthy();
   });
 
   it("a self hide POSTs entityType:'mentee' with the {cwid}:{menteeCwid} entityId", async () => {
