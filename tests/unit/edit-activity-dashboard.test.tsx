@@ -253,6 +253,18 @@ describe("pure helpers", () => {
 });
 
 describe("EditActivityDashboard", () => {
+  it("names the units in the heading for a unit-scoped viewer only", () => {
+    const { unmount } = render(<EditActivityDashboard summary={summary()} />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Edit activity");
+    unmount();
+    render(
+      <EditActivityDashboard summary={summary()} scopeLabel="Department of Testing, Alpha Center" />,
+    );
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "Edit activity: Department of Testing, Alpha Center",
+    );
+  });
+
   it("renders who-made-the-edits tiles with resolved names", () => {
     render(<EditActivityDashboard summary={summary()} />);
     const kpis = screen.getByTestId("edit-activity-kpis").textContent ?? "";

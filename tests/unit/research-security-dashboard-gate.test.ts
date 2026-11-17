@@ -116,7 +116,7 @@ describe("canViewDashboard (pages, export)", () => {
   it("an explicit dash:research-security grant does not admit it either: the role is the only way in", async () => {
     grant(["dash:research-security"]);
     expect(await canViewDashboard(plain, D)).toBe(false);
-    expect(dashboardVisible(plain, D, { viewerCanViewUsage: true, dashboards: new Set([D]) })).toBe(false);
+    expect(dashboardVisible(plain, D, { viewerCanViewUsage: true, viewerAdminsScopedUnit: false, dashboards: new Set([D]) })).toBe(false);
   });
 
   // "View as" started by an observer or content editor: the session is the
@@ -136,7 +136,7 @@ describe("canViewDashboard (pages, export)", () => {
     });
 
     it("shows no tab, with the grant loaded", () => {
-      const g = { viewerCanViewUsage: true, dashboards: new Set([D]) };
+      const g = { viewerCanViewUsage: true, viewerAdminsScopedUnit: false, dashboards: new Set([D]) };
       expect(dashboardVisible(borrowed, D, g)).toBe(false);
     });
 
@@ -151,7 +151,7 @@ describe("canViewDashboard (pages, export)", () => {
   });
 
   it("the tab form agrees", () => {
-    const g = { viewerCanViewUsage: true, dashboards: new Set<never>() };
+    const g = { viewerCanViewUsage: true, viewerAdminsScopedUnit: false, dashboards: new Set<never>() };
     expect(dashboardVisible({ ...plain, isResearchSecurityViewer: true }, D, g)).toBe(true);
     expect(dashboardVisible({ ...plain, isCommsSteward: true }, D, g)).toBe(false);
   });

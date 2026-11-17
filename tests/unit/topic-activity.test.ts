@@ -62,6 +62,7 @@ const state = vi.hoisted(() => ({
   /** Publication counts the two raw queries return (area totals, per-scholar rows). */
   pubTotals: { s: 0n, a: 0n } as { s: bigint; a: bigint },
   pubRows: [] as { cwid: string; s: bigint; a: bigint }[],
+  stageRows: [] as { st: string; s: bigint; a: bigint }[],
   rawSql: [] as string[],
 }));
 
@@ -106,7 +107,9 @@ vi.mock("@/lib/db", () => {
     prisma: {
       $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
         state.rawSql.push(JSON.stringify([strings, values]));
-        return strings.join("?").includes("GROUP BY") ? state.pubRows : [state.pubTotals];
+        const sql = strings.join("?");
+        if (sql.includes("GROUP BY p.translational_stage")) return state.stageRows;
+        return sql.includes("GROUP BY") ? state.pubRows : [state.pubTotals];
       },
       topic: {
         findUnique: async ({ where }: { where: { id: string } }) =>
@@ -344,6 +347,7 @@ beforeEach(() => {
   state.primaries = {};
   state.pubTotals = { s: 0n, a: 0n };
   state.pubRows = [];
+  state.stageRows = [];
   state.rawSql = [];
   n = 0;
   for (const c of ["tst001", "tst002", "tst003", "tst004"]) scholar(c);
@@ -742,6 +746,33 @@ describe("getTopicActivityScholars", () => {
     expect(by.tst003.grant).toEqual({ strongly: 1, also: 0 });
     expect(by.tst002.trial).toEqual({ strongly: 0, also: 1 });
     expect(by.tst001.name).toBe("Scholar tst001");
+  });
+
+  it("stageTotals: per stage over the scope (ignoring the picked stage), zero-filled, NA dropped", async () => {
+    expect((await getTopicActivityScholars(AREA, {}, NOW))!.stageTotals).toBeUndefined();
+    state.pubTotals = { s: 9n, a: 12n };
+    state.stageRows = [
+      { st: "T0", s: 5n, a: 7n },
+      { st: "T3-4", s: 1n, a: 1n },
+      { st: "NA", s: 3n, a: 3n },
+    ];
+    state.rawSql = [];
+    const r = await getTopicActivityScholars(AREA, { stage: "T2", stageTotals: true }, NOW);
+    expect(r!.stageTotals).toEqual({
+      all: { strongly: 9, also: 3 },
+      T0: { strongly: 5, also: 2 },
+      T1: { strongly: 0, also: 0 },
+      T2: { strongly: 0, also: 0 },
+      "T3-4": { strongly: 1, also: 0 },
+    });
+    // The grouped query and the "all" totals query do not carry the picked stage.
+    const narrowed = (q: string) => q.includes("p.translational_stage = ");
+    const grouped = state.rawSql.filter((q) => q.includes("GROUP BY p.translational_stage"));
+    expect(grouped).toHaveLength(1);
+    expect(narrowed(grouped[0])).toBe(false);
+    // totals + per-scholar (narrowed), grouped + "all" totals (not narrowed).
+    expect(state.rawSql).toHaveLength(4);
+    expect(state.rawSql.filter(narrowed)).toHaveLength(2);
   });
 
   it("a stage narrows both publication queries; none without it", async () => {

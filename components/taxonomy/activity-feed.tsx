@@ -262,6 +262,14 @@ export function TopicActivityFeed({
     setScholarFilter(null);
   }, [activeSubtopic]);
 
+  // The Stage menu counts as the Publications tab does; area-level only, so
+  // a picked scholar drops them (the tab then counts that scholar's papers).
+  const stageCounts =
+    data?.stageTotals && !scholar
+      ? (Object.fromEntries(
+          Object.entries(data.stageTotals).map(([k, t]) => [k, shownCount(t, related)]),
+        ) as Record<TranslationalStage | "all", number>)
+      : null;
   const activeTiers = scopeTiers(type);
   const renderHeader = (sortControl: ReactNode) => (
     <ActivitiesHeader
@@ -298,6 +306,7 @@ export function TopicActivityFeed({
         retainScholarFilter
         stageFilter={stageFilter}
         onStageChange={setStage}
+        stageCounts={stageCounts}
       />
     );
   }

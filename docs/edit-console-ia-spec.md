@@ -23,7 +23,8 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Tab | Superuser | comms_steward | honors_curator | unit Owner | unit Curator | pure `developer` |
 |---|---|---|---|---|---|---|
 | Profiles / Org units | ✓ | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
-| URL requests / URL registry / Activity / ETL status | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| URL requests / URL registry / ETL status | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Activity | ✓ | ✗ | ✗ | ✓ a department / division / center grant, either role (`viewerAdminsScopedUnit`; unit-scoped view, 2026-11-17); not core-only | ✓ same | ✗ |
 | Cores | ✓ (flag) | ✓ (flag; 2026-08-26 policy widening, decision #6 — full curator-parity on cores) | ✗ | ✗ (owner-scoped index still a deliberately deferred gap) | ✗ | ✗ |
 | Honors | ✓ (flag) | ✓ read-only | ✓ | ✗ | ✗ | ✗ |
 | News | ✓ | ✓ (flag) | ✗ | ✗ | ✗ | ✗ |

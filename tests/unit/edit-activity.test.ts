@@ -510,11 +510,13 @@ describe("Load older: cursor + paged read", () => {
 
     expect(sqls).toHaveLength(1);
     const sql = sqls[0]!.replace(/\s+/g, " ");
-    expect(sql).toContain("WHERE ts >= ? AND (ts < ? OR (ts = ? AND id < ?))");
+    // The `(?)` is the scope predicate: a bound always-true 1 for the site-wide view.
+    expect(sql).toContain("WHERE ts >= ? AND (?) AND (ts < ? OR (ts = ? AND id < ?))");
     expect(sql).toContain("ORDER BY ts DESC, id DESC");
     expect(sql).toContain(`LIMIT ${EDIT_ACTIVITY_RECENT_LIMIT + 1}`);
     expect(params[0]).toEqual([
       new Date(now.getTime() - EDIT_ACTIVITY_WINDOW_DAYS * 86_400_000),
+      1,
       cursor.ts,
       cursor.ts,
       200n,

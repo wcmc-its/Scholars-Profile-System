@@ -5,15 +5,16 @@
  * `/edit/scholar/[cwid]/history` and `/edit/center/[code]/history` surfaces.
  *
  * Superuser, or a person a superuser granted it to ad hoc (`canViewDashboard`,
- * `lib/edit/dashboard-access.ts`). This exposes every editor's activity across every unit — a
- * strictly-more-privileged view than the per-entity history, which any editor
- * of that entity can see. Re-checked on every GET, never cached. The audit
+ * `lib/edit/dashboard-access.ts`): every editor's activity across every unit.
+ * A department / division / center admin (owner or curator) also gets in, and
+ * sees only edits to their own people and units (`loadDashboardScope`, resolved
+ * from the session). Re-checked on every GET, never cached. The audit
  * table lives in the separate `scholars_audit` DB; if the read role lacks SELECT
  * there the read throws and we render an honest "unavailable" notice rather than
  * 500ing (the scholar-history fail-soft pattern).
  *
- * Discoverable via the admin sub-nav "Activity" tab (superuser-only, no separate
- * flag — the superuser gate is the control). Renders the standard console header
+ * Discoverable via the admin sub-nav "Activity" tab (same gate, no separate
+ * flag). Renders the standard console header
  * + AdminSubnav so it matches the other `/edit/*` admin surfaces.
  */
 import { redirect } from "next/navigation";
@@ -23,7 +24,11 @@ import { EditActivityDashboard } from "@/components/edit/edit-activity-dashboard
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { type EditActivitySummary, loadEditActivitySummary, parseRange } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { canViewDashboard } from "@/lib/edit/dashboard-access";
+import {
+  activityScopeSql,
+  canViewDashboard,
+  loadDashboardScope,
+} from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { resolveDirectoryPeople } from "@/lib/edit/directory-names";
@@ -72,9 +77,18 @@ export default async function EditActivityPage({
     : null;
 
   let summary: EditActivitySummary | null = null;
+  let scopeLabel: string | undefined;
   let unavailable = false;
   try {
-    summary = await loadEditActivitySummary(db.read, new Date(), resolveDirectoryPeople, range);
+    const scope = await loadDashboardScope(session, "activity");
+    if (!scope.all) scopeLabel = scope.unitNames.join(", ");
+    summary = await loadEditActivitySummary(
+      db.read,
+      new Date(),
+      resolveDirectoryPeople,
+      range,
+      activityScopeSql(scope),
+    );
   } catch (err) {
     unavailable = true;
     console.error(
@@ -104,7 +118,7 @@ export default async function EditActivityPage({
           </p>
         </>
       ) : (
-        <EditActivityDashboard summary={summary} />
+        <EditActivityDashboard summary={summary} scopeLabel={scopeLabel} />
       )}
     </ConsoleShell>
   );

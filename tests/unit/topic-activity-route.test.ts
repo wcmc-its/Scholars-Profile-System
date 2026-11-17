@@ -143,7 +143,7 @@ describe("flag on", () => {
     process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
     try {
       await call("?kind=scholars&stage=T1");
-      expect(mockGetScholars.mock.calls.at(-1)![1]).toEqual({ subtopic: undefined, stage: "T1" });
+      expect(mockGetScholars.mock.calls.at(-1)![1]).toEqual({ subtopic: undefined, stage: "T1", stageTotals: true });
       expect((await call("?kind=scholars&stage=NA")).status).toBe(400);
     } finally {
       delete process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;

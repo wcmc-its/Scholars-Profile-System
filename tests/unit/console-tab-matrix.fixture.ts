@@ -29,6 +29,7 @@ export const grants = (over: Partial<ConsoleGrants> = {}): ConsoleGrants => ({
   manageableUnitCount: 0,
   reportableUnitCount: 0,
   viewerCanViewUsage: false,
+  viewerAdminsScopedUnit: false,
   reportAccessCount: 0,
   dashboards: new Set(),
   ...over,
@@ -199,9 +200,12 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       manageableUnitCount: 2,
       reportableUnitCount: 2,
       viewerCanViewUsage: true,
+      viewerAdminsScopedUnit: true,
     }),
-    expect: ["profiles", "units", "administrators", "reports", "usage", "orcidCoverage"],
-    pins: "Gap 3 (D5: administrators for Owners) + Gap 4 (reports/usage everywhere)",
+    expect: ["profiles", "units", "administrators", "reports", "usage", "orcidCoverage", "activity"],
+    pins:
+      "Gap 3 (D5: administrators for Owners) + Gap 4 (reports/usage everywhere); " +
+      "2026-11-17 — a department / division / center admin gets the unit-scoped Activity tab",
   },
   {
     // Org-unit publications reports plan (2026-08-16) widened reports 3/6 to
@@ -212,14 +216,22 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     session: sess(),
     grants: grants({ ownerUnitCount: 1, manageableUnitCount: 1 }),
     expect: ["profiles", "units", "administrators"],
-    pins: "reportableUnitCount vs manageableUnitCount divergence, Part B §4",
+    pins:
+      "reportableUnitCount vs manageableUnitCount divergence, Part B §4; " +
+      "2026-11-17 — a core-only admin gets no Activity tab (a core has no people to scope to)",
   },
   {
     name: "unit Curator (1 manageable center, nothing else)",
     session: sess(),
-    grants: grants({ manageableUnitCount: 1, reportableUnitCount: 1 }),
-    expect: ["profiles", "units", "reports"],
-    pins: "D5 by-design exclusion — curators never see Administrators (ownerUnitCount stays 0)",
+    grants: grants({
+      manageableUnitCount: 1,
+      reportableUnitCount: 1,
+      viewerAdminsScopedUnit: true,
+    }),
+    expect: ["profiles", "units", "reports", "activity"],
+    pins:
+      "D5 by-design exclusion — curators never see Administrators (ownerUnitCount stays 0); " +
+      "2026-11-17 — a curator gets the unit-scoped Activity tab like an owner",
   },
   {
     name: "pure developer",

@@ -30,6 +30,7 @@ import { headshotUrl } from "@/lib/headshot";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import {
   getManualMentees,
+  getMenteeCurrentPositions,
   isAuthorHidden,
   loadPublicationSuppressions,
   resolveDarkPmids,
@@ -164,6 +165,10 @@ export type MenteeChip = {
    * authoritative, and the sourced panel should own it.
    */
   manualOnly: boolean;
+  /** Where the mentee is now, as free text the mentor entered on /edit
+   *  ("Assistant Professor, University of X"). No source system carries this,
+   *  so it is null unless the mentor filled it in. Render as plain text. */
+  currentPosition: string | null;
   /** Populated when the mentee exists in our local Scholar table. Drives whether
    *  the chip is rendered as a link to a profile page. Per spec, alumni do not
    *  get profiles — those entries render as unlinked. */
@@ -486,7 +491,7 @@ export async function getMenteesForMentor(
   if (!mentorCwid) return { mentees: [], copubSourceAvailable: true };
   const strict = options?.strict ?? false;
 
-  const [aocRows, jenzabarRows, postdocRows, manualRows] = await Promise.all([
+  const [aocRows, jenzabarRows, postdocRows, manualRows, positionOverrides] = await Promise.all([
     // #928 — AOC source switches on MENTORING_COPUB_BRIDGE inside the helper.
     loadAocRows(mentorCwid, strict),
     prisma.phdMentorRelationship.findMany({
@@ -519,6 +524,13 @@ export async function getMenteesForMentor(
       if (strict) throw err;
       console.error(`[mentoring] manual mentee read failed for mentor ${mentorCwid}`, err);
       return [];
+    }),
+    // The mentor's "Current position" text for sourced mentees, keyed by mentee
+    // cwid. Same best-effort posture as the manual list.
+    getMenteeCurrentPositions(mentorCwid, prisma).catch((err) => {
+      if (strict) throw err;
+      console.error("[mentoring] mentee current-position read failed for mentor %s", mentorCwid, err);
+      return {} as Record<string, string>;
     }),
   ]);
 
@@ -913,6 +925,18 @@ export async function getMenteesForMentor(
   });
   const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
 
+  // "Current position" per chip. The override map (set on the sourced row in
+  // /edit) wins over a hand-entered entry's own field when both name one cwid,
+  // matching how a sourced record wins the rest of a merged chip.
+  const positionByCwid = new Map<string, string>();
+  manualRows.forEach((m, i) => {
+    if (m.currentPosition)
+      positionByCwid.set(m.cwid ?? `${MANUAL_MENTEE_ID_PREFIX}${i}`, m.currentPosition);
+  });
+  for (const [cwid, position] of Object.entries(positionOverrides)) {
+    positionByCwid.set(cwid, position);
+  }
+
   const chips: MenteeChip[] = [];
   for (const c of byCwid.values()) {
     const s = scholarByCwid.get(c.cwid);
@@ -932,6 +956,7 @@ export async function getMenteesForMentor(
       // the pre-existing behaviour and not ours to second-guess.
       identityImageEndpoint: isManualMenteeId(c.cwid) ? "" : headshotUrl(c.cwid, s?.hasHeadshot),
       manualOnly: !sourcedCwids.has(c.cwid),
+      currentPosition: positionByCwid.get(c.cwid) ?? null,
       scholar: s
         ? {
             slug: s.slug,
@@ -1329,6 +1354,8 @@ export type MenteeCoPubEntry = {
      *  meta-line label via `menteeProgramLabel`, with `programType` carrying
      *  the degree suffix (issue #1019). Null falls back to `formatProgramLabel`. */
     programName: string | null;
+    /** Mentor-entered "where they are now" text (`MenteeChip.currentPosition`). */
+    currentPosition: string | null;
     /** Populated when the mentee has an active Scholar row. Drives whether
      *  the mentee name in the meta line renders as a link. */
     scholar: { slug: string; publishedName: string } | null;
@@ -1449,6 +1476,7 @@ export async function getAllMentorCoPublications(
           graduationYear: m.graduationYear,
           programType: m.programType,
           programName: m.programName,
+          currentPosition: m.currentPosition,
           scholar: m.scholar
             ? { slug: m.scholar.slug, publishedName: m.scholar.publishedName }
             : null,
