@@ -98,6 +98,9 @@ export const CURATED_TABLES: readonly string[] = [
   // memberships it governs while silently losing which units a restricted
   // role is scoped to.
   "org_unit_role_scope",
+  // Vice Chair roles. Steward-entered on /edit; ED carries none of them, so
+  // nothing upstream can regenerate a row.
+  "unit_leadership_role",
   "division_membership",
   "unit_admin",
   // --- Methods & tools: family-visibility overlays (DB is the SOR) ---
