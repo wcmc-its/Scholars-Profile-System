@@ -767,6 +767,43 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Logs::MetricFilter",
     },
+    "EtlUnregisteredAlarm535BEC3A": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An ETL source wrote an etl_run row in the last 30 days but is not registered in TRACKED or UNSCHEDULED (prod) -- a scheduled job nobody added to Data Sync, so its freshness is never graded. Logged by the etl:freshness heartbeat as "[freshness] WARN unregistered <source>". Next: open /edit/etl-status ("Not registered") or filter /aws/ecs/sps-etl-prod for "WARN unregistered", then add the source to lib/etl/freshness-policy.ts.",
+        "AlarmName": "sps-etl-unregistered-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "EtlUnregisteredWarn",
+        "Namespace": "SPS/Etl/prod",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EtlUnregisteredMetricFilter5522958E": {
+      "Properties": {
+        "FilterName": "sps-etl-unregistered-prod",
+        "FilterPattern": ""WARN unregistered"",
+        "LogGroupName": "/aws/ecs/sps-etl-prod",
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EtlUnregisteredWarn",
+            "MetricNamespace": "SPS/Etl/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
     "MonthlyBudget": {
       "Properties": {
         "Budget": {
@@ -2401,6 +2438,43 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
           {
             "DefaultValue": 0,
             "MetricName": "EtlRetryStormWarn",
+            "MetricNamespace": "SPS/Etl/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "EtlUnregisteredAlarm535BEC3A": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An ETL source wrote an etl_run row in the last 30 days but is not registered in TRACKED or UNSCHEDULED (staging) -- a scheduled job nobody added to Data Sync, so its freshness is never graded. Logged by the etl:freshness heartbeat as "[freshness] WARN unregistered <source>". Next: open /edit/etl-status ("Not registered") or filter /aws/ecs/sps-etl-staging for "WARN unregistered", then add the source to lib/etl/freshness-policy.ts.",
+        "AlarmName": "sps-etl-unregistered-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "EtlUnregisteredWarn",
+        "Namespace": "SPS/Etl/staging",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EtlUnregisteredMetricFilter5522958E": {
+      "Properties": {
+        "FilterName": "sps-etl-unregistered-staging",
+        "FilterPattern": ""WARN unregistered"",
+        "LogGroupName": "/aws/ecs/sps-etl-staging",
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EtlUnregisteredWarn",
             "MetricNamespace": "SPS/Etl/staging",
             "MetricValue": "1",
           },

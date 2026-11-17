@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-import { TRACKED, UNSCHEDULED } from "@/lib/etl/freshness-policy";
+import { TRACKED, UNREGISTERED_WARN_MARKER, UNSCHEDULED } from "@/lib/etl/freshness-policy";
 
 const ROOT = path.resolve(__dirname, "../..");
 const read = (p: string) => readFileSync(path.join(ROOT, p), "utf-8");
@@ -65,5 +65,16 @@ describe("Data Sync lists every deployed etl_run source", () => {
 
   it("never lists a source as both scheduled and unscheduled", () => {
     expect(Object.keys(UNSCHEDULED).filter((s) => TRACKED[s] !== undefined)).toEqual([]);
+  });
+});
+
+describe("unregistered heartbeat warn", () => {
+  it("keeps the cdk metric filter, the heartbeat line and the marker in step", () => {
+    expect(read("cdk/lib/observability-stack.ts")).toContain(
+      `marker: "${UNREGISTERED_WARN_MARKER}", // = UNREGISTERED_WARN_MARKER`,
+    );
+    expect(read("etl/freshness/index.ts")).toContain(
+      "[freshness] ${UNREGISTERED_WARN_MARKER} ${u.source}",
+    );
   });
 });
