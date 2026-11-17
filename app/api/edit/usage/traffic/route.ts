@@ -11,17 +11,27 @@
  *
  * Same gate as the page (`canViewDashboard(session, "usage")`), re-checked per
  * request. A GET with no side effects.
+ *
+ * Same scope as the page too: for a department / division / center admin a
+ * pages list holds only their own people's profile pages. The scope is
+ * resolved from the session here, never taken from the request. Referrer lists
+ * are site-wide for everyone.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import {
+  loadScopedPageList,
   loadTrafficList,
   parseTrafficListRequest,
   rangeFromSearchParams,
 } from "@/lib/api/usage-traffic";
 import { logEditDenial } from "@/lib/edit/authz";
-import { canViewDashboard } from "@/lib/edit/dashboard-access";
+import {
+  canViewDashboard,
+  loadDashboardScope,
+  loadScopeSlugs,
+} from "@/lib/edit/dashboard-access";
 import { editError } from "@/lib/edit/request";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +55,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!req) return editError(400, "invalid_params");
   const range = rangeFromSearchParams(sp);
   try {
-    const page = await loadTrafficList({ since: range.since, until: range.until }, req);
+    const w = { since: range.since, until: range.until };
+    const scope = await loadDashboardScope(session, "usage");
+    const page =
+      scope.all || req.list !== "pages"
+        ? await loadTrafficList(w, req)
+        : await loadScopedPageList(w, req, await loadScopeSlugs(scope.memberCwids));
     return NextResponse.json(page, { headers: { "cache-control": "no-store" } });
   } catch (err) {
     console.error(

@@ -58,6 +58,13 @@ export const USAGE_TOP_N = 25;
 export interface UsageQueries {
   readonly pageviewsByDay: string;
   readonly topProfiles: string;
+  /**
+   * Profile views per day and slug (`profile`), uncapped: one row per (dt,
+   * slug). The source a unit-scoped page is filtered from in the app. Never
+   * carries a slug list: Athena SQL is not parameterized, and one read per
+   * range serves every viewer.
+   */
+  readonly profileViewsByDay: string;
   /** Typed searches (`search_term`: no `src=` tag), minus untagged exact Try-chip terms. */
   readonly searchTerms: string;
   /** Suggestion clicks (`search_term_suggested`: home chips, typeahead concept picks). */
@@ -119,6 +126,12 @@ export function buildUsageQueries(sinceDt: string, untilDt?: string): UsageQueri
       "ORDER BY dt",
     ].join("\n"),
     topProfiles: ranked("profile", "slug", "views"),
+    profileViewsByDay: [
+      "SELECT dt, dimension AS slug, SUM(cnt) AS views",
+      "FROM daily_usage",
+      `WHERE metric = 'profile' AND ${since}`,
+      "GROUP BY dt, dimension",
+    ].join("\n"),
     searchTerms: rankedWhere(TYPED, "term", "searches", searchSince),
     suggestedSearchTerms: ranked("search_term_suggested", "term", "searches", searchSince),
     // search_term_bot (requests the edge challenged or blocked, or declared

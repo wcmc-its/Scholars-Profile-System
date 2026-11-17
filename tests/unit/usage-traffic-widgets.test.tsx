@@ -7,7 +7,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TrafficSection, isSitePath } from "@/app/edit/usage/traffic-widgets";
+import { TopPages, TrafficSection, isSitePath } from "@/app/edit/usage/traffic-widgets";
 import type { TrafficOverview } from "@/lib/analytics/traffic-view";
 
 const OVERVIEW: TrafficOverview = {
@@ -202,6 +202,29 @@ describe("TrafficSection", () => {
         "Showing 2 of 2 matching landing pages, busiest first",
       ),
     );
+  });
+
+  it("a unit-scoped page: the section drops Top pages, which the page draws itself", async () => {
+    render(<TrafficSection overview={OVERVIEW} rangeQuery="range=30" scoped />);
+    await waitFor(() =>
+      expect(screen.getByTestId("traffic-list-count").textContent).toContain("of 30"),
+    );
+    expect(screen.queryByTestId("traffic-pages")).toBeNull();
+    expect(screen.getByTestId("traffic-referrers")).toBeTruthy();
+    expect(urls().every((u) => u.searchParams.get("list") === "referrers")).toBe(true);
+  });
+
+  it("a unit-scoped Top pages card says whose pages it lists and has no page-type tabs", async () => {
+    render(<TopPages rangeQuery="range=30" exportHref="/api/edit/usage/traffic/export?range=30&grain=week" scoped />);
+    const pages = within(screen.getByTestId("traffic-pages"));
+    await waitFor(() =>
+      expect(pages.getByTestId("traffic-list-count").textContent).toContain("of 2"),
+    );
+    expect(pages.getByText("Profile pages of the people in your units")).toBeTruthy();
+    expect(pages.queryByRole("tab")).toBeNull();
+    expect(pages.getByRole("group", { name: "Arrived from" })).toBeTruthy();
+    // The scope is the server's: the request carries no unit or slug.
+    expect([...urls()[0].searchParams.keys()].sort()).toEqual(["kind", "list", "offset", "range"]);
   });
 
   it("shows the AI series and companies", async () => {

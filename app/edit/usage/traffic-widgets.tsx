@@ -653,7 +653,17 @@ function ReferrerList({
   );
 }
 
-function TopPages({ rangeQuery, exportHref }: { rangeQuery: string; exportHref: string }) {
+/** `scoped`: a unit-scoped viewer. The route then lists only their people's
+ *  profile pages (server-side, from the session), so the page-type tabs go. */
+export function TopPages({
+  rangeQuery,
+  exportHref,
+  scoped = false,
+}: {
+  rangeQuery: string;
+  exportHref: string;
+  scoped?: boolean;
+}) {
   const [kind, setKind] = useState<(typeof PAGE_KIND_TABS)[number][0]>("all");
   const [arr, setArr] = useState<string[]>([]);
   const query = useMemo(() => {
@@ -686,10 +696,14 @@ function TopPages({ rangeQuery, exportHref }: { rangeQuery: string; exportHref: 
           <span className="text-muted-foreground text-[13px]">
             {landing
               ? "The first page opened, arriving from the selected sources"
-              : "Every page, not just profiles"}
+              : scoped
+                ? "Profile pages of the people in your units"
+                : "Every page, not just profiles"}
           </span>
         </div>
-        <Segmented label="Page type" options={PAGE_KIND_TABS} value={kind} onChange={setKind} />
+        {scoped ? null : (
+          <Segmented label="Page type" options={PAGE_KIND_TABS} value={kind} onChange={setKind} />
+        )}
       </div>
       <div className="flex flex-col gap-1.5">
         <span id="traffic-arr-l" className="text-[13px] font-medium">
@@ -907,9 +921,12 @@ function AiCard({ overview, grain }: { overview: TrafficOverview; grain: Grain }
 export function TrafficSection({
   overview,
   rangeQuery,
+  scoped = false,
 }: {
   overview: TrafficOverview;
   rangeQuery: string;
+  /** A unit-scoped page draws its own Top pages card above the site-wide sections. */
+  scoped?: boolean;
 }) {
   const [grain, setGrain] = useState<Grain>("week");
   const [mode, setMode] = useState<"count" | "share">("count");
@@ -982,7 +999,7 @@ export function TrafficSection({
             siteOnlyShare={siteOnlyShare}
             exportHref={exportHref}
           />
-          <TopPages rangeQuery={rangeQuery} exportHref={exportHref} />
+          {scoped ? null : <TopPages rangeQuery={rangeQuery} exportHref={exportHref} />}
           <AiCard overview={overview} grain={grain} />
         </>
       )}
