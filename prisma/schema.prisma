@@ -184,6 +184,7 @@ model Scholar {
   appointments         Appointment[]
   educations           Education[]
   profileAppointments  ProfileAppointment[]
+  unitLeadershipRoles  UnitLeadershipRole[]
   honors               Honor[]
   grants               Grant[]
   grantDateGaps        GrantDateGap[]
@@ -2533,6 +2534,61 @@ model OrgUnitRoleAssignment {
   @@index([cwid])
   @@index([entityType, entityId, roleKey, sortOrder])
   @@map("org_unit_role_assignment")
+}
+
+/// A department-authored leadership title held by one person at one unit —
+/// v1 is the Vice Chair family (Executive / Senior / Vice / Associate /
+/// Assistant Vice Chair). Steward-maintained on `/edit`; ED carries none of
+/// these (2026-11-17 probe: 0 of 88 audited holders had a Vice Chair
+/// appointment title).
+///
+/// A SEPARATE TABLE from `OrgUnitRoleAssignment` on purpose: the ED ETL writes
+/// department rows there nightly and never touches this one (the
+/// `ProfileAppointment` reasoning), and that table has no per-holder title —
+/// its vocabulary speaks with one voice, while these titles are whatever each
+/// department publishes. `displayTitle` is shown verbatim; `tier`, `functions`
+/// and `site` exist only for ordering, filtering and reports.
+///
+/// No status / verified / end-date lifecycle: a row exists or it does not, and
+/// the `/edit` audit log holds the history. Readers join to an active scholar,
+/// so a departed holder drops off without a job.
+///
+/// `entityType` / `tier` / `functions` / `site` / `source` are VARCHAR with
+/// app-level closure (`lib/unit-leadership.ts`), the `OrgUnitRole` convention.
+model UnitLeadershipRole {
+  id               String    @id @default(uuid()) @db.VarChar(64)
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// `department` in v1. NO FK on `entityId` — polymorphic, as `UnitAdmin` is.
+  entityType       String    @map("entity_type") @db.VarChar(32)
+  entityId         String    @map("entity_id") @db.VarChar(64)
+  /// `vice_chair` in v1.
+  roleFamily       String    @default("vice_chair") @map("role_family") @db.VarChar(32)
+  /// `executive` | `senior` | `vice` | `associate` | `assistant`.
+  tier             String    @db.VarChar(16)
+  /// Comma-joined function codes, `''` for a general Vice Chair. Not JSON: a
+  /// `Prisma.JsonNull` passes `IS NOT NULL`.
+  functions        String    @default("") @db.VarChar(255)
+  /// Free-text subspecialty, used with the `clinical_area` code.
+  areaText         String?   @map("area_text") @db.VarChar(255)
+  /// NYP site for a site-based Vice Chair.
+  site             String?   @db.VarChar(32)
+  /// The title exactly as the department publishes it.
+  displayTitle     String    @map("display_title") @db.VarChar(255)
+  startDate        DateTime? @map("start_date") @db.Date
+  /// `steward` | `audit_seed`.
+  source           String    @default("steward") @db.VarChar(32)
+  sourceUrl        String?   @map("source_url") @db.VarChar(512)
+  sourceObservedAt DateTime? @map("source_observed_at") @db.Date
+  showOnProfile    Boolean   @default(true) @map("show_on_profile")
+  /// Steward note; required when the holder is not full-time faculty.
+  note             String?   @db.VarChar(512)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([entityType, entityId])
+  @@index([cwid])
+  @@map("unit_leadership_role")
 }
 
 /// A vocabulary entry's unit allowlist (#2557 Phase E). `research` and
