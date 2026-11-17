@@ -529,7 +529,7 @@ export async function getMenteesForMentor(
     // cwid. Same best-effort posture as the manual list.
     getMenteeCurrentPositions(mentorCwid, prisma).catch((err) => {
       if (strict) throw err;
-      console.error(`[mentoring] mentee current-position read failed for mentor ${mentorCwid}`, err);
+      console.error("[mentoring] mentee current-position read failed for mentor %s", mentorCwid, err);
       return {} as Record<string, string>;
     }),
   ]);
