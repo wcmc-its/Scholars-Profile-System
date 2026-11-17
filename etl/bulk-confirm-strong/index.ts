@@ -350,6 +350,9 @@ export async function decideOne(client: TxRunner, c: Candidate, ctx: WriteCtx): 
             select: { cwid: true },
           });
           if (held) return { kind: "skipped" as const, reason: "held_by_other" };
+          // Cornell Ithaca iDs are human-confirmed only, whatever the SQL selected.
+          const me = await tx.scholar.findUnique({ where: { cwid: c.cwid }, select: { campus: true } });
+          if (me?.campus !== "wcm") return { kind: "skipped" as const, reason: "not_wcm" };
           await confirmPair(
             tx,
             { cwid: c.cwid, orcid },

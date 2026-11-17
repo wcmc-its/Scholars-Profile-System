@@ -2248,6 +2248,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -2949,6 +2953,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -3587,6 +3595,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -4153,6 +4165,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
                 "Value": "off",
               },
               {
@@ -5161,6 +5177,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
                 "Value": "off",
               },
               {
@@ -14678,6 +14698,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -15379,6 +15403,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -16017,6 +16045,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -16583,6 +16615,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
                 "Value": "on",
               },
               {
@@ -17591,6 +17627,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
                 "Value": "on",
               },
               {

@@ -72,7 +72,9 @@ export class OrcidQueueRefused extends Error {
       | "on_file"
       | "dismissed"
       | "state_changed"
-      | "other_not_in_queue",
+      | "other_not_in_queue"
+      | "held_by_other"
+      | "on_linked_record",
   ) {
     super(code);
   }
@@ -161,6 +163,25 @@ async function matchPeople(
   return new Set(rows.map((r) => r.cwid));
 }
 
+/**
+ * Who the queue curates: active WCM scholars and Cornell Ithaca rows (`status
+ * 'external'`, Ithaca ORCID plan step 2). Ithaca rows only reach the queue once
+ * etl/orcid-evidence scores them (ITHACA_ORCID_CURATION).
+ */
+export const QUEUE_SCHOLAR_WHERE = {
+  deletedAt: null,
+  OR: [{ status: "active" }, { status: "external", campus: "ithaca" }],
+} satisfies Prisma.ScholarWhereInput;
+
+function inQueuePopulation(
+  s: { status: string; campus: string; deletedAt: Date | null },
+  filter: OrcidQueueFilter,
+): boolean {
+  if (s.deletedAt) return false;
+  if (s.status !== "active" && !(s.status === "external" && s.campus === "ithaca")) return false;
+  return filter.campuses.length === 0 || (filter.campuses as string[]).includes(s.campus);
+}
+
 /** `only`: one scholar's pairs (the card route), else every evidence row. */
 async function loadQueueState(
   client: ReadClient,
@@ -185,7 +206,7 @@ async function loadQueueState(
       ? Promise.resolve([])
       : client.scholar.findMany({
           where: { cwid: { in: cwids } },
-          select: { cwid: true, orcid: true, status: true, deletedAt: true },
+          select: { cwid: true, orcid: true, status: true, campus: true, deletedAt: true },
         }),
     cwids.length === 0
       ? Promise.resolve([])
@@ -202,7 +223,7 @@ async function loadQueueState(
     matchPeople(client, cwids, filter),
   ]);
   const held = new Map(
-    scholars.filter((s) => s.status === "active" && !s.deletedAt).map((s) => [s.cwid, s.orcid]),
+    scholars.filter((s) => inQueuePopulation(s, filter)).map((s) => [s.cwid, s.orcid]),
   );
   const dismissed = new Set(dismissals.map((d) => pairKey(d.cwid, d.orcid)));
   const sources = new Map<string, OrcidCandidateSource[]>();
@@ -279,10 +300,39 @@ function dismissalWhy(meta: WriteMeta) {
  *  `rpm_admin` or `identity` iD is a candidate). An iD already on file is refused; a
  *  DIFFERENT iD on file (a possible error) is replaced only with `replace`, and
  *  every replaced iD is dismissed. Optimistic: the update re-checks what was read. */
+/**
+ * One iD, one person: refuse an iD another live row already holds. When the holder
+ * is the same human's record on the other campus (report 22's `known` band: ED or
+ * Cornell's directory asserts the CWID↔NetID pair), the code says so; the iD stays
+ * where it is, on the WCM row (Ithaca ORCID plan). `except`: a holder this same
+ * transaction is about to clear ("Belongs to X" on an auto-confirmed iD).
+ * ponytail: read-then-write, no lock; two librarians confirming one iD on two rows
+ * in the same instant can still both land. Add SELECT … FOR UPDATE if that happens.
+ */
+export async function assertOrcidFree(
+  tx: Tx,
+  cwid: string,
+  orcid: string,
+  except?: string,
+): Promise<void> {
+  const holders = (
+    await tx.scholar.findMany({
+      where: { orcid, deletedAt: null, cwid: { not: cwid } },
+      select: { cwid: true },
+    })
+  ).filter((h) => h.cwid !== except);
+  if (holders.length === 0) return;
+  const ids = [cwid, ...holders.map((h) => h.cwid)];
+  const linked = await tx.scholarIdentityLink.count({
+    where: { band: "known", cwid: { in: ids }, netid: { in: ids } },
+  });
+  throw new OrcidQueueRefused(409, linked > 0 ? "on_linked_record" : "held_by_other");
+}
+
 export async function confirmPair(
   tx: Tx,
   pair: { cwid: string; orcid: string; replace?: boolean },
-  meta: WriteMeta,
+  meta: WriteMeta & { allowHolder?: string },
 ): Promise<void> {
   const evidence = await tx.orcidCandidateEvidence.findUnique({
     where: { cwid_orcid: { cwid: pair.cwid, orcid: pair.orcid } },
@@ -294,6 +344,7 @@ export async function confirmPair(
   if (onFile === pair.orcid) throw new OrcidQueueRefused(409, "already_on_file");
   if (dismissed.has(pair.orcid)) throw new OrcidQueueRefused(409, "dismissed");
   if (onFile !== null && !pair.replace) throw new OrcidQueueRefused(409, "on_file_differs");
+  await assertOrcidFree(tx, pair.cwid, pair.orcid, meta.allowHolder);
   const replaced = held.orcid !== null && held.orcid !== pair.orcid ? [held.orcid] : [];
   const { count } = await tx.scholar.updateMany({
     where: { cwid: pair.cwid, orcid: held.orcid },
@@ -415,7 +466,8 @@ export async function decideSharedId(
   });
   if (!theirs || other.cwid === pair.cwid) throw new OrcidQueueRefused(404, "other_not_in_queue");
   if (other.belongs) {
-    await confirmPair(tx, { cwid: other.cwid, orcid: pair.orcid }, meta);
+    // `pair.cwid` may hold the iD (an email auto-confirm); the dismiss below clears it.
+    await confirmPair(tx, { cwid: other.cwid, orcid: pair.orcid }, { ...meta, allowHolder: pair.cwid });
     return dismissPair(tx, pair, { ...meta, otherCwid: other.cwid });
   }
   await dismissPair(tx, { cwid: other.cwid, orcid: pair.orcid }, meta);
@@ -513,6 +565,7 @@ const SCHOLAR_SELECT = {
   roleCategory: true,
   primaryTitle: true,
   primaryDepartment: true,
+  campus: true,
 } as const;
 
 const publishedName = (s: ScholarRow | undefined, cwid: string) =>
@@ -596,8 +649,8 @@ export async function loadOrcidQueue(
       where: {
         orcidConfirmMethod: "librarian",
         orcid: { not: null },
-        status: "active",
-        deletedAt: null,
+        ...QUEUE_SCHOLAR_WHERE,
+        ...(filter.campuses.length > 0 ? { campus: { in: filter.campuses } } : {}),
       },
       select: { cwid: true, orcidConfirmedAt: true },
     }),
@@ -622,7 +675,11 @@ export async function loadOrcidQueue(
       ? [[], null]
       : await Promise.all([
           client.scholar.findMany({
-            where: { cwid: { in: outside }, status: "active", deletedAt: null },
+            where: {
+              cwid: { in: outside },
+              ...QUEUE_SCHOLAR_WHERE,
+              ...(filter.campuses.length > 0 ? { campus: { in: filter.campuses } } : {}),
+            },
             select: { cwid: true },
           }),
           matchPeople(client, outside, filter),
@@ -651,6 +708,7 @@ export async function loadOrcidQueue(
       .sort();
     return {
       cwid,
+      campus: s?.campus === "ithaca" ? "ithaca" : "wcm",
       name: publishedName(s, cwid),
       surname: (s?.fullName ?? cwid).trim().split(/\s+/).pop()!.toLowerCase(),
       department: s?.primaryDepartment ?? null,
@@ -762,6 +820,7 @@ export async function loadOrcidQueueCard(
         orcidConfirmedAt: true,
         orcidConfirmedBy: true,
         status: true,
+        campus: true,
         deletedAt: true,
       },
     }),
@@ -773,8 +832,7 @@ export async function loadOrcidQueueCard(
   // with no candidates, for the Decision filter's decided scholars.
   const decidedOnly =
     !!me &&
-    me.status === "active" &&
-    !me.deletedAt &&
+    inQueuePopulation(me, EMPTY_ORCID_QUEUE_FILTER) &&
     (dismissals.length > 0 || (me.orcidConfirmMethod === "librarian" && !!me.orcid));
   if (ps.length === 0 && !decidedOnly) return null;
   const detailBy = new Map(details.map((d) => [d.orcid, d]));

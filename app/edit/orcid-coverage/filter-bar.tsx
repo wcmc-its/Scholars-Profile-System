@@ -19,7 +19,7 @@ import { FacetPopover, type FacetDef } from "@/components/edit/facet-popover";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 import type { NihFilter } from "@/lib/edit/orcid-coverage";
 
-type Sel = { nih: NihFilter; types: string[]; units: string[] };
+type Sel = { nih: NihFilter; types: string[]; units: string[]; campus?: "wcm" | "ithaca" };
 
 const BOTH = "Narrows both tables.";
 
@@ -28,6 +28,7 @@ function query(s: Sel) {
   for (const t of s.types) q.append("type", t);
   for (const u of s.units) q.append("unit", u);
   q.set("nih", s.nih);
+  if (s.campus === "ithaca") q.set("campus", "ithaca");
   return `?${q.toString()}`;
 }
 
@@ -59,6 +60,16 @@ export function CoverageFilterBar({
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
   ];
   const defs: FacetDef[] = [
+    {
+      key: "campus",
+      label: "Campus",
+      single: true,
+      options: [
+        { value: "wcm", label: "Weill Cornell Medicine", count: -1 },
+        { value: "ithaca", label: "Cornell Ithaca", count: -1 },
+      ],
+      scope: BOTH,
+    },
     {
       key: "nih",
       label: "NIH funding",
@@ -97,7 +108,11 @@ export function CoverageFilterBar({
   ];
 
   const selected = (d: FacetDef): string[] =>
-    d.key === "nih"
+    d.key === "campus"
+      ? sel.campus === "ithaca"
+        ? ["ithaca"]
+        : []
+      : d.key === "nih"
       ? sel.nih === "all"
         ? []
         : [sel.nih]
@@ -105,12 +120,14 @@ export function CoverageFilterBar({
         ? sel.types
         : sel.units.filter((u) => d.options.some((o) => o.value === u));
   const toggle = (d: FacetDef, value: string) => {
+    if (d.key === "campus") return apply({ ...sel, campus: value === "ithaca" ? "ithaca" : "wcm" });
     if (d.key === "nih") return apply({ ...sel, nih: value as NihFilter });
     const list = d.key === "type" ? sel.types : sel.units;
     const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
     apply(d.key === "type" ? { ...sel, types: next } : { ...sel, units: next });
   };
   const clear = (d: FacetDef) => {
+    if (d.key === "campus") return apply({ ...sel, campus: "wcm" });
     if (d.key === "nih") return apply({ ...sel, nih: "all" });
     if (d.key === "type") return apply({ ...sel, types: [] });
     const mine = new Set(d.options.map((o) => o.value));

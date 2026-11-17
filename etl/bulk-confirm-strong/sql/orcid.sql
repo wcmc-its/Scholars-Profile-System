@@ -7,7 +7,8 @@ WITH open_pair AS (
          e.works_total, e.competitor, e.competitor_cwids, e.competitor_orcids, e.evidence_detail,
          e.computed_at, s.orcid AS on_file
   FROM orcid_candidate_evidence e
-  JOIN scholar s ON s.cwid = e.cwid AND s.status = 'active' AND s.deleted_at IS NULL
+  -- WCM only: Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
+  JOIN scholar s ON s.cwid = e.cwid AND s.status = 'active' AND s.deleted_at IS NULL AND s.campus = 'wcm'
   LEFT JOIN orcid_dismissal d ON d.cwid = e.cwid AND d.orcid = e.orcid
   WHERE d.cwid IS NULL
     AND (s.orcid IS NULL OR s.orcid <> e.orcid)

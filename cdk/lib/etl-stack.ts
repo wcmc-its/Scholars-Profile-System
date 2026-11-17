@@ -1079,6 +1079,12 @@ export class EtlStack extends Stack {
       // write. Staging on; prod off until the staging load is reviewed.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ITHACA_ROSTER: env === "prod" ? "off" : "on",
+      // Ithaca ORCID plan, step 2 — Cornell Ithaca rows join ORCID curation: Affiliation
+      // Manager and Identity candidates (etl:orcid-candidates, etl:identity) and evidence
+      // scoring (etl:orcid-evidence), only when this is exactly "on". Never auto-confirmed
+      // and never pushed, whatever the value. Staging on; prod off until the staging queue
+      // is reviewed. Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ITHACA_ORCID_CURATION: env === "prod" ? "off" : "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is

@@ -177,8 +177,12 @@ async function main() {
     if (rows.length === 0) throw new Error("0 Identity rows with an ORCID — refusing to mirror");
 
     const ourScholars = await db.write.scholar.findMany({
-      // Ithaca Identity iDs are uncurated legacy values; the Ithaca ORCID step decides their fate.
-      where: { deletedAt: null, campus: "wcm" },
+      // Cornell Ithaca rows join with ITHACA_ORCID_CURATION: their Identity iDs are
+      // uncurated legacy values, so they come in as candidates for a human to decide.
+      where: {
+        deletedAt: null,
+        campus: process.env.ITHACA_ORCID_CURATION === "on" ? { in: ["wcm", "ithaca"] } : "wcm",
+      },
       select: { cwid: true, orcid: true },
     });
     // Keyed LOWERCASE to match `cwidFromIdentityItem` (the collation is case-insensitive,

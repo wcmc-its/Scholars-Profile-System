@@ -355,6 +355,7 @@ describe("page gate", () => {
         types: ["faculty"],
         units: ["div:CARD"],
         sources: ["orcid_works"],
+        campuses: [],
       },
     );
     expect(h.shell).toHaveBeenCalledWith(expect.objectContaining({ active: "orcid-queue" }));
@@ -620,12 +621,13 @@ describe("loaders", () => {
 
   it("the filter narrows the list: person type, how discovered (a kept scholar keeps every candidate)", async () => {
     const { loadOrcidQueue } = await actual();
-    const byType = await loadOrcidQueue(client(), { types: ["postdoc"], units: [], sources: [] });
+    const byType = await loadOrcidQueue(client(), { types: ["postdoc"], units: [], sources: [], campuses: [] });
     expect(cwidsOf(byType)).toEqual(["d00001"]);
     const bySource = await loadOrcidQueue(client(), {
       types: [],
       units: [],
       sources: ["orcid_works"],
+      campuses: [],
     });
     expect(cwidsOf(bySource)).toEqual(["a00001"]);
     expect(bySource.summaries[0]!.candidates).toHaveLength(2);
@@ -634,7 +636,7 @@ describe("loaders", () => {
   it("the filter narrows the list: department, division (with its manual roster), institution", async () => {
     const { loadOrcidQueue } = await actual();
     expect(
-      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["dept:MED"], sources: [] })),
+      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["dept:MED"], sources: [], campuses: [] })),
     ).toEqual(["a00001", "c00001"]);
     expect(
       cwidsOf(
@@ -642,11 +644,12 @@ describe("loaders", () => {
           types: [],
           units: ["div:CARD"],
           sources: [],
+          campuses: [],
         }),
       ),
     ).toEqual(["a00001", "d00001"]);
     expect(
-      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["inst:HSS"], sources: [] })),
+      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["inst:HSS"], sources: [], campuses: [] })),
     ).toEqual(["f00001"]);
   });
 
@@ -763,6 +766,7 @@ describe("loaders", () => {
       types: [],
       units: [],
       sources: ["orcid_works"],
+      campuses: [],
     });
     expect(bySource.summaries.map((s) => s.cwid)).not.toContain("b00001");
     const card = (await loadOrcidQueueCard(client(), "b00001"))!;
@@ -876,15 +880,16 @@ describe("v3 pure rules", () => {
 describe("filter and link helpers", () => {
   it("the filter key is canonical and empty for no filter; the href carries no tab", () => {
     expect(orcidQueueFilterKey(EMPTY_ORCID_QUEUE_FILTER)).toBe("");
-    expect(orcidQueueFilterKey({ types: ["b", "a"], units: [], sources: ["orcid_works"] })).toBe(
+    expect(orcidQueueFilterKey({ types: ["b", "a"], units: [], sources: ["orcid_works"], campuses: [] })).toBe(
       "type=a&type=b&source=orcid_works",
     );
-    expect(orcidQueueHref("/q", { types: ["a"], units: [], sources: [] })).toBe("/q?type=a");
+    expect(orcidQueueHref("/q", { types: ["a"], units: [], sources: [], campuses: [] })).toBe("/q?type=a");
     expect(orcidQueueHref("/q", EMPTY_ORCID_QUEUE_FILTER)).toBe("/q");
     expect(parseOrcidQueueFilter({ type: "a", unit: "nope", source: "orcid_email" })).toEqual({
       types: ["a"],
       units: [],
       sources: ["orcid_email"],
+      campuses: [],
     });
   });
 
