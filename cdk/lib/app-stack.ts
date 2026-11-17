@@ -1627,6 +1627,13 @@ export class AppStack extends Stack {
         // today). App-only, no reindex, no migration. Prod-on 2026-09-30 after
         // the staging soak was signed off.
         CENTER_DISEASE_FACET: "on",
+        // UNIT_LEADERSHIP_ROLES — department Vice Chair roles (`unit_leadership_role`,
+        // lib/edit/unit-leadership-flags.ts): the Vice Chairs card on
+        // /edit/department/[code] and POST /api/edit/unit-leadership. Read via
+        // isUnitLeadershipEnabled() (=== "on"); when off the card is absent and
+        // the route 404s. Staging first; prod follows the seed and the
+        // department administrators being told.
+        UNIT_LEADERSHIP_ROLES: envConfig.envName === "staging" ? "on" : "off",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route

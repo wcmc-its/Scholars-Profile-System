@@ -291,6 +291,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   // #3362 — the pin gate: superuser / comms steward only, never a content editor.
   "title-accept": "deny",
   unit: "allow",
+  "unit-leadership": "allow",
 };
 
 /** Predicates (or the flag itself) through which a content editor's write passes. */

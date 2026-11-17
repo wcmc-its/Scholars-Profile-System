@@ -32,7 +32,9 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
+import type { UnitLeadershipRoleView } from "@/lib/unit-leadership";
 import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
+import { UnitLeadershipCard } from "@/components/edit/unit-leadership-card";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -171,6 +173,9 @@ export type UnitEditPageProps = {
   orgUnitsNavVisible?: boolean;
   /** Observer viewing a unit they have no real role on: "View only", `inert`. */
   readOnly?: boolean;
+  /** A department's Vice Chairs (`UNIT_LEADERSHIP_ROLES`). `null` / omitted
+   *  renders no section: the flag is off, or the unit is not a department. */
+  viceChairs?: ReadonlyArray<UnitLeadershipRoleView> | null;
 };
 
 export function UnitEditPage({
@@ -178,6 +183,7 @@ export function UnitEditPage({
   attr,
   orgUnitsNavVisible = false,
   readOnly = false,
+  viceChairs = null,
 }: UnitEditPageProps) {
   const visible = ATTRIBUTES.filter((a) => a.visible(ctx));
   const active: AttrDef =
@@ -224,7 +230,7 @@ export function UnitEditPage({
         contentEditor={ctx.accessReadOnly === true}
         previewHref={previewHref}
         reportsHref={reportsHref}
-        sections={unitSections(ctx, visible, basePath)}
+        sections={unitSections(ctx, visible, basePath, viceChairs)}
         initialSection={attr ? LEGACY_ATTR_SECTION[attr as AttrKey] : undefined}
         notice={ctx.unit.suppression !== null ? <RetiredNotice /> : undefined}
       />
@@ -330,6 +336,7 @@ function unitSections(
   ctx: UnitEditContext,
   visible: ReadonlyArray<AttrDef>,
   basePath: string,
+  viceChairs: ReadonlyArray<UnitLeadershipRoleView> | null,
 ): UnitEditSection[] {
   const has = (key: AttrKey) => visible.some((a) => a.key === key);
   const unitType = ctx.unit.unitType;
@@ -419,6 +426,21 @@ function unitSections(
         />
       ),
     });
+    if (unitType === "department" && viceChairs) {
+      sections.push({
+        id: "vice-chairs",
+        label: "Vice Chairs",
+        stat: String(viceChairs.length),
+        content: (
+          <UnitLeadershipCard
+            departmentCode={ctx.unit.code}
+            departmentName={ctx.unit.name}
+            roles={viceChairs}
+            headingId="vice-chairs-heading"
+          />
+        ),
+      });
+    }
   }
 
   if (has("roster")) {

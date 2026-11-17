@@ -25,10 +25,12 @@ import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
+import { loadUnitLeadershipRoles } from "@/lib/api/unit-leadership-roles";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
+import { isUnitLeadershipEnabled } from "@/lib/edit/unit-leadership-flags";
 import { stripObserverView } from "@/lib/auth/observer-view";
 
 export const dynamic = "force-dynamic";
@@ -85,7 +87,14 @@ export default async function EditDepartmentPage({
   const readOnly =
     session.isObserver === true &&
     (await loadUnitEditContext("department", code, stripObserverView(session), db.read)) === null;
+  const viceChairs = isUnitLeadershipEnabled() ? await loadUnitLeadershipRoles(code, db.read) : null;
   return (
-    <UnitEditPage ctx={ctx} attr={attr} orgUnitsNavVisible={consoleTabs.units} readOnly={readOnly} />
+    <UnitEditPage
+      ctx={ctx}
+      attr={attr}
+      orgUnitsNavVisible={consoleTabs.units}
+      readOnly={readOnly}
+      viceChairs={viceChairs}
+    />
   );
 }
