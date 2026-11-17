@@ -514,7 +514,14 @@ type Older = {
   entityNames: EditActivityPage["entityNames"];
 };
 
-export function EditActivityDashboard({ summary }: { summary: EditActivitySummary }) {
+export function EditActivityDashboard({
+  summary,
+  scopeLabel,
+}: {
+  summary: EditActivitySummary;
+  /** The unit name(s) a unit-scoped viewer's page is limited to; absent = site-wide. */
+  scopeLabel?: string;
+}) {
   const [older, setOlder] = React.useState<Older>({ rows: [], people: {}, entityNames: {}, publicationTitles: {} });
   const [cursor, setCursor] = React.useState<string | null>(summary.nextCursor);
   const [loadingOlder, setLoadingOlder] = React.useState(false);
@@ -1182,7 +1189,9 @@ export function EditActivityDashboard({ summary }: { summary: EditActivitySummar
     <div className="flex flex-col gap-6" data-slot="edit-activity">
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex min-w-0 flex-1 basis-[300px] flex-col gap-1.5">
-          <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.02em]">Edit activity</h1>
+          <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.02em]">
+            {scopeLabel ? `Edit activity: ${scopeLabel}` : "Edit activity"}
+          </h1>
           <p className="text-muted-foreground m-0 text-[14.5px] leading-normal">
             Who changed which profiles, {rangeDate(days[0]!)} to {rangeDate(days[days.length - 1]!)}. Read-only. Each
             scholar and center links to its full history.

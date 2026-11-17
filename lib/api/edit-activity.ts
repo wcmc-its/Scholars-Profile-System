@@ -27,7 +27,7 @@
  * dozens of rows, and because it keeps the pure `shapeSummary` untouched.
  */
 import { detailForAction, humanizeField } from "@/lib/api/scholar-audit";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
 /** Default rolling window the summary spans. */
 export const EDIT_ACTIVITY_WINDOW_DAYS = 30;
@@ -70,6 +70,14 @@ export type DirectoryLookup = (
  *  `center` / `core` only name those entities (fail-soft, like `scholar`). */
 export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar"> &
   Partial<Pick<PrismaClient, "center" | "core" | "publication">>;
+
+/**
+ * A unit-scoped viewer's row predicate (`activityScopeSql`,
+ * `lib/edit/dashboard-access.ts`): the edit targets one of their people or
+ * units. Built server-side and passed in, because this module reaches the
+ * client bundle and so cannot import `Prisma.sql` itself. Omitted = every row.
+ */
+export type EditActivityScopeFilter = Prisma.Sql;
 
 /** The one timezone the console reads dates in (WCM-local). */
 export const EDIT_ACTIVITY_TZ = "America/New_York";
@@ -720,8 +728,12 @@ export async function loadEditActivitySummary(
   now: Date = new Date(),
   directory?: DirectoryLookup,
   range: EditActivityRange = "30d",
+  scopeFilter?: EditActivityScopeFilter,
 ): Promise<EditActivitySummary> {
   const cutoff = rangeCutoff(range, now);
+  // The viewer's scope predicate, or a bound 1 (always true) for the
+  // site-wide view. ANDed into every read below.
+  const inScope = scopeFilter ?? 1;
 
   // Day buckets in WCM-local (Eastern) time, so they agree with the Eastern
   // timestamps the feed renders. A bound numeric offset needs no MySQL tz tables.
@@ -731,7 +743,7 @@ export async function loadEditActivitySummary(
     client.$queryRaw<RawPerDay[]>`
       SELECT DATE(CONVERT_TZ(ts, '+00:00', ${offset})) AS day, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        GROUP BY day
        ORDER BY day DESC`,
     // Grouped by the EFFECTIVE actor (`effectiveActor`): a bulk job's rows
@@ -743,14 +755,14 @@ export async function loadEditActivitySummary(
                AS actor_cwid,
              COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        GROUP BY CASE WHEN request_id LIKE 'bulk-%' THEN 'system-bulk-confirm' ELSE actor_cwid END
        ORDER BY edits DESC
        LIMIT 20`,
     client.$queryRaw<RawEntity[]>`
       SELECT target_entity_type, target_entity_id, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        GROUP BY target_entity_type, target_entity_id
        ORDER BY edits DESC
        LIMIT 20`,
@@ -759,7 +771,7 @@ export async function loadEditActivitySummary(
              target_entity_type, target_entity_id, request_id,
              fields_changed, before_values, after_values
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        ORDER BY ts DESC, id DESC
        LIMIT 100`,
     // Same effective-actor rule as the top-editors read: a bulk job counts as
@@ -775,7 +787,7 @@ export async function loadEditActivitySummary(
                                     THEN 1 ELSE 0 END), 0)
                AS SIGNED) AS automated_edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}`,
+       WHERE ts >= ${cutoff} AND (${inScope})`,
     // Every window row, folded in JS. The value blobs are NOT read: only the
     // first few characters of the five "gained content" fields, rebuilt as tiny
     // JSON objects, which is all the empty -> filled test needs. That keeps an
@@ -802,7 +814,7 @@ export async function loadEditActivitySummary(
                'manualMentees', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.manualMentees')), 8)
              ), NULL) AS after_values
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        LIMIT 500000`,
   ]);
 
@@ -858,6 +870,7 @@ export async function loadOlderEdits(
   asOf: Date = new Date(),
   directory?: DirectoryLookup,
   range: EditActivityRange = "30d",
+  scopeFilter?: EditActivityScopeFilter,
 ): Promise<EditActivityPage> {
   const cutoff = rangeCutoff(range, asOf);
   // LIMIT 101 = EDIT_ACTIVITY_RECENT_LIMIT + 1 look-ahead row (a literal, like
@@ -867,7 +880,7 @@ export async function loadOlderEdits(
            target_entity_type, target_entity_id, request_id,
            fields_changed, before_values, after_values
       FROM scholars_audit.manual_edit_audit
-     WHERE ts >= ${cutoff}
+     WHERE ts >= ${cutoff} AND (${scopeFilter ?? 1})
        AND (ts < ${cursor.ts} OR (ts = ${cursor.ts} AND id < ${cursor.id}))
      ORDER BY ts DESC, id DESC
      LIMIT 101`;
@@ -989,13 +1002,14 @@ export async function loadEditActivityCsv(
   range: EditActivityRange,
   asOf: Date,
   directory?: DirectoryLookup,
+  scopeFilter?: EditActivityScopeFilter,
 ): Promise<string> {
   const cutoff = rangeCutoff(range, asOf);
   const rows = await client.$queryRaw<RawExportRow[]>`
     SELECT id, ts, actor_cwid, impersonated_cwid, action,
            target_entity_type, target_entity_id, request_id, fields_changed
       FROM scholars_audit.manual_edit_audit
-     WHERE ts >= ${cutoff} AND ts <= ${asOf}
+     WHERE ts >= ${cutoff} AND ts <= ${asOf} AND (${scopeFilter ?? 1})
      ORDER BY ts DESC, id DESC
      LIMIT 200000`;
   const edits = rows.map((r) => shapeRecent({ ...r, before_values: null, after_values: null }));

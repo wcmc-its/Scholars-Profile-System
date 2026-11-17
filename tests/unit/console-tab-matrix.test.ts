@@ -87,6 +87,7 @@ function mergeGrants(a: ConsoleGrants, b: ConsoleGrants): ConsoleGrants {
     manageableUnitCount: a.manageableUnitCount + b.manageableUnitCount,
     reportableUnitCount: a.reportableUnitCount + b.reportableUnitCount,
     viewerCanViewUsage: a.viewerCanViewUsage || b.viewerCanViewUsage,
+    viewerAdminsScopedUnit: a.viewerAdminsScopedUnit || b.viewerAdminsScopedUnit,
     reportAccessCount: a.reportAccessCount + b.reportAccessCount,
     dashboards: new Set([...a.dashboards, ...b.dashboards]),
   };

@@ -5,14 +5,19 @@
  * matches the totals on screen.
  *
  * Same gate as the page (`canViewDashboard(session, "activity")`), re-checked
- * per request. A GET with no side effects; the session + gate is the whole
+ * per request, and the same scope: a unit admin's file holds only their own
+ * units' rows (resolved from the session, never from the request). A GET with no side effects; the session + gate is the whole
  * gate (the `GET /api/edit/activity/recent` pattern).
  */
 import { type NextRequest, NextResponse } from "next/server";
 
 import { loadEditActivityCsv, parseAsOf, parseRange } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { canViewDashboard } from "@/lib/edit/dashboard-access";
+import {
+  activityScopeSql,
+  canViewDashboard,
+  loadDashboardScope,
+} from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { resolveDirectoryPeople } from "@/lib/edit/directory-names";
@@ -34,7 +39,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!asOf) return editError(400, "invalid_as_of", "asOf");
 
   try {
-    const csv = await loadEditActivityCsv(db.read, range, asOf, resolveDirectoryPeople);
+    const scope = await loadDashboardScope(session, "activity");
+    const csv = await loadEditActivityCsv(
+      db.read,
+      range,
+      asOf,
+      resolveDirectoryPeople,
+      activityScopeSql(scope),
+    );
     return new NextResponse(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",
