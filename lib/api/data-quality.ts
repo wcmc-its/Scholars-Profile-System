@@ -537,6 +537,24 @@ async function resolveCandidateWhere(
   return buildWhere(opts, scopeCenterCwids, filterCenterCwids, scopeRosterCwids, filterRosterCwids);
 }
 
+/**
+ * The cwids of every scholar in `scope` — the people the Profiles roster lists
+ * for that viewer with no filter applied (same `where`: department / division
+ * codes, division rosters, current center members, institution codes). An
+ * `all` scope has no member list: `null`, never "everyone" as an array.
+ */
+export async function loadScopeMemberCwids(
+  scope: DataQualityScope,
+  client: DataQualityClient,
+): Promise<string[] | null> {
+  if (scope.all) return null;
+  const rows = await client.scholar.findMany({
+    where: await resolveCandidateWhere({ scope }, client),
+    select: { cwid: true },
+  });
+  return rows.map((r) => r.cwid);
+}
+
 /** Pending High-tier COI review: `pendingCoiHigh > 0` as a relation filter. */
 const WITH_COI_WHERE: Prisma.ScholarWhereInput = {
   coiGapCandidates: { some: { status: "new", tier: "High" } },

@@ -9,7 +9,11 @@ const { mockSession, mockCanView, mockCsv, mockLogDenial } = vi.hoisted(() => ({
   mockLogDenial: vi.fn(),
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockSession }));
-vi.mock("@/lib/edit/dashboard-access", () => ({ canViewDashboard: mockCanView }));
+vi.mock("@/lib/edit/dashboard-access", () => ({
+  canViewDashboard: mockCanView,
+  loadDashboardScope: async () => ({ all: true }),
+  activityScopeSql: () => undefined,
+}));
 vi.mock("@/lib/db", () => ({ db: { read: { tag: "read-client" } } }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogDenial }));
 vi.mock("@/lib/edit/directory-names", () => ({ resolveDirectoryPeople: vi.fn() }));
@@ -50,7 +54,13 @@ describe("GET /api/edit/activity/export", () => {
     expect(res.headers.get("content-type")).toBe("text/csv; charset=utf-8");
     expect(res.headers.get("content-disposition")).toBe('attachment; filename="edit-activity-12m-2026-11-11.csv"');
     expect(await res.text()).toBe("time,editor_cwid\r\nx,y");
-    expect(mockCsv).toHaveBeenCalledWith({ tag: "read-client" }, "12m", new Date(AS_OF), expect.any(Function));
+    expect(mockCsv).toHaveBeenCalledWith(
+      { tag: "read-client" },
+      "12m",
+      new Date(AS_OF),
+      expect.any(Function),
+      undefined,
+    );
   });
 
   it("500 when the audit read fails", async () => {

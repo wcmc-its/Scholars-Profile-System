@@ -16,7 +16,9 @@ const { mockGetSession, mockLoadOlder, mockLogDenial } = vi.hoisted(() => ({
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetSession,
 }));
-vi.mock("@/lib/db", () => ({ db: { read: { tag: "read-client" } } }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { tag: "read-client", unitAdmin: { findFirst: async () => null } } },
+}));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogDenial }));
 vi.mock("@/lib/api/edit-activity", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/edit-activity")>()),
@@ -98,7 +100,7 @@ describe("GET /api/edit/activity/recent", () => {
     const res = await GET(req(QS));
     expect(res.status).toBe(200);
     expect(mockLoadOlder).toHaveBeenCalledWith(
-      { tag: "read-client" },
+      expect.objectContaining({ tag: "read-client" }),
       {
         ts: new Date("2026-09-24T12:00:00.123Z"),
         id: 4242n,
@@ -106,6 +108,8 @@ describe("GET /api/edit/activity/recent", () => {
       new Date(AS_OF),
       expect.any(Function),
       "30d",
+      // No scope filter: a superuser reads every row.
+      undefined,
     );
     expect(await res.json()).toEqual({ ok: true, ...PAGE });
   });
