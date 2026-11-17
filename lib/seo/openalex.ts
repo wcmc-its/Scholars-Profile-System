@@ -106,12 +106,35 @@ function withMailto(url: string, mailto: string | undefined): string {
   return url + (url.includes("?") ? "&" : "?") + `mailto=${encodeURIComponent(mailto)}`;
 }
 
-export async function getJson<T>(url: string, mailto: string | undefined): Promise<T> {
-  const res = await fetch(withMailto(url, mailto), { headers: { Accept: "application/json" } });
-  if (!res.ok) {
-    throw new Error(`OpenAlex HTTP ${res.status} ${res.statusText} for ${url}`);
+const MAX_RETRIES = 3;
+const MAX_WAIT_MS = 60_000;
+
+/**
+ * GET + JSON, retrying a 429 / 5xx / network throw up to 3 times. Waits the
+ * `Retry-After` seconds when OpenAlex sends one (capped at a minute), else
+ * 2s/4s/8s. Batch callers only (ETL, scripts) — never put this on a request path.
+ * `sleep` is injectable so tests don't wait.
+ */
+export async function getJson<T>(
+  url: string,
+  mailto: string | undefined,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response | null = null;
+    try {
+      res = await fetch(withMailto(url, mailto), { headers: { Accept: "application/json" } });
+    } catch (err) {
+      if (attempt >= MAX_RETRIES) throw err;
+    }
+    if (res?.ok) return (await res.json()) as T;
+    const retryable = res === null || res.status === 429 || res.status >= 500;
+    if (!retryable || attempt >= MAX_RETRIES) {
+      throw new Error(`OpenAlex HTTP ${res!.status} ${res!.statusText} for ${url}`);
+    }
+    const after = Number(res?.headers.get("retry-after"));
+    await sleep(after > 0 ? Math.min(after * 1000, MAX_WAIT_MS) : 2000 * 2 ** attempt);
   }
-  return (await res.json()) as T;
 }
 
 export function mailtoFromEnv(env: Record<string, string | undefined> = process.env): string | undefined {
