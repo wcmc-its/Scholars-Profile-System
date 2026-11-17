@@ -84,8 +84,20 @@ vi.mock("@/components/ui/select", () => {
     ),
     SelectValue: () => null,
     SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
-      <option value={value}>{children}</option>
+    SelectItem: ({
+      value,
+      children,
+      trailing,
+      disabled,
+    }: {
+      value: string;
+      children: React.ReactNode;
+      trailing?: React.ReactNode;
+      disabled?: boolean;
+    }) => (
+      <option value={value} disabled={disabled} data-trailing={trailing ?? undefined}>
+        {children}
+      </option>
     ),
   };
 });
@@ -195,6 +207,7 @@ function renderFeed(props?: Partial<React.ComponentProps<typeof PublicationFeed>
         topicSlug={props?.topicSlug ?? "cancer_genomics"}
         activeSubtopic={props?.activeSubtopic ?? null}
         stageFilter={props?.stageFilter}
+        stageCounts={props?.stageCounts}
       />
     </PublicationModalProvider>,
   );
@@ -581,6 +594,30 @@ describe("TopicPublicationFeed — Stage select (SEARCH_PUBS_TRANSLATIONAL_STAGE
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(stageSelect()).toBeNull();
     expect(new URL(spy.mock.calls[0][0] as string).searchParams.has("stage")).toBe(false);
+  });
+
+  it("labels lead with the code; counts sit beside each option; a zero stage is disabled", async () => {
+    const spy = mockFetchByTier({ strongly: makeTierResponse({ hits: [makeHit()] }) });
+    renderFeed({ stageFilter: true, stageCounts: { all: 1234, T0: 19, T1: 6, T2: 0, "T3-4": 2 } });
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const opts = [...stageSelect()!.querySelectorAll("option")];
+    expect(opts.map((o) => o.textContent)).toEqual([
+      "All stages",
+      "T0 · Basic research",
+      "T1 · Early translation",
+      "T2 · Clinical trials and efficacy",
+      "T3\u20134 · Practice and population health",
+    ]);
+    expect(opts.map((o) => o.dataset.trailing)).toEqual(["1,234", "19", "6", "0", "2"]);
+    expect(opts.map((o) => o.disabled)).toEqual([false, false, false, true, false]);
+  });
+
+  it("without counts nothing is disabled and no counts show", async () => {
+    const spy = mockFetchByTier({ strongly: makeTierResponse({ hits: [makeHit()] }) });
+    renderFeed({ stageFilter: true });
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const opts = [...stageSelect()!.querySelectorAll("option")];
+    expect(opts.some((o) => o.disabled || o.dataset.trailing)).toBe(false);
   });
 
   it("picking a stage refetches with ?stage=", async () => {

@@ -103,8 +103,12 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  trailing,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & {
+  /** Right-aligned extra (e.g. a count) shown in the menu only, not the trigger. */
+  trailing?: React.ReactNode
+}) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
@@ -123,6 +127,9 @@ function SelectItem({
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {trailing != null && (
+        <span className="text-muted-foreground ml-auto pl-4 tabular-nums">{trailing}</span>
+      )}
     </SelectPrimitive.Item>
   )
 }

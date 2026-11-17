@@ -75,13 +75,15 @@ export async function GET(
       return apiError("invalid subtopic", 400);
     }
     // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — off, `stage` is ignored.
-    const stage = resolveSearchPubsTranslationalStageFacet() ? sp.get("stage") : null;
+    const stageFacet = resolveSearchPubsTranslationalStageFacet();
+    const stage = stageFacet ? sp.get("stage") : null;
     if (stage !== null && !isTranslationalStage(stage)) {
       return apiError("invalid stage", 400);
     }
     const result = await getTopicActivityScholars(slug, {
       subtopic: sub ?? undefined,
       ...(stage ? { stage } : {}),
+      ...(stageFacet ? { stageTotals: true } : {}),
     });
     if (result === null) {
       return apiError("topic not found", 404);
