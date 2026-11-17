@@ -13,8 +13,8 @@
  * inserted as a live row, `source = 'audit_seed'`. There is no review queue:
  * a steward who sees a wrong or stale row edits or removes it on /edit.
  * A title naming two roles ("Vice Chair, X; Vice Chair, Y") becomes two rows.
- * The CSV `Tier` wins over the tier read from the title; a disagreement is
- * printed. Idempotent: a (cwid, unit, display title) already present is skipped.
+ * The tier is read from the published title; a CSV `Tier` that disagrees is
+ * printed, not used. Idempotent: a (cwid, unit, display title) already present is skipped.
  *
  * Dry-run by default; pass --apply to write. Prints names and titles (already
  * public on department sites), never CWIDs.
@@ -69,14 +69,19 @@ export function parseCsv(text: string): CsvRow[] {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (quoted) {
-      if (c === '"' && text[i + 1] === '"') (field += '"'), i++;
-      else if (c === '"') quoted = false;
+      if (c === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (c === '"') quoted = false;
       else field += c;
     } else if (c === '"') quoted = true;
-    else if (c === ",") record.push(field), (field = "");
-    else if (c === "\n" || c === "\r") {
+    else if (c === ",") {
+      record.push(field);
+      field = "";
+    } else if (c === "\n" || c === "\r") {
       if (c === "\r" && text[i + 1] === "\n") i++;
-      record.push(field), (field = "");
+      record.push(field);
+      field = "";
       if (record.some((f) => f !== "")) records.push(record);
       record = [];
     } else field += c;
@@ -148,12 +153,14 @@ export function planSeed(csv: CsvRow[], depts: Dept[], people: Person[]): PlanLi
     if (person.dept_code !== dept.code) line.flags.push("primary department differs");
 
     for (const p of parsed) {
-      const tier = (LEADERSHIP_TIERS as readonly string[]).includes(csvTier) ? (csvTier as LeadershipTier) : p.tier;
-      if (tier !== p.tier) line.flags.push(`tier: audit says ${tier}, title reads ${p.tier}`);
+      // The title is what the department publishes, so its tier wins.
+      if ((LEADERSHIP_TIERS as readonly string[]).includes(csvTier) && csvTier !== p.tier) {
+        line.flags.push(`tier: title reads ${p.tier}, audit says ${csvTier}`);
+      }
       line.rows.push({
         cwid: person.cwid,
         entityId: dept.code,
-        tier,
+        tier: p.tier,
         functions: serializeFunctions(p.functions),
         areaText: p.areaText,
         // The site is often only in the audit note ("Chief of Medicine at NYP/Queens").

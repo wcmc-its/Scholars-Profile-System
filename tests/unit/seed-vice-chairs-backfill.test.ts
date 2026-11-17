@@ -83,8 +83,8 @@ describe("planSeed", () => {
     expect(l.flags).toEqual([
       "not full-time faculty (non_academic)",
       "primary department differs",
-      "tier: audit says executive, title reads vice",
+      "tier: title reads vice, audit says executive",
     ]);
-    expect(l.rows[0]).toMatchObject({ tier: "executive", site: "nyp_queens", functions: "" });
+    expect(l.rows[0]).toMatchObject({ tier: "vice", site: "nyp_queens", functions: "" });
   });
 });
