@@ -20,6 +20,7 @@ export const sess = (over: Partial<EditSession> = {}): EditSession => ({
   isHonorsCurator: false,
   isDeveloper: false,
   isDataSharingViewer: false,
+  isResearchSecurityViewer: false,
   ...over,
 });
 
@@ -45,6 +46,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "reports",
   "coi",
   "dataSharing",
+  "researchSecurity",
   "activity",
   "usage",
   "orcidCoverage",
@@ -232,6 +234,15 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     grants: grants(),
     expect: ["dataSharing"],
     pins: "2026-08-15 — the role unlocks ONLY the dashboard, no other /edit tab",
+  },
+  {
+    name: "pure research_security_viewer",
+    session: sess({ isResearchSecurityViewer: true }),
+    grants: grants(),
+    expect: ["researchSecurity"],
+    pins:
+      "2026-11 — the role unlocks ONLY the research security dashboard; the comms_steward, " +
+      "observer and content editor rows above pin that none of them sees it",
   },
   {
     name: "comms_steward + unit Owner (the Gap 4b monotonicity case)",

@@ -143,7 +143,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Affairs / Research Dean's office / compliance staff, not faculty) — the
   // exact population that was hard-404ing here before this grant.
   const targetGlobalRole =
-    target || targetIsSteward || targetIsUnitAdmin ? null : await resolveGlobalRole(targetCwid);
+    target || targetIsSteward || targetIsUnitAdmin
+      ? null
+      : // The REAL actor: a sensitive role alone does not make someone assumable
+        // by an observer or content editor (it would confirm who holds it).
+        await resolveGlobalRole(targetCwid, { viewerCwid: session.cwid });
   // …OR a profile-less proxy editor (`scholar_proxy.proxy_cwid`). The /edit
   // surfaces already resolve a viewed-as proxy to the scholars they serve
   // (#3060); without this branch the Profile editors tab offered View as on a

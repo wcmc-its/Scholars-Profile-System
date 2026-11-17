@@ -67,6 +67,7 @@ import {
   NO_SCOPE_OPTIONS,
   normalizeScopes,
   DASHBOARDS,
+  UNGRANTABLE_DASHBOARDS,
   DASHBOARD_LABEL,
   DASHBOARD_SCOPE_PREFIX,
   sameScopes,
@@ -131,6 +132,7 @@ export function reportingScopeOptions(): FunctionalRoleScopeOption[] {
   }
   // Dashboards last, one by one ("All reports" does not cover them).
   for (const d of DASHBOARDS) {
+    if (UNGRANTABLE_DASHBOARDS.has(d)) continue;
     out.push({ key: `${DASHBOARD_SCOPE_PREFIX}${d}`, label: `Dashboard · ${DASHBOARD_LABEL[d]}` });
   }
   return out;

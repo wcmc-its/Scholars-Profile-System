@@ -270,6 +270,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Loads Cornell Ithaca faculty, postdocs and grad students as hidden records for ORCID curation.",
     origin: "external", // sibling ReCiterDB (Cornell roster)
   },
+  "Research-Security": {
+    label: "Research Security Screen",
+    description: "Copies the watch-list co-publication screen for the research security dashboard.",
+    origin: "external", // sibling ReCiterDB (watchlist_match, watchlist_funding_flag)
+  },
   "InfoEd-Biosketch": {
     label: "NIH Biosketches",
     description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",
