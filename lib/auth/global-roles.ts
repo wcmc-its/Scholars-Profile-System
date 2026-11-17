@@ -32,6 +32,8 @@ import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isObserver } from "@/lib/auth/observer";
+import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
+import { isSuperuser } from "@/lib/auth/superuser";
 
 export type GlobalRole =
   | "honors_curator"
@@ -39,6 +41,7 @@ export type GlobalRole =
   | "development"
   | "content_editor"
   | "core_director"
+  | "research_security_viewer"
   | "observer";
 
 /** Display label per role — reused by the session route; client components
@@ -46,6 +49,7 @@ export type GlobalRole =
 export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
+  research_security_viewer: "Research Security Viewer",
   development: "Development",
   content_editor: "Content Editor",
   core_director: "Cores director",
@@ -65,6 +69,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
 export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string }> = {
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
+  research_security_viewer: { href: "/edit/research-security", label: "Research security" },
   // Matcha is the front door; its console nav reaches Grant Matcha too.
   development: { href: "/edit/matcha", label: "Matcha: Open search" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
@@ -79,9 +84,18 @@ const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string
   { role: "content_editor", check: isContentEditor },
   // A functional_role_grant row, not an LDAP group (`lib/auth/core-director.ts`).
   { role: "core_director", check: isCoreDirector },
+  // After every working role: someone who also edits content or runs a core
+  // lands on that work, not on a dashboard that may be dark. See also
+  // `SENSITIVE_GLOBAL_ROLES`.
+  { role: "research_security_viewer", check: isResearchSecurityViewer },
   // Last: observer is the broadest read-only role, so any narrower one held alongside it wins.
   { role: "observer", check: isObserver },
 ];
+
+/** Roles whose very membership is not for every "View as" user to learn: who
+ *  staffs the research security screen is told to that person and to a
+ *  superuser only. */
+const SENSITIVE_GLOBAL_ROLES: ReadonlySet<GlobalRole> = new Set<GlobalRole>(["research_security_viewer"]);
 
 /**
  * The first matching role for `cwid` (table order breaks a multi-role tie —
@@ -90,10 +104,28 @@ const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string
  * role", never as a grant. Checked in PARALLEL — each predicate is its own
  * LDAP round trip, and this sits in the impersonation POST/probe request
  * path, so latency is bounded to the slowest single check, not their sum.
+ *
+ * `viewerCwid` is the REAL signed-in user the answer is for. When it is given,
+ * is someone other than `cwid`, and is not a superuser (an observer or content
+ * editor using "View as"), a sensitive role is passed over as if not held, so
+ * the next role, or `null`, is returned. Every impersonation call site passes
+ * it. `exclude` passes over roles outright (a role whose one page is dark).
  */
-export async function resolveGlobalRole(cwid: string): Promise<GlobalRole | null> {
+export async function resolveGlobalRole(
+  cwid: string,
+  opts: { viewerCwid?: string; exclude?: readonly GlobalRole[] } = {},
+): Promise<GlobalRole | null> {
   if (!cwid) return null;
-  const results = await Promise.all(GLOBAL_ROLE_CHECKS.map(({ check }) => check(cwid).catch(() => false)));
-  const i = results.findIndex(Boolean);
-  return i === -1 ? null : GLOBAL_ROLE_CHECKS[i].role;
+  const checks = GLOBAL_ROLE_CHECKS.filter(({ role }) => !opts.exclude?.includes(role));
+  const results = await Promise.all(checks.map(({ check }) => check(cwid).catch(() => false)));
+  const held = checks.filter((_, i) => results[i]).map(({ role }) => role);
+  if (
+    opts.viewerCwid &&
+    opts.viewerCwid !== cwid &&
+    held.some((role) => SENSITIVE_GLOBAL_ROLES.has(role)) &&
+    !(await isSuperuser(opts.viewerCwid).catch(() => false))
+  ) {
+    return held.find((role) => !SENSITIVE_GLOBAL_ROLES.has(role)) ?? null;
+  }
+  return held[0] ?? null;
 }

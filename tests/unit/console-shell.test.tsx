@@ -67,6 +67,7 @@ const NO_TABS: ConsoleTabState = {
   reports: false,
   coi: false,
   dataSharing: false,
+  researchSecurity: false,
   activity: false,
   usage: false,
   orcidCoverage: false,

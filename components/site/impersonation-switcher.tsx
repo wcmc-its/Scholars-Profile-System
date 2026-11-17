@@ -62,6 +62,7 @@ import { mapStartError } from "@/components/edit/view-as-button";
 type GlobalRoleKey =
   | "honors_curator"
   | "data_sharing_viewer"
+  | "research_security_viewer"
   | "development"
   | "content_editor"
   | "core_director"
@@ -97,6 +98,7 @@ const ROLE_LABEL: Record<CandidateRole, string> = {
   // Same strings as `GLOBAL_ROLE_LABEL` (lib/auth/global-roles.ts).
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
+  research_security_viewer: "Research Security Viewer",
   development: "Development",
   content_editor: "Content Editor",
   core_director: "Cores director",

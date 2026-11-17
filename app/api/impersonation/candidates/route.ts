@@ -576,7 +576,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const profileless = pending.filter((c) => !withProfile.has(c));
       const [roles, globalSuperusers] = await Promise.all([
         within(
-          Promise.all(profileless.map((c) => resolveGlobalRole(c).catch(() => null))),
+          // The REAL caller: an observer or content editor is not told who
+          // holds a sensitive role (`resolveGlobalRole`).
+          Promise.all(
+            profileless.map((c) =>
+              resolveGlobalRole(c, { viewerCwid: session.cwid }).catch(() => null),
+            ),
+          ),
           ED_TIMEOUT_MS,
           profileless.map(() => null),
         ),

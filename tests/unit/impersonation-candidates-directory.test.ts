@@ -135,6 +135,9 @@ describe("candidates route — directory name search", () => {
     await get("q=pat");
 
     expect(resolveGlobalRole.mock.calls.map((c) => c[0])).toEqual(["glb0001"]);
+    // The REAL caller goes along, so a sensitive role is withheld from a
+    // non-superuser (`resolveGlobalRole`'s `viewerCwid`).
+    expect(resolveGlobalRole.mock.calls[0][1]).toEqual({ viewerCwid: "su001" });
   });
 
   it("drops a superuser global-role holder (R2)", async () => {

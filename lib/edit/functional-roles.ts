@@ -110,8 +110,23 @@ export const ALL_SCOPE = "*";
 /** The `/edit` dashboards a Reporting grant can admit, one by one, in the
  *  Insights menu's order. COI is public data (decision 2026-10-01); its page
  *  has no actions. */
-export const DASHBOARDS = ["activity", "usage", "etl-status", "orcid-coverage", "coi", "data-sharing"] as const;
+export const DASHBOARDS = [
+  "activity",
+  "usage",
+  "etl-status",
+  "orcid-coverage",
+  "coi",
+  "data-sharing",
+  "research-security",
+] as const;
 export type Dashboard = (typeof DASHBOARDS)[number];
+
+/**
+ * Dashboards an ad hoc `dash:` Reporting grant can never open: the role is the
+ * only way in. Not offered in the Assign dialog (so the route rejects it), and
+ * ignored by both gates in `dashboard-access.ts` if a row exists anyway.
+ */
+export const UNGRANTABLE_DASHBOARDS: ReadonlySet<Dashboard> = new Set<Dashboard>(["research-security"]);
 
 export const DASHBOARD_LABEL: Record<Dashboard, string> = {
   activity: "Activity",
@@ -121,6 +136,7 @@ export const DASHBOARD_LABEL: Record<Dashboard, string> = {
   "orcid-coverage": "ORCID coverage",
   coi: "COI",
   "data-sharing": "Data sharing",
+  "research-security": "Research security",
 };
 
 /** The page each dashboard lives on. */
@@ -131,6 +147,7 @@ export const DASHBOARD_HREF: Record<Dashboard, string> = {
   "etl-status": "/edit/etl-status",
   activity: "/edit/activity",
   "data-sharing": "/edit/data-sharing",
+  "research-security": "/edit/research-security",
 };
 
 /** Dashboard scope keys carry this prefix, so they can never collide with a

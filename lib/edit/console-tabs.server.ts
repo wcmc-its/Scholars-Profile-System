@@ -72,6 +72,7 @@ export const CONSOLE_TAB_IDS = [
   "reports",
   "coi",
   "dataSharing",
+  "researchSecurity",
   "activity",
   "usage",
   "orcidCoverage",
@@ -198,6 +199,9 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // variant of this dashboard has been decided; unlike Data Quality this
   // isn't cited to a spec doc yet, see Part B).
   dataSharing: (s, g) => dashboardVisible(s, "data-sharing", g),
+
+  // Superuser or research_security_viewer only (plus an explicit ad hoc grant).
+  researchSecurity: (s, g) => dashboardVisible(s, "research-security", g),
 
   // Gap 4 (usage half): any org-unit UnitAdmin grant (never `institution` —
   // WCM-wide aggregates stay internal), from any page. `canViewUsage`

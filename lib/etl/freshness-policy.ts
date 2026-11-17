@@ -323,6 +323,11 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Nightly step (cdk/lib/etl-stack.ts IthacaRoster, tier:"continue") that writes
   // source "Ithaca-Roster" (etl/ithaca-roster/index.ts withEtlRun).
   "Ithaca-Roster": { cadence: "nightly" },
+  // Nightly step (cdk/lib/etl-stack.ts ResearchSecurity, tier:"continue") that writes
+  // source "Research-Security" (etl/research-security/index.ts withEtlRun). A night
+  // with RESEARCH_SECURITY_ETL off still records a run, so staleness here means the
+  // step stopped running or its source guard refused the replace.
+  "Research-Security": { cadence: "nightly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.

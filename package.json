@@ -101,6 +101,7 @@
     "etl:clinical-trials:export": "tsx etl/clinical-trials/export.ts",
     "etl:clinical-trials:import": "tsx etl/clinical-trials/import.ts",
     "etl:data-sharing": "tsx etl/data-sharing/index.ts",
+    "etl:research-security": "tsx etl/research-security/index.ts",
     "etl:data-sharing:export": "tsx etl/data-sharing/export.ts",
     "etl:data-sharing:import": "tsx etl/data-sharing/import.ts",
     "etl:journal-impact-factor": "tsx etl/journal-impact-factor/index.ts",
