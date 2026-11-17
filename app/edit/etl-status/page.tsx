@@ -25,6 +25,7 @@ import {
   type EtlSourceRow,
   type EtlSourceState,
   type EtlStatusSummary,
+  UNREGISTERED_WINDOW_DAYS,
   loadEtlStatus,
   needsAttention,
 } from "@/lib/api/etl-status";
@@ -650,6 +651,32 @@ function StatusBody({
             </ul>
           )}
         </section>
+
+        {summary.unregistered.length === 0 ? null : (
+          <section
+            className="flex flex-col gap-2.5"
+            data-testid="etl-status-unregistered"
+            aria-label={`Not registered, ${summary.unregistered.length} imports`}
+          >
+            <h2 className="m-0 text-lg font-semibold">Not registered</h2>
+            <p className="text-muted-foreground m-0 max-w-[86ch] text-sm">
+              These imports ran in the last {UNREGISTERED_WINDOW_DAYS} days but are not on this
+              page&rsquo;s list, so nothing checks whether they are up to date. Contact ITS Support
+              with the name so they can be added.
+            </p>
+            <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+              {summary.unregistered.map((u) => (
+                <li key={u.source} data-testid={`etl-status-unregistered-${u.source}`}>
+                  <span className="font-mono">{u.source}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · last ran {formatShort(u.lastStartedAt, now)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <RunningNormally
           rows={ordered.map((row) => toNormalRow(row, now))}

@@ -29,6 +29,7 @@ import {
   HOUR_MS,
   TRACKED,
   type TrackedSpec,
+  UNSCHEDULED,
   gradeSource,
   isTrackedInEnv,
   liveStatusWhere,
@@ -119,12 +120,22 @@ export type EtlStatusSummary = {
   checkedAt: Date;
   runningTimeoutHours: number;
   sources: EtlSourceRow[];
+  /**
+   * Sources that wrote an `etl_run` row in the last {@link UNREGISTERED_WINDOW_DAYS}
+   * days but are in neither TRACKED nor UNSCHEDULED: a job somebody scheduled
+   * and never registered, so nothing grades its freshness. Shown, never graded.
+   */
+  unregistered: UnregisteredSource[];
   /** Everything except `up-to-date`, `known-issue`, and a `never-ran` source
    *  whose ack is still live — an ack is the decision that this one does NOT
    *  need attention today. A crash or a vanished task still counts: an ack
    *  covers a known staleness, never a job that died. */
   needsAttention: number;
 };
+
+export type UnregisteredSource = { source: string; lastStartedAt: Date };
+
+export const UNREGISTERED_WINDOW_DAYS = 30;
 
 /** @see EtlStatusSummary.needsAttention */
 export function needsAttention(row: EtlSourceRow): boolean {
@@ -240,10 +251,27 @@ export async function loadEtlStatus(
     (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || a.source.localeCompare(b.source),
   );
 
+  // One GROUP BY over the (source, startedAt) index — MAX per source is a loose
+  // index scan, so this stays cheap however many rows the reconcilers pile up.
+  const since = ts - UNREGISTERED_WINDOW_DAYS * 24 * HOUR_MS;
+  const groups = await client.etlRun.groupBy({
+    by: ["source"],
+    where: { source: { notIn: [...Object.keys(TRACKED), ...Object.keys(UNSCHEDULED)] } },
+    _max: { startedAt: true },
+  });
+  const unregistered = groups
+    .flatMap((g) =>
+      g._max.startedAt && g._max.startedAt.getTime() >= since
+        ? [{ source: g.source, lastStartedAt: g._max.startedAt }]
+        : [],
+    )
+    .sort((a, b) => a.source.localeCompare(b.source));
+
   return {
     checkedAt: now,
     runningTimeoutHours: RUNNING_TIMEOUT_HOURS,
     sources,
+    unregistered,
     needsAttention: sources.filter(needsAttention).length,
   };
 }

@@ -505,6 +505,30 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   },
 };
 
+/**
+ * `etl_run` sources that are deliberately NOT in TRACKED: hand-run imports and
+ * one-offs with no schedule, so there is no cadence to be late against.
+ * `/edit/etl-status` lists any source seen recently that is in neither table as
+ * "not registered", and tests/unit/etl-status-tracked-guard.test.ts fails a
+ * deployed step whose source is in neither. Each entry says why.
+ */
+export const UNSCHEDULED: Readonly<Record<string, string>> = {
+  "ClinicalTrials-Import": "hand-run bridge import (etl:clinical-trials:import)",
+  "DataSharing-Import": "hand-run bridge import (etl:data-sharing:import)",
+  "ED-StewardNames-Import": "hand-run (etl:ed:import-steward-names)",
+  "ED-Student-Programs": "hand-run (etl:ed:student-programs)",
+  "InfoEd-Biosketch-backfill": "hand-run --backfill of the tracked InfoEd-Biosketch step",
+  "Jenzabar-GS-Faculty": "hand-run (etl:jenzabar:import-gs-faculty)",
+  "COI-Statements-Import": "hand-run (etl:reciter:import-coi-statements)",
+  "HonorsSeed-Import": "hand-run seed (etl:honors:import-seed)",
+  CancerTaxonomy: "hand-run (etl:cancer-taxonomy)",
+  MeSH: "hand-run descriptor load (etl:mesh)",
+  "iLab-Import": "hand-run quarterly import (etl:ilab:import)",
+  "RCR-Import": "hand-run bridge import (etl:reciter-rcr:import)",
+  ReciterRefresh: "operator-run scanner; see etl/reciter-refresh/index.ts",
+  FamilyReview: "hand-run (etl:family-review)",
+};
+
 export interface SourceStatus {
   readonly source: string;
   readonly cadence: Cadence;
