@@ -174,6 +174,9 @@ export type PublicationFeedProps = {
   showTier?: ShowTier;
   /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the Stage select (`?stage=`). */
   stageFilter?: boolean;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the feed's tier totals while a
+   *  stage is picked, else null (the Activities tab count follows them). */
+  onStageTotals?: (totals: { strongly: number; also: number } | null) => void;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -223,6 +226,7 @@ export function PublicationFeed({
   renderHeader,
   showTier: showTierProp,
   stageFilter = false,
+  onStageTotals,
 }: PublicationFeedProps) {
   const pickedScholar = useScholarFilter();
   const scholar = scholarFilter ? pickedScholar : null;
@@ -315,6 +319,15 @@ export function PublicationFeed({
   // ---- derived view --------------------------------------------------------
   const data = loadMore ? list.data : primary.data;
   const tierTotals = data?.tierTotals ?? null;
+  const stageStrongly = stage !== "all" ? (tierTotals?.strongly ?? null) : null;
+  const stageAlso = stage !== "all" ? (tierTotals?.also ?? null) : null;
+  useEffect(() => {
+    onStageTotals?.(
+      stageStrongly === null || stageAlso === null ? null : { strongly: stageStrongly, also: stageAlso },
+    );
+  }, [onStageTotals, stageStrongly, stageAlso]);
+  // Unmount (tab switch) drops the override.
+  useEffect(() => () => onStageTotals?.(null), [onStageTotals]);
   const parentTierTotals = data?.parentTierTotals ?? null;
   const alsoInline = loadMore ? list.merged : pagedAlsoInline;
   const showTierSelect =
@@ -1074,6 +1087,7 @@ export function TopicPublicationFeed({
   showTier,
   retainScholarFilter,
   stageFilter = false,
+  onStageTotals,
 }: {
   topicSlug: string;
   /** The subtopic title/description live in the rail layout's subhead. */
@@ -1091,6 +1105,8 @@ export function TopicPublicationFeed({
   retainScholarFilter?: boolean;
   /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET. */
   stageFilter?: boolean;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET (TopicActivityFeed): tab count. */
+  onStageTotals?: (totals: { strongly: number; also: number } | null) => void;
 }) {
   const areaLabelFor = useMemo(() => {
     if (!loadMore || activeSubtopic || !subtopicLabels) return undefined;
@@ -1118,6 +1134,7 @@ export function TopicPublicationFeed({
       showTier={showTier}
       retainScholarFilter={retainScholarFilter}
       stageFilter={stageFilter}
+      onStageTotals={onStageTotals}
     />
   );
 }
