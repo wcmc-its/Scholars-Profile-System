@@ -32,7 +32,8 @@
  * the edits line) for their own people, and every other section unchanged
  * under a "Site-wide" heading; everyone else sees the whole page site-wide
  * (`loadDashboardScope`, decision 2026-11-17). The scope comes from the
- * session and is applied per request to data cached site-wide. Re-checked on
+ * session; the unit's numbers are small Athena reads over its own slugs,
+ * cached per slug set, apart from the site-wide entries. Re-checked on
  * every GET; the DATA is cached (daily / 12h) but the AUTH is not. Fails soft
  * to an "unavailable" notice per section if its own data source errors
  * (mirrors the /edit/activity pattern).
@@ -57,7 +58,7 @@ import {
   type NamedCount,
   type SearchVolume,
   type UsageSummary,
-  loadProfileViewsByDay,
+  loadScopedProfileViews,
   loadUsageSummary,
   scopeUsageSummary,
 } from "@/lib/api/usage-summary";
@@ -579,16 +580,18 @@ export default async function EditUsagePage({
   // their own people; everyone else, the whole page site-wide. Resolved from
   // the session, never from the request.
   const scope = await loadDashboardScope(session, "usage");
-  // The viewer's own profile numbers, filtered here from rows cached site-wide
-  // (never cached per viewer). Their own reads, so their own fail-soft.
+  // The viewer's own profile numbers: Athena reads over their people's slugs
+  // (from our DB, never the request), cached per slug set. Their own reads,
+  // so their own fail-soft.
   let unitSummary: UsageSummary | null = null;
   if (!scope.all && summary) {
     try {
-      const [rows, slugs] = await Promise.all([
-        loadProfileViewsByDay(range),
-        loadScopeSlugs(scope.memberCwids),
-      ]);
-      unitSummary = scopeUsageSummary(summary, rows, slugs);
+      const slugs = await loadScopeSlugs(scope.memberCwids);
+      unitSummary = scopeUsageSummary(
+        summary,
+        await loadScopedProfileViews(range, slugs.keys()),
+        slugs,
+      );
     } catch (err) {
       console.error(
         JSON.stringify({

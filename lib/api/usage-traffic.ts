@@ -11,13 +11,15 @@
  * row and is not cached (rare, and too large for a cache entry).
  *
  * A unit-scoped viewer's page lists (`loadScopedPageList`, and the workbook's
- * page sheets via `scopeExportRows`) hold only their own people's profile
- * pages: the rows are read site-wide and filtered here per viewer, so no slug
- * list ever reaches Athena SQL and no per-viewer result is cached.
+ * page sheets) hold only their own people's profile pages: the filter runs in
+ * Athena over the unit's slugs, which come from our own database and are
+ * allowlisted before they are inlined (`safeSlugs`), so the read is bounded by
+ * the unit, not the site. Cached per slug set, never per viewer.
  */
 import { unstable_cache } from "next/cache";
 
 import { runUsageQuery } from "@/lib/analytics/athena-client";
+import { chunkSlugs, safeSlugs, slugListKey } from "@/lib/analytics/usage-queries";
 import { resolveUsageRange } from "@/lib/api/usage-range";
 import { type ReferrerCategory, isReferrerCategory } from "@/lib/analytics/referrer-category";
 import {
@@ -178,60 +180,67 @@ export function loadTrafficList(
   )();
 }
 
-/** True when `path` is the profile page of one of `slugs` (lower-cased keys). */
-function isScopedProfilePath(path: string, slugs: ReadonlyMap<string, string>): boolean {
-  return path.startsWith("/") && slugs.has(path.slice(1).toLowerCase());
+/** Rows from several slug chunks as one list, busiest first (the SQL's own order). */
+function mergeByVisits(chunks: Row[][]): Row[] {
+  return chunks
+    .flat()
+    .sort(
+      (a, b) =>
+        Number(b.visits) - Number(a.visits) || (a.page ?? "").localeCompare(b.page ?? ""),
+    );
 }
 
 /**
  * One page of a pages list for a unit-scoped viewer: only the profile pages of
- * `slugs` (the viewer's people). Every profile page for the window + "Arrived
- * from" filter is read once, unpaged, and cached under a key that names no
- * viewer; the unit filter and the paging happen here. A page type other than
- * "all" / "profile" has no unit pages, so it is empty.
+ * `slugs` (the viewer's people; keys are their slugs, from our own database).
+ * The unit filter runs in Athena, one unpaged query per slug chunk, so the
+ * read is at most a few rows per person; the chunks are merged and paged here.
+ * Cached per window + "Arrived from" filter + slug set (a hash of the sorted
+ * list), so the key names no viewer. A page type other than "all" / "profile"
+ * has no unit pages, and a unit with no slugs has none either: both are empty
+ * with no Athena call and nothing cached.
  */
 export async function loadScopedPageList(
   w: TrafficWindow,
   req: Extract<TrafficListRequest, { list: "pages" }>,
   slugs: ReadonlyMap<string, string>,
 ): Promise<TrafficListPage> {
-  if (req.kind !== "all" && req.kind !== "profile") return { rows: [], total: 0 };
-  const all = await unstable_cache(
+  const safe = safeSlugs(slugs.keys());
+  if ((req.kind !== "all" && req.kind !== "profile") || safe.length === 0) {
+    return { rows: [], total: 0 };
+  }
+  const rows = await unstable_cache(
     async () =>
       shapePageList(
-        await runUsageQuery(
-          buildPageListQuery({
-            ...w,
-            kind: "profile",
-            categories: req.categories,
-            aiClasses: req.aiClasses,
-            offset: 0,
-            limit: null,
-          }),
+        mergeByVisits(
+          await Promise.all(
+            chunkSlugs(safe).map((chunk) =>
+              runUsageQuery(
+                buildPageListQuery({
+                  ...w,
+                  kind: "profile",
+                  categories: req.categories,
+                  aiClasses: req.aiClasses,
+                  slugs: chunk,
+                  offset: 0,
+                  limit: null,
+                }),
+              ),
+            ),
+          ),
         ),
       ).rows,
     [
-      "usage-traffic-profile-pages",
+      "usage-traffic-scoped-pages",
       CACHE_VERSION,
       w.since,
       w.until,
       JSON.stringify([req.categories, req.aiClasses]),
+      slugListKey(safe),
     ],
     { revalidate: TRAFFIC_CACHE_TTL_SECONDS, tags: ["usage-traffic"] },
   )();
-  const rows = all.filter((r) => isScopedProfilePath(r.label, slugs));
   return { rows: rows.slice(req.offset, req.offset + TRAFFIC_PAGE_SIZE), total: rows.length };
-}
-
-/** The workbook rows for a unit-scoped viewer: the Top pages and Landing pages
- *  sheets keep only their people's profile pages; the referrer sheets are
- *  site-wide and unchanged. */
-export function scopeExportRows(
-  rows: TrafficExportRows,
-  slugs: ReadonlyMap<string, string>,
-): TrafficExportRows {
-  const mine = (r: Row) => isScopedProfilePath(r.page ?? "", slugs);
-  return { ...rows, topPages: rows.topPages.filter(mine), landing: rows.landing.filter(mine) };
 }
 
 /** Every row the workbook lists, unpaged. */
@@ -242,14 +251,36 @@ export type TrafficExportRows = {
   landing: Row[];
 };
 
-/** The workbook's list sheets, read unpaged and uncached. Throws on any Athena error. */
-export async function loadTrafficExportRows(w: TrafficWindow): Promise<TrafficExportRows> {
+/**
+ * The workbook's list sheets, read unpaged and uncached. Throws on any Athena
+ * error. With `slugs` (a unit-scoped viewer's people) the Top pages and Landing
+ * pages sheets hold only their profile pages, filtered in Athena one slug
+ * chunk at a time (no slugs: both empty, no read); the referrer sheets are
+ * site-wide either way.
+ */
+export async function loadTrafficExportRows(
+  w: TrafficWindow,
+  slugs?: ReadonlyMap<string, string>,
+): Promise<TrafficExportRows> {
   const all = { categories: [] as ReferrerCategory[], offset: 0, limit: null };
+  const chunks = slugs ? chunkSlugs(safeSlugs(slugs.keys())) : null;
   const [referringSites, referringPages, topPages, landing] = await Promise.all([
     runUsageQuery(buildReferrerListQuery({ ...w, ...all, view: "site" })),
     runUsageQuery(buildReferrerListQuery({ ...w, ...all, view: "page" })),
-    runUsageQuery(buildPageListQuery({ ...w, ...all, kind: "all", aiClasses: [] })),
-    runUsageQuery(buildLandingExportQuery(w.since, w.until)),
+    chunks
+      ? Promise.all(
+          chunks.map((c) =>
+            runUsageQuery(
+              buildPageListQuery({ ...w, ...all, kind: "profile", aiClasses: [], slugs: c }),
+            ),
+          ),
+        ).then(mergeByVisits)
+      : runUsageQuery(buildPageListQuery({ ...w, ...all, kind: "all", aiClasses: [] })),
+    chunks
+      ? Promise.all(
+          chunks.map((c) => runUsageQuery(buildLandingExportQuery(w.since, w.until, c))),
+        ).then(mergeByVisits)
+      : runUsageQuery(buildLandingExportQuery(w.since, w.until)),
   ]);
   return { referringSites, referringPages, topPages, landing };
 }

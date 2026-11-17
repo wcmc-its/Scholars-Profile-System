@@ -6,9 +6,10 @@
  * rule), so any window back to the first rollup can be read. Site-wide
  * aggregates, no PII. A department / division / center admin sees the profile
  * numbers limited to their own people (decision 2026-11-17, reversing
- * 2026-07-03): the per-day, per-slug profile views are read once per window
- * ({@link loadProfileViewsByDay}) and filtered per viewer in the app
- * ({@link scopeUsageSummary}), never cached per viewer.
+ * 2026-07-03): two small Athena reads aggregated over the unit's slugs
+ * ({@link loadScopedProfileViews}), cached per window + slug set (never per
+ * viewer, never in the site-wide entry), laid over the site-wide summary by
+ * {@link scopeUsageSummary}.
  *
  * The Athena queries are wrapped in `unstable_cache` (daily revalidate), keyed
  * per window (`since` + `until`), so each range caches on its own: the rollup
@@ -23,7 +24,13 @@
 import { unstable_cache } from "next/cache";
 
 import { runUsageQuery, type AthenaRow } from "@/lib/analytics/athena-client";
-import { buildUsageQueries } from "@/lib/analytics/usage-queries";
+import {
+  buildScopedProfileQueries,
+  buildUsageQueries,
+  chunkSlugs,
+  safeSlugs,
+  slugListKey,
+} from "@/lib/analytics/usage-queries";
 import { type HourBucket, type HourlyTraffic, easternHour } from "@/lib/api/usage-hourly";
 
 /** Default rolling window (the page's "Last 30 days"). */
@@ -194,57 +201,79 @@ export function loadUsageSummary(window: UsageWindow): Promise<UsageSummary> {
   )();
 }
 
-/** One (day, slug) profile-view count: a tuple, to keep the cache entry small. */
-export type ProfileDayViews = [day: string, slug: string, views: number];
+/** A unit's profile views: per day, and per (lower-cased) slug as logged. */
+export type ScopedProfileViews = { byDay: DayViews[]; bySlug: ProfileViews[] };
 
 /**
- * Profile views per day and slug for a window, cached per window like the
- * summary and shared by every unit-scoped viewer (the rows are site-wide; each
- * viewer's filter is applied afterwards by {@link scopeUsageSummary}). Its own
- * cache entry, read only for a scoped viewer, so the site-wide page never
- * waits on it. A thrown Athena error propagates (never cached).
+ * Profile views for a set of slugs (a unit-scoped viewer's people) over a
+ * window, aggregated in Athena: at most one row per day and one per slug, so
+ * the read stays small however long the range. `slugs` comes from our own
+ * database (`loadScopeSlugs`), never from a request, and only allowlisted ones
+ * are inlined ({@link safeSlugs}); a long list is split so no query nears
+ * Athena's size limit, and the chunks are summed here.
+ *
+ * Cached per window + slug set (a hash of the sorted list), so two admins of
+ * one unit share an entry and the site-wide summary's entry is untouched. No
+ * slugs = zeros with no Athena call and nothing cached. A thrown Athena error
+ * propagates (never cached).
  */
-export function loadProfileViewsByDay(window: UsageWindow): Promise<ProfileDayViews[]> {
+export function loadScopedProfileViews(
+  window: UsageWindow,
+  slugs: Iterable<string>,
+): Promise<ScopedProfileViews> {
+  const safe = safeSlugs(slugs);
+  if (safe.length === 0) return Promise.resolve({ byDay: [], bySlug: [] });
   return unstable_cache(
-    async (): Promise<ProfileDayViews[]> => {
-      const rows = await runUsageQuery(
-        buildUsageQueries(window.since, window.until).profileViewsByDay,
+    async (): Promise<ScopedProfileViews> => {
+      const byDay = new Map<string, number>();
+      const bySlug = new Map<string, number>();
+      await Promise.all(
+        chunkSlugs(safe).map(async (chunk) => {
+          const q = buildScopedProfileQueries(window.since, window.until, chunk);
+          const [days, profiles] = await Promise.all([
+            runUsageQuery(q.byDay),
+            runUsageQuery(q.byProfile),
+          ]);
+          for (const r of days) byDay.set(r.dt ?? "", (byDay.get(r.dt ?? "") ?? 0) + n(r.views));
+          for (const r of profiles) {
+            bySlug.set(r.slug ?? "", (bySlug.get(r.slug ?? "") ?? 0) + n(r.views));
+          }
+        }),
       );
-      return rows.map((r) => [r.dt ?? "", r.slug ?? "", n(r.views)]);
+      return {
+        byDay: [...byDay].map(([day, views]) => ({ day, views })),
+        bySlug: [...bySlug].map(([slug, views]) => ({ slug, views })),
+      };
     },
-    ["usage-profile-views-by-day", "v1", window.since, window.until],
+    ["usage-scoped-profile-views", "v1", window.since, window.until, slugListKey(safe)],
     { revalidate: USAGE_CACHE_TTL_SECONDS, tags: ["usage-summary"] },
   )();
 }
 
 /**
- * A summary's profile numbers (total, by day, top profiles) limited to one
- * viewer's people. `slugs` maps every slug of theirs, lower-cased, to the
+ * A summary's profile numbers (total, by day, top profiles) replaced by one
+ * viewer's people's. `slugs` maps every slug of theirs, lower-cased, to the
  * person's current slug, so views of a former slug count under the current
  * one. Top profiles lists every one of them, not the site-wide top 25. The
  * site-wide fields (searches, geo, device, hourly) pass through untouched.
  */
 export function scopeUsageSummary(
   summary: UsageSummary,
-  rows: readonly ProfileDayViews[],
+  views: ScopedProfileViews,
   slugs: ReadonlyMap<string, string>,
 ): UsageSummary {
-  const byDay = new Map<string, number>();
-  const bySlug = new Map<string, number>();
-  for (const [day, slug, views] of rows) {
+  const byCurrent = new Map<string, number>();
+  for (const { slug, views: count } of views.bySlug) {
     const current = slugs.get(slug.toLowerCase());
     if (current === undefined) continue;
-    byDay.set(day, (byDay.get(day) ?? 0) + views);
-    bySlug.set(current, (bySlug.get(current) ?? 0) + views);
+    byCurrent.set(current, (byCurrent.get(current) ?? 0) + count);
   }
-  const pageviewsByDay = [...byDay]
-    .map(([day, views]) => ({ day, views }))
-    .sort((a, b) => a.day.localeCompare(b.day));
+  const pageviewsByDay = [...views.byDay].sort((a, b) => a.day.localeCompare(b.day));
   return {
     ...summary,
     totalPageviews: pageviewsByDay.reduce((sum, r) => sum + r.views, 0),
     pageviewsByDay,
-    topProfiles: [...bySlug]
+    topProfiles: [...byCurrent]
       .map(([slug, views]) => ({ slug, views }))
       .sort((a, b) => b.views - a.views || a.slug.localeCompare(b.slug)),
   };

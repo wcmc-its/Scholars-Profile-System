@@ -20,7 +20,6 @@ import {
   loadTrafficExportRows,
   loadTrafficOverview,
   rangeFromSearchParams,
-  scopeExportRows,
 } from "@/lib/api/usage-traffic";
 import { logEditDenial } from "@/lib/edit/authz";
 import {
@@ -53,15 +52,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const w = { since: range.since, until: range.until };
   try {
     const scope = await loadDashboardScope(session, "usage");
-    const [overview, lists] = await Promise.all([loadTrafficOverview(w), loadTrafficExportRows(w)]);
-    const buffer = scope.all
-      ? await buildUsageTrafficWorkbook(overview, lists, grain)
-      : await buildUsageTrafficWorkbook(
-          overview,
-          scopeExportRows(lists, await loadScopeSlugs(scope.memberCwids)),
-          grain,
-          scope.unitNames.join(", "),
-        );
+    const [overview, lists] = await Promise.all([
+      loadTrafficOverview(w),
+      loadTrafficExportRows(w, scope.all ? undefined : await loadScopeSlugs(scope.memberCwids)),
+    ]);
+    const buffer = await buildUsageTrafficWorkbook(
+      overview,
+      lists,
+      grain,
+      scope.all ? undefined : scope.unitNames.join(", "),
+    );
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
