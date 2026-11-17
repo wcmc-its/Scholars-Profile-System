@@ -529,6 +529,14 @@ export const UNSCHEDULED: Readonly<Record<string, string>> = {
   FamilyReview: "hand-run (etl:family-review)",
 };
 
+/**
+ * Logged by etl:freshness once per unregistered source (see findUnregistered in
+ * lib/api/etl-status.ts). 🔴 MIRRORED in cdk/lib/observability-stack.ts
+ * ETL_HEARTBEAT_WARNS, whose metric filter counts it into sps-warn-<env>;
+ * tests/unit/etl-status-tracked-guard.test.ts fails if the two drift.
+ */
+export const UNREGISTERED_WARN_MARKER = "WARN unregistered";
+
 export interface SourceStatus {
   readonly source: string;
   readonly cadence: Cadence;

@@ -137,6 +137,33 @@ export type UnregisteredSource = { source: string; lastStartedAt: Date };
 
 export const UNREGISTERED_WINDOW_DAYS = 30;
 
+/**
+ * Sources that ran in the last {@link UNREGISTERED_WINDOW_DAYS} days but are in
+ * neither TRACKED nor UNSCHEDULED. Shared by this page and the etl:freshness
+ * heartbeat (which warns on each one), so the two can never disagree.
+ *
+ * One GROUP BY over the (source, startedAt) index — MAX per source is a loose
+ * index scan, so this stays cheap however many rows the reconcilers pile up.
+ */
+export async function findUnregistered(
+  client: EtlStatusClient,
+  now: number,
+): Promise<UnregisteredSource[]> {
+  const since = now - UNREGISTERED_WINDOW_DAYS * 24 * HOUR_MS;
+  const groups = await client.etlRun.groupBy({
+    by: ["source"],
+    where: { source: { notIn: [...Object.keys(TRACKED), ...Object.keys(UNSCHEDULED)] } },
+    _max: { startedAt: true },
+  });
+  return groups
+    .flatMap((g) =>
+      g._max.startedAt && g._max.startedAt.getTime() >= since
+        ? [{ source: g.source, lastStartedAt: g._max.startedAt }]
+        : [],
+    )
+    .sort((a, b) => a.source.localeCompare(b.source));
+}
+
 /** @see EtlStatusSummary.needsAttention */
 export function needsAttention(row: EtlSourceRow): boolean {
   if (row.state === "up-to-date" || row.state === "known-issue") return false;
@@ -251,21 +278,7 @@ export async function loadEtlStatus(
     (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || a.source.localeCompare(b.source),
   );
 
-  // One GROUP BY over the (source, startedAt) index — MAX per source is a loose
-  // index scan, so this stays cheap however many rows the reconcilers pile up.
-  const since = ts - UNREGISTERED_WINDOW_DAYS * 24 * HOUR_MS;
-  const groups = await client.etlRun.groupBy({
-    by: ["source"],
-    where: { source: { notIn: [...Object.keys(TRACKED), ...Object.keys(UNSCHEDULED)] } },
-    _max: { startedAt: true },
-  });
-  const unregistered = groups
-    .flatMap((g) =>
-      g._max.startedAt && g._max.startedAt.getTime() >= since
-        ? [{ source: g.source, lastStartedAt: g._max.startedAt }]
-        : [],
-    )
-    .sort((a, b) => a.source.localeCompare(b.source));
+  const unregistered = await findUnregistered(client, ts);
 
   return {
     checkedAt: now,
