@@ -132,7 +132,8 @@ function stubServer(counts: Counts) {
           total: 1,
           totalAllTypes: 3,
           totalResearchOnly: 1,
-          tierTotals: { strongly: 1, also: 0 },
+          // A picked stage narrows the feed: its totals differ from the area's.
+          tierTotals: q.get("stage") ? { strongly: 7, also: 0 } : { strongly: 1, also: 0 },
           parentTierTotals: { strongly: 1, also: 0 },
           page: 1,
           pageSize: 20,
@@ -192,6 +193,18 @@ describe("flag on: TopicActivityFeed", () => {
     // Publications view keeps the research-articles toggle; no related switch (no also tier).
     expect(screen.getByText(/Show all publication types/)).toBeTruthy();
     expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("a picked stage drives the Publications tab count; All stages restores it", async () => {
+    stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
+    render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} stageFilter />);
+    await waitFor(() => expect(tabCount(/Grants/)).toBe("3"));
+    expect(tabCount(/Publications/)).toBe("1");
+    fireEvent.change(select("Translational stage")!, { target: { value: "T1" } });
+    await waitFor(() => expect(tabCount(/Publications/)).toBe("7"));
+    expect(tabCount(/Grants/)).toBe("3");
+    fireEvent.change(select("Translational stage")!, { target: { value: "all" } });
+    await waitFor(() => expect(tabCount(/Publications/)).toBe("1"));
   });
 
   it("switching to Grants fetches the activity route; Sort and the related switch reach it", async () => {

@@ -198,12 +198,21 @@ export function TopicActivityFeed({
   const [related, setRelated] = useState(false);
   const scholar = useScholarFilter();
   const data = useActivityScholars(topicSlug, activeSubtopic);
+  // A picked stage narrows the publications feed; its totals (already scoped to
+  // the scholar pick) replace the Publications tab count while it is active.
+  const [stageTotals, setStageTotals] = useState<Tiers | null>(null);
 
   // Tab counts: the picked scholar's, else the area's.
   const pickedRow = scholar ? data?.scholars.find((s) => s.cwid === scholar.cwid) : undefined;
   const zero = { strongly: 0, also: 0 };
   const scopeTiers = (t: FeedType): Tiers | null =>
-    data ? (scholar ? (pickedRow?.[TIER_KEY[t]] ?? zero) : data.totals[TIER_KEY[t]]) : null;
+    t === "publications" && stageTotals
+      ? stageTotals
+      : data
+        ? scholar
+          ? (pickedRow?.[TIER_KEY[t]] ?? zero)
+          : data.totals[TIER_KEY[t]]
+        : null;
   const tabCount = (t: FeedType) => {
     const tiers = scopeTiers(t);
     return tiers ? shownCount(tiers, related) : null;
@@ -284,6 +293,7 @@ export function TopicActivityFeed({
         showTier={showTier}
         retainScholarFilter
         stageFilter={stageFilter}
+        onStageTotals={setStageTotals}
       />
     );
   }
