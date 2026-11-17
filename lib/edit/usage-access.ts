@@ -2,11 +2,14 @@
  * Access gate for the global Usage dashboard (`/edit/usage`) — and, by reuse,
  * `/edit/orcid-coverage` and the Article-counts report: a **superuser**, or
  * **any org-unit administrator** — a person holding at least one `UnitAdmin`
- * grant (owner OR curator) on a department / division / center / core. The
- * dashboard shows site-wide aggregates only, so a unit admin sees the same
- * global view a superuser does (decision 2026-07-03); there is no per-unit
- * scoping to resolve, hence a plain existence check rather than the
- * owner-subtree resolver in `administrators.ts`.
+ * grant (owner OR curator) on a department / division / center / core. This
+ * is the gate only, a plain existence check. What the viewer then sees on
+ * Usage is `loadDashboardScope` (`lib/edit/dashboard-access.ts`): a department
+ * / division / center admin gets the profile sections limited to their own
+ * people, with every other section site-wide (decision 2026-11-17, reversing
+ * the 2026-07-03 "global view for everyone"); a core-only admin and the
+ * site-wide roles see the whole page site-wide. ORCID coverage and the
+ * Article-counts report are not scoped by it.
  *
  * An `institution` grant (#2695 — an admin at an affiliate such as Hamad,
  * scoped to that institution's scholars) does NOT qualify: WCM-wide usage and

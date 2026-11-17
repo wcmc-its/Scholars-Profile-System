@@ -127,7 +127,12 @@ describe("loadEditsByHour", () => {
     const sql = (strings as string[]).join("?");
     expect(sql).toContain("FROM scholars_audit.manual_edit_audit");
     expect(sql).toContain("DATE_FORMAT(ts, '%Y-%m-%d %H')");
-    expect(values).toEqual([new Date("2026-11-10T00:00:00Z"), new Date("2026-11-18T00:00:00Z")]);
+    // The trailing 1 is the scope predicate: always true for the site-wide read.
+    expect(values).toEqual([
+      new Date("2026-11-10T00:00:00Z"),
+      new Date("2026-11-18T00:00:00Z"),
+      1,
+    ]);
     expect(h.cacheKeys).toEqual([["usage-edits-by-hour", "v1", "2026-11-10", "2026-11-17"]]);
   });
 

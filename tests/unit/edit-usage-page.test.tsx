@@ -14,6 +14,10 @@ const h = vi.hoisted(() => ({
   mockLoadHealth: vi.fn(),
   mockLoadTraffic: vi.fn(),
   mockLoadEdits: vi.fn(),
+  mockLoadEditsUncached: vi.fn(),
+  mockScope: vi.fn(),
+  mockScopeSlugs: vi.fn(),
+  mockProfileViews: vi.fn(),
   mockFindMany: vi.fn(),
   mockPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -31,13 +35,22 @@ vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: h.mockCanViewUsage }))
 vi.mock("@/lib/api/usage-summary", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/usage-summary")>()),
   loadUsageSummary: h.mockLoadUsage,
+  loadProfileViewsByDay: h.mockProfileViews,
+}));
+vi.mock("@/lib/edit/dashboard-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/edit/dashboard-access")>()),
+  loadDashboardScope: h.mockScope,
+  loadScopeSlugs: h.mockScopeSlugs,
 }));
 vi.mock("@/lib/api/usage-traffic", () => ({ loadTrafficOverview: h.mockLoadTraffic }));
 vi.mock("@/lib/api/service-health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
   loadServiceHealth: h.mockLoadHealth,
 }));
-vi.mock("@/lib/api/usage-edits", () => ({ loadEditsByHour: h.mockLoadEdits }));
+vi.mock("@/lib/api/usage-edits", () => ({
+  loadEditsByHour: h.mockLoadEdits,
+  loadEditsByHourUncached: h.mockLoadEditsUncached,
+}));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -154,6 +167,10 @@ beforeEach(() => {
   // render their empty state so no list fetch fires.
   h.mockLoadTraffic.mockResolvedValue(TRAFFIC_EMPTY);
   h.mockLoadEdits.mockResolvedValue([]);
+  h.mockLoadEditsUncached.mockResolvedValue([]);
+  h.mockScope.mockResolvedValue({ all: true });
+  h.mockScopeSlugs.mockResolvedValue(new Map());
+  h.mockProfileViews.mockResolvedValue([]);
   h.mockFindMany.mockResolvedValue([
     { slug: "test-person-1", cwid: "tst0001", preferredName: "Test Person One" },
   ]);
@@ -342,6 +359,118 @@ describe("/edit/usage", () => {
     expect(root.getByTestId("service-health-unavailable")).toBeTruthy();
     expect(root.queryByTestId("service-health-trend")).toBeNull();
     expect(root.getByTestId("usage-total-pageviews")).toBeTruthy();
+  });
+});
+
+describe("/edit/usage for a unit admin", () => {
+  const SCOPE = {
+    all: false,
+    unitNames: ["Department of Testing", "Alpha Center"],
+    unitCodes: ["N1000"],
+    centerCodes: ["ctr_alpha"],
+    memberCwids: ["tst0001", "tst0002"],
+  };
+
+  beforeEach(() => {
+    h.mockGetEditSession.mockResolvedValue({ cwid: "adm002", isSuperuser: false, isCommsSteward: false });
+    h.mockScope.mockResolvedValue(SCOPE);
+    h.mockScopeSlugs.mockResolvedValue(
+      new Map([
+        ["test-person-1", "test-person-1"],
+        ["test-person-1-old", "test-person-1"],
+        ["test-person-2", "test-person-2"],
+      ]),
+    );
+    h.mockProfileViews.mockResolvedValue([
+      ["2026-08-26", "test-person-1", 30],
+      ["2026-08-27", "test-person-1-old", 5],
+      ["2026-08-27", "test-person-2", 10],
+      ["2026-08-27", "test-person-9", 600],
+    ]);
+  });
+
+  it("a site-wide viewer's page has no Site-wide heading and the plain title", async () => {
+    h.mockGetEditSession.mockResolvedValue(ADMIN);
+    h.mockScope.mockResolvedValue({ all: true });
+    const root = await renderPage();
+    expect(root.getByRole("heading", { level: 1 }).textContent).toBe("Usage");
+    expect(root.queryByTestId("usage-site-wide")).toBeNull();
+    expect(h.mockProfileViews).not.toHaveBeenCalled();
+    expect(h.mockScope).toHaveBeenCalledWith(ADMIN, "usage");
+  });
+
+  it("names the units in the title and intro", async () => {
+    const root = await renderPage();
+    expect(root.getByRole("heading", { level: 1 }).textContent).toBe(
+      "Usage: Department of Testing, Alpha Center",
+    );
+    expect(
+      root.getByText(/Profile usage for your units, then site-wide usage, Aug 26 – Aug 29\./),
+    ).toBeTruthy();
+  });
+
+  it("shows the unit's own pageviews, busiest day and profiles (former slug counted, not cut to a site top list)", async () => {
+    const root = await renderPage();
+    expect(root.getByTestId("usage-total-pageviews").textContent).toBe("45");
+    expect(root.getByTestId("usage-busiest-day").textContent).toBe("30");
+    expect(root.getByTestId("usage-busiest-day").nextElementSibling?.textContent).toBe("Aug 26");
+    const profiles = within(root.getByTestId("usage-top-profiles"));
+    expect(profiles.getByText("Test Person One")).toBeTruthy();
+    expect(profiles.getByText("/test-person-2")).toBeTruthy();
+    expect(profiles.queryByText("/test-person-9")).toBeNull();
+    expect(profiles.queryByText("/test-person-3")).toBeNull();
+    expect(h.mockFindMany.mock.calls[0][0].where.slug.in).toEqual(["test-person-1", "test-person-2"]);
+  });
+
+  it("keeps every other section, unchanged, after a Site-wide heading", async () => {
+    const root = await renderPage();
+    const heading = root.getByTestId("usage-site-wide");
+    expect(within(heading).getByRole("heading", { level: 2 }).textContent).toBe("Site-wide");
+    const after = (testId: string) =>
+      heading.compareDocumentPosition(root.getByTestId(testId)) & Node.DOCUMENT_POSITION_FOLLOWING;
+    for (const id of [
+      "usage-searches",
+      "service-health-uptime",
+      "service-health-alarm-firings",
+      "usage-top-search-terms",
+      "usage-suggested-search-terms",
+      "usage-traffic",
+      "usage-traffic-sources",
+      "service-health-trend",
+    ]) {
+      expect(after(id), id).toBeTruthy();
+    }
+    for (const id of ["usage-total-pageviews", "usage-busiest-day", "usage-top-profiles"]) {
+      expect(after(id), id).toBeFalsy();
+    }
+    expect(root.getByTestId("usage-searches").textContent).toBe("160");
+    expect(root.getAllByTestId("usage-total-pageviews")).toHaveLength(1);
+    expect(root.getAllByTestId("usage-top-profiles")).toHaveLength(1);
+  });
+
+  it("reads the edits line for the viewer's scope, outside the shared cache", async () => {
+    const hourly = shapeHourly([{ dt: "2026-09-20", slot: "14|human", hits: "5" }]);
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-08-26", hourly });
+    const root = await renderPage();
+    expect(h.mockLoadEdits).not.toHaveBeenCalled();
+    expect(h.mockLoadEditsUncached).toHaveBeenCalledTimes(1);
+    const [, since, until, filter] = h.mockLoadEditsUncached.mock.calls[0];
+    expect([since, until]).toEqual(["2026-08-26", "2026-09-24"]);
+    expect(filter.values).toEqual(["tst0001", "tst0002", "N1000", "ctr_alpha"]);
+    expect(root.getByTestId("usage-hourly-legend-edits").textContent).toContain(
+      "Profile edits, your units (right scale)",
+    );
+  });
+
+  it("fails soft when the unit's own read fails: the site-wide sections still draw", async () => {
+    h.mockProfileViews.mockRejectedValue(new Error("athena"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    expect(root.getByTestId("usage-unit-unavailable")).toBeTruthy();
+    expect(root.queryByTestId("usage-total-pageviews")).toBeNull();
+    expect(root.queryByTestId("usage-top-profiles")).toBeNull();
+    expect(root.getByTestId("usage-site-wide")).toBeTruthy();
+    expect(root.getByTestId("usage-searches").textContent).toBe("160");
   });
 });
 

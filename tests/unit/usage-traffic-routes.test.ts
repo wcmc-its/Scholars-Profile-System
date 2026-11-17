@@ -14,7 +14,12 @@ const h = vi.hoisted(() => ({
   runQuery: vi.fn(),
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.session }));
-vi.mock("@/lib/edit/dashboard-access", () => ({ canViewDashboard: h.canView }));
+// Site-wide viewers here; the unit-scoped paths are in unit-scoped-usage.test.ts.
+vi.mock("@/lib/edit/dashboard-access", () => ({
+  canViewDashboard: h.canView,
+  loadDashboardScope: async () => ({ all: true }),
+  loadScopeSlugs: async () => new Map(),
+}));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: h.logDenial }));
 vi.mock("@/lib/analytics/athena-client", () => ({ runUsageQuery: h.runQuery }));
 // unstable_cache needs Next's incremental cache; run the loader directly.

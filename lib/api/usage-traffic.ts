@@ -9,6 +9,11 @@
  * is nightly). A thrown Athena error propagates out of the uncached loader, so
  * a failure is never cached as an empty result. The Excel export reads every
  * row and is not cached (rare, and too large for a cache entry).
+ *
+ * A unit-scoped viewer's page lists (`loadScopedPageList`, and the workbook's
+ * page sheets via `scopeExportRows`) hold only their own people's profile
+ * pages: the rows are read site-wide and filtered here per viewer, so no slug
+ * list ever reaches Athena SQL and no per-viewer result is cached.
  */
 import { unstable_cache } from "next/cache";
 
@@ -171,6 +176,62 @@ export function loadTrafficList(
     ["usage-traffic-list", CACHE_VERSION, w.since, w.until, JSON.stringify(req)],
     { revalidate: TRAFFIC_CACHE_TTL_SECONDS, tags: ["usage-traffic"] },
   )();
+}
+
+/** True when `path` is the profile page of one of `slugs` (lower-cased keys). */
+function isScopedProfilePath(path: string, slugs: ReadonlyMap<string, string>): boolean {
+  return path.startsWith("/") && slugs.has(path.slice(1).toLowerCase());
+}
+
+/**
+ * One page of a pages list for a unit-scoped viewer: only the profile pages of
+ * `slugs` (the viewer's people). Every profile page for the window + "Arrived
+ * from" filter is read once, unpaged, and cached under a key that names no
+ * viewer; the unit filter and the paging happen here. A page type other than
+ * "all" / "profile" has no unit pages, so it is empty.
+ */
+export async function loadScopedPageList(
+  w: TrafficWindow,
+  req: Extract<TrafficListRequest, { list: "pages" }>,
+  slugs: ReadonlyMap<string, string>,
+): Promise<TrafficListPage> {
+  if (req.kind !== "all" && req.kind !== "profile") return { rows: [], total: 0 };
+  const all = await unstable_cache(
+    async () =>
+      shapePageList(
+        await runUsageQuery(
+          buildPageListQuery({
+            ...w,
+            kind: "profile",
+            categories: req.categories,
+            aiClasses: req.aiClasses,
+            offset: 0,
+            limit: null,
+          }),
+        ),
+      ).rows,
+    [
+      "usage-traffic-profile-pages",
+      CACHE_VERSION,
+      w.since,
+      w.until,
+      JSON.stringify([req.categories, req.aiClasses]),
+    ],
+    { revalidate: TRAFFIC_CACHE_TTL_SECONDS, tags: ["usage-traffic"] },
+  )();
+  const rows = all.filter((r) => isScopedProfilePath(r.label, slugs));
+  return { rows: rows.slice(req.offset, req.offset + TRAFFIC_PAGE_SIZE), total: rows.length };
+}
+
+/** The workbook rows for a unit-scoped viewer: the Top pages and Landing pages
+ *  sheets keep only their people's profile pages; the referrer sheets are
+ *  site-wide and unchanged. */
+export function scopeExportRows(
+  rows: TrafficExportRows,
+  slugs: ReadonlyMap<string, string>,
+): TrafficExportRows {
+  const mine = (r: Row) => isScopedProfilePath(r.page ?? "", slugs);
+  return { ...rows, topPages: rows.topPages.filter(mine), landing: rows.landing.filter(mine) };
 }
 
 /** Every row the workbook lists, unpaged. */
