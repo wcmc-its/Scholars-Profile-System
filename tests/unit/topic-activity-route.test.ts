@@ -136,4 +136,17 @@ describe("flag on", () => {
     mockGetScholars.mockResolvedValueOnce(null);
     expect((await call("?kind=scholars")).status).toBe(404);
   });
+
+  it("kind=scholars forwards a valid stage only while the stage flag is on", async () => {
+    await call("?kind=scholars&stage=T1");
+    expect(mockGetScholars.mock.calls.at(-1)![1]).toEqual({ subtopic: undefined });
+    process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+    try {
+      await call("?kind=scholars&stage=T1");
+      expect(mockGetScholars.mock.calls.at(-1)![1]).toEqual({ subtopic: undefined, stage: "T1" });
+      expect((await call("?kind=scholars&stage=NA")).status).toBe(400);
+    } finally {
+      delete process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
+    }
+  });
 });

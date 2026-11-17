@@ -42,6 +42,7 @@ import {
 import { setScholarFilter, useScholarFilter } from "@/components/taxonomy/scholar-filter";
 import { FEED_CHUNK, loadMoreLabel, nextChunkSize, writeShownParam } from "@/lib/taxonomy/feed-load-more";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
+import type { TranslationalStage } from "@/lib/translational-stage";
 import type {
   TopicActivityKind,
   TopicActivityResult,
@@ -152,14 +153,23 @@ const fetchActivity = (url: string) => fetchJson<TopicActivityResult>(url);
 function useActivityScholars(
   topicSlug: string,
   subtopic: string | null,
+  stage: TranslationalStage | null,
 ): TopicActivityScholarsResult | null {
   const [data, setData] = useState<TopicActivityScholarsResult | null>(null);
+  // A new area clears the counts; a stage change keeps them until the refetch
+  // lands (no chip-row flicker).
+  const area = `${topicSlug}|${subtopic ?? ""}`;
+  const lastArea = useRef(area);
   useEffect(() => {
     let cancelled = false;
-    setData(null);
+    if (lastArea.current !== area) {
+      lastArea.current = area;
+      setData(null);
+    }
     const url = new URL(`/api/topics/${encodeURIComponent(topicSlug)}/activity`, window.location.origin);
     url.searchParams.set("kind", "scholars");
     if (subtopic) url.searchParams.set("subtopic", subtopic);
+    if (stage) url.searchParams.set("stage", stage);
     fetchJson<TopicActivityScholarsResult>(url.toString())
       .then((d) => {
         if (!cancelled) setData(d);
@@ -170,7 +180,7 @@ function useActivityScholars(
     return () => {
       cancelled = true;
     };
-  }, [topicSlug, subtopic]);
+  }, [topicSlug, subtopic, stage, area]);
   return data;
 }
 
@@ -197,22 +207,16 @@ export function TopicActivityFeed({
   }, []);
   const [related, setRelated] = useState(false);
   const scholar = useScholarFilter();
-  const data = useActivityScholars(topicSlug, activeSubtopic);
-  // A picked stage narrows the publications feed; its totals (already scoped to
-  // the scholar pick) replace the Publications tab count while it is active.
-  const [stageTotals, setStageTotals] = useState<Tiers | null>(null);
+  // A picked stage narrows the publications feed; the chips' and tabs'
+  // publication counts follow it (server-side, `?stage=`).
+  const [stage, setStage] = useState<TranslationalStage | null>(null);
+  const data = useActivityScholars(topicSlug, activeSubtopic, stage);
 
   // Tab counts: the picked scholar's, else the area's.
   const pickedRow = scholar ? data?.scholars.find((s) => s.cwid === scholar.cwid) : undefined;
   const zero = { strongly: 0, also: 0 };
   const scopeTiers = (t: FeedType): Tiers | null =>
-    t === "publications" && stageTotals
-      ? stageTotals
-      : data
-        ? scholar
-          ? (pickedRow?.[TIER_KEY[t]] ?? zero)
-          : data.totals[TIER_KEY[t]]
-        : null;
+    data ? (scholar ? (pickedRow?.[TIER_KEY[t]] ?? zero) : data.totals[TIER_KEY[t]]) : null;
   const tabCount = (t: FeedType) => {
     const tiers = scopeTiers(t);
     return tiers ? shownCount(tiers, related) : null;
@@ -293,7 +297,7 @@ export function TopicActivityFeed({
         showTier={showTier}
         retainScholarFilter
         stageFilter={stageFilter}
-        onStageTotals={setStageTotals}
+        onStageChange={setStage}
       />
     );
   }

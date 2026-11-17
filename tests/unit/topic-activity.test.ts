@@ -62,6 +62,7 @@ const state = vi.hoisted(() => ({
   /** Publication counts the two raw queries return (area totals, per-scholar rows). */
   pubTotals: { s: 0n, a: 0n } as { s: bigint; a: bigint },
   pubRows: [] as { cwid: string; s: bigint; a: bigint }[],
+  rawSql: [] as string[],
 }));
 
 vi.mock("@/lib/db", () => {
@@ -103,8 +104,10 @@ vi.mock("@/lib/db", () => {
     (a.awardNumber && (g.awardNumber ?? "").includes(a.awardNumber.contains));
   return {
     prisma: {
-      $queryRaw: async (strings: TemplateStringsArray) =>
-        strings.join("?").includes("GROUP BY") ? state.pubRows : [state.pubTotals],
+      $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        state.rawSql.push(JSON.stringify([strings, values]));
+        return strings.join("?").includes("GROUP BY") ? state.pubRows : [state.pubTotals];
+      },
       topic: {
         findUnique: async ({ where }: { where: { id: string } }) =>
           where.id in state.topics ? { id: where.id, ...state.topics[where.id] } : null,
@@ -341,6 +344,7 @@ beforeEach(() => {
   state.primaries = {};
   state.pubTotals = { s: 0n, a: 0n };
   state.pubRows = [];
+  state.rawSql = [];
   n = 0;
   for (const c of ["tst001", "tst002", "tst003", "tst004"]) scholar(c);
 });
@@ -738,5 +742,17 @@ describe("getTopicActivityScholars", () => {
     expect(by.tst003.grant).toEqual({ strongly: 1, also: 0 });
     expect(by.tst002.trial).toEqual({ strongly: 0, also: 1 });
     expect(by.tst001.name).toBe("Scholar tst001");
+  });
+
+  it("a stage narrows both publication queries; none without it", async () => {
+    await getTopicActivityScholars(AREA, {}, NOW);
+    expect(state.rawSql.join()).not.toContain("translational_stage");
+    state.rawSql = [];
+    await getTopicActivityScholars(AREA, { stage: "T2" }, NOW);
+    expect(state.rawSql).toHaveLength(2);
+    for (const q of state.rawSql) {
+      expect(q).toContain("translational_stage");
+      expect(q).toContain("T2");
+    }
   });
 });
