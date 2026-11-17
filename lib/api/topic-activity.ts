@@ -60,6 +60,7 @@ import {
   projectFromRows,
 } from "@/lib/funding-projection";
 import { headshotUrl } from "@/lib/headshot";
+import type { TranslationalStage } from "@/lib/translational-stage";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
 import { projectSiblingArms } from "@/lib/api/project-siblings";
 import { isPublicScholarCwid } from "@/lib/api/scholar-filter";
@@ -619,7 +620,13 @@ export type TopicActivityScholarsResult = {
  */
 export async function getTopicActivityScholars(
   topicSlug: string,
-  opts: { subtopic?: string },
+  opts: {
+    subtopic?: string;
+    /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — publication counts (totals and
+     *  per scholar) keep only papers shown at this stage, as the feed does.
+     *  Grants and trials are unaffected. */
+    stage?: TranslationalStage;
+  },
   now: Date = new Date(),
 ): Promise<TopicActivityScholarsResult | null> {
   const topic = await prisma.topic.findUnique({
@@ -632,7 +639,8 @@ export async function getTopicActivityScholars(
 
   const where = Prisma.sql`pt.parent_topic_id = ${topicSlug}
     ${subtopic ? Prisma.sql`AND pt.primary_subtopic_id = ${subtopic}` : Prisma.empty}
-    AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.publication_type NOT IN (${Prisma.join([...FEED_EXCLUDED_TYPES])}))`;
+    AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.publication_type NOT IN (${Prisma.join([...FEED_EXCLUDED_TYPES])}))
+    ${opts.stage ? Prisma.sql`AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.translational_stage = ${opts.stage} AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low'))` : Prisma.empty}`;
   const [scope, pubTotals, pubRows] = await Promise.all([
     loadScope(topicSlug, subtopic, now),
     prisma.$queryRaw<Array<{ s: bigint; a: bigint }>>`

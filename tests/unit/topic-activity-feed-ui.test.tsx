@@ -70,10 +70,12 @@ function stubServer(counts: Counts) {
       const q = url.searchParams;
       let body: unknown;
       if (url.pathname.endsWith("/activity") && q.get("kind") === "scholars") {
+        // A stage narrows the publication counts (server-side).
+        const pubs = q.get("stage") ? { strongly: 7, also: 0 } : PUBS;
         body = {
-          totals: { pubs: PUBS, ...counts },
+          totals: { pubs, ...counts },
           scholars: [
-            { cwid: "aaa1001", name: "Ann Able", slug: "ann-able", headshot: "", pubs: PUBS, ...counts },
+            { cwid: "aaa1001", name: "Ann Able", slug: "ann-able", headshot: "", pubs, ...counts },
             {
               cwid: "bbb2002",
               name: "Bob Baker",
@@ -132,8 +134,7 @@ function stubServer(counts: Counts) {
           total: 1,
           totalAllTypes: 3,
           totalResearchOnly: 1,
-          // A picked stage narrows the feed: its totals differ from the area's.
-          tierTotals: q.get("stage") ? { strongly: 7, also: 0 } : { strongly: 1, also: 0 },
+          tierTotals: { strongly: 1, also: 0 },
           parentTierTotals: { strongly: 1, also: 0 },
           page: 1,
           pageSize: 20,
@@ -195,14 +196,19 @@ describe("flag on: TopicActivityFeed", () => {
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("a picked stage drives the Publications tab count; All stages restores it", async () => {
-    stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
+  it("a picked stage refetches the counts: Publications tab and chips follow; All stages restores", async () => {
+    const calls = stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
     render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} stageFilter />);
     await waitFor(() => expect(tabCount(/Grants/)).toBe("3"));
     expect(tabCount(/Publications/)).toBe("1");
     fireEvent.change(select("Translational stage")!, { target: { value: "T1" } });
     await waitFor(() => expect(tabCount(/Publications/)).toBe("7"));
     expect(tabCount(/Grants/)).toBe("3");
+    expect(
+      calls.some((u) => u.searchParams.get("kind") === "scholars" && u.searchParams.get("stage") === "T1"),
+    ).toBe(true);
+    const chips = screen.getByTestId("activities-scholars").querySelectorAll("button[aria-pressed]");
+    expect(Array.from(chips).map((c) => c.textContent)).toContain("AAAnn Able10");
     fireEvent.change(select("Translational stage")!, { target: { value: "all" } });
     await waitFor(() => expect(tabCount(/Publications/)).toBe("1"));
   });
