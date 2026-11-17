@@ -9,7 +9,7 @@
  *   - Unknown topic (service returns null) → 404
  *   - Valid request → 200
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // Mock the service layer so route tests do not hit the database.
@@ -256,6 +256,39 @@ describe("/api/topics/[slug]/publications route", () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(JSON.stringify(body)).not.toContain("DROP TABLE");
+    });
+  });
+  describe("stage (SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET)", () => {
+    const empty = { hits: [], total: 0, page: 0, pageSize: 20, tierTotals: { strongly: 0, also: 0 } };
+    const call = (q: string) =>
+      GET(makeReq(`http://localhost/api/topics/cancer_genomics/publications?sort=newest${q}`), {
+        params: Promise.resolve({ slug: "cancer_genomics" }),
+      });
+    afterEach(() => {
+      delete process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
+    });
+
+    it("forwards a valid stage when the flag is on", async () => {
+      process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+      mockGetTopicPublications.mockResolvedValue(empty);
+      expect((await call("&stage=T3-4")).status).toBe(200);
+      expect(mockGetTopicPublications).toHaveBeenCalledWith(
+        "cancer_genomics",
+        expect.objectContaining({ stage: "T3-4" }),
+      );
+    });
+
+    it("rejects an unknown stage with 400 when the flag is on", async () => {
+      process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+      const res = await call("&stage=NA");
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid stage");
+    });
+
+    it("ignores the param when the flag is off", async () => {
+      mockGetTopicPublications.mockResolvedValue(empty);
+      expect((await call("&stage=T0")).status).toBe(200);
+      expect(mockGetTopicPublications.mock.calls[0][1].stage).toBeUndefined();
     });
   });
 });

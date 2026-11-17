@@ -361,6 +361,32 @@ describe("getTopicPublications", () => {
     });
   });
 
+  describe("stage narrows rows and every count", () => {
+    it("adds the stage + not-low-confidence filter beside the type filter", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest", stage: "T1" }, NOW);
+      const where = mockPublicationTopicFindMany.mock.calls[0][0].where;
+      expect(where.publication.publicationType).toBeDefined();
+      expect(where.publication.translationalStage).toBe("T1");
+      expect(where.publication.OR).toEqual([
+        { translationalStageConfidence: null },
+        { translationalStageConfidence: { not: "low" } },
+      ]);
+      const countSql = JSON.stringify(mockQueryRaw.mock.calls.map((c) => c));
+      expect(countSql).toContain("translational_stage");
+    });
+
+    it("no stage ⇒ no stage filter", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      const where = mockPublicationTopicFindMany.mock.calls[0][0].where;
+      expect(where.publication.translationalStage).toBeUndefined();
+      expect(JSON.stringify(mockQueryRaw.mock.calls)).not.toContain("translational_stage");
+    });
+  });
+
   describe("subtopic param filters by primarySubtopicId", () => {
     it("passes primarySubtopicId filter on newest path", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);

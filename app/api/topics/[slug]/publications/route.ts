@@ -32,6 +32,8 @@ import {
   type TopicPublicationTier,
 } from "@/lib/api/topics";
 import { CWID_PATTERN } from "@/lib/cwid";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { isTranslationalStage, type TranslationalStage } from "@/lib/translational-stage";
 import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { FEED_CHUNK, clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
@@ -109,6 +111,19 @@ export async function GET(
     }
   }
 
+  // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — optional stage filter; off, the
+  // param is ignored.
+  let stage: TranslationalStage | undefined;
+  if (resolveSearchPubsTranslationalStageFacet()) {
+    const stageRaw = sp.get("stage");
+    if (stageRaw !== null) {
+      if (!isTranslationalStage(stageRaw)) {
+        return apiError("invalid stage", 400);
+      }
+      stage = stageRaw;
+    }
+  }
+
   let pageSize = FEED_CHUNK;
   if (isTaxonomyFeedLoadMoreOn()) {
     const limit = parseFeedLimit(sp.get("limit"));
@@ -134,6 +149,7 @@ export async function GET(
     filter,
     tier,
     ...(cwid ? { cwid } : {}),
+    ...(stage ? { stage } : {}),
     ...(pageSize !== FEED_CHUNK ? { pageSize } : {}),
   });
   if (result === null) {

@@ -194,6 +194,7 @@ function renderFeed(props?: Partial<React.ComponentProps<typeof PublicationFeed>
       <PublicationFeed
         topicSlug={props?.topicSlug ?? "cancer_genomics"}
         activeSubtopic={props?.activeSubtopic ?? null}
+        stageFilter={props?.stageFilter}
       />
     </PublicationModalProvider>,
   );
@@ -565,5 +566,33 @@ describe("PublicationFeed — 'Publications N' heading row (mockup)", () => {
     renderFeed();
     await screen.findByRole("heading", { level: 3, name: "Publications" });
     expect(screen.queryByText(/Research articles in this area/)).toBeNull();
+  });
+});
+
+describe("TopicPublicationFeed — Stage select (SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET)", () => {
+  const stageSelect = () =>
+    (document.querySelector("optgroup[data-trigger-aria='Translational stage']")?.closest(
+      "select",
+    ) as HTMLSelectElement | null) ?? null;
+
+  it("is absent without stageFilter", async () => {
+    const spy = mockFetchByTier({ strongly: makeTierResponse({ hits: [makeHit()] }) });
+    renderFeed();
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(stageSelect()).toBeNull();
+    expect(new URL(spy.mock.calls[0][0] as string).searchParams.has("stage")).toBe(false);
+  });
+
+  it("picking a stage refetches with ?stage=", async () => {
+    const spy = mockFetchByTier({ strongly: makeTierResponse({ hits: [makeHit()] }) });
+    renderFeed({ stageFilter: true });
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(stageSelect()!.value).toBe("all");
+    fireEvent.change(stageSelect()!, { target: { value: "T2" } });
+    await waitFor(() =>
+      expect(
+        spy.mock.calls.some((c) => new URL(c[0] as string).searchParams.get("stage") === "T2"),
+      ).toBe(true),
+    );
   });
 });

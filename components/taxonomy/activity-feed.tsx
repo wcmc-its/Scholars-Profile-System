@@ -180,12 +180,15 @@ export function TopicActivityFeed({
   activeSubtopic,
   loadMore = false,
   subtopicLabels,
+  stageFilter = false,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
   /** TAXONOMY_FEED_LOAD_MORE (publications; grants and trials always load more). */
   loadMore?: boolean;
   subtopicLabels?: Record<string, string>;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET (publications only). */
+  stageFilter?: boolean;
 }) {
   const [requested, setRequested] = useState<FeedType>("publications");
   // Client-read only: the server render is always the publications view.
@@ -280,6 +283,7 @@ export function TopicActivityFeed({
         renderHeader={renderHeader}
         showTier={showTier}
         retainScholarFilter
+        stageFilter={stageFilter}
       />
     );
   }
