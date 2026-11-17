@@ -1393,10 +1393,11 @@ describe("EdgeStack", () => {
         expect(dc.Aliases).toEqual([
           "scholars.weill.cornell.edu",
           "vivo.weill.cornell.edu",
+          "vivo.med.cornell.edu",
         ]);
         const cert = dc.ViewerCertificate as Record<string, unknown>;
         expect(cert.AcmCertificateArn).toBe(
-          "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
+          "arn:aws:acm:us-east-1:665083158573:certificate/80637162-668f-4742-8bef-c8c0588e5077",
         );
         expect(cert.SslSupportMethod).toBe("sni-only");
       });
@@ -1463,11 +1464,15 @@ describe("EdgeStack", () => {
   });
 
   describe("legacy VIVO host alias (#945)", () => {
-    it("prod attaches vivo.weill.cornell.edu beside the canonical alias", () => {
+    it("prod attaches the vivo.weill and vivo.med hosts beside the canonical alias", () => {
       const { template } = buildEdgeStack("prod");
       template.hasResourceProperties("AWS::CloudFront::Distribution", {
         DistributionConfig: Match.objectLike({
-          Aliases: ["scholars.weill.cornell.edu", "vivo.weill.cornell.edu"],
+          Aliases: [
+            "scholars.weill.cornell.edu",
+            "vivo.weill.cornell.edu",
+            "vivo.med.cornell.edu",
+          ],
         }),
       });
     });
@@ -1510,7 +1515,10 @@ describe("EdgeStack", () => {
 
     describe("redirect handler", () => {
       const handler = new Function(
-        `${legacyHostRedirectCode("scholars.weill.cornell.edu", ["vivo.weill.cornell.edu"])}; return handler;`,
+        `${legacyHostRedirectCode("scholars.weill.cornell.edu", [
+          "vivo.weill.cornell.edu",
+          "vivo.med.cornell.edu",
+        ])}; return handler;`,
       )() as (e: unknown) => {
         statusCode?: number;
         headers: Record<string, { value: string }>;
@@ -1530,6 +1538,14 @@ describe("EdgeStack", () => {
         expect(res.statusCode).toBe(301);
         expect(res.headers.location.value).toBe(
           `https://scholars.weill.cornell.edu${path}`,
+        );
+      });
+
+      it("vivo.med host redirects the same way", () => {
+        const res = run("vivo.med.cornell.edu", "/display/cwid-aer2006");
+        expect(res.statusCode).toBe(301);
+        expect(res.headers.location.value).toBe(
+          "https://scholars.weill.cornell.edu/scholars/by-cwid/aer2006",
         );
       });
 
