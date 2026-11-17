@@ -42,7 +42,7 @@ import { SnippetUsageBadge } from "@/components/method/snippet-usage-badge";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import {
   TRANSLATIONAL_STAGES,
-  TRANSLATIONAL_STAGE_LABELS,
+  translationalStageDisplay,
   type TranslationalStage,
 } from "@/lib/translational-stage";
 import { pubTitleProps } from "@/components/publication/pub-html";
@@ -177,6 +177,9 @@ export type PublicationFeedProps = {
   /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the picked stage, null for all
    *  stages or once the feed unmounts (the Activities counts follow it). */
   onStageChange?: (stage: TranslationalStage | null) => void;
+  /** The Stage menu's per-option counts (as the Publications tab counts);
+   *  a zero-count stage is disabled. Null = no counts shown. */
+  stageCounts?: Record<TranslationalStage | "all", number> | null;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -227,6 +230,7 @@ export function PublicationFeed({
   showTier: showTierProp,
   stageFilter = false,
   onStageChange,
+  stageCounts = null,
 }: PublicationFeedProps) {
   const pickedScholar = useScholarFilter();
   const scholar = scholarFilter ? pickedScholar : null;
@@ -370,14 +374,22 @@ export function PublicationFeed({
 
   const stageSelect = stageFilter ? (
     <Select value={stage} onValueChange={(v) => setStage(v as TranslationalStage | "all")}>
-      <SelectTrigger className={renderHeader ? "w-[170px]" : "w-[200px]"} aria-label="Translational stage">
+      <SelectTrigger className="w-[240px]" aria-label="Translational stage">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="all">All stages</SelectItem>
+        <SelectItem value="all" trailing={stageCounts?.all.toLocaleString()}>
+          All stages
+        </SelectItem>
         {TRANSLATIONAL_STAGES.map((st) => (
-          <SelectItem key={st} value={st}>
-            {TRANSLATIONAL_STAGE_LABELS[st]} ({st})
+          <SelectItem
+            key={st}
+            value={st}
+            trailing={stageCounts?.[st].toLocaleString()}
+            // Never strand the current pick: it stays selectable at zero.
+            disabled={stageCounts !== null && stageCounts[st] === 0 && stage !== st}
+          >
+            {translationalStageDisplay(st)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -1084,6 +1096,7 @@ export function TopicPublicationFeed({
   retainScholarFilter,
   stageFilter = false,
   onStageChange,
+  stageCounts = null,
 }: {
   topicSlug: string;
   /** The subtopic title/description live in the rail layout's subhead. */
@@ -1103,6 +1116,7 @@ export function TopicPublicationFeed({
   stageFilter?: boolean;
   /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET (TopicActivityFeed): the counts. */
   onStageChange?: (stage: TranslationalStage | null) => void;
+  stageCounts?: Record<TranslationalStage | "all", number> | null;
 }) {
   const areaLabelFor = useMemo(() => {
     if (!loadMore || activeSubtopic || !subtopicLabels) return undefined;
@@ -1131,6 +1145,7 @@ export function TopicPublicationFeed({
       retainScholarFilter={retainScholarFilter}
       stageFilter={stageFilter}
       onStageChange={onStageChange}
+      stageCounts={stageCounts}
     />
   );
 }

@@ -66,6 +66,13 @@ export function displayStage(
   return stage;
 }
 
+/** "T0 · Basic research": the code first (the stages are ordered and the
+ *  T-scheme is familiar), then the plain name. En dash in "T3–4". Unknown
+ *  values pass through. */
+export function translationalStageDisplay(v: string): string {
+  return isTranslationalStage(v) ? `${v.replace("-", "\u2013")} · ${TRANSLATIONAL_STAGE_LABELS[v]}` : v;
+}
+
 /** Display label for a stage value; unknown values pass through. */
 export function translationalStageLabel(v: string): string {
   return isTranslationalStage(v) ? TRANSLATIONAL_STAGE_LABELS[v] : v;

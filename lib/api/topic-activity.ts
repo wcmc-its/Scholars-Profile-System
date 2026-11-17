@@ -60,7 +60,11 @@ import {
   projectFromRows,
 } from "@/lib/funding-projection";
 import { headshotUrl } from "@/lib/headshot";
-import type { TranslationalStage } from "@/lib/translational-stage";
+import {
+  isTranslationalStage,
+  TRANSLATIONAL_STAGES,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
 import { projectSiblingArms } from "@/lib/api/project-siblings";
 import { isPublicScholarCwid } from "@/lib/api/scholar-filter";
@@ -610,7 +614,12 @@ export type TopicActivityScholarsResult = {
   /** Every public scholar with at least one item in scope, unsorted. */
   scholars: TopicActivityScholar[];
   displayThreshold: number;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — publication tiers per stage (and
+   *  "all") for the scope, ignoring any picked stage: the Stage menu's counts. */
+  stageTotals?: StageTotals;
 };
+
+export type StageTotals = Record<TranslationalStage | "all", TierCounts>;
 
 /**
  * The Activities Scholars chips (`?kind=scholars`): each scholar's count of
@@ -626,6 +635,8 @@ export async function getTopicActivityScholars(
      *  per scholar) keep only papers shown at this stage, as the feed does.
      *  Grants and trials are unaffected. */
     stage?: TranslationalStage;
+    /** Also return `stageTotals` (the Stage menu's counts). */
+    stageTotals?: boolean;
   },
   now: Date = new Date(),
 ): Promise<TopicActivityScholarsResult | null> {
@@ -637,16 +648,19 @@ export async function getTopicActivityScholars(
   const displayThreshold = topic.displayThreshold ?? TOPIC_PUBLICATIONS_DEFAULT_DISPLAY_THRESHOLD;
   const subtopic = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
 
-  const where = Prisma.sql`pt.parent_topic_id = ${topicSlug}
+  const scopeWhere = Prisma.sql`pt.parent_topic_id = ${topicSlug}
     ${subtopic ? Prisma.sql`AND pt.primary_subtopic_id = ${subtopic}` : Prisma.empty}
-    AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.publication_type NOT IN (${Prisma.join([...FEED_EXCLUDED_TYPES])}))
-    ${opts.stage ? Prisma.sql`AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.translational_stage = ${opts.stage} AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low'))` : Prisma.empty}`;
-  const [scope, pubTotals, pubRows] = await Promise.all([
-    loadScope(topicSlug, subtopic, now),
-    prisma.$queryRaw<Array<{ s: bigint; a: bigint }>>`
+    AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.publication_type NOT IN (${Prisma.join([...FEED_EXCLUDED_TYPES])}))`;
+  const where = opts.stage
+    ? Prisma.sql`${scopeWhere} AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.translational_stage = ${opts.stage} AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low'))`
+    : scopeWhere;
+  const totalsSql = (w: Prisma.Sql) => prisma.$queryRaw<Array<{ s: bigint; a: bigint }>>`
       SELECT COUNT(DISTINCT CASE WHEN pt.score >= ${displayThreshold} THEN pt.pmid END) AS s,
              COUNT(DISTINCT pt.pmid) AS a
-      FROM publication_topic pt WHERE ${where}`,
+      FROM publication_topic pt WHERE ${w}`;
+  const [scope, pubTotals, pubRows, stageRows, allTotals] = await Promise.all([
+    loadScope(topicSlug, subtopic, now),
+    totalsSql(where),
     prisma.$queryRaw<Array<{ cwid: string; s: bigint; a: bigint }>>`
       SELECT pt.cwid,
              SUM(pt.score >= ${displayThreshold}) AS s,
@@ -658,6 +672,19 @@ export async function getTopicActivityScholars(
           WHERE x.entity_type = 'publication' AND x.entity_id = pt.pmid
             AND x.contributor_cwid = pt.cwid AND x.revoked_at IS NULL)
       GROUP BY pt.cwid`,
+    // The Stage menu's per-option counts: the scope without the picked stage.
+    opts.stageTotals
+      ? prisma.$queryRaw<Array<{ st: string; s: bigint; a: bigint }>>`
+      SELECT p.translational_stage AS st,
+             COUNT(DISTINCT CASE WHEN pt.score >= ${displayThreshold} THEN pt.pmid END) AS s,
+             COUNT(DISTINCT pt.pmid) AS a
+      FROM publication_topic pt JOIN publication p ON p.pmid = pt.pmid
+      WHERE ${scopeWhere}
+        AND p.translational_stage IN (${Prisma.join([...TRANSLATIONAL_STAGES])})
+        AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')
+      GROUP BY p.translational_stage`
+      : null,
+    opts.stageTotals && opts.stage ? totalsSql(scopeWhere) : null,
   ]);
 
   const tiers = (s: number, a: number): TierCounts => ({ strongly: s, also: a - s });
@@ -698,5 +725,14 @@ export async function getTopicActivityScholars(
       headshot: headshotUrl(p.cwid, p.hasHeadshot),
       ...by.get(p.cwid)!,
     }));
-  return { totals, scholars, displayThreshold };
+  if (!stageRows) return { totals, scholars, displayThreshold };
+  const all = allTotals ?? pubTotals;
+  const stageTotals = {
+    all: tiers(Number(all[0]?.s ?? 0), Number(all[0]?.a ?? 0)),
+    ...Object.fromEntries(TRANSLATIONAL_STAGES.map((st) => [st, { strongly: 0, also: 0 }])),
+  } as StageTotals;
+  for (const r of stageRows) {
+    if (isTranslationalStage(r.st)) stageTotals[r.st] = tiers(Number(r.s), Number(r.a));
+  }
+  return { totals, scholars, displayThreshold, stageTotals };
 }
