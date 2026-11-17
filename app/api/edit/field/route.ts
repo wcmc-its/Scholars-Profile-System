@@ -66,7 +66,7 @@ import {
   validateSlugFormat,
   validateUnitFieldValue,
 } from "@/lib/edit/validators";
-import { validateManualMentees } from "@/lib/edit/manual-mentee";
+import { validateManualMentees, validateMenteeCurrentPositions } from "@/lib/edit/manual-mentee";
 import { isProfileLinksEnabled, validateProfileLinks } from "@/lib/edit/profile-links";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import {
@@ -215,6 +215,7 @@ async function handleScholarFieldEdit(params: {
   if (
     fieldName !== "selectedHighlightPmids" &&
     fieldName !== "manualMentees" &&
+    fieldName !== "menteeCurrentPositions" &&
     fieldName !== "profileLinks" &&
     typeof value !== "string"
   ) {
@@ -234,9 +235,11 @@ async function handleScholarFieldEdit(params: {
   if (
     fieldName === "overview" ||
     fieldName === "profileLinks" ||
+    fieldName === "menteeCurrentPositions" ||
     isSectionVisibilityField(fieldName)
   ) {
-    // Section-visibility toggles (and #2699 profile links) ride the SAME "may edit this scholar's profile"
+    // Section-visibility toggles (and #2699 profile links, and the mentee
+    // "Current position" map) ride the SAME "may edit this scholar's profile"
     // authz as the bio (self / superuser / comms_steward / granted proxy /
     // org-unit owner-or-curator) — `authorizeOverviewWrite` is keyed on the
     // scholar (entityId), not the field name, so reusing it is correct. A
@@ -290,6 +293,12 @@ async function handleScholarFieldEdit(params: {
     // hold a CWID with no local Scholar row — the common case here). The read
     // path degrades on its own when nothing resolves.
     const result = validateManualMentees(value);
+    if (!result.ok) return editError(400, result.error, "value");
+    storedValue = JSON.stringify(result.value);
+  } else if (fieldName === "menteeCurrentPositions") {
+    // Free text shown on the public profile: trimmed and length-capped here,
+    // rendered as plain text there.
+    const result = validateMenteeCurrentPositions(value);
     if (!result.ok) return editError(400, result.error, "value");
     storedValue = JSON.stringify(result.value);
   } else if (fieldName === "profileLinks") {
@@ -464,6 +473,7 @@ async function handleScholarFieldEdit(params: {
     fieldName === "overview" ||
     fieldName === "selectedHighlightPmids" ||
     fieldName === "manualMentees" ||
+    fieldName === "menteeCurrentPositions" ||
     fieldName === "profileLinks" ||
     isSectionVisibilityField(fieldName)
   ) {

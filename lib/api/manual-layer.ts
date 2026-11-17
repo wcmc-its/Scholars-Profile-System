@@ -26,7 +26,11 @@
  *    applied in code.
  */
 import { sanitizeOverviewHtml, validateSelectedHighlightPmids } from "@/lib/edit/validators";
-import { type ManualMentee, validateManualMentees } from "@/lib/edit/manual-mentee";
+import {
+  type ManualMentee,
+  validateManualMentees,
+  validateMenteeCurrentPositions,
+} from "@/lib/edit/manual-mentee";
 import { type ProfileLinks, validateProfileLinks } from "@/lib/edit/profile-links";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
@@ -162,6 +166,31 @@ export async function getManualMentees(
   if (!override) return [];
   const parsed = validateManualMentees(override.value);
   return parsed.ok ? parsed.value : [];
+}
+
+/**
+ * The mentor's "Current position" text for training-record mentees, keyed by
+ * mentee CWID, or `{}` when none are on file. Reads
+ * `field_override(scholar, mentorCwid, 'menteeCurrentPositions')`; a malformed
+ * row reads as `{}` rather than throwing, matching {@link getManualMentees}.
+ */
+export async function getMenteeCurrentPositions(
+  mentorCwid: string,
+  client: OverrideReadClient,
+): Promise<Record<string, string>> {
+  const override = await client.fieldOverride.findUnique({
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: "scholar",
+        entityId: mentorCwid,
+        fieldName: "menteeCurrentPositions",
+      },
+    },
+    select: { value: true },
+  });
+  if (!override) return {};
+  const parsed = validateMenteeCurrentPositions(override.value);
+  return parsed.ok ? parsed.value : {};
 }
 
 // ---------------------------------------------------------------------------

@@ -324,6 +324,7 @@ function CoPubCitation({
             "Other mentee";
           return ` · ${label}${yearSeg}`;
         })()}
+        {entry.mentee.currentPosition ? ` · Now: ${entry.mentee.currentPosition}` : null}
       </p>
     </div>
   );

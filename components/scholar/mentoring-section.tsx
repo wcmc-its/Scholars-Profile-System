@@ -414,6 +414,11 @@ function MenteeChipCard({
         <div className="text-muted-foreground text-xs leading-snug">
           {[programLabel, yearLabel].filter(Boolean).join(" · ")}
         </div>
+        {mentee.currentPosition ? (
+          <div className="text-muted-foreground text-xs leading-snug">
+            Now: {mentee.currentPosition}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -4,7 +4,8 @@
  * Mentor-level rollup export (issue #189). Sibling of the per-mentee
  * export at `/scholars/<slug>/co-pubs/<menteeCwid>/export`.
  *
- * CSV: adds `mentee_name`, `mentee_program`, and `copub_id` columns. A
+ * CSV: adds `mentee_name`, `mentee_program`, `copub_id`, and
+ *      `mentee_current_position` (mentor-entered, usually blank) columns. A
  *      pub tying to N mentees produces N rows sharing one `copub_id`,
  *      so consumers counting publications can `DISTINCT copub_id`.
  *
@@ -117,6 +118,8 @@ const CSV_HEADERS = [
   "mentee_name",
   "mentee_program",
   "copub_id",
+  // Appended last so the existing columns keep their positions.
+  "mentee_current_position",
 ] as const;
 
 function renderCsv(groups: MenteeCoPubGroup[]): string {
@@ -134,6 +137,7 @@ function renderCsv(groups: MenteeCoPubGroup[]): string {
         e.mentee.fullName,
         g.programLabel,
         copubId(e.publication),
+        e.mentee.currentPosition ?? "",
       ]);
     }
   }
@@ -218,11 +222,12 @@ async function renderDocx(opts: {
         const subProgramLabel =
           menteeProgramLabel(e.mentee.programName, e.mentee.programType) ??
           "Other mentee";
+        const nowSeg = e.mentee.currentPosition ? ` · Now: ${e.mentee.currentPosition}` : "";
         bodyChildren.push(
           new Paragraph({
             children: [
               new TextRun({
-                text: `Mentee: ${e.mentee.fullName} · ${subProgramLabel}${yearSeg}`,
+                text: `Mentee: ${e.mentee.fullName} · ${subProgramLabel}${yearSeg}${nowSeg}`,
                 italics: true,
                 color: "555555",
               }),
