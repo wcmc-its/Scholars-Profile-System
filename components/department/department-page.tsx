@@ -14,6 +14,7 @@ import {
 } from "@/lib/api/dept-lists";
 import { officialUnitName } from "@/lib/org-unit-names";
 import { isOrgUnitMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
+import { ViceChairsList } from "@/components/department/vice-chairs-list";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
@@ -221,6 +222,8 @@ export async function DepartmentPage({
             interim={detail.chair.isInterim}
           />
         )}
+
+        <ViceChairsList viceChairs={detail.viceChairs ?? []} />
 
         {/* Unit Page v2 — a division chip filters the roster's Division facet
             in place (href `?div=<code>#people` for other tabs / new-tab clicks,

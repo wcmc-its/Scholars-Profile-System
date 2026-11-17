@@ -28,6 +28,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { reflectOverviewEdit, reflectUnitChange } from "@/lib/edit/revalidation";
 import { isUnitLeadershipEnabled } from "@/lib/edit/unit-leadership-flags";
 import { CWID_PATTERN } from "@/lib/edit/validators";
 import { isFullTimeFaculty } from "@/lib/unit-leadership";
@@ -91,9 +92,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const department = await db.read.department.findUnique({
     where: { code: departmentCode },
-    select: { code: true },
+    select: { code: true, slug: true },
   });
   if (!department) return editError(400, "unit_not_found", "departmentCode");
+
+  // The department page lists the row and the holder's profile carries the
+  // title line: refresh both.
+  const reflect = async (holderCwid: string): Promise<void> => {
+    await reflectUnitChange({ unitKind: "department", unitSlug: department.slug });
+    const holderRow = await db.read.scholar.findUnique({ where: { cwid: holderCwid }, select: { slug: true } });
+    if (holderRow) await reflectOverviewEdit(holderRow.slug);
+  };
 
   const effective = await getEffectiveUnitRole(
     session,
@@ -154,6 +163,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
+    await reflect(gone.cwid);
     return editOk({ departmentCode, action: act, id: gone.id, changed: true });
   }
 
@@ -201,6 +211,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(500, "write_failed");
   }
 
+  await reflect(cwid);
   return editOk({
     departmentCode,
     action: act,

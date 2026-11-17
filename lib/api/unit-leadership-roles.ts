@@ -3,6 +3,7 @@
  * validate a write. The vocabulary and the view type live in the import-free
  * `lib/unit-leadership.ts`.
  */
+import { isPublicLeader } from "@/lib/eligibility";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import {
   LEADERSHIP_FUNCTIONS,
@@ -157,4 +158,98 @@ export function validateLeadershipFields(
     ok: true,
     fields: { displayTitle, tier, functions: serializeFunctions(functions), areaText, site, startDate, note },
   };
+}
+
+/** One Vice Chair as the PUBLIC department page lists it. */
+export type PublicViceChair = {
+  cwid: string;
+  preferredName: string;
+  slug: string;
+  /** The published title, verbatim. */
+  displayTitle: string;
+  tier: LeadershipTier;
+  site: LeadershipSite | null;
+};
+
+/**
+ * A department's Vice Chairs for its public page: tier order, then name. A
+ * holder who is not publicly displayed (hidden identity class, soft-deleted or
+ * inactive — the `isPublicLeader` rule the chair card uses) is left out.
+ */
+export async function loadPublicViceChairs(
+  departmentCode: string,
+  client: Pick<PrismaClient, "unitLeadershipRole">,
+): Promise<PublicViceChair[]> {
+  const rows = await client.unitLeadershipRole.findMany({
+    where: { entityType: LEADERSHIP_ENTITY_TYPE, entityId: departmentCode },
+    select: {
+      cwid: true,
+      displayTitle: true,
+      tier: true,
+      site: true,
+      scholar: {
+        select: { preferredName: true, slug: true, roleCategory: true, deletedAt: true, status: true },
+      },
+    },
+  });
+  return rows
+    .filter((r) => isPublicLeader(r.scholar))
+    .map((r) => ({
+      cwid: r.cwid,
+      preferredName: r.scholar.preferredName,
+      slug: r.scholar.slug,
+      displayTitle: r.displayTitle,
+      tier: r.tier as LeadershipTier,
+      site: r.site as LeadershipSite | null,
+    }))
+    .sort(
+      (a, b) =>
+        LEADERSHIP_TIERS.indexOf(a.tier) - LEADERSHIP_TIERS.indexOf(b.tier) ||
+        a.preferredName.localeCompare(b.preferredName),
+    );
+}
+
+/**
+ * The profile title line for a Vice Chair role: the published title followed
+ * by the department, unless the title already names it ("Vice Chair, Weill
+ * Department of Medicine" / "Vice Chair of Ophthalmology").
+ */
+export function viceChairTitleLine(displayTitle: string, unitName: string, unitShortName?: string): string {
+  const t = displayTitle.toLowerCase();
+  const namesUnit =
+    t.includes("department") ||
+    t.includes(unitName.toLowerCase()) ||
+    (unitShortName !== undefined && t.includes(unitShortName.toLowerCase()));
+  return namesUnit ? displayTitle : `${displayTitle}, ${unitName}`;
+}
+
+/**
+ * A scholar's Vice Chair title lines for their profile, tier order. Rows with
+ * `showOnProfile = false` are left out (they still show on the department
+ * page). A row whose department vanished contributes nothing.
+ */
+export async function loadProfileViceChairTitles(
+  cwid: string,
+  client: Pick<PrismaClient, "unitLeadershipRole" | "department">,
+): Promise<string[]> {
+  const rows = await client.unitLeadershipRole.findMany({
+    where: { cwid, entityType: LEADERSHIP_ENTITY_TYPE, showOnProfile: true },
+    select: { entityId: true, displayTitle: true, tier: true },
+  });
+  if (rows.length === 0) return [];
+  const depts = await client.department.findMany({
+    where: { code: { in: rows.map((r) => r.entityId) } },
+    select: { code: true, name: true, officialName: true },
+  });
+  const byCode = new Map(depts.map((d) => [d.code, d]));
+  return [...rows]
+    .sort(
+      (a, b) =>
+        LEADERSHIP_TIERS.indexOf(a.tier as LeadershipTier) - LEADERSHIP_TIERS.indexOf(b.tier as LeadershipTier) ||
+        a.displayTitle.localeCompare(b.displayTitle),
+    )
+    .flatMap((r) => {
+      const d = byCode.get(r.entityId);
+      return d ? [viceChairTitleLine(r.displayTitle, d.officialName ?? d.name, d.name)] : [];
+    });
 }

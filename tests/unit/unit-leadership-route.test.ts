@@ -28,6 +28,8 @@ const m = vi.hoisted(() => ({
   txCreate: vi.fn(),
   txUpdate: vi.fn(),
   txDelete: vi.fn(),
+  reflectUnit: vi.fn(),
+  reflectProfile: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: m.session }));
@@ -53,6 +55,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/edit/revalidation", () => ({
+  reflectUnitChange: m.reflectUnit,
+  reflectOverviewEdit: m.reflectProfile,
+}));
+
 import { POST } from "@/app/api/edit/unit-leadership/route";
 
 const fakeTx = {
@@ -68,6 +75,7 @@ const post = (body: unknown) =>
   });
 
 const FT = {
+  slug: "ann-example",
   preferredName: "Ann Example",
   primaryTitle: "Professor of Medicine",
   roleCategory: "full_time_faculty",
@@ -107,7 +115,7 @@ beforeEach(() => {
   m.session.mockResolvedValue({ cwid: "cur001", isSuperuser: false });
   m.transaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   m.executeRaw.mockResolvedValue(1);
-  m.deptFindUnique.mockResolvedValue({ code: "N1280" });
+  m.deptFindUnique.mockResolvedValue({ code: "N1280", slug: "medicine" });
   m.unitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "N1280", role: "curator" }]);
   m.scholarFindUnique.mockResolvedValue(FT);
   m.roleFindUnique.mockResolvedValue(ROW);
@@ -182,6 +190,9 @@ describe("/api/edit/unit-leadership — add", () => {
     expect(m.executeRaw).toHaveBeenCalledTimes(1);
     const audit = m.executeRaw.mock.calls[0] as unknown[];
     expect(audit.slice(1, 5)).toEqual(["cur001", "department", "N1280", "roster_change"]);
+    // The department page and the holder's profile both show the row.
+    expect(m.reflectUnit).toHaveBeenCalledWith({ unitKind: "department", unitSlug: "medicine" });
+    expect(m.reflectProfile).toHaveBeenCalledWith("ann-example");
   });
 
   it("asks for a note when the holder is not full-time faculty, then accepts one", async () => {
@@ -261,6 +272,8 @@ describe("/api/edit/unit-leadership — update and remove", () => {
     expect(res.status).toBe(200);
     expect(m.txDelete).toHaveBeenCalledWith({ where: { id: "r1" } });
     expect(m.executeRaw).toHaveBeenCalledTimes(1);
+    expect(m.reflectUnit).toHaveBeenCalledTimes(1);
+    expect(m.reflectProfile).toHaveBeenCalledWith("ann-example");
   });
 
   it.each(["update", "remove"])("%s refuses a row from another department", async (action) => {
