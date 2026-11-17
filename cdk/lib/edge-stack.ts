@@ -1369,6 +1369,12 @@ export class EdgeStack extends Stack {
         challengeConfig: {
           immunityTimeProperty: { immunityTime: 14400 },
         },
+        // A solved CAPTCHA lasts as long as a solved challenge. Unset, it is
+        // 300s, and the signal that raised the puzzle usually outlives that:
+        // prod 11-17, one person solved it and was asked again within a minute.
+        captchaConfig: {
+          immunityTimeProperty: { immunityTime: 14400 },
+        },
         // Default ALLOW: only WCM traffic ever reaches the default action --
         // the priority-0 block-non-wcm rule drops everything else. (Was
         // default-BLOCK + a terminating allow-wcm rule, which short-circuited
@@ -1590,6 +1596,13 @@ export class EdgeStack extends Stack {
                     name: "TGT_SignalBrowserAutomationExtension",
                     actionToUse: { count: {} },
                   },
+                  // AWS default: CAPTCHA. It scores one session's request
+                  // rate against a learned baseline, and ordinary facet
+                  // clicking (each click is an `_rsc` fetch) reached "high" in
+                  // under 20 seconds. Prod, 72h to 11-17: 2,425 CAPTCHAs to
+                  // 557 IPs, people among them. TGT_VolumetricSessionMaximum
+                  // (Block) still stops the extreme case.
+                  { name: "TGT_VolumetricSession", actionToUse: { count: {} } },
                 ],
                 scopeDownStatement: targetedScope,
               },

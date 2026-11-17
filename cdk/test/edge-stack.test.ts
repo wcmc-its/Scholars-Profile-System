@@ -1994,6 +1994,8 @@ describe("EdgeStack", () => {
           expect(actionOf("TGT_SignalBrowserAutomationExtension")).toEqual([
             "Count",
           ]);
+          // Ordinary facet clicking tripped it: no CAPTCHA for session volume.
+          expect(actionOf("TGT_VolumetricSession")).toEqual(["Count"]);
           for (const n of [
             "CategoryAI",
             "CategoryHttpLibrary",
@@ -2072,6 +2074,10 @@ describe("EdgeStack", () => {
 
         it("sets a 4h challenge immunity so search sessions are not re-challenged every 5 min", () => {
           expect(acl.ChallengeConfig).toEqual({
+            ImmunityTimeProperty: { ImmunityTime: 14400 },
+          });
+          // Same for a solved CAPTCHA (default 300s re-prompted mid-session).
+          expect(acl.CaptchaConfig).toEqual({
             ImmunityTimeProperty: { ImmunityTime: 14400 },
           });
         });

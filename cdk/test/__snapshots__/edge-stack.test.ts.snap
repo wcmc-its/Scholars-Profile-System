@@ -1500,6 +1500,11 @@ function handler(event) {
             "CLOUDFRONT": {},
           },
         },
+        "CaptchaConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
         "ChallengeConfig": {
           "ImmunityTimeProperty": {
             "ImmunityTime": 14400,
@@ -1844,6 +1849,12 @@ a{color:var(--slate)}
                       "Count": {},
                     },
                     "Name": "TGT_SignalBrowserAutomationExtension",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_VolumetricSession",
                   },
                 ],
                 "ScopeDownStatement": {
@@ -3878,6 +3889,11 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             "CLOUDFRONT": {},
           },
         },
+        "CaptchaConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
         "ChallengeConfig": {
           "ImmunityTimeProperty": {
             "ImmunityTime": 14400,
@@ -4278,6 +4294,12 @@ a{color:var(--slate)}
                       "Count": {},
                     },
                     "Name": "TGT_SignalBrowserAutomationExtension",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_VolumetricSession",
                   },
                 ],
                 "ScopeDownStatement": {
