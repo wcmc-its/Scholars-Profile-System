@@ -15,6 +15,9 @@
  * Shared by the /edit UI, the write route, and the ED ETL so all three agree.
  */
 
+/** `Scholar.postnominal` column width. */
+export const POSTNOMINAL_MAX = 64;
+
 /** `field_override.fieldName` for a scholar's degree pick. */
 export const DEGREE_OVERRIDE_FIELD = "postnominal";
 
@@ -42,7 +45,7 @@ const PROFESSIONAL_SINGLE = new Set(["BM", "BDS", "BVSc", "BAO", "MBBS", "BMBS",
 /** Parts of a comma-joined medical degree ("MB,BS", "BM,BCh", "MB,BCh,BAO"). A
  *  bare "BS" is a bachelor's; only inside such a compound is it professional. */
 const PROFESSIONAL_PART = new Set(["MB", "BM", "BS", "BCh", "BChir", "BAO"]);
-const MEDICAL = /^(MD|DO|MDCM|MBBS|BMBS|BMBCh|BM)$|^(MB|BM),/;
+const MEDICAL = /^(MD|DO|MDCM|MB|BM|MBBS|BMBS|BMBCh|MBChB|MBBCh|Dr Med)$|^(MB|BM),/i;
 
 /** Bachelor's and below. `B…`, Latin-order `AB` / `SB` / `ScB`, `LLB`,
  *  `PharmB`, `BsC`, associate `AA` / `AS` / `AAS`, intermediate `ISc` / `FA`. */
@@ -59,7 +62,7 @@ export function normalizeDegree(raw: string): string {
  * space only: "M.B.,B.S." (no space) is ONE degree, MBBS. A professional
  * compound like "MB,BCh" stays whole; its parts are checked individually.
  */
-function splitTitle(raw: string): string[] {
+export function splitTitle(raw: string): string[] {
   return raw
     .split(/,\s+/)
     .map(normalizeDegree)
@@ -116,7 +119,9 @@ export function validateDegreePick(pick: unknown, options: ReadonlyArray<string>
   if (!Array.isArray(pick) || pick.length === 0) return null;
   if (!pick.every((t): t is string => typeof t === "string" && options.includes(t))) return null;
   const chosen = new Set(pick);
-  return options.filter((o) => chosen.has(o));
+  const tokens = options.filter((o) => chosen.has(o));
+  // `Scholar.postnominal` is VARCHAR(64); a longer pick would fail the write.
+  return tokens.join(", ").length <= POSTNOMINAL_MAX ? tokens : null;
 }
 
 /** The stored override value (JSON array) → display string, or null when the

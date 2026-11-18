@@ -18,7 +18,7 @@ import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DEGREE_OVERRIDE_FIELD, normalizeDegree } from "@/lib/degree-picker";
+import { DEGREE_OVERRIDE_FIELD, POSTNOMINAL_MAX, splitTitle } from "@/lib/degree-picker";
 import { cn } from "@/lib/utils";
 
 export type DegreeFieldProps = {
@@ -35,14 +35,15 @@ export type DegreeFieldProps = {
 
 export function DegreeField({ cwid, options, selected, directory, current }: DegreeFieldProps) {
   const router = useRouter();
-  // Start from the saved pick, else the options the ED string already names,
-  // so adding one missing degree is a single tick.
-  const initial = React.useMemo(() => {
-    if (selected) return selected;
-    const named = new Set((directory ?? "").split(",").map((t) => normalizeDegree(t)));
+  // The options the ED string already names, so adding one missing degree is a
+  // single tick. Same splitter as the options: "MB,BS" stays one degree.
+  const directoryTicks = () => {
+    const named = new Set(splitTitle(directory ?? ""));
     return options.filter((o) => named.has(o));
-  }, [selected, directory, options]);
-  const [checked, setChecked] = React.useState<Set<string>>(() => new Set(initial));
+  };
+  // The last saved state — what Cancel returns to.
+  const [base, setBase] = React.useState<string[]>(() => selected ?? directoryTicks());
+  const [checked, setChecked] = React.useState<Set<string>>(() => new Set(base));
   const [shown, setShown] = React.useState(current);
   const [hasPick, setHasPick] = React.useState(selected !== null);
   const [touched, setTouched] = React.useState(false);
@@ -53,7 +54,8 @@ export function DegreeField({ cwid, options, selected, directory, current }: Deg
   if (options.length === 0) return <>{current ?? "—"}</>;
 
   const preview = options.filter((o) => checked.has(o)).join(", ");
-  const dirty = touched && checked.size > 0 && preview !== shown;
+  const tooLong = preview.length > POSTNOMINAL_MAX;
+  const dirty = touched && checked.size > 0 && !tooLong && preview !== shown;
 
   async function post(value: string[] | "", note: string) {
     setBusy(true);
@@ -79,10 +81,9 @@ export function DegreeField({ cwid, options, selected, directory, current }: Deg
       const body = (await res.json().catch(() => null)) as { postnominal?: string | null } | null;
       setShown(body?.postnominal ?? null);
       setHasPick(value !== "");
-      if (value === "") {
-        const named = new Set((directory ?? "").split(",").map((t) => normalizeDegree(t)));
-        setChecked(new Set(options.filter((o) => named.has(o))));
-      }
+      const saved = value === "" ? directoryTicks() : value;
+      setBase(saved);
+      setChecked(new Set(saved));
       setTouched(false);
       setDone(note);
       // The identity header above the panel reads the degrees server-side.
@@ -130,7 +131,11 @@ export function DegreeField({ cwid, options, selected, directory, current }: Deg
         </ul>
       </fieldset>
       <p className="text-muted-foreground text-xs" data-testid="degree-preview">
-        {checked.size === 0 ? "Select at least one degree." : `Shown as: ${preview}`}
+        {checked.size === 0
+          ? "Select at least one degree."
+          : tooLong
+            ? `Too long to display (${POSTNOMINAL_MAX} characters max). Select fewer degrees.`
+            : `Shown as: ${preview}`}
         {hasPick && directory ? ` · Directory default: ${directory}` : ""}
       </p>
 
@@ -155,7 +160,7 @@ export function DegreeField({ cwid, options, selected, directory, current }: Deg
               type="button"
               className="text-[13px] text-[#5c574d] hover:underline"
               onClick={() => {
-                setChecked(new Set(initial));
+                setChecked(new Set(base));
                 setTouched(false);
               }}
             >

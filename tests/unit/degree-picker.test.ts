@@ -97,3 +97,35 @@ describe("normalizeDegree", () => {
     expect(normalizeDegree("Dr. rer. nat.")).toBe("Dr rer nat");
   });
 });
+
+describe("review fixes", () => {
+  it("ranks bare MB and Dr. Med. as medicine", () => {
+    expect(degreeOptions([row("Ph.D.", 1990), row("M.B.", 2000)])).toEqual(["MB", "PhD"]);
+    expect(degreeOptions([row("Ph.D.", 1990), row("Dr. Med.", 2000)])).toEqual(["Dr Med", "PhD"]);
+  });
+
+  it("keeps a professional compound after a bachelor's in the same title", () => {
+    expect(degreeOptions([row("B.Sc., M.B.,B.S.")])).toEqual(["MB,BS"]);
+  });
+
+  it("rejects a pick longer than the postnominal column", () => {
+    const opts = [
+      "MD",
+      "PhD",
+      "MPH",
+      "MS",
+      "MBA",
+      "MSc",
+      "MA",
+      "MPhil",
+      "MEd",
+      "MHS",
+      "MSW",
+      "MSN",
+      "MPA",
+      "MPP",
+    ];
+    expect(opts.join(", ").length).toBeGreaterThan(64);
+    expect(validateDegreePick(opts, opts)).toBeNull();
+  });
+});
