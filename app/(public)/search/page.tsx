@@ -1955,7 +1955,14 @@ async function PublicationsResults({
     middle: "Middle author",
   };
 
+  // Chips are pushed in the same order as the FacetSidebarPubs rail.
   const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
+  if (publicationType) {
+    chips.push({
+      label: displayPublicationType(publicationType),
+      removeHref: buildUrl((sp) => sp.delete("publicationType")),
+    });
+  }
   if (yearMin !== undefined || yearMax !== undefined) {
     let label: string;
     if (yearMin !== undefined && yearMax !== undefined) {
@@ -1971,12 +1978,6 @@ async function PublicationsResults({
         sp.delete("yearMin");
         sp.delete("yearMax");
       }),
-    });
-  }
-  if (publicationType) {
-    chips.push({
-      label: displayPublicationType(publicationType),
-      removeHref: buildUrl((sp) => sp.delete("publicationType")),
     });
   }
   for (const v of translationalStage) {
@@ -1999,9 +2000,6 @@ async function PublicationsResults({
       removeHref: removeMulti("wcmAuthor", v),
     });
   }
-  for (const v of journal) {
-    chips.push({ label: htmlToPlainText(v, Number.POSITIVE_INFINITY), removeHref: removeMulti("journal", v) });
-  }
   // Issue #837 — Department chips. Label resolved via the dept/div map (falls
   // back to the bare key — e.g. a `name:<dept>` long-tail value — through
   // `deptDivLabel`).
@@ -2017,6 +2015,9 @@ async function PublicationsResults({
       label: institutionDisplayName(v),
       removeHref: removeMulti("institution", v),
     });
+  }
+  for (const v of journal) {
+    chips.push({ label: htmlToPlainText(v, Number.POSITIVE_INFINITY), removeHref: removeMulti("journal", v) });
   }
   const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", string> = {
     md: "MD mentee",
@@ -3647,8 +3648,60 @@ function FacetSidebarPubs({
         </FacetGroup>
       ) : null}
 
-      {/* WCM author role first — it's the highest-signal pub filter
-          for promotion/recruiting use cases. */}
+      {publicationTypes.length > 0 ? (
+        <FacetGroup label="Publication type" collapseAfter={5}>
+          {publicationTypes.map((p) => (
+            <FacetCheckbox
+              key={p.value}
+              label={displayPublicationType(p.value)}
+              count={p.count}
+              isActive={p.value === activePublicationType}
+              href={buildHref({
+                publicationType: p.value === activePublicationType ? "" : p.value,
+              })}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      <FacetGroup label="Year (since)">
+        {yearChoices.map((y) => (
+          <FacetCheckbox
+            key={y}
+            label={`${y}–present`}
+            isActive={yearMin === y}
+            href={buildHref({ yearMin: yearMin === y ? "" : String(y) })}
+            radio
+          />
+        ))}
+      </FacetGroup>
+
+      {/* Translational stage — ReciterAI's per-paper stage on the bench-to-
+          population spectrum (lib/translational-stage.ts). Multi-select; rows
+          stay in stage order rather than active-first or count order. Renders
+          only when the response carries buckets (flag off / pre-reindex ⇒ no
+          group). */}
+      {translationalStages.length > 0 ? (
+        <FacetGroup label="Translational stage">
+          {translationalStages.map((b) => (
+            <FacetCheckbox
+              key={b.value}
+              label={translationalStageDisplay(b.value)}
+              count={b.count}
+              isActive={activeTranslationalStage.includes(b.value)}
+              href={toggleHref("translationalStage", b.value)}
+            />
+          ))}
+          <li className="pt-1 text-[12.5px]">
+            <Link href={methodologyHref("translationalStage")} prefetch={false} className="text-[#2c4f6e] hover:underline">
+              How these are defined
+            </Link>
+          </li>
+        </FacetGroup>
+      ) : null}
+
+      {/* WCM author role opens the authorship block (role, Authors, then
+          department / institution), after the paper-level facets above. */}
       <FacetGroup label="WCM author role">
         <FacetCheckbox
           label="First author"
@@ -3670,9 +3723,9 @@ function FacetSidebarPubs({
         />
       </FacetGroup>
 
-      {/* Issue #88 — Author facet sits between WCM author role and Year
-          per spec: the two authorship axes are conceptually paired and
-          users combine them ("first-author papers by Wolf"). */}
+      {/* Issue #88 — Author facet sits directly below WCM author role: the
+          two authorship axes are conceptually paired and users combine them
+          ("first-author papers by Wolf"). */}
       {authorItems.length > 0 ? (
         <AuthorFacet
           items={authorItems}
@@ -3717,58 +3770,6 @@ function FacetSidebarPubs({
               />
             ),
           )}
-        </FacetGroup>
-      ) : null}
-
-      <FacetGroup label="Year (since)">
-        {yearChoices.map((y) => (
-          <FacetCheckbox
-            key={y}
-            label={`${y}–present`}
-            isActive={yearMin === y}
-            href={buildHref({ yearMin: yearMin === y ? "" : String(y) })}
-            radio
-          />
-        ))}
-      </FacetGroup>
-
-      {publicationTypes.length > 0 ? (
-        <FacetGroup label="Publication type" collapseAfter={5}>
-          {publicationTypes.map((p) => (
-            <FacetCheckbox
-              key={p.value}
-              label={displayPublicationType(p.value)}
-              count={p.count}
-              isActive={p.value === activePublicationType}
-              href={buildHref({
-                publicationType: p.value === activePublicationType ? "" : p.value,
-              })}
-            />
-          ))}
-        </FacetGroup>
-      ) : null}
-
-      {/* Translational stage — ReciterAI's per-paper stage on the bench-to-
-          population spectrum (lib/translational-stage.ts). Multi-select; rows
-          stay in stage order rather than active-first or count order. Renders
-          only when the response carries buckets (flag off / pre-reindex ⇒ no
-          group). */}
-      {translationalStages.length > 0 ? (
-        <FacetGroup label="Translational stage">
-          {translationalStages.map((b) => (
-            <FacetCheckbox
-              key={b.value}
-              label={translationalStageDisplay(b.value)}
-              count={b.count}
-              isActive={activeTranslationalStage.includes(b.value)}
-              href={toggleHref("translationalStage", b.value)}
-            />
-          ))}
-          <li className="pt-1 text-[12.5px]">
-            <Link href={methodologyHref("translationalStage")} prefetch={false} className="text-[#2c4f6e] hover:underline">
-              How these are defined
-            </Link>
-          </li>
         </FacetGroup>
       ) : null}
 
