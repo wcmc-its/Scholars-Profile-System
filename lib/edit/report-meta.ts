@@ -76,6 +76,7 @@ export const REPORT_KEYS = [
   "20",
   "21",
   "22",
+  "23",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -265,6 +266,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Cross-campus duplicates",
     summary:
       "WCM scholars who probably also hold a Cornell Ithaca NetID, with the evidence for each pair: the directory, a shared ORCID iD or email, or the same name.",
+    descriptionHtml: null,
+  },
+  "23": {
+    slug: "vice-chairs",
+    name: "Vice Chairs",
+    summary:
+      "Vice Chair roles across all departments, with each title as the department publishes it. Filter by area, department or hospital site.",
     descriptionHtml: null,
   },
 };

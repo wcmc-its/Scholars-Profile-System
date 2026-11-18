@@ -30,6 +30,7 @@ import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isObserver } from "@/lib/auth/observer";
+import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
 import { getSession } from "@/lib/auth/session-server";
 import { type SessionData, nowSeconds } from "@/lib/auth/session";
 import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
@@ -88,9 +89,12 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
   const cwid = getEffectiveCwid(session);
+  // A live overlay started by someone who is NOT a superuser (an observer or
+  // content editor, R1). Decided on the REAL cwid, like every initiator check.
+  const borrowedByNonSuperuser = cwid !== session.cwid && !(await isSuperuser(session.cwid));
   // #1514 — same concurrent resolve as getEditSession: independent fail-closed
   // checks, one directory round-trip of wall-clock instead of five.
-  const [su, cs, dev, hc, dsv, obs, ce, cd] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce, cd, rsv] = await Promise.all([
     isSuperuser(cwid),
     isCommsSteward(cwid),
     isDeveloper(cwid),
@@ -101,6 +105,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
     // The TARGET's Cores director verdict under "View as", never the real
     // user's: impersonating a non-director strips it, as for every role here.
     isCoreDirector(cwid),
+    isResearchSecurityViewer(cwid),
   ]);
   // Same order as getEditSession: content editor first, then observer.
   return withObserverView(
@@ -112,7 +117,16 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
         isDeveloper: dev,
         isHonorsCurator: hc,
         isDataSharingViewer: dsv,
+        // The research security dashboard is sensitive: under "View as", the
+        // target's access carries over only when a SUPERUSER started the
+        // overlay. An observer or content editor may start one too, and must
+        // not reach the dashboard through a person they impersonate, whether
+        // that person holds it by role (stripped here) or by an ad hoc
+        // `dash:research-security` grant (`sensitiveDashboardsBlocked`, which
+        // the dashboard gate reads before the birthright and the registry).
+        isResearchSecurityViewer: rsv && !borrowedByNonSuperuser,
         isCoreDirector: cd,
+        ...(borrowedByNonSuperuser ? { sensitiveDashboardsBlocked: true } : {}),
       },
       ce,
     ),

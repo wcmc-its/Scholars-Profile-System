@@ -30,6 +30,7 @@ import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isObserver } from "@/lib/auth/observer";
+import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
 import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
@@ -78,6 +79,21 @@ export interface EditSession {
    * (`canViewDataSharingDashboard`) only ever reads a session from those.
    */
   isDataSharingViewer?: boolean;
+  /**
+   * Live `research_security_viewer` verdict; a superuser is a superset of this.
+   * Gates ONLY `/edit/research-security` and its export. OPTIONAL for the same
+   * reason as `isDataSharingViewer`: only the live resolvers populate it, and
+   * the dashboard gate only ever reads a session from those.
+   */
+  isResearchSecurityViewer?: boolean;
+  /**
+   * `true` ONLY on a "View as" session started by a non-superuser (an observer
+   * or content editor). The sensitive dashboards (`SENSITIVE_DASHBOARDS`,
+   * `lib/edit/dashboard-access.ts`) are then closed whatever the impersonated
+   * person holds, by role or by an ad hoc grant. Set by
+   * `getEffectiveEditSession` alone; absent everywhere else.
+   */
+  sensitiveDashboardsBlocked?: boolean;
   /**
    * `observer` (`lib/auth/observer.ts`): `true` ONLY when this session's
    * `isCommsSteward` is the observer's SYNTHETIC read grant, not a real one.
@@ -174,7 +190,7 @@ export async function getEditSession(): Promise<EditSession | null> {
   // #1514 — six independent LDAPS group checks; resolve concurrently so the
   // wall-clock cost is one directory round-trip, not six. All six are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv, obs, ce, cd] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce, cd, rsv] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
@@ -183,6 +199,7 @@ export async function getEditSession(): Promise<EditSession | null> {
     isObserver(session.cwid),
     isContentEditor(session.cwid),
     isCoreDirector(session.cwid),
+    isResearchSecurityViewer(session.cwid),
   ]);
   // Content editor first: its synthetic steward grant then makes the observer
   // view a no-op, so someone in both groups edits rather than viewing only.
@@ -195,6 +212,7 @@ export async function getEditSession(): Promise<EditSession | null> {
         isDeveloper: dev,
         isHonorsCurator: hc,
         isDataSharingViewer: dsv,
+        isResearchSecurityViewer: rsv,
         isCoreDirector: cd,
       },
       ce,

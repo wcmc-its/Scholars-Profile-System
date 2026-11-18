@@ -32,6 +32,7 @@ export function TopicRailLayout({
   scholarNames = false,
   loadMore = false,
   activityFeed = false,
+  stageFilter = false,
 }: {
   topicSlug: string;
   /** Scope label for the scholar chips' hover card. */
@@ -49,6 +50,8 @@ export function TopicRailLayout({
   /** TOPIC_FEED_GRANTS_TRIALS — the "Activities" feed with its Type select
    *  (publications, grants, clinical trials). */
   activityFeed?: boolean;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the publications Stage select. */
+  stageFilter?: boolean;
 }) {
   const items: TaxonomyRailItem[] = subtopics.map((s) => ({
     id: s.id,
@@ -117,6 +120,7 @@ export function TopicRailLayout({
                 activeSubtopic={activeSubtopic}
                 loadMore={loadMore}
                 subtopicLabels={subtopicLabels}
+                stageFilter={stageFilter}
               />
             ) : (
               <TopicPublicationFeed
@@ -124,6 +128,7 @@ export function TopicRailLayout({
                 activeSubtopic={activeSubtopic}
                 loadMore={loadMore}
                 subtopicLabels={subtopicLabels}
+                stageFilter={stageFilter}
               />
             )}
           </>

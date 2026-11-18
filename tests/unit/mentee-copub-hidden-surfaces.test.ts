@@ -69,6 +69,7 @@ vi.mock("@/lib/api/manual-layer", () => ({
   // No manual mentees in these fixtures: the mentee-level hide under test is a
   // suppression concern and orthogonal to manual entry.
   getManualMentees: vi.fn(async () => []),
+  getMenteeCurrentPositions: vi.fn(async () => ({})),
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {

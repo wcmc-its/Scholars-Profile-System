@@ -37,6 +37,11 @@ export const MAX_MANUAL_MENTEES = 25;
  *  128 is comfortably inside anything the chip renders). */
 const MAX_TEXT = 128;
 
+/** Cap on a mentee's free-text "Current position" — where they are NOW, for a
+ *  mentee who has left. Roomier than {@link MAX_TEXT} because it usually holds a
+ *  title AND an institution ("Assistant Professor, University of X"). */
+export const MAX_CURRENT_POSITION = 200;
+
 /** Earliest plausible mentorship year. Guards typos (`19` , `202`) without
  *  policing history — WCM predates this, but no mentee record does. */
 const MIN_YEAR = 1950;
@@ -75,6 +80,10 @@ export type ManualMentee = {
    *  suggestion accept flow (#2634) so an accepted postdoc lands under
    *  "Postdoc mentees" rather than "other"; the hand-entry form leaves it unset. */
   programType?: ManualMenteeProgramType;
+  /** Where the mentee is now ("Assistant Professor, University of X") →
+   *  `MenteeChip.currentPosition`. Free text the mentor types; no source system
+   *  carries it. Rendered publicly as plain text. */
+  currentPosition?: string;
 };
 
 export const MANUAL_MENTEE_PROGRAM_TYPES = ["AOC", "MD-PhD", "PhD", "POSTDOC"] as const;
@@ -106,6 +115,8 @@ export type ManualMenteesResult =
  *   - `programLabel`, when present, ≤ {@link MAX_TEXT} after trim — a blank one
  *     normalizes away rather than erroring (an empty optional input is a
  *     no-op, not a mistake);
+ *   - `currentPosition`, when present, ≤ {@link MAX_CURRENT_POSITION} after
+ *     trim; blank normalizes away the same way;
  *   - `year`, when present, an integer in [{@link MIN_YEAR}, next calendar
  *     year] (`invalid_year`);
  *   - no two entries sharing a `cwid` (`duplicate`). Entries WITHOUT a cwid are
@@ -183,8 +194,69 @@ export function validateManualMentees(input: unknown): ManualMenteesResult {
       out.programType = entry.programType as ManualMenteeProgramType;
     }
 
+    if (entry.currentPosition !== undefined && entry.currentPosition !== null) {
+      if (typeof entry.currentPosition !== "string") return { ok: false, error: "invalid_value" };
+      const currentPosition = entry.currentPosition.trim();
+      if (currentPosition.length > MAX_CURRENT_POSITION) {
+        return { ok: false, error: "invalid_value" };
+      }
+      if (currentPosition !== "") out.currentPosition = currentPosition;
+    }
+
     value.push(out);
   }
 
+  return { ok: true, value };
+}
+
+/** Upper bound on the `menteeCurrentPositions` map — a runaway-payload guard
+ *  above any real roster, and small enough that a full map of capped entries
+ *  still fits the `field_override.value` TEXT column. */
+export const MAX_MENTEE_CURRENT_POSITIONS = 200;
+
+export type MenteeCurrentPositionsResult =
+  | { ok: true; value: Record<string, string> }
+  | { ok: false; error: "invalid_value" | "too_many" };
+
+/**
+ * Validate + normalize a `menteeCurrentPositions` payload — the mentor's
+ * "Current position" text for mentees that came from the training records,
+ * stored as ONE JSON object in
+ * `field_override(scholar, mentorCwid, 'menteeCurrentPositions')`, keyed by
+ * mentee CWID. (A hand-entered mentee carries its own `currentPosition` on the
+ * `manualMentees` entry instead.) Same reasoning as `manualMentees` for a JSON
+ * blob over a table: small, bounded, no migration and no audit ENUM change.
+ *
+ * Accepts an already-parsed object or a JSON string. A blank position drops its
+ * key, so clearing the input removes the entry; `{}` is valid. Keys are trimmed
+ * and length-checked only, NOT `isCwid`-checked: they are ids a source system
+ * gave us (see {@link MANUAL_MENTEE_ID_PREFIX}).
+ */
+export function validateMenteeCurrentPositions(input: unknown): MenteeCurrentPositionsResult {
+  let parsed: unknown = input;
+  if (typeof input === "string") {
+    try {
+      parsed = JSON.parse(input);
+    } catch {
+      return { ok: false, error: "invalid_value" };
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, error: "invalid_value" };
+  }
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length > MAX_MENTEE_CURRENT_POSITIONS) return { ok: false, error: "too_many" };
+
+  const value: Record<string, string> = {};
+  for (const [rawKey, rawPosition] of entries) {
+    const key = rawKey.trim();
+    if (key === "" || key.length > 64 || isManualMenteeId(key)) {
+      return { ok: false, error: "invalid_value" };
+    }
+    if (typeof rawPosition !== "string") return { ok: false, error: "invalid_value" };
+    const position = rawPosition.trim();
+    if (position.length > MAX_CURRENT_POSITION) return { ok: false, error: "invalid_value" };
+    if (position !== "") value[key] = position;
+  }
   return { ok: true, value };
 }

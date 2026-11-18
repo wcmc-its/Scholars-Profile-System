@@ -1162,9 +1162,10 @@ export class SpsObservabilityStack extends Stack {
     // ------------------------------------------------------------------
     // ETL heartbeat WARN lines -> sps-warn (#2190)
     // ------------------------------------------------------------------
-    // (9b) The daily heartbeat (`etl:freshness`, 13:00 UTC) grades two WARN-tier
-    // signals it must not fail on -- a step creeping toward its timeout (margin)
-    // and a step that was retried (several etl_run rows in one window). Both
+    // (9b) The daily heartbeat (`etl:freshness`, 13:00 UTC) grades three WARN-tier
+    // signals it must not fail on -- a step creeping toward its timeout (margin),
+    // a step that was retried (several etl_run rows in one window), and a source
+    // that ran but is not registered on Data Sync (unregistered). All three
     // only ever reached the heartbeat log, which nobody opens while the run is
     // green. Count the log lines and alarm each to the warn topic.
     //
@@ -1173,9 +1174,11 @@ export class SpsObservabilityStack extends Stack {
     // prefix. The quoted phrase is an exact substring match.
     //
     // 🔴 MIRRORED from MARGIN_WARN_MARKER / RETRY_WARN_MARKER in
-    // lib/etl/duration-margin.ts (cdk/ cannot import lib/, and lib/ is in the
-    // ETL image while cdk/ is not). tests/unit/duration-margin.test.ts reads
-    // this file as text and fails if either drifts.
+    // lib/etl/duration-margin.ts and UNREGISTERED_WARN_MARKER in
+    // lib/etl/freshness-policy.ts (cdk/ cannot import lib/, and lib/ is in the
+    // ETL image while cdk/ is not). tests/unit/duration-margin.test.ts and
+    // tests/unit/etl-status-tracked-guard.test.ts read this file as text and
+    // fail if any drifts.
     //
     // The log group is looked up BY NAME (EtlStack owns it as
     // `/aws/ecs/sps-etl-${env}`) rather than via `props.etlStack`: a token would
@@ -1217,6 +1220,13 @@ export class SpsObservabilityStack extends Stack {
         metricName: "EtlRetryStormWarn",
         alarmName: `sps-etl-retry-storm-${env}`,
         description: `An ETL source has more than one etl_run row in one cadence window with at least one that did not end clean (${env}) -- Step Functions retried it (each retry is a fresh task and row), even if the last attempt succeeded. Logged by the etl:freshness heartbeat as "[freshness] WARN retries <source>". Next: open /aws/ecs/sps-etl-${env}, filter "WARN retries", then that source's failed attempt's log; see gradeRetries in lib/etl/duration-margin.ts (#2190).`,
+      },
+      {
+        id: "EtlUnregistered",
+        marker: "WARN unregistered", // = UNREGISTERED_WARN_MARKER
+        metricName: "EtlUnregisteredWarn",
+        alarmName: `sps-etl-unregistered-${env}`,
+        description: `An ETL source wrote an etl_run row in the last 30 days but is not registered in TRACKED or UNSCHEDULED (${env}) -- a scheduled job nobody added to Data Sync, so its freshness is never graded. Logged by the etl:freshness heartbeat as "[freshness] WARN unregistered <source>". Next: open /edit/etl-status ("Not registered") or filter /aws/ecs/sps-etl-${env} for "WARN unregistered", then add the source to lib/etl/freshness-policy.ts.`,
       },
     ];
     for (const w of ETL_HEARTBEAT_WARNS) {

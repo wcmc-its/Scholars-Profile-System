@@ -27,6 +27,7 @@ const {
   mockSession,
   mockDenial,
   mockFindFirst,
+  mockGroupBy,
   mockRedirect,
   mockPendingHonors,
   mockHonorsTabVisible,
@@ -34,6 +35,7 @@ const {
   mockSession: vi.fn(),
   mockDenial: vi.fn(),
   mockFindFirst: vi.fn(),
+  mockGroupBy: vi.fn(),
   mockRedirect: vi.fn(() => {
     throw new Error("NEXT_REDIRECT");
   }),
@@ -52,7 +54,9 @@ vi.mock("@/lib/edit/honor-queue", () => ({
   countPendingHonors: mockPendingHonors,
   isHonorsQueueTabVisible: mockHonorsTabVisible,
 }));
-vi.mock("@/lib/db", () => ({ db: { read: { etlRun: { findFirst: mockFindFirst } } } }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { etlRun: { findFirst: mockFindFirst, groupBy: mockGroupBy } } },
+}));
 // The shell mounts the account menu (a client island that probes
 // /api/auth/session) and the whole tab strip; the page owns only its body.
 vi.mock("@/components/edit/console-shell", () => ({
@@ -91,6 +95,8 @@ const NOW = Date.parse("2026-08-06T12:00:00Z");
 
 type Fixture = { success?: EtlSuccessRow | null; attempt?: EtlAttemptRow | null };
 let fixtures: Record<string, Fixture> = {};
+/** etl_run sources with their newest startedAt, as the GROUP BY would see them. */
+let seen: Record<string, Date> = {};
 
 const success = (anchor: EtlSuccessRow, at = anchor.completedAt): Fixture => ({
   success: anchor,
@@ -111,6 +117,15 @@ beforeEach(() => {
   // would let a page that reads the wrong variable in prod stay green.
   vi.stubEnv("SPS_ENV", "prod");
   fixtures = {};
+  seen = {};
+  // Mirrors the SQL: GROUP BY source, MAX(startedAt), WHERE source NOT IN (...).
+  mockGroupBy.mockImplementation((args: { where: { source: { notIn: string[] } } }) =>
+    Promise.resolve(
+      Object.entries(seen)
+        .filter(([source]) => !args.where.source.notIn.includes(source))
+        .map(([source, startedAt]) => ({ source, _max: { startedAt } })),
+    ),
+  );
   // clearAllMocks() clears CALLS, not implementations — re-assert the default
   // shape of the honors gate so a per-test override cannot leak sideways.
   mockHonorsTabVisible.mockReturnValue(false);
@@ -170,7 +185,8 @@ const nightly: TrackedSpec = { cadence: "nightly" };
 const annual: TrackedSpec = { cadence: "annual" };
 
 /** The loader needs exactly one Prisma model, so the fake is one method. */
-const fakeClient = () => ({ etlRun: { findFirst: mockFindFirst } }) as unknown as EtlStatusClient;
+const fakeClient = () =>
+  ({ etlRun: { findFirst: mockFindFirst, groupBy: mockGroupBy } }) as unknown as EtlStatusClient;
 
 describe("liveStatuses (spotlight gate)", () => {
   it("counts a skipped gate run as alive, and only that source", async () => {
@@ -1015,6 +1031,33 @@ describe("/edit/etl-status triage layout", () => {
     expect(
       within(screen.getByTestId("etl-status-table")).queryByTestId(`etl-status-row-${source}`),
     ).toBeNull();
+  });
+});
+
+describe("unregistered sources", () => {
+  it("lists a recent source in neither TRACKED nor UNSCHEDULED, and nothing else", async () => {
+    seen = {
+      "Brand-New-Step": new Date(NOW - 2 * DAY), // the miss this exists to catch
+      "Long-Gone-Step": new Date(NOW - 45 * DAY), // outside the window
+      ED: new Date(NOW - HOUR), // tracked
+      ReciterRefresh: new Date(NOW - HOUR), // deliberately unscheduled
+    };
+    const summary = await loadEtlStatus(fakeClient(), new Date(NOW), "prod");
+    expect(summary.unregistered.map((u) => u.source)).toEqual(["Brand-New-Step"]);
+    // Shown, never graded: it must not leak into the TRACKED rows or their counts.
+    expect(summary.sources.some((r) => r.source === "Brand-New-Step")).toBe(false);
+  });
+
+  it("renders the section only when there is something in it", async () => {
+    render(await Page({}));
+    expect(screen.queryByTestId("etl-status-unregistered")).toBeNull();
+
+    seen = { "Brand-New-Step": new Date(NOW - 2 * DAY) };
+    render(await Page({}));
+    const section = screen.getByTestId("etl-status-unregistered");
+    expect(
+      within(section).getByTestId("etl-status-unregistered-Brand-New-Step").textContent,
+    ).toContain("Brand-New-Step");
   });
 });
 

@@ -30,6 +30,7 @@ const ALL_FLAGS_ON: Record<string, string> = {
   COMMS_STEWARD_ENABLED: "on",
   EDIT_DATA_QUALITY_DASHBOARD: "on",
   EDIT_DATA_SHARING_DASHBOARD: "on",
+  EDIT_RESEARCH_SECURITY_DASHBOARD: "on",
   CORE_PAGES: "on",
   MATCHA: "on",
   GRANT_MATCHA: "on",
@@ -76,6 +77,8 @@ function mergeSessions(a: EditSession, b: EditSession): EditSession {
     isHonorsCurator: a.isHonorsCurator === true || b.isHonorsCurator === true,
     isDeveloper: a.isDeveloper === true || b.isDeveloper === true,
     isDataSharingViewer: a.isDataSharingViewer === true || b.isDataSharingViewer === true,
+    isResearchSecurityViewer:
+      a.isResearchSecurityViewer === true || b.isResearchSecurityViewer === true,
     isObserver: a.isObserver === true || b.isObserver === true,
     isContentEditor: a.isContentEditor === true || b.isContentEditor === true,
   };
@@ -87,6 +90,7 @@ function mergeGrants(a: ConsoleGrants, b: ConsoleGrants): ConsoleGrants {
     manageableUnitCount: a.manageableUnitCount + b.manageableUnitCount,
     reportableUnitCount: a.reportableUnitCount + b.reportableUnitCount,
     viewerCanViewUsage: a.viewerCanViewUsage || b.viewerCanViewUsage,
+    viewerAdminsScopedUnit: a.viewerAdminsScopedUnit || b.viewerAdminsScopedUnit,
     reportAccessCount: a.reportAccessCount + b.reportAccessCount,
     dashboards: new Set([...a.dashboards, ...b.dashboards]),
   };
@@ -123,6 +127,7 @@ describe("feature flags", () => {
     ["COMMS_STEWARD_ENABLED", ["methods"]],
     ["EDIT_DATA_QUALITY_DASHBOARD", ["coi"]],
     ["EDIT_DATA_SHARING_DASHBOARD", ["dataSharing"]],
+    ["EDIT_RESEARCH_SECURITY_DASHBOARD", ["researchSecurity"]],
     ["CORE_PAGES", ["cores"]],
     ["MATCHA", ["matcha", "grantMatcha"]],
     ["GRANT_MATCHA", ["grantMatcha"]],

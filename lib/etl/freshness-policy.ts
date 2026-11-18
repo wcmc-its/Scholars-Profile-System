@@ -323,6 +323,11 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Nightly step (cdk/lib/etl-stack.ts IthacaRoster, tier:"continue") that writes
   // source "Ithaca-Roster" (etl/ithaca-roster/index.ts withEtlRun).
   "Ithaca-Roster": { cadence: "nightly" },
+  // Nightly step (cdk/lib/etl-stack.ts ResearchSecurity, tier:"continue") that writes
+  // source "Research-Security" (etl/research-security/index.ts withEtlRun). A night
+  // with RESEARCH_SECURITY_ETL off still records a run, so staleness here means the
+  // step stopped running or its source guard refused the replace.
+  "Research-Security": { cadence: "nightly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.
@@ -357,6 +362,18 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Sources tab), so this detects the schedule dying or every list failing,
   // not one list quietly failing.
   HonorsLists: { cadence: "weekly" },
+  // Deployed steps that wrote etl_run rows but were never registered here, so
+  // /edit/etl-status (TRACKED x etl_run) never showed them. All continue-tier
+  // (or, for FeedbackDigest, their own machine), so freshness is their net.
+  CenterPubRelevance: { cadence: "nightly" }, // CenterPubRelevanceNightly
+  HeadshotMissing: { cadence: "nightly" }, // HeadshotMissingNightly
+  CancerCenterDiseaseAssignment: { cadence: "weekly" }, // CancerCenterDiseaseAssignmentsWeekly
+  JournalImpactFactor: { cadence: "weekly" }, // JournalImpactFactorWeekly
+  FundableWork: { cadence: "weekly" }, // FundableWorkWeekly
+  FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
+  // ED email-visibility bridge (export -> S3 -> import). Only the import writes a
+  // row; built only where edEmailVisibilityBridgeEnabled (staging today).
+  "ED-EmailVisibility-Import": { cadence: "weekly", envs: ["staging"] },
   // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
   // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
   // the SLA here has to track the PRODUCER's schedule, not our loader's. That
@@ -492,6 +509,38 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
     },
   },
 };
+
+/**
+ * `etl_run` sources that are deliberately NOT in TRACKED: hand-run imports and
+ * one-offs with no schedule, so there is no cadence to be late against.
+ * `/edit/etl-status` lists any source seen recently that is in neither table as
+ * "not registered", and tests/unit/etl-status-tracked-guard.test.ts fails a
+ * deployed step whose source is in neither. Each entry says why.
+ */
+export const UNSCHEDULED: Readonly<Record<string, string>> = {
+  "ClinicalTrials-Import": "hand-run bridge import (etl:clinical-trials:import)",
+  "DataSharing-Import": "hand-run bridge import (etl:data-sharing:import)",
+  "ED-StewardNames-Import": "hand-run (etl:ed:import-steward-names)",
+  "ED-Student-Programs": "hand-run (etl:ed:student-programs)",
+  "InfoEd-Biosketch-backfill": "hand-run --backfill of the tracked InfoEd-Biosketch step",
+  "Jenzabar-GS-Faculty": "hand-run (etl:jenzabar:import-gs-faculty)",
+  "COI-Statements-Import": "hand-run (etl:reciter:import-coi-statements)",
+  "HonorsSeed-Import": "hand-run seed (etl:honors:import-seed)",
+  CancerTaxonomy: "hand-run (etl:cancer-taxonomy)",
+  MeSH: "hand-run descriptor load (etl:mesh)",
+  "iLab-Import": "hand-run quarterly import (etl:ilab:import)",
+  "RCR-Import": "hand-run bridge import (etl:reciter-rcr:import)",
+  ReciterRefresh: "operator-run scanner; see etl/reciter-refresh/index.ts",
+  FamilyReview: "hand-run (etl:family-review)",
+};
+
+/**
+ * Logged by etl:freshness once per unregistered source (see findUnregistered in
+ * lib/api/etl-status.ts). 🔴 MIRRORED in cdk/lib/observability-stack.ts
+ * ETL_HEARTBEAT_WARNS, whose metric filter counts it into sps-warn-<env>;
+ * tests/unit/etl-status-tracked-guard.test.ts fails if the two drift.
+ */
+export const UNREGISTERED_WARN_MARKER = "WARN unregistered";
 
 export interface SourceStatus {
   readonly source: string;

@@ -4,13 +4,17 @@
  * Scholars is the ORCID authority for everyone with an active record
  * (Roadmap/orcid-scholars-authority-plan.md, SPS PR 3). PM reads this table to
  * decide whether its ORCID field is read-only, with a "Change in Scholars" link.
- * It holds no iD: PM shows the one in WCM Identity, which `etl/orcid-push` keeps
- * equal to `scholar.orcid`, and `has_confirmed_orcid = 0` tells PM to label that
- * value "not confirmed in Scholars" (Identity can still hold an iD Scholars has
- * not confirmed).
+ * PM shows the iD in WCM Identity, which `etl/orcid-push` keeps equal to
+ * `scholar.orcid`, and `has_confirmed_orcid = 0` tells PM to label that value
+ * "not confirmed in Scholars" (Identity can still hold an iD Scholars has not
+ * confirmed).
  *
  * One row per non-deleted scholar, the set `etl/orcid-push` writes Identity for:
- *   cwid, has_confirmed_orcid (`orcid` set AND `orcid_confirmed_at` set), refreshed_at.
+ *   cwid, has_confirmed_orcid (`orcid` set AND `orcid_confirmed_at` set), refreshed_at,
+ *   and, once reciterdb has them (ReCiterDB setup v3.16), `orcid` (the CONFIRMED iD,
+ *   else NULL) and `campus`. reciterdb jobs read confirmed iDs from here, never from
+ *   Identity (Ithaca ORCID plan 2026-11-11, section 6). Until v3.16 is applied the
+ *   export writes the three original columns, so the two repos deploy in either order.
  * Every row of a run carries the same `refreshed_at`; PM treats the table as
  * missing when MAX(refreshed_at) is older than its threshold (48 h).
  *
@@ -37,7 +41,29 @@ export const TABLE = "scholar_active";
 export const MAX_SHRINK = 0.1;
 const BATCH = 1000;
 
-export type ActiveRow = { cwid: string; hasConfirmedOrcid: boolean };
+export type ActiveRow = {
+  cwid: string;
+  hasConfirmedOrcid: boolean;
+  /** The confirmed iD; null when `hasConfirmedOrcid` is false. */
+  orcid: string | null;
+  campus: string;
+};
+
+/** Pure: the INSERT and one row's values, with or without the v3.16 columns. */
+export function insertFor(withOrcid: boolean): {
+  sql: string;
+  values: (r: ActiveRow, now: Date) => unknown[];
+} {
+  return withOrcid
+    ? {
+        sql: `INSERT INTO ${TABLE} (cwid, has_confirmed_orcid, orcid, campus, refreshed_at) VALUES (?, ?, ?, ?, ?)`,
+        values: (r, now) => [r.cwid, r.hasConfirmedOrcid ? 1 : 0, r.orcid, r.campus, now],
+      }
+    : {
+        sql: `INSERT INTO ${TABLE} (cwid, has_confirmed_orcid, refreshed_at) VALUES (?, ?, ?)`,
+        values: (r, now) => [r.cwid, r.hasConfirmedOrcid ? 1 : 0, now],
+      };
+}
 
 /** Pure: the shrink guard. Null when the write may go ahead, else the reason. */
 export function refuseReason(next: number, current: number, force: boolean): string | null {
@@ -52,16 +78,22 @@ async function main(): Promise<number> {
   const force = process.argv.includes("--force");
   const rows: ActiveRow[] = (
     await db.write.scholar.findMany({
-      // WCM only: downstream ReCiter jobs read this as the WCM roster. The Ithaca
-      // ORCID step adds a campus column before Ithaca rows go in.
+      // WCM only: downstream ReCiter jobs and PM read this as the WCM roster. The
+      // campus column exists (v3.16), but Ithaca rows go in only after each reader
+      // filters on it (listed in the v3.16 migration).
       where: { deletedAt: null, campus: "wcm" },
-      select: { cwid: true, orcid: true, orcidConfirmedAt: true },
+      select: { cwid: true, orcid: true, orcidConfirmedAt: true, campus: true },
       orderBy: { cwid: "asc" },
     })
-  ).map((s) => ({
-    cwid: s.cwid.toLowerCase(),
-    hasConfirmedOrcid: s.orcid !== null && s.orcidConfirmedAt !== null,
-  }));
+  ).map((s) => {
+    const hasConfirmedOrcid = s.orcid !== null && s.orcidConfirmedAt !== null;
+    return {
+      cwid: s.cwid.toLowerCase(),
+      hasConfirmedOrcid,
+      orcid: hasConfirmedOrcid ? s.orcid : null,
+      campus: s.campus,
+    };
+  });
   const confirmed = rows.filter((r) => r.hasConfirmedOrcid).length;
   console.log(`${rows.length} active scholar(s), ${confirmed} with a confirmed ORCID iD.`);
 
@@ -71,6 +103,15 @@ async function main(): Promise<number> {
     }>;
     const refused = refuseReason(rows.length, Number(n), force);
     if (refused) throw new Error(refused);
+    const [{ c }] = (await conn.query(
+      `SELECT COUNT(*) AS c FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name IN ('orcid', 'campus')`,
+      [TABLE],
+    )) as Array<{ c: number }>;
+    const insert = insertFor(Number(c) === 2);
+    if (Number(c) !== 2)
+      console.warn(
+        `${TABLE} has no orcid/campus columns (ReCiterDB v3.16 not applied); writing without the iD.`,
+      );
     if (dryRun) {
       console.log(
         `Dry run (SCHOLARS_ENV=${process.env.SCHOLARS_ENV ?? "unset"}): would replace ${n} row(s) with ${rows.length}. Only prod writes.`,
@@ -83,8 +124,8 @@ async function main(): Promise<number> {
       await conn.query(`DELETE FROM ${TABLE}`);
       for (let i = 0; i < rows.length; i += BATCH) {
         await conn.batch(
-          `INSERT INTO ${TABLE} (cwid, has_confirmed_orcid, refreshed_at) VALUES (?, ?, ?)`,
-          rows.slice(i, i + BATCH).map((r) => [r.cwid, r.hasConfirmedOrcid ? 1 : 0, now]),
+          insert.sql,
+          rows.slice(i, i + BATCH).map((r) => insert.values(r, now)),
         );
       }
       await conn.commit();

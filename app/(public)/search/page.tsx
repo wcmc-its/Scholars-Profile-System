@@ -121,7 +121,7 @@ import {
   researchTypeLabel,
   toggleResearchTypeValue,
 } from "@/lib/research-type";
-import { isTranslationalStage, translationalStageLabel } from "@/lib/translational-stage";
+import { isTranslationalStage, translationalStageDisplay } from "@/lib/translational-stage";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -1981,7 +1981,7 @@ async function PublicationsResults({
   }
   for (const v of translationalStage) {
     chips.push({
-      label: translationalStageLabel(v),
+      label: translationalStageDisplay(v),
       removeHref: removeMulti("translationalStage", v),
     });
   }
@@ -3576,7 +3576,7 @@ function FacetSidebarPubs({
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
   /** Translational stage facet — buckets already in the fixed T0 → T3-4 order
-   *  (labelled here via `translationalStageLabel`). Empty while
+   *  (labelled here via `translationalStageDisplay`). Empty while
    *  `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off / pre-reindex ⇒ no group. */
   translationalStages: SearchFacetBucket[];
   activeTranslationalStage: string[];
@@ -3758,7 +3758,7 @@ function FacetSidebarPubs({
           {translationalStages.map((b) => (
             <FacetCheckbox
               key={b.value}
-              label={translationalStageLabel(b.value)}
+              label={translationalStageDisplay(b.value)}
               count={b.count}
               isActive={activeTranslationalStage.includes(b.value)}
               href={toggleHref("translationalStage", b.value)}

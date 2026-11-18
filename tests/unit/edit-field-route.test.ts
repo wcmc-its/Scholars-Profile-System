@@ -661,6 +661,44 @@ describe("POST /api/edit/field — selectedHighlightPmids (#836)", () => {
   });
 });
 
+describe("POST /api/edit/field — menteeCurrentPositions", () => {
+  const body = (entityId: string, value: unknown) =>
+    post({ entityType: "scholar", entityId, fieldName: "menteeCurrentPositions", value });
+
+  it("stores the trimmed map as JSON, audits once, and revalidates the profile", async () => {
+    const res = await POST(body("self01", { abc2001: "  Assistant Professor, Example University " }));
+    expect(res.status).toBe(200);
+    const stored = '{"abc2001":"Assistant Professor, Example University"}';
+    expect((await res.json()).value).toBe(stored);
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ fieldName: "menteeCurrentPositions", value: stored }),
+      }),
+    );
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the B03 audit row
+    expect(mockReflectOverviewEdit).toHaveBeenCalled();
+  });
+
+  it("rejects an over-long position with 400 and writes nothing", async () => {
+    const res = await POST(body("self01", { abc2001: "x".repeat(201) }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_value");
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-object value with 400", async () => {
+    const res = await POST(body("self01", ["abc2001"]));
+    expect(res.status).toBe(400);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-scholar write with 403 and writes nothing", async () => {
+    const res = await POST(body("other9", { abc2001: "Fellow" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // section-visibility (section-visibility-spec.md) — the seven whole-section
 // hide booleans ride the same POST /api/edit/field, allowlist, and B03 audit.

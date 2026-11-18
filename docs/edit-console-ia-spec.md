@@ -23,7 +23,8 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Tab | Superuser | comms_steward | honors_curator | unit Owner | unit Curator | pure `developer` |
 |---|---|---|---|---|---|---|
 | Profiles / Org units | ✓ | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
-| URL requests / URL registry / Activity / ETL status | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| URL requests / URL registry / ETL status | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| Activity | ✓ | ✗ | ✗ | ✓ a department / division / center grant, either role (`viewerAdminsScopedUnit`; unit-scoped view, 2026-11-17); not core-only | ✓ same | ✗ |
 | Cores | ✓ (flag) | ✓ (flag; 2026-08-26 policy widening, decision #6 — full curator-parity on cores) | ✗ | ✗ (owner-scoped index still a deliberately deferred gap) | ✗ | ✗ |
 | Honors | ✓ (flag) | ✓ read-only | ✓ | ✗ | ✗ | ✗ |
 | News | ✓ | ✓ (flag) | ✗ | ✗ | ✗ | ✗ |
@@ -32,6 +33,7 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Reports | ✓ | ✓ | ✗ | ✓ — `reportableUnitCount > 0` (centers only, not depts/divisions/cores) | ✓ same | ✗ |
 | Data quality | ✓ (flag) | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
 | Data sharing | ✓ (flag) | ✓ | ✗ | ✗ (no unit-scoped variant exists — no decision doc cites this yet, unlike Data Quality) | ✗ | ✗ |
+| Research security | ✓ (flag) | ✗ (sensitive: superuser or `research_security_viewer` only) | ✗ | ✗ | ✗ | ✗ |
 | Usage | ✓ | ✗ (`canViewUsage` has no steward carve-out) | ✗ | ✓ any `UnitAdmin` grant, either role | ✓ same | ✗ |
 | ORCID coverage | ✓ | ✗ | ✗ | ✓ same predicate as Usage (`viewerCanViewUsage`) | ✓ same | ✗ |
 | Funding matcher / Matcha | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ (Matcha also flag-gated) |

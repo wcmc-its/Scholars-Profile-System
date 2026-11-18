@@ -324,11 +324,14 @@ export function HourlyTrafficChart({
   traffic,
   since,
   edits,
+  editsLabel = EDITS_LABEL,
 }: {
   traffic: HourlyTraffic;
   since: string;
   /** Profile edits by hour; null when unavailable, omitted for no line. */
   edits?: EditHour[] | null;
+  /** The edits line's name; a unit-scoped page says whose edits it counts. */
+  editsLabel?: string;
 }) {
   const [mode, setMode] = useState<"timeline" | "hourOfDay">("timeline");
   const [hidden, setHidden] = useState<TrafficClass[]>([]);
@@ -377,7 +380,7 @@ export function HourlyTrafficChart({
       const line = countsLine(b.counts, shown, avg);
       if (line) parts.push(line);
     }
-    if (showEdits) parts.push(`${EDITS_LABEL} ${fmtCount(editValues[i] ?? 0, avg)}`);
+    if (showEdits) parts.push(`${editsLabel} ${fmtCount(editValues[i] ?? 0, avg)}`);
     return `${b.tip}: ${parts.join(" · ") || "all series hidden"}`;
   };
 
@@ -478,7 +481,7 @@ export function HourlyTrafficChart({
               )}
               aria-hidden="true"
             />
-            {EDITS_LABEL} (right scale)
+            {editsLabel} (right scale)
           </button>
         ) : edits === null ? (
           <span

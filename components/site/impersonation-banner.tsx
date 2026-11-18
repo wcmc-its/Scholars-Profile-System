@@ -54,6 +54,7 @@ export type SubjectRole =
   | "proxy"
   | "honors_curator"
   | "data_sharing_viewer"
+  | "research_security_viewer"
   | "development"
   | "content_editor"
   | "core_director"
@@ -67,6 +68,7 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   proxy: "Proxy editor",
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
+  research_security_viewer: "Research Security Viewer",
   development: "Development",
   content_editor: "Content Editor",
   core_director: "Cores director",
@@ -105,6 +107,7 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   proxy: [{ label: "Profiles they edit", href: "/edit" }],
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
+  research_security_viewer: [{ label: "Research security", href: "/edit/research-security" }],
   development: [
     { label: "Matcha: Open search", href: "/edit/matcha" },
     { label: "Matcha: Grants", href: "/edit/grant-matcha" },

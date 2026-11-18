@@ -209,6 +209,7 @@ describe("getEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isResearchSecurityViewer: false,
       isCoreDirector: false,
     });
   });
@@ -223,6 +224,7 @@ describe("getEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isResearchSecurityViewer: false,
       isCoreDirector: false,
     });
   });

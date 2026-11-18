@@ -93,6 +93,15 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     cannot: ["Any edit"],
   },
   {
+    key: "research_security_viewer",
+    label: "Research-security viewer",
+    description: "The research security dashboard.",
+    source: "ed_group",
+    groupCn: ED("research-security-viewer"),
+    can: ["Research security dashboard"],
+    cannot: ["Any edit"],
+  },
+  {
     key: "reporting",
     label: "Reporting",
     description: "Reports and dashboards, one scope at a time.",

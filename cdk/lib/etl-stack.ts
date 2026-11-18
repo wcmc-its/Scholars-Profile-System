@@ -1013,6 +1013,14 @@ export class EtlStack extends Stack {
         this,
         `/sps/${env}/etl/feedback-digest-recipient`,
       ),
+      // OpenAlex "polite pool" contact (lib/seo/openalex.ts mailtoFromEnv), read by
+      // etl:fundable-work. From SSM at deploy time for the same reason as the
+      // digest recipient above: no address in this public repo. Create
+      // `/sps/<env>/etl/openalex-mailto` before deploying, or the deploy fails.
+      OPENALEX_MAILTO: ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/etl/openalex-mailto`,
+      ),
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
       // the task well under the container limit; pin the heap to ~85% of the
@@ -1085,6 +1093,17 @@ export class EtlStack extends Stack {
       // and never pushed, whatever the value. Staging on; prod off until the staging queue
       // is reviewed. Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ITHACA_ORCID_CURATION: env === "prod" ? "off" : "on",
+      // Research security dashboard — etl:research-security copies reciterdb's
+      // watch-list screen (sensitive, per-person) into research_security_* only
+      // when this is exactly "on"; otherwise the step reads and writes nothing.
+      // OFF in both environments. Staging and prod read the SAME reciterdb, and
+      // the step throws (and alarms nightly) if watchlist_match is absent or
+      // holds fewer than 1,000 rows. Turn staging on in the change that confirms
+      // ReCiterDB's v3.13 tables exist there and one collectAffiliations run
+      // with RESEARCH_SECURITY_MODE=apply has finished; prod after the staging
+      // copy is checked against the 2026-10-29 workbook.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      RESEARCH_SECURITY_ETL: "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -1457,6 +1476,8 @@ export class EtlStack extends Stack {
       "etl:reporter",
       "etl:clinical-trials",
       "etl:data-sharing",
+      // Reads reciterdb watchlist_match / watchlist_funding_flag + authorship.
+      "etl:research-security",
       "etl:journal-impact-factor",
       // #3348 — exports the mentoring/cited-by bridge products from reciterdb,
       // then imports them (etl/mentoring/refresh.ts).
@@ -1999,6 +2020,13 @@ export class EtlStack extends Stack {
         external: true,
         tier: "continue",
       },
+      // Research security dashboard — reciterdb's watch-list screen joined to
+      // current authorship → research_security_* (read by /edit/research-security
+      // only). Same ReciterDB path as Reciter, so external:true and placed after
+      // it. Writes only when RESEARCH_SECURITY_ETL is "on" (else reads nothing).
+      // tier:"continue": a missed night, or the step refusing an empty or
+      // implausibly small source, leaves last night's copy and warns.
+      { id: "ResearchSecurity", npmScript: "etl:research-security", external: true, tier: "continue" },
       // RPM ORCID candidates (inferred + admin-entered) → orcid_candidate, read by
       // /edit/orcid-coverage only. Same ReciterDB path as Reciter, so external:true
       // and placed with it; tier:"continue" — a missed night just leaves last

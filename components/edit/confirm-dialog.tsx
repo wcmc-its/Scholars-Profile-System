@@ -61,6 +61,9 @@ export type ConfirmDialogProps = {
    * caller can render an inline error in the surrounding card.
    */
   onConfirm: (reason: string | null) => Promise<void> | void;
+  /** Placeholder for the `required-text` reason box. Defaults to the
+   *  retraction / compliance wording the suppression dialogs use. */
+  reasonPlaceholder?: string;
 };
 
 export function ConfirmDialog({
@@ -72,6 +75,7 @@ export function ConfirmDialog({
   confirmLabel,
   confirmVariant,
   onConfirm,
+  reasonPlaceholder = "Required — a retraction notice, compliance reference, or ticket link",
 }: ConfirmDialogProps) {
   const [preset, setPreset] = React.useState<PresetValue>("out-of-date");
   const [otherText, setOtherText] = React.useState("");
@@ -170,7 +174,7 @@ export function ConfirmDialog({
             <Textarea
               id="confirm-dialog-reason-required"
               aria-required="true"
-              placeholder="Required — a retraction notice, compliance reference, or ticket link"
+              placeholder={reasonPlaceholder}
               value={requiredText}
               onChange={(e) => setRequiredText(e.target.value)}
               rows={3}

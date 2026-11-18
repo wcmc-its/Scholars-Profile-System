@@ -184,6 +184,7 @@ model Scholar {
   appointments         Appointment[]
   educations           Education[]
   profileAppointments  ProfileAppointment[]
+  unitLeadershipRoles  UnitLeadershipRole[]
   honors               Honor[]
   grants               Grant[]
   grantDateGaps        GrantDateGap[]
@@ -1608,6 +1609,104 @@ model PersonDatasetDeposit {
   @@map("person_dataset_deposit")
 }
 
+/// Research security dashboard (`/edit/research-security`). A denormalized copy
+/// of reciterdb's watch-list screen (`watchlist_match`, `watchlist_funding_flag`)
+/// joined to current authorship, replaced in full each night by
+/// `etl/research-security`. SENSITIVE and per-person: read only by that page and
+/// its export, never by a public page, the search index or a log line.
+///
+/// One row per article that has a match or funding flag AND at least one of our
+/// people attached. `articleId` is reciterdb's stable key: the pmid as a string,
+/// or a SCOPUS: / OPENALEX: / CROSSREF: / DOI: id.
+model ResearchSecurityArticle {
+  articleId       String    @id @map("article_id") @db.VarChar(96)
+  /// Set for PubMed articles only.
+  pmid            Int?
+  title           String?   @db.Text
+  journal         String?   @db.VarChar(512)
+  publicationDate DateTime? @map("publication_date") @db.Date
+  publicationType String?   @map("publication_type") @db.VarChar(128)
+  /// Every author on the paper (`article_affiliation_state.n_authors`); 0 = unknown.
+  totalAuthors    Int       @default(0) @map("total_authors")
+  doi             String?   @db.VarChar(255)
+  /// 'pubmed' | 'scopus' | 'openalex' | 'crossref' | 'other'.
+  source          String    @db.VarChar(16)
+  lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
+
+  people       ResearchSecurityPerson[]
+  matches      ResearchSecurityMatch[]
+  fundingFlags ResearchSecurityFundingFlag[]
+
+  @@index([publicationDate])
+  @@map("research_security_article")
+}
+
+/// One of our people on a flagged article. Denormalized from reciterdb, so a
+/// Cornell (Ithaca) person needs no `scholar` row. `cwid` is null only for an
+/// open review-queue row with no proposed person.
+model ResearchSecurityPerson {
+  id           Int                     @id @default(autoincrement())
+  articleId    String                  @map("article_id") @db.VarChar(96)
+  article      ResearchSecurityArticle @relation(fields: [articleId], references: [articleId], onDelete: Cascade)
+  cwid         String?                 @db.VarChar(32)
+  displayName  String                  @map("display_name") @db.VarChar(255)
+  firstName    String?                 @map("first_name") @db.VarChar(128)
+  lastName     String?                 @map("last_name") @db.VarChar(128)
+  /// 'wcm' | 'ithaca' | 'unknown' (a review-queue row with no proposed person).
+  campus       String                  @db.VarChar(8)
+  department   String?                 @db.VarChar(255)
+  title        String?                 @db.VarChar(255)
+  /// 'confirmed' | 'pending' | 'review_queue'.
+  attribution  String                  @db.VarChar(16)
+  /// An open review-queue row names this person on this paper: always true for
+  /// 'review_queue', and true for a 'pending' row that also has a queue row.
+  inReviewQueue Boolean                @default(false) @map("in_review_queue")
+  /// ReCiter score for a pending or review-queue row; null when confirmed.
+  reciterScore Float?                  @map("reciter_score")
+
+  @@index([articleId])
+  @@index([cwid])
+  @@index([attribution])
+  @@map("research_security_person")
+}
+
+/// One matched (co-author, affiliation string) on a flagged article.
+model ResearchSecurityMatch {
+  id                  Int                     @id @default(autoincrement())
+  articleId           String                  @map("article_id") @db.VarChar(96)
+  article             ResearchSecurityArticle @relation(fields: [articleId], references: [articleId], onDelete: Cascade)
+  /// 'house-1286-nominations' | 'usual-suspects' | 'country-of-concern'.
+  listCode            String                  @map("list_code") @db.VarChar(40)
+  category            String                  @db.VarChar(64)
+  listNo              Int?                    @map("list_no")
+  entity              String                  @db.VarChar(160)
+  authorRank          Int                     @map("author_rank")
+  authorName          String?                 @map("author_name") @db.VarChar(255)
+  /// The exact affiliation string that matched.
+  affiliation         String?                 @db.Text
+  /// Approximate: the matched co-author has the name of one of our people on the paper.
+  isInstitutionAuthor Boolean                 @default(false) @map("is_institution_author")
+  /// Which of this article's people (cwids, comma-separated) the matched name is,
+  /// by reciterdb's own name rule. Null when it is none of them.
+  ourAuthorCwids      String?                 @map("our_author_cwids") @db.VarChar(512)
+
+  @@index([articleId])
+  @@index([listCode, entity])
+  @@map("research_security_match")
+}
+
+/// A talent-program or CSC acknowledgement in an article's grant metadata.
+model ResearchSecurityFundingFlag {
+  articleId String                  @map("article_id") @db.VarChar(96)
+  article   ResearchSecurityArticle @relation(fields: [articleId], references: [articleId], onDelete: Cascade)
+  program   String                  @db.VarChar(160)
+  agency    String?                 @db.VarChar(500)
+  grantId   String?                 @map("grant_id") @db.VarChar(255)
+
+  @@id([articleId, program])
+  @@map("research_security_funding_flag")
+}
+
 /// Grants from InfoEd, filtered per spec line 125 (Confidential != 'Y',
 /// program_type != 'Contract without funding', valid roles, valid dates).
 model Grant {
@@ -2533,6 +2632,63 @@ model OrgUnitRoleAssignment {
   @@index([cwid])
   @@index([entityType, entityId, roleKey, sortOrder])
   @@map("org_unit_role_assignment")
+}
+
+/// A department-authored leadership title held by one person at one unit —
+/// v1 is the Vice Chair family (Executive / Senior / Vice / Associate /
+/// Assistant Vice Chair). Steward-maintained on `/edit`; ED carries none of
+/// these (2026-11-17 probe: 0 of 88 audited holders had a Vice Chair
+/// appointment title).
+///
+/// A SEPARATE TABLE from `OrgUnitRoleAssignment` on purpose: the ED ETL writes
+/// department rows there nightly and never touches this one (the
+/// `ProfileAppointment` reasoning), and that table has no per-holder title —
+/// its vocabulary speaks with one voice, while these titles are whatever each
+/// department publishes. `displayTitle` is shown verbatim; `tier`, `functions`
+/// and `site` exist only for ordering, filtering and reports.
+///
+/// No status / verified / end-date lifecycle: a row exists or it does not, and
+/// the `/edit` audit log holds the history. Readers join to an active scholar,
+/// so a departed holder drops off without a job.
+///
+/// `entityType` / `tier` / `functions` / `site` / `source` are VARCHAR with
+/// app-level closure (`lib/unit-leadership.ts`), the `OrgUnitRole` convention.
+model UnitLeadershipRole {
+  id               String    @id @default(uuid()) @db.VarChar(64)
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// `department` in v1. NO FK on `entityId` — polymorphic, as `UnitAdmin` is.
+  entityType       String    @map("entity_type") @db.VarChar(32)
+  entityId         String    @map("entity_id") @db.VarChar(64)
+  /// `vice_chair` in v1.
+  roleFamily       String    @default("vice_chair") @map("role_family") @db.VarChar(32)
+  /// The modifier before "Vice Chair", lower-cased and OPEN-ENDED (`executive`,
+  /// `senior`, `deputy`, `interim executive`, …); `vice` when there is none.
+  /// Read from `displayTitle` on write, never picked from a list.
+  tier             String    @db.VarChar(64)
+  /// Comma-joined function codes, `''` for a general Vice Chair. Not JSON: a
+  /// `Prisma.JsonNull` passes `IS NOT NULL`.
+  functions        String    @default("") @db.VarChar(255)
+  /// Free-text subspecialty, used with the `clinical_area` code.
+  areaText         String?   @map("area_text") @db.VarChar(255)
+  /// NYP site for a site-based Vice Chair.
+  site             String?   @db.VarChar(32)
+  /// The title exactly as the department publishes it.
+  displayTitle     String    @map("display_title") @db.VarChar(255)
+  startDate        DateTime? @map("start_date") @db.Date
+  /// `steward` | `audit_seed`.
+  source           String    @default("steward") @db.VarChar(32)
+  sourceUrl        String?   @map("source_url") @db.VarChar(512)
+  sourceObservedAt DateTime? @map("source_observed_at") @db.Date
+  showOnProfile    Boolean   @default(true) @map("show_on_profile")
+  /// Steward note; required when the holder is not full-time faculty.
+  note             String?   @db.VarChar(512)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([entityType, entityId])
+  @@index([cwid])
+  @@map("unit_leadership_role")
 }
 
 /// A vocabulary entry's unit allowlist (#2557 Phase E). `research` and

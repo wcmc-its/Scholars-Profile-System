@@ -270,6 +270,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Loads Cornell Ithaca faculty, postdocs and grad students as hidden records for ORCID curation.",
     origin: "external", // sibling ReCiterDB (Cornell roster)
   },
+  "Research-Security": {
+    label: "Research Security Screen",
+    description: "Copies the watch-list co-publication screen for the research security dashboard.",
+    origin: "external", // sibling ReCiterDB (watchlist_match, watchlist_funding_flag)
+  },
   "InfoEd-Biosketch": {
     label: "NIH Biosketches",
     description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",
@@ -332,6 +337,36 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description:
       "Checks public honor lists (academies, fellowships) for Weill Cornell scholars and queues each new match for curator approval.",
     origin: "external", // public roster pages of the conferring bodies
+  },
+  CenterPubRelevance: {
+    label: "Cancer Relevance of Center Publications",
+    description: "Scores center members' new papers for cancer relevance in center reports.",
+    origin: "external", // PubMed EFetch affiliations + Bedrock scoring
+  },
+  CancerCenterDiseaseAssignment: {
+    label: "Cancer Center Disease Assignments",
+    description: "Proposes disease-area assignments for Cancer Center members to curate.",
+    origin: "internal", // SPS-DB taxonomy + person rollup only
+  },
+  JournalImpactFactor: {
+    label: "Journal Impact Factors",
+    description: "Journal impact factors used in publication reports.",
+    origin: "external", // ReCiterDB JCR snapshot
+  },
+  FundableWork: {
+    label: "Fundable Work",
+    description: "Conference abstracts and preprints scored for private-funding potential.",
+    origin: "external", // OpenAlex + ReCiterDB
+  },
+  FeedbackDigest: {
+    label: "Feedback Digest Email",
+    description: "Emails the weekly summary of site feedback to the Scholars team.",
+    origin: "internal", // SPS-DB feedback rows, sent via SES
+  },
+  "ED-EmailVisibility-Import": {
+    label: "Email Visibility",
+    description: "Whether each scholar's email address is shown on their profile.",
+    origin: "external", // WCM Enterprise Directory release codes, via S3
   },
   NewsClips: {
     label: "Media highlights",

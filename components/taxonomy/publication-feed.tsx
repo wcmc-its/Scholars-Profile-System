@@ -40,6 +40,11 @@ import { Compass } from "lucide-react";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { SnippetUsageBadge } from "@/components/method/snippet-usage-badge";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import {
+  TRANSLATIONAL_STAGES,
+  translationalStageDisplay,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 import { pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
@@ -167,6 +172,14 @@ export type PublicationFeedProps = {
   renderHeader?: (sortControl: ReactNode) => ReactNode;
   /** TOPIC_FEED_GRANTS_TRIALS — the Show tier, set by the header's switch. */
   showTier?: ShowTier;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the Stage select (`?stage=`). */
+  stageFilter?: boolean;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the picked stage, null for all
+   *  stages or once the feed unmounts (the Activities counts follow it). */
+  onStageChange?: (stage: TranslationalStage | null) => void;
+  /** The Stage menu's per-option counts (as the Publications tab counts);
+   *  a zero-count stage is disabled. Null = no counts shown. */
+  stageCounts?: Record<TranslationalStage | "all", number> | null;
 };
 
 /** Build a feed URL. Param order is part of the (tested) request contract. */
@@ -215,6 +228,9 @@ export function PublicationFeed({
   heading,
   renderHeader,
   showTier: showTierProp,
+  stageFilter = false,
+  onStageChange,
+  stageCounts = null,
 }: PublicationFeedProps) {
   const pickedScholar = useScholarFilter();
   const scholar = scholarFilter ? pickedScholar : null;
@@ -223,9 +239,12 @@ export function PublicationFeed({
     () => (scholarFilter && !retainScholarFilter ? () => setScholarFilter(null) : undefined),
     [scholarFilter, retainScholarFilter],
   );
-  const scopeParams: Array<[string, string | null]> = scholar
-    ? [...baseScopeParams, ["cwid", scholar.cwid]]
-    : baseScopeParams;
+  const [stage, setStage] = useState<TranslationalStage | "all">("all");
+  const scopeParams: Array<[string, string | null]> = [
+    ...baseScopeParams,
+    ...(scholar ? [["cwid", scholar.cwid] as [string, string]] : []),
+    ...(stageFilter && stage !== "all" ? [["stage", stage] as [string, string]] : []),
+  ];
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   // #326 — defaults to "strongly" on every mount (no persistence).
@@ -304,6 +323,11 @@ export function PublicationFeed({
   // ---- derived view --------------------------------------------------------
   const data = loadMore ? list.data : primary.data;
   const tierTotals = data?.tierTotals ?? null;
+  useEffect(() => {
+    onStageChange?.(stage === "all" ? null : stage);
+  }, [onStageChange, stage]);
+  // Unmount (tab switch) resets the stage, so the counts drop it too.
+  useEffect(() => () => onStageChange?.(null), [onStageChange]);
   const parentTierTotals = data?.parentTierTotals ?? null;
   const alsoInline = loadMore ? list.merged : pagedAlsoInline;
   const showTierSelect =
@@ -348,11 +372,41 @@ export function PublicationFeed({
     </Select>
   );
 
+  const stageSelect = stageFilter ? (
+    <Select value={stage} onValueChange={(v) => setStage(v as TranslationalStage | "all")}>
+      <SelectTrigger className="w-[240px]" aria-label="Translational stage">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all" trailing={stageCounts?.all.toLocaleString()}>
+          All stages
+        </SelectItem>
+        {TRANSLATIONAL_STAGES.map((st) => (
+          <SelectItem
+            key={st}
+            value={st}
+            trailing={stageCounts?.[st].toLocaleString()}
+            // Never strand the current pick: it stays selectable at zero.
+            disabled={stageCounts !== null && stageCounts[st] === 0 && stage !== st}
+          >
+            {translationalStageDisplay(st)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  ) : null;
+
   return (
     <section className="flex flex-col gap-4">
       {renderHeader ? (
         renderHeader(
           <>
+            {stageSelect && (
+              <>
+                Stage
+                {stageSelect}
+              </>
+            )}
             Sort
             {sortSelect}
             {isCuratedSort && <CuratedTag surface="publication_centric" />}
@@ -380,6 +434,12 @@ export function PublicationFeed({
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+        )}
+        {stageSelect && (
+          <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
+            Stage
+            {stageSelect}
           </div>
         )}
         <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
@@ -1034,6 +1094,9 @@ export function TopicPublicationFeed({
   renderHeader,
   showTier,
   retainScholarFilter,
+  stageFilter = false,
+  onStageChange,
+  stageCounts = null,
 }: {
   topicSlug: string;
   /** The subtopic title/description live in the rail layout's subhead. */
@@ -1049,6 +1112,11 @@ export function TopicPublicationFeed({
   showTier?: ShowTier;
   /** TOPIC_FEED_GRANTS_TRIALS (TopicActivityFeed) owns the scholar pick. */
   retainScholarFilter?: boolean;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET. */
+  stageFilter?: boolean;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET (TopicActivityFeed): the counts. */
+  onStageChange?: (stage: TranslationalStage | null) => void;
+  stageCounts?: Record<TranslationalStage | "all", number> | null;
 }) {
   const areaLabelFor = useMemo(() => {
     if (!loadMore || activeSubtopic || !subtopicLabels) return undefined;
@@ -1075,6 +1143,9 @@ export function TopicPublicationFeed({
       renderHeader={renderHeader}
       showTier={showTier}
       retainScholarFilter={retainScholarFilter}
+      stageFilter={stageFilter}
+      onStageChange={onStageChange}
+      stageCounts={stageCounts}
     />
   );
 }

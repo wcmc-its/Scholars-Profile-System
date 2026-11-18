@@ -83,9 +83,25 @@ import {
   getMenteesForMentor,
 } from "@/lib/api/mentoring";
 import { fetchCoPubsSummary } from "@/lib/api/popover-context";
-import { MAX_MANUAL_MENTEES, validateManualMentees } from "@/lib/edit/manual-mentee";
+import {
+  MAX_CURRENT_POSITION,
+  MAX_MANUAL_MENTEES,
+  MAX_MENTEE_CURRENT_POSITIONS,
+  validateManualMentees,
+  validateMenteeCurrentPositions,
+} from "@/lib/edit/manual-mentee";
 
 const MENTOR = "abc1001";
+
+/** Stub BOTH stored field-overrides, keyed on the requested field name. */
+function storeOverrides(stored: { manualMentees?: unknown; menteeCurrentPositions?: unknown }): void {
+  fieldOverrideFindUnique.mockImplementation((async (args: {
+    where: { entityType_entityId_fieldName: { fieldName: string } };
+  }) => {
+    const v = stored[args.where.entityType_entityId_fieldName.fieldName as keyof typeof stored];
+    return v === undefined ? null : { value: JSON.stringify(v) };
+  }) as never);
+}
 
 /** Stub the stored `manualMentees` field-override with the given entries. */
 function storeManual(entries: unknown[]): void {
@@ -178,6 +194,79 @@ describe("validateManualMentees", () => {
       ok: false,
       error: "invalid_value",
     });
+  });
+});
+
+describe("validateManualMentees — currentPosition", () => {
+  it("trims and keeps a current position", () => {
+    const r = validateManualMentees([
+      { name: "Rowan Ellis", currentPosition: "  Assistant Professor, Example University " },
+    ]);
+    expect(r).toEqual({
+      ok: true,
+      value: [{ name: "Rowan Ellis", currentPosition: "Assistant Professor, Example University" }],
+    });
+  });
+
+  it("drops a blank one so the stored JSON stays minimal", () => {
+    const r = validateManualMentees([{ name: "A", currentPosition: "   " }]);
+    expect(r.ok && JSON.stringify(r.value)).toBe('[{"name":"A"}]');
+  });
+
+  it("caps the length and rejects a non-string", () => {
+    const atCap = "x".repeat(MAX_CURRENT_POSITION);
+    expect(validateManualMentees([{ name: "A", currentPosition: atCap }]).ok).toBe(true);
+    expect(validateManualMentees([{ name: "A", currentPosition: atCap + "x" }])).toEqual({
+      ok: false,
+      error: "invalid_value",
+    });
+    expect(validateManualMentees([{ name: "A", currentPosition: 7 }])).toEqual({
+      ok: false,
+      error: "invalid_value",
+    });
+  });
+});
+
+describe("validateMenteeCurrentPositions", () => {
+  it("accepts a map of mentee cwid → trimmed text, from an object or a JSON string", () => {
+    const want = { ok: true, value: { rel2002: "Staff Scientist, Example Institute" } };
+    expect(
+      validateMenteeCurrentPositions({ rel2002: " Staff Scientist, Example Institute " }),
+    ).toEqual(want);
+    expect(
+      validateMenteeCurrentPositions('{"rel2002":"Staff Scientist, Example Institute"}'),
+    ).toEqual(want);
+  });
+
+  it("drops a blank position — clearing the input removes the entry", () => {
+    expect(validateMenteeCurrentPositions({ rel2002: "  ", pxr4012: "Fellow" })).toEqual({
+      ok: true,
+      value: { pxr4012: "Fellow" },
+    });
+    expect(validateMenteeCurrentPositions({})).toEqual({ ok: true, value: {} });
+  });
+
+  it("rejects anything that is not a plain object of strings", () => {
+    for (const bad of [[], null, "not json", 3, { rel2002: 5 }, { rel2002: { a: 1 } }, { "": "x" }]) {
+      expect(validateMenteeCurrentPositions(bad)).toEqual({ ok: false, error: "invalid_value" });
+    }
+  });
+
+  it("rejects a synthetic manual id — those carry the field on their own entry", () => {
+    expect(validateMenteeCurrentPositions({ "manual:0": "Fellow" })).toEqual({
+      ok: false,
+      error: "invalid_value",
+    });
+  });
+
+  it("caps the text length and the number of entries", () => {
+    expect(
+      validateMenteeCurrentPositions({ rel2002: "x".repeat(MAX_CURRENT_POSITION + 1) }),
+    ).toEqual({ ok: false, error: "invalid_value" });
+    const many = Object.fromEntries(
+      Array.from({ length: MAX_MENTEE_CURRENT_POSITIONS + 1 }, (_, i) => [`abc${i}`, "Fellow"]),
+    );
+    expect(validateMenteeCurrentPositions(many)).toEqual({ ok: false, error: "too_many" });
   });
 });
 
@@ -360,6 +449,52 @@ describe("getMenteesForMentor — manual mentees (#2011)", () => {
     expect(mentees).toHaveLength(1);
     expect(mentees[0].fullName).toBe("Rowan Ellis");
     err.mockRestore();
+  });
+
+  it("leaves currentPosition null when the mentor entered none", async () => {
+    storeManual([{ name: "Rowan Ellis" }]);
+    const { mentees } = await getMenteesForMentor(MENTOR);
+    expect(mentees[0].currentPosition).toBeNull();
+  });
+
+  it("carries a manual entry's currentPosition onto its chip, with or without a cwid", async () => {
+    storeOverrides({
+      manualMentees: [
+        { name: "Rowan Ellis", currentPosition: "Assistant Professor, Example University" },
+        { name: "Priya Raman", cwid: "pxr4012", currentPosition: "Staff Scientist" },
+      ],
+    });
+    const { mentees } = await getMenteesForMentor(MENTOR);
+    const byName = new Map(mentees.map((m) => [m.fullName, m.currentPosition]));
+    expect(byName.get("Rowan Ellis")).toBe("Assistant Professor, Example University");
+    expect(byName.get("Priya Raman")).toBe("Staff Scientist");
+  });
+
+  it("attaches the override map's position to a SOURCED mentee, and only to that mentee", async () => {
+    phdFindMany.mockResolvedValue([
+      { menteeCwid: "rel2002", menteeFirstName: "Rowan", menteeLastName: "Ellis", conferralYear: 2021, programType: "PhD", majorDesc: null },
+      { menteeCwid: "pxr4012", menteeFirstName: "Priya", menteeLastName: "Raman", conferralYear: 2020, programType: "PhD", majorDesc: null },
+    ]);
+    storeOverrides({ menteeCurrentPositions: { rel2002: "Group Leader, Example Institute" } });
+
+    const { mentees } = await getMenteesForMentor(MENTOR);
+
+    const byCwid = new Map(mentees.map((m) => [m.cwid, m.currentPosition]));
+    expect(byCwid.get("rel2002")).toBe("Group Leader, Example Institute");
+    expect(byCwid.get("pxr4012")).toBeNull();
+  });
+
+  it("prefers the override map over a manual entry's own text for the same cwid", async () => {
+    phdFindMany.mockResolvedValue([
+      { menteeCwid: "rel2002", menteeFirstName: "Rowan", menteeLastName: "Ellis", conferralYear: 2021, programType: "PhD", majorDesc: null },
+    ]);
+    storeOverrides({
+      manualMentees: [{ name: "R. Ellis", cwid: "rel2002", currentPosition: "Postdoc elsewhere" }],
+      menteeCurrentPositions: { rel2002: "Group Leader, Example Institute" },
+    });
+    const { mentees } = await getMenteesForMentor(MENTOR);
+    expect(mentees).toHaveLength(1);
+    expect(mentees[0].currentPosition).toBe("Group Leader, Example Institute");
   });
 
   it("treats a corrupt stored value as no manual mentees rather than 500-ing", async () => {

@@ -311,7 +311,9 @@ export async function GET(): Promise<NextResponse> {
         // prevent. These roles have no name-resolution bridge of their own (no
         // steward_directory-equivalent), so the name comes from ED, degrading to
         // the bare CWID if the directory is unreachable — never missing.
-        const globalRole = await resolveGlobalRole(targetCwid).catch(() => null);
+        const globalRole = await resolveGlobalRole(targetCwid, {
+          viewerCwid: session.cwid,
+        }).catch(() => null);
         if (globalRole) {
           impersonating = {
             targetCwid,

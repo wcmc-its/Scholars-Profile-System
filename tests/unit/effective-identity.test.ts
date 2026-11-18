@@ -317,7 +317,87 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isResearchSecurityViewer: false,
       isCoreDirector: false,
+    });
+  });
+
+  // The research security dashboard is sensitive. An observer or content editor
+  // may start a read-only "View as" (R1), so the target's viewer role must not
+  // carry over to them: only a superuser-started overlay inherits it.
+  describe("research_security_viewer under View as", () => {
+    const VIEWER_CN = "ITS:Library:Scholars/research-security-viewer-role";
+    const VIEWER = ROLE_FIXTURES.scholar;
+
+    /** Members per group cn; the search resolves a DN that names the cn. */
+    function ldapGroups(members: Record<string, string[]>) {
+      mockedOpenLdap.mockResolvedValue(
+        asClient(
+          fakeClient(
+            async (_base, options) => {
+              const cn = options.filter.match(/^\(cn=(.+)\)$/)?.[1] ?? "";
+              return { searchEntries: [{ cn, dn: `cn=${cn},ou=Groups` }] };
+            },
+            async (dn, _attr, value) => {
+              const cn = dn.match(/^cn=(.+),ou=Groups$/)?.[1] ?? "";
+              const cwid = value.match(/^uid=([^,]+),/)?.[1] ?? "";
+              return (members[cn] ?? []).includes(cwid);
+            },
+          ),
+        ),
+      );
+    }
+
+    beforeEach(() => {
+      process.env.RESEARCH_SECURITY_VIEWER_ENABLED = "on";
+      process.env.SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN = VIEWER_CN;
+    });
+    afterEach(() => {
+      delete process.env.RESEARCH_SECURITY_VIEWER_ENABLED;
+      delete process.env.SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN;
+    });
+
+    it("a viewer signed in as themselves holds the role", async () => {
+      mockedGetSession.mockResolvedValue(
+        sessionAs(VIEWER, { cwid: VIEWER, impersonating: undefined }),
+      );
+      ldapGroups({ [VIEWER_CN]: [VIEWER] });
+      const s = await getEffectiveEditSession();
+      expect(s?.isResearchSecurityViewer).toBe(true);
+      expect(s?.sensitiveDashboardsBlocked).toBeUndefined();
+    });
+
+    it("a superuser viewing as the viewer inherits it (a superuser already passes the gate)", async () => {
+      mockedGetSession.mockResolvedValue(sessionAs(VIEWER));
+      ldapGroups({ [GROUP_CN]: [SUPERUSER_FIXTURE], [VIEWER_CN]: [VIEWER] });
+      const s = await getEffectiveEditSession();
+      expect(s).toMatchObject({ cwid: VIEWER, isSuperuser: false, isResearchSecurityViewer: true });
+      expect(s?.sensitiveDashboardsBlocked).toBeUndefined();
+    });
+
+    it("a NON-superuser viewing as the viewer does not: the dashboard stays closed to them", async () => {
+      // The real user (an observer, say) is in no superuser group.
+      mockedGetSession.mockResolvedValue(sessionAs(VIEWER, { cwid: "obs0001" }));
+      ldapGroups({ [GROUP_CN]: [SUPERUSER_FIXTURE], [VIEWER_CN]: [VIEWER] });
+      const s = await getEffectiveEditSession();
+      expect(s).toMatchObject({
+        cwid: VIEWER,
+        isSuperuser: false,
+        isResearchSecurityViewer: false,
+        sensitiveDashboardsBlocked: true,
+      });
+    });
+
+    it("a NON-superuser overlay is marked whoever the target is, so an ad hoc grant cannot open it either", async () => {
+      // The target holds no viewer role; they might hold a dash:research-security
+      // grant, which the session cannot see. The marker closes the gate anyway.
+      mockedGetSession.mockResolvedValue(sessionAs(VIEWER, { cwid: "obs0001" }));
+      ldapGroups({ [GROUP_CN]: [SUPERUSER_FIXTURE] });
+      expect(await getEffectiveEditSession()).toMatchObject({
+        cwid: VIEWER,
+        isResearchSecurityViewer: false,
+        sensitiveDashboardsBlocked: true,
+      });
     });
   });
 
@@ -336,6 +416,7 @@ describe("getEffectiveEditSession", () => {
       isDeveloper: false,
       isHonorsCurator: false,
       isDataSharingViewer: false,
+      isResearchSecurityViewer: false,
       isCoreDirector: false,
     });
   });

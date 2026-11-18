@@ -31,6 +31,7 @@
 import {
   getEffectiveOverview,
   getManualMentees,
+  getMenteeCurrentPositions,
   getProfileLinks,
   getSelectedHighlightPmids,
 } from "@/lib/api/manual-layer";
@@ -754,6 +755,14 @@ export type EditContext = {
    * card round-trips this array through `POST /api/edit/field`.
    */
   manualMentees: ReadonlyArray<ManualMentee>;
+  /**
+   * The mentor's "Current position" text for training-record mentees, keyed by
+   * mentee CWID (`field_override('menteeCurrentPositions')`), `{}` when none.
+   * The whole stored map, not just the rows in `mentees`: the Mentees panel
+   * writes the map back whole, so an entry for a mentee missing from today's
+   * roster must survive the round trip.
+   */
+  menteeCurrentPositions: Readonly<Record<string, string>>;
   /** #2699 — the scholar's external profile links (`field_override('profileLinks')`),
    *  `{}` when none. The Identifiers & Profiles card round-trips this object. */
   profileLinks: ProfileLinks;
@@ -1024,6 +1033,7 @@ export async function loadEditContext(
     sectionOverrideRows,
     manualMenteeRows,
     profileLinks,
+    menteeCurrentPositions,
   ] = await Promise.all([
     // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
     // shows the "no override" state. The self surface does not surface this field
@@ -1216,6 +1226,10 @@ export async function loadEditContext(
       );
       return {} as ProfileLinks;
     }),
+    // Deliberately NOT caught, unlike the two reads above. The Mentees panel
+    // writes this map back whole, so a failed read degraded to `{}` would let the
+    // next save erase every stored position. Failing the load is the safe side.
+    getMenteeCurrentPositions(cwid, client),
   ]);
 
   const slugOverride = slugOverrideRow?.value ?? null;
@@ -2138,6 +2152,7 @@ export async function loadEditContext(
       datasets,
       mentees,
       manualMentees: manualMenteeRows,
+      menteeCurrentPositions,
       profileLinks,
       manualMenteeUnresolvedCwids,
       menteeSuggestions,
@@ -2325,6 +2340,7 @@ export async function loadEditContext(
     datasets,
     mentees,
     manualMentees: manualMenteeRows,
+    menteeCurrentPositions,
     profileLinks,
     manualMenteeUnresolvedCwids,
     menteeSuggestions,

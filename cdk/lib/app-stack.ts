@@ -1518,6 +1518,13 @@ export class AppStack extends Stack {
         // isDataSharingDashboardEnabled() (=== "on"); when off the route 404s and
         // the sub-nav tab is hidden — ships dark. App-only, no reindex, no writes.
         EDIT_DATA_SHARING_DASHBOARD: "on", // Prod flipped 2026-08-12 (#2383, staging-soaked same day, render-only).
+        // Research security dashboard (`/edit/research-security`): co-publications
+        // where a co-author lists a watch-list entity, from the tables
+        // etl:research-security fills. SENSITIVE, per-person. Read via
+        // isResearchSecurityDashboardEnabled() (=== "on"); when off the route and
+        // its export 404 and the sub-nav tab is hidden. App-only, no reindex, no
+        // writes. STAGING-FIRST: on in staging, off in prod until sign-off.
+        EDIT_RESEARCH_SECURITY_DASHBOARD: envConfig.envName === "staging" ? "on" : "off",
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"
@@ -1620,6 +1627,14 @@ export class AppStack extends Stack {
         // today). App-only, no reindex, no migration. Prod-on 2026-09-30 after
         // the staging soak was signed off.
         CENTER_DISEASE_FACET: "on",
+        // UNIT_LEADERSHIP_ROLES — department Vice Chair roles (`unit_leadership_role`,
+        // lib/edit/unit-leadership-flags.ts): the Vice Chairs card on
+        // /edit/department/[code] and POST /api/edit/unit-leadership. Read via
+        // isUnitLeadershipEnabled() (=== "on"); when off the card is absent and
+        // the route 404s. Also gates the public department-page list, the
+        // profile title lines and report 23. Prod-on 2026-11-17 after the
+        // staging soak; prod rows seeded from the November 2026 audit.
+        UNIT_LEADERSHIP_ROLES: "on",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
@@ -2007,6 +2022,18 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         DATA_SHARING_VIEWER_ENABLED: "on",
         SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
+        // `research_security_viewer` role. Unlocks ONLY /edit/research-security
+        // for the export-controls / research-security office; superusers already
+        // pass. Same shape as data_sharing_viewer above.
+        //   RESEARCH_SECURITY_VIEWER_ENABLED -- master kill switch. On since the
+        //     ED group below was created (2026-11-17). Inert in prod while
+        //     EDIT_RESEARCH_SECURITY_DASHBOARD is off there.
+        //   SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN -- the ED group whose
+        //     membership confers the role.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        RESEARCH_SECURITY_VIEWER_ENABLED: "on",
+        SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN:
+          "ITS:Library:Scholars/research-security-viewer-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
         // who need to understand the app and guide users through changes.
@@ -2389,7 +2416,7 @@ export class AppStack extends Stack {
         // both envs at merge. Flip only AFTER the DynamoDB ETL has filled the
         // columns and the nightly publications alias rebuild carries the keyword
         // mapping. Staging first.
-        SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET: envConfig.envName === "staging" ? "off" : "off",
+        SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET: envConfig.envName === "staging" ? "on" : "on",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.
