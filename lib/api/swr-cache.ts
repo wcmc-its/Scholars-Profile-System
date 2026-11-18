@@ -70,6 +70,18 @@ function isNotFound(err: unknown): boolean {
   return n === "NoSuchKey" || n === "NotFound" || e?.$metadata?.httpStatusCode === 404;
 }
 
+function logMarkerFailure(op: "put" | "get", prefix: string, err: unknown): void {
+  const e = err as { name?: string; message?: string } | undefined;
+  console.warn(
+    JSON.stringify({
+      event: "swr_bust_marker_failed",
+      op,
+      prefix,
+      error: e?.name || e?.message || String(err),
+    }),
+  );
+}
+
 // Hard-timeout wrapper mirroring s3-cache-handler.js's withTimeout: rejects if
 // the op outruns `ms`, so every caller's try/catch can fall open.
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -109,9 +121,11 @@ async function bustEpochFor(prefix: string): Promise<number> {
     const parsed = JSON.parse(body) as { bustedAt?: number };
     ts = Number(parsed.bustedAt) || 0;
   } catch (err) {
-    if (!isNotFound(err)) {
-      // swallow — fail open, keep the previously-known epoch
-    }
+    // Fail open, keep the previously-known epoch. A missing marker is normal
+    // (nothing busted yet); anything else (AccessDenied, timeout) is logged so
+    // a broken signal is visible. At most once per prefix per EPOCH_TTL_MS,
+    // since the epoch cache gates how often we reach this GET.
+    if (!isNotFound(err)) logMarkerFailure("get", prefix, err);
   }
   bustEpochCache.set(prefix, { ts, at: now });
   return ts;
@@ -147,9 +161,11 @@ function writeBustMarker(prefix: string): void {
       }),
     ),
     S3_TIMEOUT_MS,
-  ).catch(() => {
+  ).catch((err) => {
     // best-effort — a slow/unavailable S3 falls back to today's MAX_STALE_MS
-    // ceiling on the other tasks, never surfaces to the caller
+    // ceiling on the other tasks, never surfaces to the caller; logged so a
+    // denied/failed write doesn't go unnoticed.
+    logMarkerFailure("put", prefix, err);
   });
 }
 
@@ -209,8 +225,16 @@ export function cachedRead<T>(key: string, load: () => Promise<T>): Promise<T> {
   if (age < MAX_STALE_MS) {
     // Stale-while-revalidate: kick off a refresh, swallow its failure (we're
     // serving the still-acceptable stale value either way).
-    void refresh(key, load).catch(() => {});
-    return Promise.resolve(hit.data);
+    const serveStale = () => {
+      void refresh(key, load).catch(() => {});
+      return hit.data;
+    };
+    if (!BUCKET) return Promise.resolve(serveStale());
+    // An entry busted by another task is pre-edit data, not merely stale:
+    // block on a fresh load instead of serving it.
+    return isBustedSince(key, hit.ts).then((busted) =>
+      busted ? refresh(key, load) : serveStale(),
+    );
   }
   return refresh(key, load); // too stale — block on fresh
 }

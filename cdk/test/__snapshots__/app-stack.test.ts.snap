@@ -3331,6 +3331,12 @@ service:
               "Prefix": "next-isr-cache/",
               "Status": "Enabled",
             },
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-swr-cache-bust",
+              "Prefix": "swr-cache-bust/",
+              "Status": "Enabled",
+            },
           ],
         },
         "PublicAccessBlockConfiguration": {
@@ -4714,6 +4720,43 @@ service:
                         ],
                       },
                       "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/swr-cache-bust/*",
                     ],
                   ],
                 },
@@ -8645,6 +8688,12 @@ service:
               "Prefix": "next-isr-cache/",
               "Status": "Enabled",
             },
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-swr-cache-bust",
+              "Prefix": "swr-cache-bust/",
+              "Status": "Enabled",
+            },
           ],
         },
         "PublicAccessBlockConfiguration": {
@@ -9991,6 +10040,43 @@ service:
                         ],
                       },
                       "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/swr-cache-bust/*",
                     ],
                   ],
                 },
