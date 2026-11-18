@@ -177,12 +177,23 @@ function originalSlice(original: string, area: string): string {
   return area;
 }
 
+const NOT_FULL_TIME_TITLE = /\b(?:adjunct|voluntary|courtesy|visiting|emerit(?:us|a))\b/i;
+
 /**
  * Vice Chairs are normally full-time faculty. Anyone else can still be added,
- * with a required note. `scholar.role_category` value.
+ * with a required note.
+ *
+ * `scholar.role_category` alone is not enough: the directory classes some
+ * adjunct faculty as `full_time_faculty` (found 2026-11-17: a seeded holder
+ * whose title is "Adjunct Professor of …"). So a title that says adjunct,
+ * voluntary, courtesy, visiting or emeritus also counts as not full-time. Pass
+ * the scholar's `primaryTitle` and `edPrimaryTitle`.
  */
-export function isFullTimeFaculty(roleCategory: string | null | undefined): boolean {
-  return roleCategory === "full_time_faculty";
+export function isFullTimeFaculty(
+  roleCategory: string | null | undefined,
+  ...titles: (string | null | undefined)[]
+): boolean {
+  return roleCategory === "full_time_faculty" && !titles.some((t) => t && NOT_FULL_TIME_TITLE.test(t));
 }
 
 /** One Vice Chair row as the `/edit` Leadership card renders it. */

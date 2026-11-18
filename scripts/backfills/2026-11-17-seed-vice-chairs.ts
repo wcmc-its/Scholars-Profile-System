@@ -36,7 +36,14 @@ import {
 } from "@/lib/unit-leadership";
 
 type Dept = { code: string; name: string; official_name: string | null; compact_name: string | null };
-type Person = { cwid: string; preferred_name: string; dept_code: string | null; role_category: string | null };
+type Person = {
+  cwid: string;
+  preferred_name: string;
+  dept_code: string | null;
+  role_category: string | null;
+  primary_title?: string | null;
+  ed_primary_title?: string | null;
+};
 type CsvRow = Record<string, string>;
 
 export type SeedRow = {
@@ -149,7 +156,9 @@ export function planSeed(csv: CsvRow[], depts: Dept[], people: Person[]): PlanLi
 
     const csvTier = (r["Tier"] ?? "").split(/\s+/)[0].toLowerCase();
     const notes = r["Notes"] ?? "";
-    if (!isFullTimeFaculty(person.role_category)) line.flags.push(`not full-time faculty (${person.role_category ?? "none"})`);
+    if (!isFullTimeFaculty(person.role_category, person.primary_title, person.ed_primary_title)) {
+      line.flags.push(`not full-time faculty (${person.role_category ?? "none"})`);
+    }
     if (person.dept_code !== dept.code) line.flags.push("primary department differs");
 
     for (const p of parsed) {
@@ -195,7 +204,7 @@ async function main(): Promise<void> {
   try {
     const depts: Dept[] = await conn.query("SELECT code, name, official_name, compact_name FROM department");
     const people: Person[] = await conn.query(
-      "SELECT cwid, preferred_name, dept_code, role_category FROM scholar " +
+      "SELECT cwid, preferred_name, dept_code, role_category, primary_title, ed_primary_title FROM scholar " +
         "WHERE deleted_at IS NULL AND status = 'active'",
     );
     const existing: { cwid: string; entity_id: string; display_title: string }[] = await conn.query(

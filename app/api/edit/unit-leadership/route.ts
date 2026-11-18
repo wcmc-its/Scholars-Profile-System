@@ -183,7 +183,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "scholar_not_found", "cwid");
   }
   // The friction for a holder who is not full-time faculty: say why.
-  if (!isFullTimeFaculty(holder.roleCategory) && !fields.note) {
+  if (!isFullTimeFaculty(holder.roleCategory, holder.primaryTitle, holder.edPrimaryTitle) && !fields.note) {
     return editError(400, "note_required", "note");
   }
 

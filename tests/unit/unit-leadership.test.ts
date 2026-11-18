@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   detectLeadershipSite,
+  isFullTimeFaculty,
   parseFunctions,
   parseLeadershipTitle,
   serializeFunctions,
@@ -105,6 +106,18 @@ describe("functions column", () => {
     expect(serializeFunctions(["informatics", "research"])).toBe("research,informatics");
     expect(parseFunctions("informatics,bogus,research")).toEqual(["research", "informatics"]);
     expect(parseFunctions("")).toEqual([]);
+  });
+});
+
+describe("isFullTimeFaculty", () => {
+  it("needs the full-time class AND no adjunct-style title", () => {
+    expect(isFullTimeFaculty("full_time_faculty", "Professor of Medicine", null)).toBe(true);
+    expect(isFullTimeFaculty("part_time_faculty", "Professor of Medicine")).toBe(false);
+    expect(isFullTimeFaculty(null)).toBe(false);
+    // The directory classes some adjuncts as full-time; the title wins.
+    expect(isFullTimeFaculty("full_time_faculty", "Adjunct Professor of Immunology in Medicine")).toBe(false);
+    expect(isFullTimeFaculty("full_time_faculty", "Chief, Newborn Medicine", "Clinical Professor (Voluntary)")).toBe(false);
+    expect(isFullTimeFaculty("full_time_faculty", "Professor Emeritus of Surgery")).toBe(false);
   });
 });
 

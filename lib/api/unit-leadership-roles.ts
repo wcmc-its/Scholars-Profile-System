@@ -25,6 +25,7 @@ export const LEADERSHIP_ENTITY_TYPE = "department";
 const HOLDER_SELECT = {
   preferredName: true,
   primaryTitle: true,
+  edPrimaryTitle: true,
   roleCategory: true,
   deletedAt: true,
   status: true,
@@ -42,7 +43,12 @@ type RowWithHolder = {
   source: string;
   sourceUrl: string | null;
   note: string | null;
-  scholar: { preferredName: string; primaryTitle: string | null; roleCategory: string | null };
+  scholar: {
+    preferredName: string;
+    primaryTitle: string | null;
+    edPrimaryTitle: string | null;
+    roleCategory: string | null;
+  };
 };
 
 export function toLeadershipRoleView(row: RowWithHolder): UnitLeadershipRoleView {
@@ -51,7 +57,7 @@ export function toLeadershipRoleView(row: RowWithHolder): UnitLeadershipRoleView
     cwid: row.cwid,
     name: row.scholar.preferredName,
     title: row.scholar.primaryTitle,
-    fullTimeFaculty: isFullTimeFaculty(row.scholar.roleCategory),
+    fullTimeFaculty: isFullTimeFaculty(row.scholar.roleCategory, row.scholar.primaryTitle, row.scholar.edPrimaryTitle),
     displayTitle: row.displayTitle,
     tier: row.tier as LeadershipTier,
     functions: parseFunctions(row.functions),

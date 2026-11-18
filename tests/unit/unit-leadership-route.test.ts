@@ -78,6 +78,7 @@ const FT = {
   slug: "ann-example",
   preferredName: "Ann Example",
   primaryTitle: "Professor of Medicine",
+  edPrimaryTitle: "Professor of Medicine",
   roleCategory: "full_time_faculty",
   deletedAt: null,
   status: "active",
@@ -207,6 +208,13 @@ describe("/api/edit/unit-leadership — add", () => {
     expect(await ok.json()).toMatchObject({
       role: { fullTimeFaculty: false, note: "Voluntary faculty; named by the chair." },
     });
+  });
+
+  it("asks for a note when the directory says full-time but the title says adjunct", async () => {
+    m.scholarFindUnique.mockResolvedValue({ ...FT, primaryTitle: "Adjunct Professor of Immunology in Medicine" });
+    const res = await POST(post(ADD));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "note_required" });
   });
 
   it.each([
