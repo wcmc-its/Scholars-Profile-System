@@ -977,6 +977,14 @@ export class EtlStack extends Stack {
       // Read by etl/orchestrate.ts as SCHOLARS_REVALIDATE_TOKEN -- the
       // env-var name is the contract. #447
       SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+      // etl:fundable-work. Keyless OpenAlex shares a $0.10/day budget per NAT IP
+      // and 429s for the rest of the day once it is spent; a key has its own.
+      // The SecureString must exist in SSM before deploy or every ETL task fails to start.
+      OPENALEX_API_KEY: ecs.Secret.fromSsmParameter(
+        ssm.StringParameter.fromSecureStringParameterAttributes(this, "OpenAlexApiKey", {
+          parameterName: `/sps/${env}/etl/openalex-api-key`,
+        }),
+      ),
     };
     // Internal-ALB origin (http://<dns>), read once from the App stack's SSM
     // param; feeds SCHOLARS_BASE_URL and SCHOLARS_INTERNAL_ALB_ORIGIN (#1478).
