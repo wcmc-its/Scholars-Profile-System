@@ -54,6 +54,7 @@ function pub(pmid: string, over: Partial<HighImpactRow>, people: Who[]): HighImp
     journal: "Nature Medicine",
     year: 2026,
     articleType: "Academic Article",
+    stage: null,
     jif: 50.123,
     dateAdded: "2026-03-04",
     citations: 3,
@@ -475,5 +476,39 @@ describe("RailChecklist (roomy)", () => {
   it("labels are not force-wrapped", () => {
     const r = render(<RailChecklist roomy name="unit" options={OPTS.slice(0, 1)} selected={[]} />);
     expect(r.container.querySelector("li span")!.className).not.toContain("break-words");
+  });
+});
+
+describe("report 9 translational stage (SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("flag off: no rail section, and a stage in the URL is ignored", async () => {
+    const q = await renderBody({ stage: "T2", pos: "any" });
+    expect(q.queryAllByTestId("high-impact-stage")).toEqual([]);
+    expect(h.totals.mock.calls[0][0].stages).toBeUndefined();
+    expect(q.getByTestId("high-impact-download").getAttribute("href")).not.toContain("stage=");
+  });
+
+  it("flag on: the section sits after Article type, the selection reaches the loader, the download and a chip", async () => {
+    vi.stubEnv("SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET", "on");
+    const q = await renderBody({ stage: ["T2", "bogus"], pos: "any" });
+    const rail = q.getAllByTestId("high-impact-rail")[0];
+    const labels = [...rail.querySelectorAll("details > summary")].map(
+      (s) => s.querySelector("span > span")?.textContent,
+    );
+    expect(labels.slice(-3)).toEqual(["Article type", "Translational stage", "Author position"]);
+    const section = within(rail).getByTestId("high-impact-stage");
+    const boxes = within(section).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes.map((b) => [b.name, b.value, b.checked])).toEqual([
+      ["stage", "T0", false],
+      ["stage", "T1", false],
+      ["stage", "T2", true],
+      ["stage", "T3-4", false],
+    ]);
+    expect(h.totals.mock.calls[0][0].stages).toEqual(["T2"]);
+    expect(h.list.mock.calls[0][0].stages).toEqual(["T2"]);
+    const download = new URL(q.getByTestId("high-impact-download").getAttribute("href")!, "http://x");
+    expect(download.searchParams.getAll("stage")).toEqual(["T2"]);
+    expect(q.getByTestId("high-impact-chips").textContent).toContain("T2 · Clinical trials and efficacy");
   });
 });

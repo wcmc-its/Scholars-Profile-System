@@ -4,7 +4,8 @@
  * Redesign.dc.html`). The shared pieces (`report-ui.tsx`): a filter rail of
  * collapsed sections (years with calendar / fiscal basis, journal families,
  * the Profiles roster's person type / department / center / institution
- * facets, article type, author position) in a plain GET `AutoSubmitForm`;
+ * facets, article type, translational stage while
+ * `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is on, author position) in a plain GET `AutoSubmitForm`;
  * the headline numbers with the `.xlsx` button and its note; the active
  * filters as chips; then the Scholars / Publications tabs
  * (`high-impact-results.tsx`, the client half). Below `lg` the rail moves
@@ -33,6 +34,7 @@ import {
 } from "@/components/edit/reports/report-ui";
 import { Button } from "@/components/ui/button";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import {
   ARTICLE_COUNT_CAVEAT,
   BASIS_LABEL,
@@ -58,6 +60,7 @@ import {
   type HighImpactParams,
 } from "@/lib/edit/high-impact-pubs-report";
 import type { PersonReportProps, ReportRender } from "@/lib/edit/report-registry";
+import { TRANSLATIONAL_STAGES, translationalStageDisplay } from "@/lib/translational-stage";
 import { cn } from "@/lib/utils";
 
 const SELECT =
@@ -284,6 +287,23 @@ function Rail({ basePath, params, facets, atypes, labels, resetHref }: RailProps
             collapseAfter={8}
           />
         </RailSection>
+        {params.stages && (
+          <RailSection
+            label="Translational stage"
+            summary={summarize(params.stages.map(translationalStageDisplay))}
+            testId="high-impact-stage"
+          >
+            <RailChecklist
+              name="stage"
+              roomy
+              options={TRANSLATIONAL_STAGES.map((s) => ({
+                value: s,
+                label: translationalStageDisplay(s),
+              }))}
+              selected={params.stages}
+            />
+          </RailSection>
+        )}
         <RailSection
           label="Author position"
           summary={POSITION_LABEL[params.pos]}
@@ -333,7 +353,9 @@ export async function renderHighImpactPublicationsReport({
   searchParams,
   basePath,
 }: PersonReportProps): Promise<ReportRender> {
-  const params = parseHighImpactParams(toSearchParams(searchParams));
+  const params = parseHighImpactParams(toSearchParams(searchParams), {
+    stage: resolveSearchPubsTranslationalStageFacet(),
+  });
   const [{ facets, atypes }, totals] = await Promise.all([
     loadArticleCountChoices(),
     loadHighImpactTotals(params),

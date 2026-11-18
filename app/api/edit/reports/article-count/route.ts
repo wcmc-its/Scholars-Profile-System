@@ -7,12 +7,15 @@
  * (`parseArticleCountParams` + `resolveArticleCountParams`: a bare URL gets
  * the viewer's units, a `list` is resolved), same gate
  * (`canViewArticleCountReport`); the Criteria sheet names selected units from
- * the rail's own facets and states the CWID list and the window.
+ * the rail's own facets and states the CWID list and the window. While
+ * `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is on the `stage` filter applies,
+ * Counts splits each year by stage and Articles carries a stage column.
  * No session → 401 · not an administrator → 403. `no-store`: never cached.
  */
 import { NextResponse } from "next/server";
 
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -36,7 +39,11 @@ export async function GET(request: Request) {
   if (!(await canViewArticleCountReport(session))) return new NextResponse("Forbidden", { status: 403 });
 
   const sp = new URL(request.url).searchParams;
-  const { params } = await resolveArticleCountParams(parseArticleCountParams(sp, ARTICLE_COUNT_PARSE), sp, session);
+  const { params } = await resolveArticleCountParams(
+    parseArticleCountParams(sp, { ...ARTICLE_COUNT_PARSE, stage: resolveSearchPubsTranslationalStageFacet() }),
+    sp,
+    session,
+  );
   const generatedAt = new Date();
   const { rows, total } = await loadArticleCounts(params);
   const articles = total <= ARTICLE_LIST_CAP ? await loadArticleList(params) : null;
