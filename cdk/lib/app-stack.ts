@@ -846,11 +846,16 @@ export class AppStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
       lifecycleRules: [
         { id: "expire-isr-cache", prefix: "next-isr-cache/", expiration: Duration.days(7) },
+        { id: "expire-swr-cache-bust", prefix: "swr-cache-bust/", expiration: Duration.days(7) },
       ],
     });
-    // Scoped to the app's prefix only: object CRUD on next-isr-cache/* plus
+    // Scoped to the app's prefixes only: object CRUD on next-isr-cache/* plus
     // ListBucket (the handler never touches anything else).
     isrCacheBucket.grantReadWrite(taskRole, "next-isr-cache/*");
+    // Cross-task bust markers written/read by lib/api/swr-cache.ts (#1537).
+    // Without this grant the Put/Get were denied and swallowed, so an /edit
+    // save only cleared the in-memory cache on the task that handled it.
+    isrCacheBucket.grantReadWrite(taskRole, "swr-cache-bust/*");
 
     // ------------------------------------------------------------------
     // X-Ray write grant (B24).
