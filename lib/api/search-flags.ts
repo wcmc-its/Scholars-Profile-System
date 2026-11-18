@@ -1474,7 +1474,7 @@ export function resolveSearchPeopleResearchTypeFacet(): boolean {
  * ETL has filled the columns and the nightly publications alias rebuild that
  * follows carries the keyword mapping; flip only AFTER both.
  *
- * Off in every environment at merge. Flag-parity: wire
+ * On in staging and prod. Flag-parity: wired as
  * `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` in `cdk/lib/app-stack.ts`.
  */
 export function resolveSearchPubsTranslationalStageFacet(): boolean {
