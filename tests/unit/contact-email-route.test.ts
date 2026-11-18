@@ -142,6 +142,7 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 HeadlessChrome/131.0.0.0 Safari/537.36",
     "python-requests/2.32.3",
     "curl/8.7.1",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 LinkCheck by Siteimprove.com",
   ])("bot UA %s → external shape even with ?reveal=1; never resolves viewer or loads", async (ua) => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });

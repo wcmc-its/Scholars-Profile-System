@@ -11,7 +11,7 @@
  * self-identify; one spoofing a browser UA gets through. Upgrade path: a per-IP
  * WAF rate rule on /api/profile/*.
  */
-const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|httpclient|java\//i;
+const BOT_UA = /bot|crawl|spider|slurp|headless|python|curl|wget|httpclient|java\/|siteimprove/i;
 
 export function isBotUserAgent(request: Request): boolean {
   return BOT_UA.test(request.headers.get("user-agent") ?? "");

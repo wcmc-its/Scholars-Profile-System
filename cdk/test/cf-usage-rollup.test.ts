@@ -167,8 +167,14 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
       expect(arm).toContain(SCRAPER);
       // `bot` covers GPTBot/ClaudeBot/CCBot/Amazonbot/Applebot; `spider` Bytespider.
       expect(arm).toContain("(?i)(bot|crawl|spider|");
-      expect(arm).toContain("perplexity|googleother");
+      expect(arm).toContain("perplexity|googleother|siteimprove");
     }
+  });
+
+  it("gives Siteimprove its own device bucket ahead of the generic bot bucket", () => {
+    const si = device.indexOf("THEN 'siteimprove'");
+    expect(si).toBeGreaterThan(-1);
+    expect(si).toBeLessThan(device.indexOf("THEN 'bot'"));
   });
 
   it("keeps bots visible in the device breakdown and does not filter traffic arms by UA", () => {
