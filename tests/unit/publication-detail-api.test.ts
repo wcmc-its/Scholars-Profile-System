@@ -81,6 +81,7 @@ beforeEach(() => {
   delete process.env.PUBLICATION_CITING_BRIDGE;
   delete process.env.CORE_PUB_MODAL;
   delete process.env.CORE_PAGES;
+  delete process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
   mocks.withReciterConnection.mockImplementation(
     async (fn: (conn: unknown) => Promise<unknown>) => {
       const conn = {
@@ -199,6 +200,38 @@ describe("getPublicationDetail — topic collapse", () => {
     );
     const r = await getPublicationDetail("12345");
     expect(r?.pub.synopsis).toBe("Per-pmid plain-language summary.");
+  });
+
+  it("carries the display-ready translational stage while its flag is on", async () => {
+    process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(
+      basePub({ translationalStage: "T2", translationalStageConfidence: null }),
+    );
+    const r = await getPublicationDetail("12345");
+    expect(r?.pub.translationalStage).toBe("T2");
+    const select = mocks.publicationFindUnique.mock.calls[0]![0].select;
+    expect(select).toMatchObject({ translationalStage: true, translationalStageConfidence: true });
+  });
+
+  it.each([
+    ["T2", "low"],
+    ["NA", "high"],
+    [null, null],
+  ])("omits the stage when it is not displayable (%s / %s)", async (stage, confidence) => {
+    process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(
+      basePub({ translationalStage: stage, translationalStageConfidence: confidence }),
+    );
+    const r = await getPublicationDetail("12345");
+    expect(r?.pub).not.toHaveProperty("translationalStage");
+  });
+
+  it("omits the stage while SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET is off", async () => {
+    mocks.publicationFindUnique.mockResolvedValueOnce(
+      basePub({ translationalStage: "T2", translationalStageConfidence: "high" }),
+    );
+    const r = await getPublicationDetail("12345");
+    expect(r?.pub).not.toHaveProperty("translationalStage");
   });
 
   it("returns null synopsis when Publication.synopsis is null", async () => {

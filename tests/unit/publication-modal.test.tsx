@@ -258,6 +258,30 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     );
   });
 
+  it("shows the translational stage in the header, linked to its /about section", async () => {
+    const base = makePayload();
+    mockFetch(makePayload({ pub: { ...base.pub, translationalStage: "T3-4" } }));
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const line = await screen.findByTestId("pub-modal-stage");
+    expect(line.textContent).toBe(
+      "Translational stage: T3\u20134 · Practice and population health",
+    );
+    expect(within(line).getByRole("link").getAttribute("href")).toBe(
+      "/about#translational-stage",
+    );
+  });
+
+  it("omits the translational stage line when the payload has no stage", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByText("A study of widgets")).toBeDefined());
+    expect(screen.queryByTestId("pub-modal-stage")).toBeNull();
+    expect(screen.queryByText(/Translational stage/)).toBeNull();
+  });
+
   it("renders the abstract with whitespace-pre-line so newlines survive", async () => {
     mockFetch(makePayload());
     renderModalHarness();

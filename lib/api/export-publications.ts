@@ -35,6 +35,7 @@ import {
 } from "@/lib/api/manual-layer";
 import { htmlToPlainText } from "@/lib/utils";
 import { institutionDisplayName } from "@/lib/institutions";
+import { displayStage, translationalStageDisplay } from "@/lib/translational-stage";
 
 /** Hardcoded ceiling for Phase 1; spec §7.1 hard cap is 30,000. */
 export const EXPORT_MAX_LIMIT = 5000;
@@ -66,6 +67,7 @@ export type AuthorshipRow = {
   publicationType: string | null;
   authors: string;
   authorPosition: string;
+  translationalStage: string;
 };
 
 export type ArticleRow = {
@@ -79,12 +81,23 @@ export type ArticleRow = {
   citationCount: number;
   publicationType: string | null;
   authors: string;
+  translationalStage: string;
 };
 
 // Spec §6.2: strip these characters from the authors string + position
 // label. Mirrors PM's existing transform — these characters trip up some
 // downstream consumers that double-quote on word boundaries.
 const STRIP_RE = /[\])}[{(]/g;
+
+/** The "Translational stage" cell: the display text ("T2 · Clinical trials and
+ *  efficacy"), or empty when the paper has no displayable stage. */
+function stageCell(pub: {
+  translationalStage: string | null;
+  translationalStageConfidence: string | null;
+}): string {
+  const stage = displayStage(pub.translationalStage, pub.translationalStageConfidence);
+  return stage ? translationalStageDisplay(stage) : "";
+}
 
 function stripBrackets(s: string | null): string {
   if (!s) return "";
@@ -278,6 +291,7 @@ export async function fetchAuthorshipRows(
     if (isPublicationDark(suppressions, pub.pmid, confirmedWcmCwids)) continue;
     // #2581 — the untruncated byline; see the note on the article-row select.
     const authorsClean = stripBrackets(pub.fullAuthorsString ?? pub.authorsString);
+    const stage = stageCell(pub);
     for (const a of pub.authors) {
       if (!a.scholar) continue;
       if (isAuthorHidden(suppressions, pub.pmid, a.scholar.cwid)) continue;
@@ -304,6 +318,7 @@ export async function fetchAuthorshipRows(
         publicationType: pub.publicationType,
         authors: authorsClean,
         authorPosition: stripBrackets(authorPositionLabel(a)),
+        translationalStage: stage,
       });
     }
   }
@@ -338,6 +353,8 @@ export async function fetchArticleRows(
       // fallback below never actually fires in prod — 0 rows have one without
       // the other — but it costs nothing and matches the other citation paths).
       fullAuthorsString: true,
+      translationalStage: true,
+      translationalStageConfidence: true,
       // Confirmed, active WCM authors — needed only to derive publication
       // darkness (a pub whose every confirmed WCM author is hidden is dark).
       // Same author carve as fetchAuthorshipRows.
@@ -381,6 +398,7 @@ export async function fetchArticleRows(
       citationCount: pub.citationCount,
       publicationType: pub.publicationType,
       authors: stripBrackets(pub.fullAuthorsString ?? pub.authorsString),
+      translationalStage: stageCell(pub),
     });
   }
   return rows;
@@ -403,6 +421,8 @@ export const AUTHORSHIP_HEADERS: ReadonlyArray<keyof AuthorshipRow> = [
   "publicationType",
   "authors",
   "authorPosition",
+  // Last on purpose: existing column positions do not move.
+  "translationalStage",
 ];
 
 export const ARTICLE_HEADERS: ReadonlyArray<keyof ArticleRow> = [
@@ -416,4 +436,6 @@ export const ARTICLE_HEADERS: ReadonlyArray<keyof ArticleRow> = [
   "citationCount",
   "publicationType",
   "authors",
+  // Last on purpose: existing column positions do not move.
+  "translationalStage",
 ];
