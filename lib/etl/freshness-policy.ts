@@ -319,7 +319,17 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // source "Research-Security" (etl/research-security/index.ts withEtlRun). A night
   // with RESEARCH_SECURITY_ETL off still records a run, so staleness here means the
   // step stopped running or its source guard refused the replace.
-  "Research-Security": { cadence: "nightly" },
+  // Acked until the step is in the deployed nightly (Sps-Etl-<env> deploy after
+  // #3450); before that it has never run and grades never-ran. Remove the ack
+  // once both envs show a run.
+  "Research-Security": {
+    cadence: "nightly",
+    ack: {
+      until: "2026-12-02",
+      reason:
+        "Research security nightly step merged (#3450) but not yet in the deployed nightly; remove once Sps-Etl-<env> is deployed and a run is recorded",
+    },
+  },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.
