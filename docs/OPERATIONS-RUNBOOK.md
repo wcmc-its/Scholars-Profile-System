@@ -979,6 +979,7 @@ From [`cdk/lib/observability-stack.ts`](../cdk/lib/observability-stack.ts) as of
 | `sps-opensearch-jvm-pressure` | P2 | JVM memory pressure over 85% | [Playbook 12](#12-search-cluster-unhealthy-p1-p2) |
 | `sps-opensearch-breaker` | P2 | Any query refused by the circuit breaker | [Playbook 12](#12-search-cluster-unhealthy-p1-p2) |
 | `sps-edit-authz-denied` | P2 | Over 10 edit 403s per 5 min, twice in a row | [Playbook 15](#15-staff-cant-log-in-or-are-denied-on-edit-p2) |
+| `sps-role-check-failed` | P2 | Any `*_check_failed` LDAP role-check event in an hour (a broken ED group silently removes that role from everyone) | [Playbook 15](#15-staff-cant-log-in-or-are-denied-on-edit-p2) |
 | `sps-etl-duration-margin` | P2 | An ETL step ran at 80% or more of its timeout | [Playbook 8](#8-an-etl-alarm-arrived-in-teams-p2) |
 | `sps-etl-retry-storm` | P2 | A source was retried or re-run within one cycle | [Playbook 8](#8-an-etl-alarm-arrived-in-teams-p2) |
 | **Alerting health** | | | |

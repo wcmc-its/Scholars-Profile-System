@@ -71,7 +71,7 @@ Client-side (browser console → RUM via [#595](https://github.com/wcmc-its/Scho
 |---|---|
 | `edit_authz_denied` | **A 403 on the edit surface.** Carries `{ actor_cwid, target_cwid, path, reason }` (+ unit-curation `target_entity_type`/`target_entity_id`/`role`). Feeds the `EditAuthzDenied` metric → `sps-edit-authz-denied-${env}` alarm (>10/5m, 2 windows). A burst signals a predicate regression or probing. See [`access-control-rbac.md`](./access-control-rbac.md). |
 | `saml_callback_failed` | SAML assertion processing failed (login broken). |
-| `superuser_check_failed` | The LDAPS superuser/role lookup errored — **note the authz is fail-closed**, so this denies the action. Spikes ⇒ ED reachability problem. |
+| `superuser_check_failed` | The LDAPS superuser/role lookup errored — **note the authz is fail-closed**, so this denies the action. Spikes ⇒ ED reachability problem. Every role checker logs the same shape (`observer_check_failed`, `research_security_viewer_check_failed`, ...); all of them feed the `RoleCheckFailed` metric → `sps-role-check-failed-${env}` alarm (any in 1h). `reason: group_not_found` = the configured ED group is gone or misconfigured. |
 | `edit_write_failed` | An `/api/edit` transaction failed (e.g. the #493 audit-grant class — the whole tx rolls back). |
 | `self_suppression` | A scholar hid themselves / their own content. |
 

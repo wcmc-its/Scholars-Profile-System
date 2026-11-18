@@ -1619,6 +1619,45 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Dashboard",
     },
+    "RoleCheckFailedAlarmB4CA47A7": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An LDAP role check failed (prod) -- some *_check_failed event was logged. Role checks are fail-closed, so a broken Enterprise Directory group silently removes that role from everyone. Next: in /aws/ecs/sps-app-prod, filter { $.event = "*_check_failed" } and group by event + reason. group_not_found = the group cn env var points at a group ED no longer has (or a bad memberURL); ldap_* reasons = directory reachability. See lib/auth/ldap-group.ts.",
+        "AlarmName": "sps-role-check-failed-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "RoleCheckFailed",
+        "Namespace": "SPS/Auth/prod",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RoleCheckFailedMetricFilter4F7BBA06": {
+      "Properties": {
+        "FilterName": "sps-role-check-failed-prod",
+        "FilterPattern": "{ $.event = "*_check_failed" }",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "RoleCheckFailed",
+            "MetricNamespace": "SPS/Auth/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
     "SearchChallengeSurgeAlarmEBD0F7D3": {
       "Properties": {
         "AlarmActions": [
@@ -3210,6 +3249,45 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "DashboardName": "sps-reliability-staging",
       },
       "Type": "AWS::CloudWatch::Dashboard",
+    },
+    "RoleCheckFailedAlarmB4CA47A7": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An LDAP role check failed (staging) -- some *_check_failed event was logged. Role checks are fail-closed, so a broken Enterprise Directory group silently removes that role from everyone. Next: in /aws/ecs/sps-app-staging, filter { $.event = "*_check_failed" } and group by event + reason. group_not_found = the group cn env var points at a group ED no longer has (or a bad memberURL); ldap_* reasons = directory reachability. See lib/auth/ldap-group.ts.",
+        "AlarmName": "sps-role-check-failed-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "RoleCheckFailed",
+        "Namespace": "SPS/Auth/staging",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "RoleCheckFailedMetricFilter4F7BBA06": {
+      "Properties": {
+        "FilterName": "sps-role-check-failed-staging",
+        "FilterPattern": "{ $.event = "*_check_failed" }",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "RoleCheckFailed",
+            "MetricNamespace": "SPS/Auth/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "SearchChallengeSurgeAlarmEBD0F7D3": {
       "Properties": {
