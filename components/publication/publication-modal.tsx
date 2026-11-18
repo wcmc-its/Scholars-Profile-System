@@ -508,14 +508,14 @@ function ModalContent({
               className="text-muted-foreground text-[13px] leading-[1.45]"
             >
               Translational stage:{" "}
-              <a
+              <Link
                 href={methodologyHref("translationalStage")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-foreground underline underline-offset-[3px]"
               >
                 {translationalStageDisplay(pub.translationalStage)}
-              </a>
+              </Link>
             </p>
           ) : null}
         </div>
