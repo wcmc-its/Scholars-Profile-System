@@ -23,6 +23,7 @@ import { DeptPublicationsList } from "@/components/department/dept-publications-
 import { DeptGrantsList } from "@/components/department/dept-grants-list";
 import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
+import { EditUnitLink } from "@/components/shared/edit-unit-link";
 import {
   UnitResearchAreas,
   UnitStatsLine,
@@ -238,6 +239,7 @@ export async function CenterPage({
             {detail.description}
           </p>
         )}
+        <EditUnitLink kind="center" code={detail.code} />
 
         {/* #2542 Phase B — every leadership-group, profileTitle-eligible role
             holder (director, co-directors, associate directors, …), in

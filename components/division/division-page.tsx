@@ -22,6 +22,7 @@ import { DepartmentFacultyClient } from "@/components/department/department-facu
 import { parseRosterSort } from "@/lib/roster-sort";
 import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
+import { EditUnitLink } from "@/components/shared/edit-unit-link";
 import { DeptTabs } from "@/components/department/dept-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
 import { DeptGrantsList } from "@/components/department/dept-grants-list";
@@ -146,6 +147,7 @@ export async function DivisionPage({
             {detail.division.description}
           </p>
         )}
+        <EditUnitLink kind="division" code={detail.division.code} />
 
         {detail.chief && (
           <LeaderCard
