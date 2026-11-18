@@ -21,6 +21,7 @@ import { DepartmentFacultyClient } from "@/components/department/department-facu
 import { parseRosterSort } from "@/lib/roster-sort";
 import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
+import { EditUnitLink } from "@/components/shared/edit-unit-link";
 import {
   UnitResearchAreas,
   UnitStatsLine,
@@ -214,6 +215,7 @@ export async function DepartmentPage({
             {detail.dept.description}
           </p>
         )}
+        <EditUnitLink kind="department" code={detail.dept.code} />
 
         {detail.chair && (
           <LeaderCard
