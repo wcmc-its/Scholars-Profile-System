@@ -163,6 +163,11 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   "Identity-orcid": { cadence: "nightly" },
   // RPM ORCID candidates (inferred + admin-entered) mirrored from reciterdb → orcid_candidate.
   "RPM-orcid-candidates": { cadence: "nightly" },
+  // Nightly step (cdk/lib/etl-stack.ts OrcidAuthorshipImpact, tier:"continue") that writes
+  // source "ORCID-authorship-impact" (etl/orcid-authorship-impact/index.ts withEtlRun).
+  // A night it skips (byline_orcid absent or not granted) still records a run, so
+  // staleness here means the step stopped running or refused an empty read.
+  "ORCID-authorship-impact": { cadence: "nightly" },
   // Active scholars → reciterdb scholar_active (Publication Manager's ORCID gate); prod writes, staging dry-runs.
   "Scholar-active-export": { cadence: "nightly" },
   // Public ORCID registry sweep → orcid_candidate (orcid_email / orcid_works / orcid_crossref / orcid_name); weekly step.

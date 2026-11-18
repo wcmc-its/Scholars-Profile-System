@@ -888,7 +888,7 @@ ETL scripts run in five task-definition families, split so each holds only the c
 | Family | Use when the script… | Scripts |
 |---|---|---|
 | `sps-etl-<env>` (base) | Uses public APIs, AWS or only the SPS database | `search:index`, `backup:curated`, `etl:dynamodb`, `etl:identity`, `etl:spotlight`, `etl:hierarchy`, `etl:scholar-tool`, `etl:mesh-*`, `etl:pubmed-retractions`, `etl:reporter-grants`, `etl:nsf`, `etl:gates`, `etl:nih-profile`, `etl:pops`, `etl:news`, `etl:technologies`, `etl:revalidate`, `etl:integrity`, `etl:completeness`, `etl:headshot`, `etl:freshness`, `etl:coi-gap`, `etl:roster-prominence`, `etl:ed:import-email-visibility` |
-| `sps-etl-sources-<env>` | Reads a WCM database | `etl:reciter`, `etl:reciter:coi-statements`, `etl:orcid-candidates`, `etl:orcid-evidence`, `etl:fundable-work`, `etl:scholar-active-export`, `etl:asms`, `etl:infoed`, `etl:infoed-biosketch`, `etl:coi`, `etl:frt`, `etl:jenzabar`, `etl:reporter`, `etl:clinical-trials`, `etl:data-sharing`, `etl:journal-impact-factor` |
+| `sps-etl-sources-<env>` | Reads a WCM database | `etl:reciter`, `etl:reciter:coi-statements`, `etl:orcid-candidates`, `etl:orcid-authorship-impact`, `etl:orcid-evidence`, `etl:fundable-work`, `etl:scholar-active-export`, `etl:asms`, `etl:infoed`, `etl:infoed-biosketch`, `etl:coi`, `etl:frt`, `etl:jenzabar`, `etl:reporter`, `etl:clinical-trials`, `etl:data-sharing`, `etl:journal-impact-factor` |
 | `sps-etl-ldap-<env>` | Reads the Enterprise Directory | `etl:ed`, `etl:ed:admins`, `etl:ed:export-email-visibility` (any `etl:ed:*` that binds LDAP) |
 | `sps-etl-reciter-api-<env>` | Calls the ReCiter admin API | `etl:reciter-refresh` (run by hand) and the nightly `etl:orcid-push` |
 | `sps-etl-ctsc-<env>` | Reads the CTSC feed | `etl:ctsc-roster` |

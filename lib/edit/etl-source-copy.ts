@@ -127,6 +127,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "ORCID iDs the ReCiter Publication Manager has inferred from a scholar's accepted publications, or an administrator entered there. Feeds the ORCID coverage dashboard only.",
     origin: "external", // WCM ReciterDB
   },
+  "ORCID-authorship-impact": {
+    label: "Open authorship rows by ORCID iD",
+    description:
+      "How many publications awaiting review in Publication Manager carry each ORCID iD. Feeds the ORCID coverage dashboard only.",
+    origin: "external", // WCM ReciterDB (authorship_review)
+  },
   "ORCID-registry": {
     label: "ORCID registry sweep",
     description:

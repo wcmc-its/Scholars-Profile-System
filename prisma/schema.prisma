@@ -1009,6 +1009,20 @@ model OrcidCandidate {
   @@map("orcid_candidate")
 }
 
+/// Open `authorship_review` rows in reciterdb (candidate authorships from Scopus /
+/// OpenAlex awaiting a curator) per byline ORCID iD: how many open rows carry each
+/// iD. Full-replaced nightly by `etl/orcid-authorship-impact`; `refreshedAt` is the
+/// same instant on every row. No cwid: `/edit/orcid-coverage` joins it to people
+/// through `scholar.orcid` and `orcid_candidate`. Aggregate counts only; read by
+/// that page and nothing else.
+model OrcidOpenAuthorship {
+  orcid       String   @id @db.Char(19)
+  openRows    Int      @map("open_rows")
+  refreshedAt DateTime @map("refreshed_at")
+
+  @@map("orcid_open_authorship")
+}
+
 /// ORCID iDs a person said are NOT theirs: "Not me" on a suggested candidate,
 /// or Remove on the iD that was on file. One row per (cwid, orcid); written by
 /// the `/edit` dismiss route, deleted by the confirm route for the same pair.
