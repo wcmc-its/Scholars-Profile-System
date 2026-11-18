@@ -56,6 +56,9 @@ import {
   isOrgUnitMethodsFacetEnabled,
 } from "@/lib/profile/methods-lens-flags";
 
+import { loadPublicViceChairs, type PublicViceChair } from "@/lib/api/unit-leadership-roles";
+import { isUnitLeadershipEnabled } from "@/lib/edit/unit-leadership-flags";
+
 export type DepartmentChair = {
   cwid: string;
   preferredName: string;
@@ -114,6 +117,9 @@ export type DepartmentDetail = {
     url: string | null;
   };
   chair: DepartmentChair | null;
+  /** Vice Chairs (`UNIT_LEADERSHIP_ROLES`), tier order. `[]` when the flag is
+   *  off or the department lists none. */
+  viceChairs: PublicViceChair[];
   topResearchAreas: DepartmentTopicArea[];
   divisions: DepartmentDivisionSummary[];
   stats: DepartmentStats;
@@ -391,6 +397,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
       url: merged.url && merged.url !== "" ? merged.url : null,
     },
     chair,
+    viceChairs: isUnitLeadershipEnabled() ? await loadPublicViceChairs(dept.code, prisma) : [],
     topResearchAreas,
     divisions,
     stats,

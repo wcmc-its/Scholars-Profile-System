@@ -6,6 +6,8 @@
  * profile page server component imports this directly for ISR; the equivalent
  * external API endpoint would call the same function.
  */
+import { loadProfileViceChairTitles } from "@/lib/api/unit-leadership-roles";
+import { isUnitLeadershipEnabled } from "@/lib/edit/unit-leadership-flags";
 import { alsoIn, type AlsoInLink } from "@/lib/edit/clip-repeats";
 import { cache } from "react";
 import { isHiddenTrialStatus } from "@/lib/clinical-trial-status";
@@ -1410,6 +1412,11 @@ export const getScholarFullProfileBySlug = cache(
             });
           }
         }
+        // Vice Chair roles (`UnitLeadershipRole`) — department-authored titles,
+        // shown verbatim after the chair line. Dark unless the flag is on.
+        const viceChairTitles = isUnitLeadershipEnabled()
+          ? await loadProfileViceChairTitles(scholar.cwid, prisma)
+          : [];
         return [
           // Departments — sole source is the assignment table (#2542 contract A).
           ...deptAssignments.flatMap((a) => {
@@ -1418,6 +1425,7 @@ export const getScholarFullProfileBySlug = cache(
               ? [`${formatLeadershipTitle(a.role.label, a.interim)}, ${unitName}`]
               : [];
           }),
+          ...viceChairTitles,
           // Divisions — sole source is the assignment table.
           ...divAssignments.flatMap((a) => {
             const unitName = divAssignmentName.get(a.entityId);

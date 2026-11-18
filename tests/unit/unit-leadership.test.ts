@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   detectLeadershipSite,
+  isFullTimeFaculty,
+  leadershipTierLabel,
+  leadershipTierRank,
   parseFunctions,
   parseLeadershipTitle,
   serializeFunctions,
@@ -94,9 +97,35 @@ describe("parseLeadershipTitle", () => {
     ).toEqual([["research"], ["faculty_affairs"]]);
   });
 
+  it.each([
+    ["Deputy Vice Chair for Research", "deputy"],
+    ["Interim Executive Vice Chair", "interim executive"],
+    ["Co-Vice Chair of Education", "co"],
+    ["Professor and Executive Vice Chair for Academic Affairs", "executive"],
+    ["Professor of Medicine, Vice Chair for Research", "vice"],
+    ["Vice-Chairman", "vice"],
+  ])("reads an open-ended modifier: %s", (title, tier) => {
+    expect(parseLeadershipTitle(title)[0].tier).toBe(tier);
+  });
+
   it("returns nothing for a title with no Vice Chair in it", () => {
     expect(parseLeadershipTitle("Chair of Surgery")).toEqual([]);
     expect(parseLeadershipTitle("")).toEqual([]);
+  });
+});
+
+describe("modifier rank and label", () => {
+  it("orders by the first known word; an unknown modifier ranks with plain Vice Chairs", () => {
+    const ranked = ["assistant", "deputy", "interim executive", "vice", "senior", "associate"]
+      .map((t) => [t, leadershipTierRank(t)] as const)
+      .sort((a, b) => a[1] - b[1])
+      .map(([t]) => t);
+    expect(ranked).toEqual(["interim executive", "senior", "deputy", "vice", "associate", "assistant"]);
+  });
+
+  it("labels any modifier", () => {
+    expect(leadershipTierLabel("vice")).toBe("Vice Chair");
+    expect(leadershipTierLabel("interim executive")).toBe("Interim Executive Vice Chair");
   });
 });
 
@@ -105,6 +134,18 @@ describe("functions column", () => {
     expect(serializeFunctions(["informatics", "research"])).toBe("research,informatics");
     expect(parseFunctions("informatics,bogus,research")).toEqual(["research", "informatics"]);
     expect(parseFunctions("")).toEqual([]);
+  });
+});
+
+describe("isFullTimeFaculty", () => {
+  it("needs the full-time class AND no adjunct-style title", () => {
+    expect(isFullTimeFaculty("full_time_faculty", "Professor of Medicine", null)).toBe(true);
+    expect(isFullTimeFaculty("part_time_faculty", "Professor of Medicine")).toBe(false);
+    expect(isFullTimeFaculty(null)).toBe(false);
+    // The directory classes some adjuncts as full-time; the title wins.
+    expect(isFullTimeFaculty("full_time_faculty", "Adjunct Professor of Immunology in Medicine")).toBe(false);
+    expect(isFullTimeFaculty("full_time_faculty", "Chief, Newborn Medicine", "Clinical Professor (Voluntary)")).toBe(false);
+    expect(isFullTimeFaculty("full_time_faculty", "Professor Emeritus of Surgery")).toBe(false);
   });
 });
 

@@ -27,7 +27,7 @@ import { gunzipSync } from "node:zlib";
 import { createConnection } from "mariadb";
 import { connectionOptionsFromDsn } from "@/lib/db-tls";
 import {
-  LEADERSHIP_TIERS,
+  PLAIN_TIER,
   detectLeadershipSite,
   isFullTimeFaculty,
   parseLeadershipTitle,
@@ -36,7 +36,14 @@ import {
 } from "@/lib/unit-leadership";
 
 type Dept = { code: string; name: string; official_name: string | null; compact_name: string | null };
-type Person = { cwid: string; preferred_name: string; dept_code: string | null; role_category: string | null };
+type Person = {
+  cwid: string;
+  preferred_name: string;
+  dept_code: string | null;
+  role_category: string | null;
+  primary_title?: string | null;
+  ed_primary_title?: string | null;
+};
 type CsvRow = Record<string, string>;
 
 export type SeedRow = {
@@ -147,14 +154,16 @@ export function planSeed(csv: CsvRow[], depts: Dept[], people: Person[]): PlanLi
     const parsed = parseLeadershipTitle(title, dept.name);
     if (parsed.length === 0) return { ...line, status: "no_vice_chair_title" };
 
-    const csvTier = (r["Tier"] ?? "").split(/\s+/)[0].toLowerCase();
+    const csvTier = (r["Tier"] ?? "").split(/\s+/)[0].toLowerCase() || PLAIN_TIER;
     const notes = r["Notes"] ?? "";
-    if (!isFullTimeFaculty(person.role_category)) line.flags.push(`not full-time faculty (${person.role_category ?? "none"})`);
+    if (!isFullTimeFaculty(person.role_category, person.primary_title, person.ed_primary_title)) {
+      line.flags.push(`not full-time faculty (${person.role_category ?? "none"})`);
+    }
     if (person.dept_code !== dept.code) line.flags.push("primary department differs");
 
     for (const p of parsed) {
       // The title is what the department publishes, so its tier wins.
-      if ((LEADERSHIP_TIERS as readonly string[]).includes(csvTier) && csvTier !== p.tier) {
+      if (csvTier !== p.tier) {
         line.flags.push(`tier: title reads ${p.tier}, audit says ${csvTier}`);
       }
       line.rows.push({
@@ -195,7 +204,7 @@ async function main(): Promise<void> {
   try {
     const depts: Dept[] = await conn.query("SELECT code, name, official_name, compact_name FROM department");
     const people: Person[] = await conn.query(
-      "SELECT cwid, preferred_name, dept_code, role_category FROM scholar " +
+      "SELECT cwid, preferred_name, dept_code, role_category, primary_title, ed_primary_title FROM scholar " +
         "WHERE deleted_at IS NULL AND status = 'active'",
     );
     const existing: { cwid: string; entity_id: string; display_title: string }[] = await conn.query(

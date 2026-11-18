@@ -6,8 +6,10 @@
  * an immediate POST to `/api/edit/unit-leadership`; a saved row is live at
  * once (there is no review step).
  *
- * The title is stored exactly as typed. Tier, areas and site are suggested from
- * it (`parseLeadershipTitle`) until the steward changes one by hand.
+ * The title is stored exactly as typed, with any modifier the department uses
+ * ("Executive", "Deputy", "Interim" …); the modifier is read from the title and
+ * only orders the list. Areas and site are suggested from the title
+ * (`parseLeadershipTitle`) until the steward changes one by hand.
  *
  * A holder who is not full-time faculty takes one more step: the route answers
  * `note_required`, and the card asks for the reason in a confirm dialog before
@@ -34,13 +36,11 @@ import {
   LEADERSHIP_FUNCTION_LABELS,
   LEADERSHIP_SITES,
   LEADERSHIP_SITE_LABELS,
-  LEADERSHIP_TIERS,
-  LEADERSHIP_TIER_LABELS,
+  leadershipTierLabel,
   parseLeadershipTitle,
   sortLeadershipRoles,
   type LeadershipFunction,
   type LeadershipSite,
-  type LeadershipTier,
   type UnitLeadershipRoleView,
 } from "@/lib/unit-leadership";
 
@@ -54,19 +54,17 @@ export type UnitLeadershipCardProps = {
 
 type Draft = {
   displayTitle: string;
-  tier: LeadershipTier;
   functions: LeadershipFunction[];
   areaText: string;
   site: LeadershipSite | "";
   startDate: string;
   note: string;
-  /** True once the steward sets tier / areas / site by hand: stop suggesting. */
+  /** True once the steward sets areas / site by hand: stop suggesting. */
   touched: boolean;
 };
 
 const EMPTY_DRAFT: Draft = {
   displayTitle: "",
-  tier: "vice",
   functions: [],
   areaText: "",
   site: "",
@@ -77,7 +75,6 @@ const EMPTY_DRAFT: Draft = {
 
 const draftOf = (r: UnitLeadershipRoleView): Draft => ({
   displayTitle: r.displayTitle,
-  tier: r.tier,
   functions: [...r.functions],
   areaText: r.areaText ?? "",
   site: r.site ?? "",
@@ -94,7 +91,7 @@ function describeRole(r: UnitLeadershipRoleView): string {
   const areas = r.functions
     .map((f) => (f === "clinical_area" && r.areaText ? r.areaText : LEADERSHIP_FUNCTION_LABELS[f]))
     .join(", ");
-  return [LEADERSHIP_TIER_LABELS[r.tier], areas, r.site ? LEADERSHIP_SITE_LABELS[r.site] : ""]
+  return [leadershipTierLabel(r.tier), areas, r.site ? LEADERSHIP_SITE_LABELS[r.site] : ""]
     .filter(Boolean)
     .join(" · ");
 }
@@ -137,7 +134,6 @@ export function UnitLeadershipCard({
 
   const fieldsOf = (d: Draft) => ({
     displayTitle: d.displayTitle,
-    tier: d.tier,
     functions: d.functions,
     areaText: d.functions.includes("clinical_area") ? d.areaText : null,
     site: d.site || null,
@@ -379,7 +375,7 @@ export function UnitLeadershipCard({
   );
 }
 
-/** Title, tier, areas, site and start date — shared by add and edit. */
+/** Title, areas, site and start date — shared by add and edit. */
 function RoleFields({
   idPrefix,
   departmentName,
@@ -393,8 +389,6 @@ function RoleFields({
   onChange: (draft: Draft) => void;
   disabled: boolean;
 }) {
-  const suggested = parseLeadershipTitle(draft.displayTitle, departmentName)[0];
-  const tierMismatch = suggested && suggested.tier !== draft.tier;
 
   function setTitle(displayTitle: string) {
     const s = parseLeadershipTitle(displayTitle, departmentName)[0];
@@ -404,7 +398,6 @@ function RoleFields({
         : {
             ...draft,
             displayTitle,
-            tier: s.tier,
             functions: s.functions,
             areaText: s.areaText ?? "",
             site: s.site ?? "",
@@ -428,22 +421,6 @@ function RoleFields({
       </label>
 
       <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Tier</span>
-          <select
-            value={draft.tier}
-            disabled={disabled}
-            onChange={(e) => onChange({ ...draft, tier: e.target.value as LeadershipTier, touched: true })}
-            className={SELECT_CLASS}
-            data-testid={`${idPrefix}-tier`}
-          >
-            {LEADERSHIP_TIERS.map((t) => (
-              <option key={t} value={t}>
-                {LEADERSHIP_TIER_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="flex flex-col gap-1">
           <span className="text-muted-foreground">Hospital site (if site-based)</span>
           <select
@@ -473,12 +450,6 @@ function RoleFields({
           />
         </label>
       </div>
-      {tierMismatch && (
-        <p className="text-apollo-amber text-[12.5px]" data-testid={`${idPrefix}-tier-mismatch`}>
-          The title reads as {LEADERSHIP_TIER_LABELS[suggested.tier]}.
-        </p>
-      )}
-
       <fieldset className="flex flex-col gap-1.5">
         <legend className="text-muted-foreground mb-1">
           Areas (for reports; leave empty for a general Vice Chair)
@@ -531,7 +502,7 @@ function mapErrorToMessage(code: string): string {
     case "invalid_cwid":
       return "That person can’t be added. Vice Chairs must have an active Scholars profile.";
     case "duplicate_role":
-      return "That person already holds a role with this tier and these areas.";
+      return "That person already holds this role with these areas.";
     case "area_text_required":
       return "Enter the clinical area this title names.";
     case "area_unmapped":

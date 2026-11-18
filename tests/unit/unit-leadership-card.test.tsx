@@ -86,19 +86,23 @@ describe("UnitLeadershipCard", () => {
     expect(screen.queryByTestId("vice-chair-not-ft-r1")).toBeNull();
   });
 
-  it("suggests tier and areas from the title, then stops once the steward sets one", () => {
+  it("suggests areas from the title, then stops once the steward sets one; there is no tier menu", () => {
     renderCard();
     const title = screen.getByTestId("vc-add-title");
-    fireEvent.change(title, { target: { value: "Associate Vice Chair of Education and Faculty Development" } });
-    expect((screen.getByTestId("vc-add-tier") as HTMLSelectElement).value).toBe("associate");
+    fireEvent.change(title, { target: { value: "Deputy Vice Chair of Education and Faculty Development" } });
+    expect(screen.queryByTestId("vc-add-tier")).toBeNull();
     expect(screen.getByTestId("vc-add-fn-education").getAttribute("aria-checked")).toBe("true");
     expect(screen.getByTestId("vc-add-fn-faculty_affairs").getAttribute("aria-checked")).toBe("true");
 
-    fireEvent.change(screen.getByTestId("vc-add-tier"), { target: { value: "vice" } });
-    expect(screen.getByTestId("vc-add-tier-mismatch").textContent).toContain("Associate Vice Chair");
+    fireEvent.click(screen.getByTestId("vc-add-fn-education"));
     fireEvent.change(title, { target: { value: "Executive Vice Chair of Research" } });
-    expect((screen.getByTestId("vc-add-tier") as HTMLSelectElement).value).toBe("vice");
     expect(screen.getByTestId("vc-add-fn-research").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByTestId("vc-add-fn-faculty_affairs").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("labels a row with whatever modifier its title carries", () => {
+    renderCard([role({ displayTitle: "Interim Deputy Vice Chair for Research", tier: "interim deputy" })]);
+    expect(screen.getByText("Interim Deputy Vice Chair · Research")).toBeTruthy();
   });
 
   it("adds a row and lists it", async () => {
@@ -115,7 +119,6 @@ describe("UnitLeadershipCard", () => {
       action: "add",
       cwid: "new001",
       displayTitle: "Executive Vice Chair",
-      tier: "executive",
       functions: [],
       areaText: null,
       site: null,
@@ -168,6 +171,6 @@ describe("UnitLeadershipCard", () => {
     fireEvent.click(screen.getByTestId("pick"));
     fireEvent.change(screen.getByTestId("vc-add-title"), { target: { value: "Vice Chair for Research" } });
     fireEvent.click(screen.getByTestId("vice-chair-add"));
-    expect(await screen.findByText(/already holds a role with this tier/)).toBeTruthy();
+    expect(await screen.findByText(/already holds this role with these areas/)).toBeTruthy();
   });
 });

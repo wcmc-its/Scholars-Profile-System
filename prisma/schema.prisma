@@ -2662,8 +2662,10 @@ model UnitLeadershipRole {
   entityId         String    @map("entity_id") @db.VarChar(64)
   /// `vice_chair` in v1.
   roleFamily       String    @default("vice_chair") @map("role_family") @db.VarChar(32)
-  /// `executive` | `senior` | `vice` | `associate` | `assistant`.
-  tier             String    @db.VarChar(16)
+  /// The modifier before "Vice Chair", lower-cased and OPEN-ENDED (`executive`,
+  /// `senior`, `deputy`, `interim executive`, …); `vice` when there is none.
+  /// Read from `displayTitle` on write, never picked from a list.
+  tier             String    @db.VarChar(64)
   /// Comma-joined function codes, `''` for a general Vice Chair. Not JSON: a
   /// `Prisma.JsonNull` passes `IS NOT NULL`.
   functions        String    @default("") @db.VarChar(255)

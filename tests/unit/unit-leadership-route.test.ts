@@ -28,6 +28,8 @@ const m = vi.hoisted(() => ({
   txCreate: vi.fn(),
   txUpdate: vi.fn(),
   txDelete: vi.fn(),
+  reflectUnit: vi.fn(),
+  reflectProfile: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: m.session }));
@@ -53,6 +55,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/edit/revalidation", () => ({
+  reflectUnitChange: m.reflectUnit,
+  reflectOverviewEdit: m.reflectProfile,
+}));
+
 import { POST } from "@/app/api/edit/unit-leadership/route";
 
 const fakeTx = {
@@ -68,8 +75,10 @@ const post = (body: unknown) =>
   });
 
 const FT = {
+  slug: "ann-example",
   preferredName: "Ann Example",
   primaryTitle: "Professor of Medicine",
+  edPrimaryTitle: "Professor of Medicine",
   roleCategory: "full_time_faculty",
   deletedAt: null,
   status: "active",
@@ -107,7 +116,7 @@ beforeEach(() => {
   m.session.mockResolvedValue({ cwid: "cur001", isSuperuser: false });
   m.transaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   m.executeRaw.mockResolvedValue(1);
-  m.deptFindUnique.mockResolvedValue({ code: "N1280" });
+  m.deptFindUnique.mockResolvedValue({ code: "N1280", slug: "medicine" });
   m.unitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "N1280", role: "curator" }]);
   m.scholarFindUnique.mockResolvedValue(FT);
   m.roleFindUnique.mockResolvedValue(ROW);
@@ -182,6 +191,9 @@ describe("/api/edit/unit-leadership — add", () => {
     expect(m.executeRaw).toHaveBeenCalledTimes(1);
     const audit = m.executeRaw.mock.calls[0] as unknown[];
     expect(audit.slice(1, 5)).toEqual(["cur001", "department", "N1280", "roster_change"]);
+    // The department page and the holder's profile both show the row.
+    expect(m.reflectUnit).toHaveBeenCalledWith({ unitKind: "department", unitSlug: "medicine" });
+    expect(m.reflectProfile).toHaveBeenCalledWith("ann-example");
   });
 
   it("asks for a note when the holder is not full-time faculty, then accepts one", async () => {
@@ -196,6 +208,13 @@ describe("/api/edit/unit-leadership — add", () => {
     expect(await ok.json()).toMatchObject({
       role: { fullTimeFaculty: false, note: "Voluntary faculty; named by the chair." },
     });
+  });
+
+  it("asks for a note when the directory says full-time but the title says adjunct", async () => {
+    m.scholarFindUnique.mockResolvedValue({ ...FT, primaryTitle: "Adjunct Professor of Immunology in Medicine" });
+    const res = await POST(post(ADD));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "note_required" });
   });
 
   it.each([
@@ -220,7 +239,6 @@ describe("/api/edit/unit-leadership — add", () => {
   });
 
   it.each([
-    [{ tier: "deputy" }, "invalid_value", "tier"],
     [{ functions: ["research", "nope"] }, "invalid_value", "functions"],
     [{ displayTitle: "  " }, "invalid_value", "displayTitle"],
     [{ site: "nyp_mars" }, "invalid_value", "site"],
@@ -232,6 +250,14 @@ describe("/api/edit/unit-leadership — add", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error, field });
     expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("reads any modifier from the title and ignores a tier in the body", async () => {
+    const res = await POST(
+      post({ ...ADD, displayTitle: "Interim Deputy Vice Chair for Research", tier: "executive" }),
+    );
+    expect(res.status).toBe(200);
+    expect(m.txCreate.mock.calls[0][0].data.tier).toBe("interim deputy");
   });
 
   it("accepts a general Vice Chair with no functions", async () => {
@@ -261,6 +287,8 @@ describe("/api/edit/unit-leadership — update and remove", () => {
     expect(res.status).toBe(200);
     expect(m.txDelete).toHaveBeenCalledWith({ where: { id: "r1" } });
     expect(m.executeRaw).toHaveBeenCalledTimes(1);
+    expect(m.reflectUnit).toHaveBeenCalledTimes(1);
+    expect(m.reflectProfile).toHaveBeenCalledWith("ann-example");
   });
 
   it.each(["update", "remove"])("%s refuses a row from another department", async (action) => {
