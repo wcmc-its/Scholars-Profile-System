@@ -22,6 +22,10 @@
  *     `added_from` / `added_to` (ISO dates, inclusive) — `basis=added`, or
  *     either date with no `basis`, selects it; the modes never combine.
  *   - `atype` (repeated), `jif` (minimum, one decimal), `pos`.
+ *   - `stage` (repeated; `TRANSLATIONAL_STAGES`, anything else dropped) — the
+ *     translational stage, read only while `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`
+ *     is on (the caller resolves the flag and passes `stage` to the parser).
+ *     Only a stage that would be displayed matches (`displayStage`).
  *   - `f=1` marks a submitted form: a BARE URL (no filter param at all) is
  *     the only one that gets the viewer's own units as the default `unit`
  *     (`resolveArticleCountParams`), so clearing every filter never brings
@@ -71,6 +75,13 @@ import {
 } from "@/lib/edit/person-filter";
 import { institutionDisplayName } from "@/lib/institutions";
 import { formatRoleCategory } from "@/lib/role-display";
+import {
+  displayStage,
+  isTranslationalStage,
+  TRANSLATIONAL_STAGES,
+  translationalStageDisplay,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 
 /** The rail's label (`loadDataQualityFacets`), so page and workbook agree. */
 const roleCategoryLabel = (r: string | null) => formatRoleCategory(r) ?? "";
@@ -108,6 +119,10 @@ export type ArticleCountParams = {
    *  `inst:CODE`), kept raw so they round-trip; `scopeSql` decodes them. */
   units: string[];
   atypes: string[];
+  /** Translational stages (`stage`); empty = any. UNDEFINED while the feature
+   *  is off (`ArticleCountParseOptions.stage`): no clause, no rail section, no
+   *  Criteria row, no stage columns, no by-year split. */
+  stages?: TranslationalStage[];
   /** Minimum Journal Impact Factor, 0..`JIF_MAX`, one decimal; 0 = none. */
   jif: number;
   pos: AuthorPosition;
@@ -127,7 +142,12 @@ export type ArticleCountParams = {
 
 /** Which of report 8's own params a caller reads. Off by default so report 9
  *  (which shares the parser) is unchanged. */
-export type ArticleCountParseOptions = { dateAdded?: boolean; cwidList?: boolean };
+export type ArticleCountParseOptions = {
+  dateAdded?: boolean;
+  cwidList?: boolean;
+  /** `resolveSearchPubsTranslationalStageFacet()`, read by the page / route. */
+  stage?: boolean;
+};
 
 /** Report 8's page and download: every param. */
 export const ARTICLE_COUNT_PARSE: ArticleCountParseOptions = { dateAdded: true, cwidList: true };
@@ -188,6 +208,8 @@ export function parseArticleCountParams(
     types: person.types,
     units: person.unitValues,
     atypes: sp.getAll("atype").map((v) => v.trim()).filter(Boolean),
+    // Fixed order, deduped; an unknown value is dropped.
+    stages: opts.stage ? TRANSLATIONAL_STAGES.filter((s) => sp.getAll("stage").includes(s)) : undefined,
     jif,
     pos: pick("pos", Object.keys(POSITION_LABEL) as AuthorPosition[], "any"),
     basis,
@@ -206,6 +228,7 @@ export const ARTICLE_COUNT_FILTER_KEYS = [
   "unit",
   "list",
   "atype",
+  "stage",
   "jif",
   "pos",
   "basis",
@@ -260,7 +283,7 @@ export async function resolveArticleCountParams(
 }
 
 /** The phone sheet trigger's "Filters (n)": one per who-filter selection and
- *  article type, one for a CWID list, plus one each for a non-default window
+ *  article type and stage, one for a CWID list, plus one each for a non-default window
  *  (basis / years / a date-added window), minimum JIF and author position. */
 export function articleCountActiveFilters(p: ArticleCountParams): number {
   const d = parseArticleCountParams(new URLSearchParams());
@@ -271,6 +294,7 @@ export function articleCountActiveFilters(p: ArticleCountParams): number {
     p.types.length +
     p.units.length +
     p.atypes.length +
+    (p.stages?.length ?? 0) +
     (p.list ? 1 : 0) +
     span +
     (p.jif !== d.jif ? 1 : 0) +
@@ -287,6 +311,7 @@ export function articleCountQueryString(p: ArticleCountParams): string {
   for (const u of p.units) q.append("unit", u);
   if (p.list) q.set("list", p.list);
   for (const a of p.atypes) q.append("atype", a);
+  for (const s of p.stages ?? []) q.append("stage", s);
   q.set("jif", String(p.jif));
   q.set("pos", p.pos);
   if (p.added) {
@@ -361,7 +386,20 @@ export async function loadArticleCountChoices(): Promise<{
 /** Moved to `lib/edit/person-filter.ts` (ORCID coverage labels its captions with it too). */
 export { unitLabels };
 
-export type ArticleCountRow = { year: number; count: number };
+/** A year's count split by displayed stage; the parts sum to the count. */
+export type StageSplit = Record<TranslationalStage | "none", number>;
+export const NO_STAGE_LABEL = "No stage";
+
+export type ArticleCountRow = {
+  year: number;
+  count: number;
+  /** Present only while the stage feature is on (`ArticleCountParams.stages`). */
+  byStage?: StageSplit;
+};
+
+/** The SQL form of `displayStage` (`lib/api/topic-activity.ts`): low confidence
+ *  hidden, NULL confidence shown. */
+const STAGE_NOT_LOW = Prisma.sql`(p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')`;
 
 /** The year each counted article falls in: the calendar year of publication,
  *  the fiscal year of its PubMed add date, or (date-added window) the
@@ -405,6 +443,7 @@ export function scopeSql(
        AND s.deleted_at IS NULL AND s.status = 'active'
        ${personFilterSql({ types: p.types, unitValues: p.units, listCwids }, { scholar: "s", centerMembership: "cm" })}
        ${inList(Prisma.sql`p.publication_type`, p.atypes)}
+       ${p.stages && p.stages.length > 0 ? Prisma.sql`AND p.translational_stage IN (${Prisma.join(p.stages)}) AND ${STAGE_NOT_LOW}` : Prisma.empty}
        ${p.jif > 0 ? Prisma.sql`AND j.impact_score_1 >= ${p.jif}` : Prisma.empty}
        ${posExpr}
        ${extra}
@@ -412,20 +451,38 @@ export function scopeSql(
   return { yearExpr, fromWhere };
 }
 
-/** One row per year in `from..to` (zeros filled), plus the total. */
+/** One row per year in `from..to` (zeros filled), plus the total. While the
+ *  stage feature is on, each year is also split by displayed stage: the query
+ *  groups by year AND stage (an article has one of each, so the groups are
+ *  disjoint and sum to the year's distinct count); an article with no
+ *  displayable stage falls under `none`. Report 8 only. */
 export async function loadArticleCounts(
   p: ArticleCountParams,
 ): Promise<{ rows: ArticleCountRow[]; total: number }> {
   const { yearExpr, fromWhere } = scopeSql(p);
-  const raw = await db.read.$queryRaw<{ y: number | null; n: bigint | number }[]>`
-    SELECT ${yearExpr} AS y, COUNT(DISTINCT pa.pmid) AS n
+  const split = p.stages !== undefined;
+  const stageCol = split
+    ? Prisma.sql`, CASE WHEN p.translational_stage IN (${Prisma.join([...TRANSLATIONAL_STAGES])}) AND ${STAGE_NOT_LOW} THEN p.translational_stage END AS st`
+    : Prisma.empty;
+  const raw = await db.read.$queryRaw<{ y: number | null; st?: string | null; n: bigint | number }[]>`
+    SELECT ${yearExpr} AS y${stageCol}, COUNT(DISTINCT pa.pmid) AS n
     ${fromWhere}
-     GROUP BY y
+     GROUP BY y${split ? Prisma.sql`, st` : Prisma.empty}
      ORDER BY y`;
 
-  const byYear = new Map(raw.map((r) => [Number(r.y), Number(r.n)]));
+  const zero = (): StageSplit => ({ T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 0 });
+  const byYear = new Map<number, StageSplit>();
+  for (const r of raw) {
+    const s = byYear.get(Number(r.y)) ?? zero();
+    s[isTranslationalStage(r.st) ? r.st : "none"] += Number(r.n);
+    byYear.set(Number(r.y), s);
+  }
   const rows: ArticleCountRow[] = [];
-  for (let y = p.from; y <= p.to; y++) rows.push({ year: y, count: byYear.get(y) ?? 0 });
+  for (let y = p.from; y <= p.to; y++) {
+    const byStage = byYear.get(y) ?? zero();
+    const count = Object.values(byStage).reduce((s, n) => s + n, 0);
+    rows.push(split ? { year: y, count, byStage } : { year: y, count });
+  }
   return { rows, total: rows.reduce((s, r) => s + r.count, 0) };
 }
 
@@ -440,6 +497,8 @@ export type ArticleRow = {
   /** The article's year on the report's basis (FY / year added / year). */
   year: number;
   articleType: string | null;
+  /** The stage as displayed (`displayStage`), else null. */
+  stage: TranslationalStage | null;
   jif: number | null;
   dateAdded: string | null;
   doi: string | null;
@@ -471,6 +530,8 @@ type RawArticleRow = {
   full_authors_string: string | null;
   authors_string: string | null;
   publication_type: string | null;
+  translational_stage: string | null;
+  translational_stage_confidence: string | null;
   date_added_to_entrez: Date | null;
   doi: string | null;
   jif: number | string | null;
@@ -500,6 +561,7 @@ export async function loadArticleList(
   const raw = await db.read.$queryRaw<RawArticleRow[]>`
     SELECT p.pmid, ${yearExpr} AS y, p.title, p.journal, p.year, p.volume, p.issue, p.pages,
            p.full_authors_string, p.authors_string, p.publication_type, p.date_added_to_entrez, p.doi,
+           p.translational_stage, p.translational_stage_confidence,
            j.impact_score_1 AS jif,
            s.preferred_name, s.cwid, s.role_category, s.primary_department, s.primary_org_code,
            pa.is_first, pa.is_last, pa.position
@@ -525,6 +587,7 @@ export async function loadArticleList(
         journal: r.journal,
         year: Number(r.y),
         articleType: r.publication_type,
+        stage: displayStage(r.translational_stage, r.translational_stage_confidence),
         jif: r.jif === null ? null : Number(r.jif),
         dateAdded: r.date_added_to_entrez ? r.date_added_to_entrez.toISOString().slice(0, 10) : null,
         doi: r.doi,
@@ -598,6 +661,16 @@ export function describeCriteria(
     ...personFilterCriteria({ types: p.types, unitValues: p.units }, labels, roleCategoryLabel),
     ...(opts.cwidList ? ([["CWID list", describeCwidList(p)]] as [string, string][]) : []),
     ["Article type", list(p.atypes)],
+    ...(p.stages
+      ? ([
+          [
+            "Translational stage",
+            p.stages.length > 0
+              ? `${p.stages.map(translationalStageDisplay).join("; ")} (articles with no stage, or a low-confidence one, are excluded)`
+              : "All",
+          ],
+        ] as [string, string][])
+      : []),
     [
       "Minimum Journal Impact Factor",
       p.jif > 0 ? `${p.jif} or higher (articles in journals with no JIF on file are excluded)` : "None",
@@ -632,13 +705,26 @@ export async function buildArticleCountWorkbook(
   const wb = new ExcelJS.Workbook();
 
   const counts = wb.addWorksheet("Counts");
-  counts.addRow([articleCountYearHeader(p), "Articles"]);
+  // The per-stage split (stage feature on): one column per stage plus
+  // "No stage", which together sum to "Articles".
+  const splitKeys = p.stages ? ([...TRANSLATIONAL_STAGES, "none"] as const) : [];
+  const splitOf = (s: StageSplit | undefined) => splitKeys.map((k) => s?.[k] ?? 0);
+  counts.addRow([
+    articleCountYearHeader(p),
+    "Articles",
+    ...splitKeys.map((k) => (k === "none" ? NO_STAGE_LABEL : translationalStageDisplay(k))),
+  ]);
   boldRow(counts, 1);
-  for (const r of rows) counts.addRow([r.year, r.count]);
-  counts.addRow(["Total", total]);
+  for (const r of rows) counts.addRow([r.year, r.count, ...splitOf(r.byStage)]);
+  counts.addRow([
+    "Total",
+    total,
+    ...splitKeys.map((k) => rows.reduce((s, r) => s + (r.byStage?.[k] ?? 0), 0)),
+  ]);
   boldRow(counts, counts.rowCount);
   counts.getColumn(1).width = 26;
   counts.getColumn(2).width = 12;
+  splitKeys.forEach((_, i) => (counts.getColumn(i + 3).width = 34));
 
   addCriteriaSheet(wb, [
     ...describeCriteria(p, generatedAt, labels, { cwidList: true }),
@@ -667,6 +753,7 @@ export async function buildArticleCountWorkbook(
     "Date added to PubMed",
     "DOI",
     "Matching scholars",
+    ...(p.stages ? ["Translational stage"] : []),
   ]);
   boldRow(list, 1);
   list.views = [{ state: "frozen", ySplit: 1 }];
@@ -681,9 +768,10 @@ export async function buildArticleCountWorkbook(
       a.dateAdded,
       a.doi,
       a.scholars.join("; "),
+      ...(p.stages ? [a.stage ? translationalStageDisplay(a.stage) : null] : []),
     ]);
   }
-  for (const [i, w] of [14, 90, 30, 12, 18, 12, 14, 28, 60].entries()) list.getColumn(i + 1).width = w;
+  for (const [i, w] of [14, 90, 30, 12, 18, 12, 14, 28, 60, 34].entries()) list.getColumn(i + 1).width = w;
   list.getColumn(2).alignment = { wrapText: true, vertical: "top" };
   list.getColumn(9).alignment = { wrapText: true, vertical: "top" };
 

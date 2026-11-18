@@ -4,7 +4,9 @@
  * sections (`ReportRail` / `RailSection`, `report-ui.tsx`) inside ONE GET
  * `AutoSubmitForm`: Years (calendar / fiscal / date added to PubMed), Person
  * type, Department / division, Centers, Institution, CWID list, Article
- * type, Journal Impact Factor, Author position. Beside it the results card:
+ * type, Translational stage (while `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is
+ * on; then "By year" also splits each year by stage), Journal Impact Factor,
+ * Author position. Beside it the results card:
  * the distinct-article total with the `.xlsx` link and its note, the active
  * filters as removable chips, and two tabs — "By year" (a bar per year, the
  * in-progress year badged YTD; a year opens the Articles tab narrowed to it)
@@ -42,6 +44,7 @@ import {
 } from "@/components/edit/reports/report-ui";
 import { Button } from "@/components/ui/button";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import {
   ADDED_BASIS,
   ADDED_LABEL,
@@ -60,6 +63,7 @@ import {
   loadArticleCountChoices,
   loadArticleCounts,
   loadArticleList,
+  NO_STAGE_LABEL,
   parseArticleCountParams,
   POSITION_LABEL,
   resolveArticleCountParams,
@@ -70,6 +74,7 @@ import {
   type ArticleRow,
 } from "@/lib/edit/article-count-report";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
+import { TRANSLATIONAL_STAGES, translationalStageDisplay } from "@/lib/translational-stage";
 import { cn } from "@/lib/utils";
 
 const RADIO = "flex cursor-pointer items-center gap-2 text-sm";
@@ -339,6 +344,20 @@ function Rail({ basePath, params, choices, labels, applied, resetHref, href, tod
             selected={params.atypes}
           />
         </RailSection>
+        {params.stages && (
+          <RailSection
+            label="Translational stage"
+            summary={summarize(params.stages.map(translationalStageDisplay))}
+            defaultOpen={params.stages.length > 0}
+            testId="rail-stage"
+          >
+            <ReportFacetList
+              name="stage"
+              options={TRANSLATIONAL_STAGES.map((s) => ({ value: s, label: translationalStageDisplay(s) }))}
+              selected={params.stages}
+            />
+          </RailSection>
+        )}
         <RailSection
           label="Journal Impact Factor"
           summary={params.jif > 0 ? `Journals with JIF ≥ ${params.jif}` : "Any journal"}
@@ -491,6 +510,17 @@ function ByYear({
                     ›
                   </span>
                 </span>
+                {r.byStage && (
+                  <span
+                    className="text-muted-foreground col-span-2 col-start-2 -mt-2 text-[13px]"
+                    data-testid="article-count-stage-split"
+                  >
+                    {[
+                      ...TRANSLATIONAL_STAGES.map((s) => `${s.replace("-", "–")} ${r.byStage![s].toLocaleString()}`),
+                      `${NO_STAGE_LABEL} ${r.byStage.none.toLocaleString()}`,
+                    ].join(" · ")}
+                  </span>
+                )}
               </Link>
             </li>
           );
@@ -502,6 +532,13 @@ function ByYear({
             ? `FY${current} counts articles added to PubMed through ${formatLongDate(today)}.`
             : `${current} counts articles published through ${formatLongDate(today)}.`}{" "}
           Records for the year are still being added.
+        </p>
+      )}
+      {rows.some((r) => r.byStage) && (
+        <p className="text-muted-foreground mt-3 text-[13px]" data-testid="article-count-stage-note">
+          Under each year, its articles by translational stage: {TRANSLATIONAL_STAGES.map(translationalStageDisplay).join(", ")}.
+          Articles with no stage, or a low-confidence one, are under {NO_STAGE_LABEL}, so the parts add up to the
+          year&rsquo;s count.
         </p>
       )}
       <p className="text-muted-foreground mt-2 text-[13px]">Select a year to see its articles.</p>
@@ -516,7 +553,7 @@ export async function renderArticleCountReport({
 }: AdminReportProps): Promise<ReportRender> {
   const sp = toSearchParams(searchParams);
   const { params, defaulted } = await resolveArticleCountParams(
-    parseArticleCountParams(sp, ARTICLE_COUNT_PARSE),
+    parseArticleCountParams(sp, { ...ARTICLE_COUNT_PARSE, stage: resolveSearchPubsTranslationalStageFacet() }),
     sp,
     session,
   );
@@ -568,6 +605,12 @@ export async function renderArticleCountReport({
     });
   for (const a of params.atypes)
     chips.push({ group: "Article type", value: a, removeHref: href({ ...params, atypes: params.atypes.filter((x) => x !== a) }) });
+  for (const st of params.stages ?? [])
+    chips.push({
+      group: "Translational stage",
+      value: translationalStageDisplay(st),
+      removeHref: href({ ...params, stages: params.stages?.filter((x) => x !== st) }),
+    });
   if (params.jif > 0) chips.push({ group: "Impact Factor", value: `≥ ${params.jif}`, removeHref: href({ ...params, jif: 0 }) });
   if (params.pos !== "any")
     chips.push({ group: "Author", value: POSITION_LABEL[params.pos], removeHref: href({ ...params, pos: "any" }) });

@@ -154,7 +154,16 @@ const GEO_CASE = [
  * crawlers without either token are named explicitly (#3368).
  */
 const BOT_UA_PATTERN =
-  "(?i)(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|crawler|fetch|monitor|curl|wget|python-requests|httpclient|headless|perplexity|googleother)";
+  "(?i)(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|crawler|fetch|monitor|curl|wget|python-requests|httpclient|headless|perplexity|googleother|siteimprove)";
+
+/**
+ * Siteimprove's site-QA crawler ("... LinkCheck by Siteimprove.com"), which
+ * WCM runs against the site. It sends a full browser UA with no bot token, so
+ * before it was named here it counted as human (~10k pages/day from 11-10).
+ * The device arm gives it its own 'siteimprove' bucket so the dashboard shows
+ * it apart from other bots.
+ */
+const SITEIMPROVE_UA_PATTERN = "(?i)siteimprove";
 
 /**
  * Exact User-Agents of scrapers that spoof a real browser, so no token regex
@@ -189,13 +198,15 @@ const NOT_BOT_UA = `NOT coalesce(${IS_BOT_UA}, false)`;
 
 /**
  * Device class from the (url-decoded) User-Agent. Order matters: bots first
- * (they often spoof a desktop/mobile UA tail), then tablet (an Android tablet
+ * (they often spoof a desktop/mobile UA tail; Siteimprove gets its own bucket
+ * ahead of them), then tablet (an Android tablet
  * UA lacks the "Mobile" token a phone carries), then mobile, else desktop.
  * The device arm deliberately does NOT apply NOT_BOT_UA: the 'bot' bucket is
  * how the dashboard shows bot share.
  */
 const DEVICE_CASE = [
   "CASE",
+  `  WHEN regexp_like(url_decode(cs_user_agent), '${SITEIMPROVE_UA_PATTERN}') THEN 'siteimprove'`,
   `  WHEN ${IS_BOT_UA} THEN 'bot'`,
   "  WHEN regexp_like(url_decode(cs_user_agent), '(?i)(ipad|tablet|playbook|silk|(android(?!.*mobile)))') THEN 'tablet'",
   "  WHEN regexp_like(url_decode(cs_user_agent), '(?i)(mobi|iphone|ipod|android.*mobile|blackberry|iemobile|opera mini|windows phone)') THEN 'mobile'",
