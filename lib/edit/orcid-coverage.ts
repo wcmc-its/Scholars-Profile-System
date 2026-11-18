@@ -74,26 +74,35 @@
  * `ITHACA_ROLES`; etl/ithaca-roster writes the Cornell department NAME to
  * `primary_department`, so the department table groups on it unchanged). `all`
  * = both, side by side: every row carries its `campus`, `campuses` holds each
- * campus's tiles and person-type subtotal. Anything else falls back to WCM.
+ * campus's tiles and person-type subtotal. Anything else is read as if `campus`
+ * were not in the URL at all: WCM, and on an otherwise bare visit the default
+ * person type too.
  * The NIH filter, the `unit` filter, the eRA and the NIH counts are WCM
  * concepts (no Cornell award, eRA or org-unit data is loaded): they never
  * narrow or count Cornell Ithaca rows. On `ithaca` the parser drops `nih` /
  * `unit`; on `all` they narrow the WCM half only. `type` is literal on every
- * campus (a WCM-only selection leaves no Ithaca department).
+ * campus (a WCM-only selection leaves no Ithaca department), which is why the
+ * filter bar starts Both with no person type selected (`campusSwitch`).
  *
  * "Open authorship rows waiting" (`waitingRows`): reciterdb's `authorship_review`
  * holds candidate authorships from Scopus and OpenAlex awaiting a curator, and a
  * row can carry the ORCID iD the source attaches to that byline author.
  * `etl/orcid-authorship-impact` copies, nightly, how many OPEN rows carry each
  * iD (`orcid_open_authorship`: iD and count, no person). For each counted person
- * the fold sums those counts over the person's iDs that are NOT yet confirmed
- * in Scholars: their non-dismissed `orcid_candidate` iDs, plus `scholar.orcid`
- * when it is set but unconfirmed. Each (person, iD) counts once, however many
- * candidate sources name the iD. A person whose iD is already confirmed
- * contributes 0: nothing is waiting on a confirmation. An iD that is a candidate
- * for two people counts for both. `waitingPeople` = people with at least one
- * such row. The tile is the person-type table's total (campus + `unit` + `nih`,
- * every person type). When the table is empty or its `refreshed_at` is older
+ * the fold takes the person's iDs that are NOT yet confirmed in Scholars: their
+ * non-dismissed `orcid_candidate` iDs, plus `scholar.orcid` when it is set but
+ * unconfirmed. Each (person, iD) counts once, however many candidate sources
+ * name the iD. A person whose iD is already confirmed contributes 0: nothing is
+ * waiting on a confirmation. An iD that ANYONE has confirmed in Scholars is
+ * waiting on nobody, so it counts for no one: not for a namesake who holds it as
+ * a candidate, and not for the same person's row on the other campus (the loader
+ * reads every confirmed iD, not only the counted people's). `waitingRows` counts
+ * rows, not (person, row) pairs: an iD that is a candidate for two people in one
+ * table row, subtotal or total adds its open rows there ONCE. So a total can be
+ * less than the sum of the rows above it, and is never more than the open rows
+ * that exist. `waitingPeople` = people with at least one such row (both
+ * namesakes count). The tile is the person-type table's total (campus + `unit`
+ * + `nih`, every person type). When the table is empty or its `refreshed_at` is older
  * than `OPEN_AUTHORSHIP_MAX_AGE_HOURS`, the fold is given no impact data and the
  * tile, the columns and the CSV column are all absent (never a zero that looks
  * like data): the page and CSV are then exactly what they were without it.
@@ -148,7 +157,8 @@ export type OrcidCoverageParams = {
 };
 
 /** `type` / `unit` via `parsePersonFilter`; an unknown `nih` falls back to `all`.
- *  A BARE visit (none of `type`, `unit`, `nih`, `role` in the URL) defaults the
+ *  A BARE visit (none of `type`, `unit`, `nih`, `role`, or a recognized `campus`,
+ *  in the URL) defaults the
  *  department table to full-time faculty; any form submit carries `nih`, so an
  *  empty type selection there means every type. Legacy links: a single
  *  `role=X` reads as `type=X` (`role=all` = every type) when no `type` is
@@ -166,10 +176,11 @@ export function parseOrcidCoverageParams(
   const person = parsePersonFilter(raw);
   const role = first("role");
   const nih = first("nih") ?? "all";
-  const bare = !["type", "unit", "nih", "role", "campus"].some(has);
   // Absent or unknown = WCM, so a WCM parse is exactly what it was before the Ithaca step.
   const rawCampus = first("campus");
   const campus = rawCampus === "ithaca" || rawCampus === "all" ? rawCampus : undefined;
+  // An unrecognized `campus` is no campus at all: it does not end a bare visit.
+  const bare = !["type", "unit", "nih", "role"].some(has) && campus === undefined;
   // `nih` and `unit` are WCM concepts: an Ithaca-only view drops them.
   const wcmFilters = campus !== "ithaca";
   return {
@@ -370,10 +381,14 @@ const bareOrcid = (orcid: string) =>
 
 /** The open-row counts the fold may use, or null when there is nothing to show:
  *  the table is empty, or its newest `refreshedAt` is more than
- *  `OPEN_AUTHORSHIP_MAX_AGE_HOURS` before `now`. Pure. */
+ *  `OPEN_AUTHORSHIP_MAX_AGE_HOURS` before `now`. `confirmed` = iDs already
+ *  confirmed in Scholars by anyone: nothing waits on those, so they are left out
+ *  (the fold does the same for the people it is given; this covers everyone
+ *  else). Pure. */
 export function openAuthorshipImpact(
   rows: readonly OpenAuthorshipRow[],
   now: Date,
+  confirmed: Iterable<string> = [],
 ): OpenAuthorshipImpact | null {
   if (rows.length === 0) return null;
   const refreshedAt = new Date(Math.max(...rows.map((r) => r.refreshedAt.getTime())));
@@ -384,6 +399,7 @@ export function openAuthorshipImpact(
     const k = bareOrcid(r.orcid);
     byOrcid.set(k, (byOrcid.get(k) ?? 0) + r.openRows);
   }
+  for (const orcid of confirmed) byOrcid.delete(bareOrcid(orcid));
   return { byOrcid, refreshedAt };
 }
 
@@ -416,7 +432,8 @@ export type CoverageCounts = {
 };
 /** Set on table rows and totals only when the fold was given open-row counts. */
 export type WaitingCounts = {
-  /** Open authorship rows carrying an iD these people have not yet confirmed. */
+  /** Open authorship rows carrying an iD these people hold and nobody has
+   *  confirmed. Rows, not (person, row) pairs: an iD two of them hold counts once. */
   waitingRows?: number;
   /** …and how many of these people have at least one such row. */
   waitingPeople?: number;
@@ -578,30 +595,30 @@ export function buildOrcidCoverage(
   const tierOf = (s: ScholarRow): OrcidTier =>
     heldOrcid.has(s.cwid) ? "asserted" : (tiers.get(s.cwid) ?? "none");
   const isConfirmed = (s: ScholarRow) => heldOrcid.has(s.cwid) && s.orcidConfirmedAt !== null;
-  // Open rows waiting on a confirmation, per person: the person's unconfirmed iDs
-  // (a Set, so an iD several sources name counts once) summed over `impact`.
-  const waitingByCwid = new Map<string, number>();
+  // Open rows waiting on a confirmation: per person, the unconfirmed iDs that
+  // carry open rows (a Set, so an iD several sources name counts once). An iD
+  // somebody here has confirmed is waiting on nobody, whoever else holds it.
+  const waitingIds = new Map<string, Set<string>>();
   if (impact !== null) {
-    const ids = new Map<string, Set<string>>();
+    const confirmedIds = new Set(
+      scholars.flatMap((s) => (s.orcid !== null && isConfirmed(s) ? [bareOrcid(s.orcid)] : [])),
+    );
     const add = (cwid: string, orcid: string) => {
+      const id = bareOrcid(orcid);
+      if (confirmedIds.has(id) || !((impact.byOrcid.get(id) ?? 0) > 0)) return;
       const k = cwid.toLowerCase();
-      const set = ids.get(k);
-      if (set) set.add(bareOrcid(orcid));
-      else ids.set(k, new Set([bareOrcid(orcid)]));
+      const set = waitingIds.get(k);
+      if (set) set.add(id);
+      else waitingIds.set(k, new Set([id]));
     };
     for (const c of liveCandidates) add(c.cwid, c.orcid);
     for (const s of scholars)
       if (s.orcid !== null && heldOrcid.has(s.cwid) && s.orcidConfirmedAt === null)
         add(s.cwid, s.orcid);
-    for (const [cwid, set] of ids) {
-      let n = 0;
-      for (const orcid of set) n += impact.byOrcid.get(orcid) ?? 0;
-      if (n > 0) waitingByCwid.set(cwid, n);
-    }
   }
   // A confirmed iD means nothing is waiting on this person, whatever else is on file.
-  const waitingOf = (s: ScholarRow) =>
-    isConfirmed(s) ? 0 : (waitingByCwid.get(s.cwid.toLowerCase()) ?? 0);
+  const waitingIdsOf = (s: ScholarRow) =>
+    isConfirmed(s) ? undefined : waitingIds.get(s.cwid.toLowerCase());
   const nihEnd = new Map(nih.map((r) => [r.cwid, r.latestEnd]));
   const nihPi = new Set(nih.filter((r) => r.pi).map((r) => r.cwid));
   const era = new Set(eraCwids);
@@ -624,6 +641,8 @@ export function buildOrcidCoverage(
   const count = (rows: ScholarRow[], wcmFacts = true): CoverageCounts & WaitingCounts => {
     let waitingRows = 0;
     let waitingPeople = 0;
+    // Rows, not (person, row) pairs: an iD two of these people hold counts once.
+    const counted = new Set<string>();
     const c = {
       people: 0,
       orcid: 0,
@@ -642,9 +661,15 @@ export function buildOrcidCoverage(
       const t = tierOf(s);
       const o = t === "asserted";
       const e = wcmFacts && era.has(s.cwid);
-      const w = waitingOf(s);
-      waitingRows += w;
-      if (w > 0) waitingPeople++;
+      const ids = waitingIdsOf(s);
+      if (ids) {
+        waitingPeople++;
+        for (const id of ids) {
+          if (counted.has(id)) continue;
+          counted.add(id);
+          waitingRows += impact?.byOrcid.get(id) ?? 0;
+        }
+      }
       c.people++;
       if (o) {
         c.orcid++;
@@ -723,6 +748,7 @@ export function buildOrcidCoverage(
         nihFullTime: count(wcm ? headline.filter(isNih) : [], wcm),
       },
       total: count(filtered, wcm),
+      filtered,
       byRole,
       byDept,
     };
@@ -770,7 +796,8 @@ export function buildOrcidCoverage(
         ),
       campuses: parts.map(({ campus, label, tiles, total }) => ({ campus, label, tiles, total })),
       sources,
-      ...shown(addCounts(w.total, i.total)),
+      // Counted over both campuses at once, not summed: an iD held on both counts once.
+      ...shown(count([...w.filtered, ...i.filtered])),
     };
   }
 
@@ -796,13 +823,24 @@ export type OrcidCoverageClient = Pick<
   | "$queryRaw"
 >;
 
-/** The open-row counts. Garnish on this page: a failed read (the table not yet
- *  migrated, say) hides the tile and columns, it does not blank the coverage. */
-async function readOpenAuthorship(db: OrcidCoverageClient): Promise<OpenAuthorshipRow[]> {
+/** The open-row counts, and every iD confirmed in Scholars (any campus, any
+ *  status: the counted population is one campus's active people, but an iD
+ *  confirmed on any row is waiting on nobody). The second read happens only when
+ *  there are counts to show. Garnish on this page: a failed read (the table not
+ *  yet migrated, say) hides the tile and columns, it does not blank the coverage. */
+async function readOpenAuthorship(
+  db: OrcidCoverageClient,
+): Promise<{ rows: OpenAuthorshipRow[]; confirmed: string[] }> {
   try {
-    return await db.orcidOpenAuthorship.findMany({
+    const rows = await db.orcidOpenAuthorship.findMany({
       select: { orcid: true, openRows: true, refreshedAt: true },
     });
+    if (rows.length === 0) return { rows, confirmed: [] };
+    const confirmed = await db.scholar.findMany({
+      where: { deletedAt: null, orcid: { not: null }, orcidConfirmedAt: { not: null } },
+      select: { orcid: true },
+    });
+    return { rows, confirmed: confirmed.flatMap((s) => (s.orcid === null ? [] : [s.orcid])) };
   } catch (err) {
     console.warn(
       JSON.stringify({
@@ -810,7 +848,7 @@ async function readOpenAuthorship(db: OrcidCoverageClient): Promise<OpenAuthorsh
         error: err instanceof Error ? err.message : String(err),
       }),
     );
-    return [];
+    return { rows: [], confirmed: [] };
   }
 }
 
@@ -889,7 +927,7 @@ export async function loadOrcidCoverage(
     candidates,
     dismissals,
     unitRows === null ? null : new Set(unitRows.map((r) => r.cwid)),
-    openAuthorshipImpact(openAuthorship, now),
+    openAuthorshipImpact(openAuthorship.rows, now, openAuthorship.confirmed),
   );
 }
 

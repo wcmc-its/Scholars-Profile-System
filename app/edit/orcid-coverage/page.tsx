@@ -241,8 +241,10 @@ function Definitions({ waiting }: { waiting: boolean }) {
           Publications from Scopus or OpenAlex that are still awaiting review in Publication
           Manager, where the source lists an ORCID iD for the author and that iD is one we hold for
           the person but nobody has confirmed. Once the iD is confirmed, those rows can be settled
-          quickly. A person whose iD is already confirmed counts zero. Copied nightly; hidden when
-          the copy is more than {OPEN_AUTHORSHIP_MAX_AGE_HOURS} hours old.
+          quickly. A person whose iD is already confirmed counts zero. So does an iD that someone
+          else has confirmed. Each row is counted once in a line and once in a total, even when two
+          people hold its iD, so a total can be less than the lines above it. Copied nightly; hidden
+          when the copy is more than {OPEN_AUTHORSHIP_MAX_AGE_HOURS} hours old.
         </Definition>
       ) : null}
     </div>

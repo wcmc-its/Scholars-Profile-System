@@ -45,6 +45,7 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/lib/api/data-quality", () => ({ loadDataQualityFacets: h.mockFacets }));
 
+import { campusSwitch } from "@/app/edit/orcid-coverage/filter-bar";
 import EditOrcidCoveragePage from "@/app/edit/orcid-coverage/page";
 import {
   buildOrcidCoverage,
@@ -568,6 +569,20 @@ describe("/edit/orcid-coverage — campus", () => {
       ["Cornell Ithaca grad student", "2", "—"],
       ["Cornell Ithaca subtotal", "4", "—"],
     ]);
+    // One row group per campus, headed by a row-group header (not a column header).
+    const groups = [...page.getByTestId("orcid-coverage-by-role").querySelectorAll("tbody")];
+    expect(groups.map((g) => g.querySelector("tr:first-child > th")?.textContent)).toEqual([
+      "Weill Cornell Medicine",
+      "Cornell Ithaca",
+    ]);
+    for (const g of groups) {
+      expect(g.querySelectorAll('th[scope="rowgroup"]')).toHaveLength(1);
+      expect(g.querySelector("tr:last-child")?.textContent).toMatch(/ subtotal/);
+    }
+    expect(
+      page.getByTestId("orcid-coverage-by-role").querySelector('th[scope="colgroup"]'),
+    ).toBeNull();
+    expect(page.getByTestId("orcid-coverage-by-dept").querySelectorAll("tbody")).toHaveLength(1);
     expect(headerTexts(page, "orcid-coverage-by-role")).not.toContain("Campus");
     expect(headerTexts(page, "orcid-coverage-by-dept").slice(0, 3)).toEqual([
       "Department",
@@ -595,6 +610,53 @@ describe("/edit/orcid-coverage — campus", () => {
     expect(getByTestId("orcid-coverage-page").textContent).not.toMatch(/\bf1\b|\bi1\b|0000-0000/);
   });
 
+  it("Campus → Both from the bare landing page drops the default person type, so both campuses' departments list", async () => {
+    const { getByTestId, baseElement } = render(
+      await EditOrcidCoveragePage({ searchParams: sp() }),
+    );
+    // The bare visit: full-time faculty in the department table.
+    expect(h.mockLoad).toHaveBeenLastCalledWith(
+      {},
+      { types: ["full_time_faculty"], units: [], nih: "all" },
+    );
+    fireEvent.click(
+      within(getByTestId("orcid-coverage-page")).getByTestId("orcid-coverage-filter-campus"),
+    );
+    fireEvent.click(within(baseElement).getByRole("radio", { name: "Both" }));
+    expect(h.mockReplace).toHaveBeenLastCalledWith("/edit/orcid-coverage?nih=all&campus=all", {
+      scroll: false,
+    });
+    // That URL is what a hand-typed ?campus=all parses to, and it lists Ithaca departments.
+    const viaBar = parseOrcidCoverageParams(new URLSearchParams("nih=all&campus=all"));
+    expect(viaBar).toEqual(parseOrcidCoverageParams({ campus: "all" }));
+    const depts = buildOrcidCoverage([...WCM, ...ITHACA], [], [], viaBar, TODAY).byDept;
+    expect(new Set(depts.map((d) => d.campus))).toEqual(new Set(["wcm", "ithaca"]));
+  });
+
+  it("campusSwitch: Both starts with no person type; unit and NIH stay (WCM half); one campus keeps its own types", () => {
+    const sel = {
+      nih: "ever" as const,
+      units: ["dept:AA1"],
+      types: ["full_time_faculty", "ithaca_postdoc"],
+    };
+    expect(campusSwitch(sel, "all")).toEqual({ ...sel, types: [], campus: "all" });
+    expect(campusSwitch({ ...sel, campus: "ithaca" }, "all").types).toEqual([]);
+    // Already on Both: a deliberate selection there is kept.
+    const onBoth = { ...sel, campus: "all" as const };
+    expect(campusSwitch(onBoth, "all")).toBe(onBoth);
+    expect(campusSwitch(onBoth, "ithaca")).toEqual({
+      nih: "all",
+      units: [],
+      types: ["ithaca_postdoc"],
+      campus: "ithaca",
+    });
+    expect(campusSwitch(onBoth, "wcm")).toEqual({
+      ...sel,
+      types: ["full_time_faculty"],
+      campus: "wcm",
+    });
+  });
+
   it("both + a WCM-only filter: the captions say it narrows WCM only", async () => {
     const { getByTestId } = render(
       await EditOrcidCoveragePage({ searchParams: sp({ campus: "all", nih: "ever" }) }),
@@ -620,6 +682,7 @@ describe("/edit/orcid-coverage — campus", () => {
 describe("/edit/orcid-coverage — open authorship rows waiting", () => {
   const A = "0000-0002-1825-0097";
   const B = "0000-0001-0000-000X";
+  const C = "0000-0001-0000-0003";
   const person = (
     cwid: string,
     roleCategory: string,
@@ -637,7 +700,7 @@ describe("/edit/orcid-coverage — open authorship rows waiting", () => {
   });
   const WCM = [
     person("f1", "full_time_faculty", "Dept A", A, true), // confirmed: 0
-    person("f2", "full_time_faculty", "Dept A", A), // unconfirmed: 12
+    person("f2", "full_time_faculty", "Dept A", C), // unconfirmed: 12
     person("p1", "postdoc", "Dept B"), // candidate B: 1,300
   ];
   const ITHACA = [person("n1", "ithaca_faculty", "Physics", null, false, "ithaca")]; // candidate B too
@@ -656,7 +719,9 @@ describe("/edit/orcid-coverage — open authorship rows waiting", () => {
         ? null
         : openAuthorshipImpact(
             [
-              { orcid: A, openRows: 12, refreshedAt },
+              // f1 confirmed A: its rows wait on nobody.
+              { orcid: A, openRows: 40, refreshedAt },
+              { orcid: C, openRows: 12, refreshedAt },
               { orcid: B, openRows: 1300, refreshedAt },
             ],
             NOW,
@@ -722,6 +787,9 @@ describe("/edit/orcid-coverage — open authorship rows waiting", () => {
     expect(headers(page, "orcid-coverage-by-role").at(-1)).toBe("Open rows waiting");
     expect(getByTestId("orcid-coverage-page").textContent).toContain(
       "A person whose iD is already confirmed counts zero.",
+    );
+    expect(getByTestId("orcid-coverage-page").textContent).toContain(
+      "Each row is counted once in a line and once in a total, even when two people hold its iD",
     );
   });
 

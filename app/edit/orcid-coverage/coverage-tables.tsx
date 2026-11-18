@@ -351,63 +351,67 @@ function Table({
           })}
         </tr>
       </thead>
-      <tbody>
-        {rows.length === 0 ? (
-          <tr>
-            <td className="text-muted-foreground px-[18px] py-3" colSpan={cols.length}>
-              {empty}
-            </td>
-          </tr>
-        ) : groups ? (
-          groups.map((g, gi) => (
-            <React.Fragment key={g.label}>
-              <tr
-                className={cn(
-                  "bg-apollo-surface-2",
-                  gi > 0 && "border-apollo-border-strong border-t",
-                )}
-              >
-                <th
-                  scope="colgroup"
-                  colSpan={cols.length}
-                  className="px-[18px] py-2 text-left text-[13px] font-semibold"
-                >
-                  {g.label}
-                </th>
-              </tr>
-              {[...g.rows, g.subtotal].map((r, i) => (
-                <tr
-                  key={i === g.rows.length ? "__subtotal" : (r.key ?? "__null")}
-                  className={cn(
-                    "border-apollo-border border-t",
-                    i === g.rows.length ? "font-semibold" : "hover:bg-apollo-page",
-                    i < g.rows.length && highlight?.(r) && "bg-apollo-page",
-                  )}
-                >
-                  {cols.map((col, ci) => (
-                    <Cell key={col.key} r={r} col={col} isName={ci === 0} />
-                  ))}
-                </tr>
-              ))}
-            </React.Fragment>
-          ))
-        ) : (
-          rows.map((r, i) => (
+      {groups && rows.length > 0 ? (
+        // One row group per campus, so its heading cell is a header for exactly
+        // the rows beneath it.
+        groups.map((g, gi) => (
+          <tbody key={g.label}>
             <tr
-              key={r.campus ? `${r.campus}:${r.key ?? "__null"}` : (r.key ?? "__null")}
               className={cn(
-                "hover:bg-apollo-page",
-                i > 0 && "border-apollo-border border-t",
-                highlight?.(r) && "bg-apollo-page",
+                "bg-apollo-surface-2",
+                gi > 0 && "border-apollo-border-strong border-t",
               )}
             >
-              {cols.map((col, ci) => (
-                <Cell key={col.key} r={r} col={col} isName={ci === 0} />
-              ))}
+              <th
+                scope="rowgroup"
+                colSpan={cols.length}
+                className="px-[18px] py-2 text-left text-[13px] font-semibold"
+              >
+                {g.label}
+              </th>
             </tr>
-          ))
-        )}
-      </tbody>
+            {[...g.rows, g.subtotal].map((r, i) => (
+              <tr
+                key={i === g.rows.length ? "__subtotal" : (r.key ?? "__null")}
+                className={cn(
+                  "border-apollo-border border-t",
+                  i === g.rows.length ? "font-semibold" : "hover:bg-apollo-page",
+                  i < g.rows.length && highlight?.(r) && "bg-apollo-page",
+                )}
+              >
+                {cols.map((col, ci) => (
+                  <Cell key={col.key} r={r} col={col} isName={ci === 0} />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        ))
+      ) : (
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td className="text-muted-foreground px-[18px] py-3" colSpan={cols.length}>
+                {empty}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r, i) => (
+              <tr
+                key={r.campus ? `${r.campus}:${r.key ?? "__null"}` : (r.key ?? "__null")}
+                className={cn(
+                  "hover:bg-apollo-page",
+                  i > 0 && "border-apollo-border border-t",
+                  highlight?.(r) && "bg-apollo-page",
+                )}
+              >
+                {cols.map((col, ci) => (
+                  <Cell key={col.key} r={r} col={col} isName={ci === 0} />
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+      )}
     </table>
   );
 }

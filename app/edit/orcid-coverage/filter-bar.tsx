@@ -14,7 +14,9 @@
  * is "both" because `FacetPopover` reads a single-select "all" as "nothing
  * selected"). NIH funding and the unit facets are WCM concepts: hidden on
  * Cornell Ithaca, and on Both they narrow the WCM half only. Person type offers
- * the six Cornell Ithaca roles whenever Ithaca people are in view.
+ * the six Cornell Ithaca roles whenever Ithaca people are in view. A person-type
+ * selection belongs to the campus it was made on, so a switch to Both starts
+ * with none (`campusSwitch`): the department table then lists both campuses.
  */
 "use client";
 
@@ -40,6 +42,17 @@ const ITHACA_TYPE_OPTIONS = ITHACA_ROLES.map((value) => ({
   label: formatRoleCategory(value) ?? value,
   count: -1,
 }));
+
+/** A campus switch keeps only the selections that still mean something there.
+ *  To Both from one campus, the person types are dropped: they are that campus's
+ *  roles (the bare visit's full-time faculty among them) and would leave the
+ *  other campus with no department at all. Same as opening `?campus=all`. Pure. */
+export function campusSwitch(sel: Sel, campus: CampusView): Sel {
+  if (campus === "ithaca")
+    return { nih: "all", units: [], types: sel.types.filter(isIthacaRole), campus };
+  if (campus === "wcm") return { ...sel, types: sel.types.filter((t) => !isIthacaRole(t)), campus };
+  return sel.campus === "all" ? sel : { ...sel, types: [], campus };
+}
 
 function query(s: Sel) {
   const q = new URLSearchParams();
@@ -150,13 +163,7 @@ export function CoverageFilterBar({
         : d.key === "type"
           ? sel.types
           : sel.units.filter((u) => d.options.some((o) => o.value === u));
-  /** A campus switch keeps only the selections that still mean something there. */
-  const toCampus = (campus: CampusView): Sel =>
-    campus === "ithaca"
-      ? { nih: "all", units: [], types: sel.types.filter(isIthacaRole), campus }
-      : campus === "wcm"
-        ? { ...sel, types: sel.types.filter((t) => !isIthacaRole(t)), campus }
-        : { ...sel, campus };
+  const toCampus = (campus: CampusView): Sel => campusSwitch(sel, campus);
   const toggle = (d: FacetDef, value: string) => {
     if (d.key === "campus")
       return apply(toCampus(value === "ithaca" ? "ithaca" : value === "both" ? "all" : "wcm"));

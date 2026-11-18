@@ -794,6 +794,24 @@ describe("campus: WCM (default), Cornell Ithaca, both", () => {
     expect(parseOrcidCoverageParams(new URLSearchParams("campus=all")).campus).toBe("all");
   });
 
+  it("parse: an unknown campus on an otherwise bare visit is the bare visit, default person type included", () => {
+    const bare = parseOrcidCoverageParams({});
+    expect(bare.types).toEqual(["full_time_faculty"]);
+    for (const junk of ["bogus", "ALL", "wcm", ""]) {
+      expect(parseOrcidCoverageParams({ campus: junk })).toEqual(bare);
+      expect(parseOrcidCoverageParams(new URLSearchParams({ campus: junk }))).toEqual(bare);
+    }
+    // The first value decides, as for every other parameter here.
+    expect(parseOrcidCoverageParams({ campus: ["", "ithaca"] })).toEqual(bare);
+    // A recognized campus is a choice: every person type, as on the base branch.
+    expect(parseOrcidCoverageParams({ campus: "ithaca" }).types).toEqual([]);
+    expect(parseOrcidCoverageParams({ campus: "all" }).types).toEqual([]);
+    // An unknown campus beside a real filter changes nothing either.
+    expect(parseOrcidCoverageParams({ campus: "bogus", type: "postdoc" })).toEqual(
+      parseOrcidCoverageParams({ type: "postdoc" }),
+    );
+  });
+
   it("query, active-filter count, criteria and filename carry the campus view", () => {
     const all = parseOrcidCoverageParams({ campus: "all", nih: "ever" });
     expect(orcidCoverageQuery(all)).toBe("?nih=ever&campus=all");
@@ -977,6 +995,7 @@ describe("open authorship rows waiting", () => {
   const B = "0000-0001-0000-000X";
   const C = "0000-0001-0000-0003";
   const D = "0000-0001-0000-0004";
+  const E = "0000-0001-0000-0005";
   const open = (orcid: string, openRows: number, refreshedAt = FRESH) => ({
     orcid,
     openRows,
@@ -991,7 +1010,7 @@ describe("open authorship rows waiting", () => {
   });
   const PEOPLE: ScholarRow[] = [
     s("w1", "full_time_faculty", "Dept A", true, true), // confirmed A
-    s("w2", "full_time_faculty", "Dept A", true), // holds A, unconfirmed (Identity)
+    { ...s("w2", "full_time_faculty", "Dept A", true), orcid: E }, // holds E, unconfirmed (Identity)
     s("w3", "full_time_faculty", "Dept B"), // candidate B from two sources
     s("w4", "postdoc", "Dept B"), // candidates C (dismissed) and D
     s("w5", "postdoc", "Dept B"), // nothing on file
@@ -1004,7 +1023,11 @@ describe("open authorship rows waiting", () => {
     c("w4", D, "orcid_email"),
   ];
   const DISMISSED = [{ cwid: "w4", orcid: C }];
-  const IMPACT = openAuthorshipImpact([open(A, 10), open(B, 7), open(C, 100), open(D, 2)], NOW)!;
+  // A is w1's confirmed iD: its open rows wait on nobody.
+  const IMPACT = openAuthorshipImpact(
+    [open(A, 50), open(B, 7), open(C, 100), open(D, 2), open(E, 10)],
+    NOW,
+  )!;
   const ALL_TYPES = parseOrcidCoverageParams({ nih: "all" });
   const run = (
     impact: ReturnType<typeof openAuthorshipImpact>,
@@ -1037,7 +1060,7 @@ describe("open authorship rows waiting", () => {
     const dept = Object.fromEntries(
       r.byDept.map((d) => [d.label, [d.waitingRows, d.waitingPeople]]),
     );
-    // Dept A: w1 confirmed → 0 (its candidate B ignored too); w2 holds A unconfirmed → 10.
+    // Dept A: w1 confirmed → 0 (its candidate B ignored too); w2 holds E unconfirmed → 10.
     expect(dept["Dept A"]).toEqual([10, 1]);
     // Dept B: w3 → B once (7, not 14); w4 → D only (2; C is dismissed); w5 → 0.
     expect(dept["Dept B"]).toEqual([9, 2]);
@@ -1051,7 +1074,7 @@ describe("open authorship rows waiting", () => {
     expect(run(IMPACT, ALL_TYPES, PEOPLE, []).impact).toMatchObject({ rows: 119, people: 3 });
     // w2 dismissed the very iD on scholar.orcid: it counts nowhere.
     expect(
-      run(IMPACT, ALL_TYPES, PEOPLE, [...DISMISSED, { cwid: "w2", orcid: A }]).impact,
+      run(IMPACT, ALL_TYPES, PEOPLE, [...DISMISSED, { cwid: "w2", orcid: E }]).impact,
     ).toMatchObject({
       rows: 9,
       people: 2,
@@ -1093,7 +1116,79 @@ describe("open authorship rows waiting", () => {
     expect(unit.impact).toMatchObject({ rows: 10, people: 1 });
   });
 
-  it("both campuses: each campus's subtotal carries its own rows; the total is their sum", () => {
+  it("an iD two people hold counts its rows once per line and once per total; both people count", () => {
+    // Namesakes x1 (Dept A) and x2, x3 (Dept B) all carry B as a candidate: 7 open rows exist.
+    const people = [
+      s("x1", "full_time_faculty", "Dept A"),
+      s("x2", "full_time_faculty", "Dept B"),
+      s("x3", "postdoc", "Dept B"),
+    ];
+    const r = buildOrcidCoverage(
+      people,
+      [],
+      [],
+      ALL_TYPES,
+      TODAY,
+      [c("x1", B, "orcid_name"), c("x2", B, "orcid_name"), c("x3", B, "orcid_name")],
+      [],
+      null,
+      IMPACT,
+    );
+    expect(
+      Object.fromEntries(r.byDept.map((d) => [d.label, [d.waitingRows, d.waitingPeople]])),
+    ).toEqual({
+      "Dept A": [7, 1],
+      "Dept B": [7, 2],
+    });
+    expect(
+      Object.fromEntries(r.byRole.map((d) => [d.key, [d.waitingRows, d.waitingPeople]])),
+    ).toEqual({
+      full_time_faculty: [7, 2],
+      postdoc: [7, 1],
+    });
+    // Never more than the open rows that exist.
+    expect(r.impact).toMatchObject({ rows: 7, people: 3 });
+  });
+
+  it("an iD anyone has confirmed waits on nobody: a namesake's candidate, or another campus's row", () => {
+    // y1 confirmed A; y2 (a namesake) and the Ithaca row n1 hold A as a candidate.
+    const y1 = s("y1", "full_time_faculty", "Dept A", true, true);
+    const y2 = s("y2", "full_time_faculty", "Dept B");
+    const n1 = { ...s("n1", "ithaca_faculty", "Physics"), campus: "ithaca" };
+    const cands = [c("y2", A, "orcid_name"), c("n1", A, "cornell_affiliation_manager")];
+    const fold = (rows: ScholarRow[], raw: Record<string, string>, impact = IMPACT) =>
+      buildOrcidCoverage(
+        rows,
+        [],
+        [],
+        parseOrcidCoverageParams(raw),
+        TODAY,
+        cands,
+        [],
+        null,
+        impact,
+      );
+    expect(fold([y1, y2], { nih: "all" }).impact).toMatchObject({ rows: 0, people: 0 });
+    const both = fold([y1, y2, n1], { campus: "all" });
+    expect(both.campuses!.map((x) => [x.total.waitingRows, x.total.waitingPeople])).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+    expect(both.impact).toMatchObject({ rows: 0, people: 0 });
+    // Until y1 confirms, the rows do wait (once, though two WCM people and n1 hold the iD).
+    const unconfirmed = fold([{ ...y1, orcidConfirmedAt: null }, y2, n1], { campus: "all" });
+    expect(unconfirmed.impact).toMatchObject({ rows: 50, people: 3 });
+    // The Ithaca-only view never loads y1: the loader hands the confirmed iDs to
+    // openAuthorshipImpact, which leaves them out.
+    expect(fold([n1], { campus: "ithaca" }).impact).toMatchObject({ rows: 50, people: 1 });
+    const known = openAuthorshipImpact([open(A, 50), open(B, 7)], NOW, [
+      `https://orcid.org/${A.toLowerCase()}`,
+    ])!;
+    expect([...known.byOrcid]).toEqual([[B, 7]]);
+    expect(fold([n1], { campus: "ithaca" }, known).impact).toMatchObject({ rows: 0, people: 0 });
+  });
+
+  it("both campuses: each campus's subtotal carries its own rows; the total counts a shared iD once", () => {
     const ithaca: ScholarRow[] = [
       { ...s("n1", "ithaca_faculty", "Physics"), campus: "ithaca" },
       { ...s("n2", "ithaca_postdoc", "Physics", true, true), campus: "ithaca" },
@@ -1117,7 +1212,8 @@ describe("open authorship rows waiting", () => {
     expect([w.total.waitingRows, w.total.waitingPeople]).toEqual([19, 3]);
     // n1 → D (2); n2 is confirmed → 0.
     expect([i.total.waitingRows, i.total.waitingPeople]).toEqual([2, 1]);
-    expect(r.impact).toMatchObject({ rows: 21, people: 4 });
+    // D is held on both campuses (w4, n1): 2 in each subtotal, once in the total.
+    expect(r.impact).toMatchObject({ rows: 19, people: 4 });
     const one = buildOrcidCoverage(
       ithaca,
       [],
@@ -1172,10 +1268,15 @@ describe("open authorship rows waiting", () => {
   });
 
   it("loadOrcidCoverage reads orcid_open_authorship; a failed read hides the numbers, not the page", async () => {
+    // The second scholar read (every confirmed iD) happens only when there are counts.
+    const confirmedIds = vi.fn().mockResolvedValue([] as { orcid: string }[]);
+    const findMany = vi.fn((args: { where: Record<string, unknown> }) =>
+      "orcidConfirmedAt" in args.where
+        ? confirmedIds(args)
+        : Promise.resolve([s("w2", "full_time_faculty", "Dept A", true)]),
+    );
     const base = {
-      scholar: {
-        findMany: vi.fn().mockResolvedValue([s("w2", "full_time_faculty", "Dept A", true)]),
-      },
+      scholar: { findMany },
       grant: { groupBy: vi.fn().mockResolvedValue([]) },
       personNihProfile: { findMany: vi.fn().mockResolvedValue([]) },
       orcidCandidate: { findMany: vi.fn().mockResolvedValue([]) },
@@ -1190,6 +1291,30 @@ describe("open authorship rows waiting", () => {
       ALL_TYPES,
     );
     expect(ok.impact).toEqual({ refreshedAt: fresh, rows: 6, people: 1 });
+    expect(confirmedIds).toHaveBeenCalledWith({
+      where: { deletedAt: null, orcid: { not: null }, orcidConfirmedAt: { not: null } },
+      select: { orcid: true },
+    });
+    // Someone outside the counted people (another campus, say) confirmed that iD.
+    confirmedIds.mockResolvedValueOnce([{ orcid: A }]);
+    const settled = await loadOrcidCoverage(
+      {
+        ...base,
+        orcidOpenAuthorship: { findMany: vi.fn().mockResolvedValue([open(A, 6, fresh)]) },
+      } as unknown as OrcidCoverageClient,
+      ALL_TYPES,
+    );
+    expect(settled.impact).toEqual({ refreshedAt: fresh, rows: 0, people: 0 });
+    // An empty table: no second read at all.
+    confirmedIds.mockClear();
+    await loadOrcidCoverage(
+      {
+        ...base,
+        orcidOpenAuthorship: { findMany: vi.fn().mockResolvedValue([]) },
+      } as unknown as OrcidCoverageClient,
+      ALL_TYPES,
+    );
+    expect(confirmedIds).not.toHaveBeenCalled();
 
     const old = await loadOrcidCoverage(
       {
