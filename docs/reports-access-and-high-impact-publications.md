@@ -87,6 +87,7 @@ Every parameter is optional; an unknown value falls back to its default, never a
 | `basis`, `from`, `to` | `cy` (calendar year of publication, default) or `fy` (July–June, by PubMed add date, named by the ending year); the year range, default the last five years |
 | `basis=added`, `added_from`, `added_to` | the date the article was added to PubMed (ISO dates, inclusive), grouped by year added; replaces `basis` / `from` / `to`. The dates alone (no `basis`) select it too; an explicit `basis=cy` or `fy` wins over stale dates. `basis=added` with no dates means the last 30 days |
 | `atype` (repeated) | article type |
+| `stage` (repeated) | translational stage: `T0` / `T1` / `T2` / `T3-4`; unknown values are dropped. Read only while `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is on. Articles with no stage, or a low-confidence one, are excluded when set. With the flag on, the By year counts and the Counts sheet also split each year by stage plus "No stage", and the Articles sheet gains a stage column |
 | `jif` | minimum Journal Impact Factor, one decimal (articles in journals with no JIF on file are excluded when set) |
 | `pos` | `any` / `first` / `last` / `either` author position |
 | `f=1` | a submitted form (see the unit default) |
@@ -204,6 +205,7 @@ collapsed section per filter, each showing its current value, in this order:
 | Centers | `unit=center:` | Searchable, first 6 then "Show all". |
 | Institution | `unit=inst:` | |
 | Article type | `atype` (repeated) | None checked = all. |
+| Translational stage | `stage` (repeated) | None checked = all. Shown only while `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is on; the Publications sheet then carries a stage column. |
 | Author position | `pos` | `any`, `first`, `last`, `either` (first or last). |
 
 Numbers beside the who-filter options count active people (`loadDataQualityFacets`), not articles.
