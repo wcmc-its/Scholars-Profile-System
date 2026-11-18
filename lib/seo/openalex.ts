@@ -101,9 +101,16 @@ export function openAlexKey(id: string): string {
 
 // ── network ───────────────────────────────────────────────────────────────
 
+// OPENALEX_API_KEY gives its own daily budget; keyless calls share one per IP.
+// Added here, not to `url`, so error messages never carry the key.
 function withMailto(url: string, mailto: string | undefined): string {
-  if (!mailto) return url;
-  return url + (url.includes("?") ? "&" : "?") + `mailto=${encodeURIComponent(mailto)}`;
+  const key = process.env.OPENALEX_API_KEY?.trim();
+  const params = [
+    mailto && `mailto=${encodeURIComponent(mailto)}`,
+    key && `api_key=${encodeURIComponent(key)}`,
+  ].filter(Boolean);
+  if (!params.length) return url;
+  return url + (url.includes("?") ? "&" : "?") + params.join("&");
 }
 
 const MAX_RETRIES = 3;

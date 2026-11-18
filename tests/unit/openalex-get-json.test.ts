@@ -5,7 +5,10 @@ import { getJson } from "@/lib/seo/openalex";
 const res = (status: number, headers: Record<string, string> = {}) =>
   new Response(status === 200 ? JSON.stringify({ ok: true }) : "", { status, headers });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("OpenAlex getJson retry", () => {
   it("retries a 429, honouring Retry-After, then returns the body", async () => {
@@ -44,5 +47,14 @@ describe("OpenAlex getJson retry", () => {
       "OpenAlex HTTP 401",
     );
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("sends OPENALEX_API_KEY but keeps it out of the error message", async () => {
+    vi.stubEnv("OPENALEX_API_KEY", "k3y");
+    const fetch = vi.fn().mockResolvedValue(res(403));
+    vi.stubGlobal("fetch", fetch);
+    const err = await getJson("https://api.openalex.org/works?x=1", "a@b.c").catch((e) => e);
+    expect(fetch.mock.calls[0][0]).toBe("https://api.openalex.org/works?x=1&mailto=a%40b.c&api_key=k3y");
+    expect(String(err)).not.toContain("k3y");
   });
 });
