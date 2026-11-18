@@ -203,7 +203,7 @@
     "isomorphic-dompurify": "^4.7.0",
     "ldapts": "^9.2.0",
     "lucide-react": "^1.72.0",
-    "mariadb": "^3.5.4",
+    "mariadb": "^3.5.5",
     "mssql": "^12.7.14",
     "next": "16.4.6",
     "prisma": "^7.10.1",
