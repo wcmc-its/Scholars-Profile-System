@@ -1159,6 +1159,50 @@ export class SpsObservabilityStack extends Stack {
     );
     editAuthzDeniedAlarm.addAlarmAction(warnAction); // P2 -- security signal, review-in-hours
 
+    // (9a) Role-check failures. Every LDAP-group role checker in lib/auth/*
+    // (superuser, observer, research_security_viewer, data_sharing_viewer,
+    // comms_steward, development, honors_curator, content_editor) logs one
+    // JSON line per failed lookup: {"event":"<role>_check_failed","reason":...}.
+    // The checks are fail-closed, so a broken or renamed ED group silently
+    // removes that role from EVERYONE -- nothing 500s and nobody is told. This
+    // has gone unnoticed for days more than once. A healthy day logs none, so
+    // alarm on the first.
+    //
+    // The pattern keys off the shared `_check_failed` suffix (wildcard on a
+    // JSON string value; verified with `aws logs test-metric-filter`), so a
+    // new role checker that follows the naming is covered without a CDK
+    // change. 1h period, missing = not breaching: one P2 post per hour while
+    // the condition persists, not one per request.
+    new logs.MetricFilter(this, "RoleCheckFailedMetricFilter", {
+      logGroup: appStack.appLogGroup,
+      filterName: `sps-role-check-failed-${env}`,
+      filterPattern: logs.FilterPattern.stringValue(
+        "$.event",
+        "=",
+        "*_check_failed",
+      ),
+      metricNamespace: `SPS/Auth/${env}`, // env-scoped -- see (6b)
+      metricName: "RoleCheckFailed",
+      metricValue: "1",
+      defaultValue: 0,
+    });
+
+    new cloudwatch.Alarm(this, "RoleCheckFailedAlarm", {
+      alarmName: `sps-role-check-failed-${env}`,
+      alarmDescription: `An LDAP role check failed (${env}) -- some *_check_failed event was logged. Role checks are fail-closed, so a broken Enterprise Directory group silently removes that role from everyone. Next: in /aws/ecs/sps-app-${env}, filter { $.event = "*_check_failed" } and group by event + reason. group_not_found = the group cn env var points at a group ED no longer has (or a bad memberURL); ldap_* reasons = directory reachability. See lib/auth/ldap-group.ts.`,
+      metric: new cloudwatch.Metric({
+        namespace: `SPS/Auth/${env}`, // env-scoped -- see (6b)
+        metricName: "RoleCheckFailed",
+        statistic: "Sum",
+        period: Duration.hours(1),
+      }),
+      threshold: 0,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(warnAction); // P2 -- a role is down, nothing is 500ing
+
     // ------------------------------------------------------------------
     // ETL heartbeat WARN lines -> sps-warn (#2190)
     // ------------------------------------------------------------------
