@@ -25,10 +25,13 @@ import {
   ORCID_CANDIDATE_SOURCES,
   ORCID_QUEUE_BAND_LABEL,
   ORCID_QUEUE_BANDS,
+  ORCID_QUEUE_CAMPUS_LABEL,
+  ORCID_QUEUE_CAMPUSES,
   ORCID_SOURCE_LABEL,
   orcidQueueHref,
   type OrcidCandidateSource,
   type OrcidQueueBand,
+  type OrcidQueueCampus,
   type OrcidQueueFilter,
   type OrcidQueueSummary,
 } from "@/lib/edit/orcid-queue";
@@ -165,6 +168,16 @@ export function OrcidQueueFilterBar({
       })),
       scope: "Scholars with an iD found this way.",
     },
+    {
+      key: "campus",
+      label: "Campus",
+      options: ORCID_QUEUE_CAMPUSES.map((c) => ({
+        value: c,
+        label: ORCID_QUEUE_CAMPUS_LABEL[c],
+        count: count((x) => (x.campus ?? "wcm") === c),
+      })),
+      scope: SERVER_SCOPE,
+    },
   ];
 
   const serverSelected = (d: FacetDef): string[] =>
@@ -172,18 +185,23 @@ export function OrcidQueueFilterBar({
       ? sel.types
       : d.key === "source"
         ? sel.sources
-        : sel.units.filter((u) => d.options.some((o) => o.value === u));
+        : d.key === "campus"
+          ? sel.campuses
+          : sel.units.filter((u) => d.options.some((o) => o.value === u));
   const flip = <T extends string>(xs: T[], v: T) =>
     (xs.includes(v) ? xs.filter((x) => x !== v) : [...xs, v]).sort();
   const toggleServer = (d: FacetDef, value: string) => {
     if (d.key === "type") return apply({ ...sel, types: flip(sel.types, value) });
     if (d.key === "source")
       return apply({ ...sel, sources: flip(sel.sources, value as OrcidCandidateSource) });
+    if (d.key === "campus")
+      return apply({ ...sel, campuses: flip(sel.campuses, value as OrcidQueueCampus) });
     apply({ ...sel, units: flip(sel.units, value) });
   };
   const clearServer = (d: FacetDef) => {
     if (d.key === "type") return apply({ ...sel, types: [] });
     if (d.key === "source") return apply({ ...sel, sources: [] });
+    if (d.key === "campus") return apply({ ...sel, campuses: [] });
     const mine = new Set(d.options.map((o) => o.value));
     apply({ ...sel, units: sel.units.filter((u) => !mine.has(u)) });
   };

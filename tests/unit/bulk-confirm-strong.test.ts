@@ -188,7 +188,7 @@ function harness(rows: Partial<Record<(typeof QUEUES)[number], Array<Record<stri
         { createdBy: "system-unverified" },
       ]),
     },
-    scholar: { findFirst: vi.fn(async () => null) },
+    scholar: { findFirst: vi.fn(async () => null), findUnique: vi.fn(async () => ({ campus: "wcm" })) },
   };
   const write = {
     $queryRawUnsafe: vi.fn(async (sql: string) => {

@@ -99,6 +99,8 @@ export type OrcidCoverageParams = {
    *  empty = everyone. Undecodable-only values match nothing (`personFilterSql`). */
   units: string[];
   nih: NihFilter;
+  /** `scholar.campus`: WCM (absent = WCM) or Cornell Ithaca (Ithaca ORCID plan). */
+  campus?: "wcm" | "ithaca";
 };
 
 /** `type` / `unit` via `parsePersonFilter`; an unknown `nih` falls back to `all`.
@@ -120,7 +122,7 @@ export function parseOrcidCoverageParams(
   const person = parsePersonFilter(raw);
   const role = first("role");
   const nih = first("nih") ?? "all";
-  const bare = !["type", "unit", "nih", "role"].some(has);
+  const bare = !["type", "unit", "nih", "role", "campus"].some(has);
   return {
     types:
       person.types.length > 0
@@ -134,6 +136,8 @@ export function parseOrcidCoverageParams(
             : [],
     units: person.unitValues,
     nih: (NIH_FILTERS as readonly string[]).includes(nih) ? (nih as NihFilter) : "all",
+    // Absent = WCM, so a WCM parse is exactly what it was before the Ithaca step.
+    ...(first("campus") === "ithaca" ? { campus: "ithaca" as const } : {}),
     ignoredLegacyDept: first("dept") !== undefined,
   };
 }
@@ -141,7 +145,12 @@ export function parseOrcidCoverageParams(
 /** The phone sheet trigger's "Filters (n)": one per who-filter selection, plus
  *  one for a non-"all" NIH filter. */
 export function orcidCoverageActiveFilters(params: OrcidCoverageParams): number {
-  return params.types.length + params.units.length + (params.nih === "all" ? 0 : 1);
+  return (
+    params.types.length +
+    params.units.length +
+    (params.nih === "all" ? 0 : 1) +
+    (params.campus === "ithaca" ? 1 : 0)
+  );
 }
 
 /** `?type=…&unit=…&nih=…` — the page and its CSV route share it. Always carries
@@ -152,6 +161,7 @@ export function orcidCoverageQuery(params: OrcidCoverageParams): string {
   for (const t of params.types) q.append("type", t);
   for (const u of params.units) q.append("unit", u);
   q.set("nih", params.nih);
+  if (params.campus === "ithaca") q.set("campus", "ithaca");
   return `?${q.toString()}`;
 }
 
@@ -267,6 +277,9 @@ export function orcidVerdict(
     // ORCID account), tied to them by the SF424 profile email — etl/infoed-biosketch
     // writes only email-attributed rows.
     r.source === "infoed_biosketch" ||
+    // Cornell's library mapped the NetID to the iD (Affiliation Manager): an
+    // institutional assertion, so the Ithaca person is asked to confirm it.
+    r.source === "cornell_affiliation_manager" ||
     // Matched to the person by name only, so a namesake's biosketch is possible: strong
     // only when another source names the same iD — not another name-only match, and not
     // an RPM row that also sat on articles the person rejected.
@@ -535,7 +548,10 @@ export async function loadOrcidCoverage(
     // Same population the Identity ETL writes to (`etl/identity/index.ts`),
     // narrowed to status=active like every other console aggregate.
     db.scholar.findMany({
-      where: { deletedAt: null, status: "active" },
+      where:
+        params.campus === "ithaca"
+          ? { deletedAt: null, campus: "ithaca", status: "external" }
+          : { deletedAt: null, status: "active" },
       select: {
         cwid: true,
         roleCategory: true,
@@ -651,6 +667,7 @@ export function orcidCoverageCriteria(
     ["Generated", generatedAt.toISOString()],
     ...personFilterCriteria({ types: params.types, unitValues: params.units }, labels, (t) => roleLabel(t)),
     ["NIH funding", NIH_FILTER_LABELS[params.nih]],
+    ...(params.campus === "ithaca" ? [["Campus", "Cornell Ithaca"] as [string, string]] : []),
   ];
 }
 
@@ -675,6 +692,7 @@ export function orcidCoverageFilename(
     ...params.types.map((t) => roleLabel(t)),
     ...params.units.map((u) => labels.get(u) ?? u),
     ...(params.nih === "all" ? [] : [params.nih === "none" ? "no-nih" : `nih-${params.nih}`]),
+    ...(params.campus === "ithaca" ? ["cornell-ithaca"] : []),
   ];
   const summary =
     parts

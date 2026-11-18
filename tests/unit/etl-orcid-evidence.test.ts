@@ -539,8 +539,19 @@ describe("email auto-confirm", () => {
         ["e", null],
       ]),
       new Set(["c|0000-0000-0000-001X"]),
+      new Set(["a", "b", "c", "d", "e"]),
     );
     expect(plan).toEqual([{ cwid: "a", orcid: ORCID }]);
+  });
+
+  it("never plans a scholar outside the eligible set (a Cornell Ithaca row)", () => {
+    const plan = planAutoConfirm(
+      [row("ab123", ORCID)],
+      new Map<string, string | null>([["ab123", null]]),
+      new Set(),
+      new Set(["a"]),
+    );
+    expect(plan).toEqual([]);
   });
 
   it("never plans an iD another scholar already holds", () => {
@@ -551,6 +562,7 @@ describe("email auto-confirm", () => {
         ["z", ORCID],
       ]),
       new Set(),
+      new Set(["a"]),
     );
     expect(plan).toEqual([]);
   });

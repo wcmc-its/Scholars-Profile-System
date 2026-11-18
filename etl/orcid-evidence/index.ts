@@ -752,11 +752,19 @@ export function assembleEvidence(args: {
   reciter?: Map<string, Map<string, ReciterAssertion>>;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
-  // A coauthor's iD gets no row and is no rule-2 competitor. On-file iDs stay.
+  // A coauthor's iD gets no row and is no rule-2 competitor. On-file iDs stay, and
+  // so do Affiliation Manager pairs: Cornell's library asserted them, so a name
+  // mismatch is for a human to look at, not a reason to hide the pair.
   const pairs = args.pairs.filter((p) => {
     const f = args.facts.get(p.orcid);
     const s = args.scholars.get(p.cwid);
-    return args.onFile.has(key(p.cwid, p.orcid)) || !f || !s || !nameDisagrees(f, s);
+    return (
+      args.onFile.has(key(p.cwid, p.orcid)) ||
+      isAffiliationManagerPair(args.sources?.get(key(p.cwid, p.orcid))) ||
+      !f ||
+      !s ||
+      !nameDisagrees(f, s)
+    );
   });
   const reciter = args.reciter ? withReciterAccepted(args.works, args.reciter) : null;
   const works = reciter?.works ?? args.works;
@@ -856,7 +864,11 @@ export function assembleEvidence(args: {
     rows.push({
       cwid: p.cwid,
       orcid: p.orcid,
-      band: bandOf({ ...e, historyMatch: args.historyBand === true && e.historyMatch }),
+      band: affiliationManagerBand(
+        bandOf({ ...e, historyMatch: args.historyBand === true && e.historyMatch }),
+        e,
+        args.sources?.get(key(p.cwid, p.orcid)),
+      ),
       ...e,
       competitorCwids: comp.cwids,
       competitorOrcids: comp.orcids,
@@ -970,6 +982,24 @@ export function substituteDeprecated(
   return { pairs: out, replaced, dropped };
 }
 
+const isAffiliationManagerPair = (sources: readonly string[] | undefined) =>
+  !!sources?.includes("cornell_affiliation_manager");
+
+/**
+ * Ithaca ORCID plan, step 2: a Cornell Affiliation Manager pair (the library's
+ * NetID→ORCID map) is a strong suggestion when no other scholar claims the iD and
+ * the record's name agrees. Ithaca rows have no SPS publications, so the shared-paper
+ * rule could never get them there. Never above `email_verified`. Pure.
+ */
+export function affiliationManagerBand(
+  band: Band,
+  e: { competitor: boolean; nameAgrees: boolean },
+  sources: readonly string[] | undefined,
+): Band {
+  if (!isAffiliationManagerPair(sources) || e.competitor || !e.nameAgrees) return band;
+  return band === "email_verified" || band === "strong" ? band : "strong";
+}
+
 /** The `email_verified` rows the auto-confirm may write: the scholar has no iD
  *  on file (`held`: `scholar.orcid`), the pair
  *  is not dismissed, the scholar has exactly one such row, and no other scholar
@@ -979,6 +1009,9 @@ export function planAutoConfirm(
   rows: Array<Pick<EvidenceRow, "cwid" | "orcid" | "band">>,
   held: Map<string, string | null>,
   dismissed: Set<string>,
+  /** The scholars the ETL may confirm for: active WCM rows. Cornell Ithaca iDs are
+   *  human-confirmed only (Ithaca ORCID plan, decision 3). */
+  eligible: ReadonlySet<string>,
 ): Array<{ cwid: string; orcid: string }> {
   const verified = rows.filter((r) => r.band === "email_verified");
   const perCwid = new Map<string, number>();
@@ -995,7 +1028,8 @@ export function planAutoConfirm(
         !dismissed.has(`${r.cwid}|${r.orcid}`) &&
         perCwid.get(r.cwid) === 1 &&
         perOrcid.get(r.orcid) === 1 &&
-        !heldIds.has(r.orcid),
+        !heldIds.has(r.orcid) &&
+        eligible.has(r.cwid),
     )
     .map((r) => ({ cwid: r.cwid, orcid: r.orcid }));
 }
@@ -1179,10 +1213,17 @@ async function main(): Promise<number> {
       orcid: true,
       status: true,
       deletedAt: true,
+      campus: true,
     },
   });
+  // WCM: active scholars. Cornell Ithaca rows join the scored population with
+  // ITHACA_ORCID_CURATION; `active` stays the WCM universe for rival claimants.
   const active = scholars.filter((s) => s.status === "active" && !s.deletedAt);
-  const byCwid = new Map(active.map((s) => [s.cwid, s]));
+  const ithacaOn = process.env.ITHACA_ORCID_CURATION === "on";
+  const ithaca = ithacaOn
+    ? scholars.filter((s) => s.campus === "ithaca" && s.status === "external" && !s.deletedAt)
+    : [];
+  const byCwid = new Map([...active, ...ithaca].map((s) => [s.cwid, s]));
   const dismissed = new Set(
     (await db.write.orcidDismissal.findMany({ select: { cwid: true, orcid: true } })).map(
       (d) => `${d.cwid}|${d.orcid}`,
@@ -1391,7 +1432,14 @@ async function main(): Promise<number> {
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
-  const plan = planAutoConfirm(rows, new Map(active.map((s) => [s.cwid, s.orcid])), dismissed);
+  // `held` spans every live row, so an iD confirmed on a Cornell Ithaca row blocks a
+  // WCM auto-confirm of it too; only active WCM rows are eligible.
+  const plan = planAutoConfirm(
+    rows,
+    new Map(scholars.filter((s) => !s.deletedAt).map((s) => [s.cwid, s.orcid])),
+    dismissed,
+    new Set(active.filter((s) => s.campus === "wcm").map((s) => s.cwid)),
+  );
   if (dryRun) {
     await autoConfirmStep(db.write, plan, { enabled: isEmailAutoconfirmEnabled(), dryRun });
     console.log("--dry-run: nothing written.");
