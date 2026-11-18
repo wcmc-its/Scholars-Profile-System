@@ -2024,13 +2024,13 @@ export class AppStack extends Stack {
         // `research_security_viewer` role. Unlocks ONLY /edit/research-security
         // for the export-controls / research-security office; superusers already
         // pass. Same shape as data_sharing_viewer above.
-        //   RESEARCH_SECURITY_VIEWER_ENABLED -- master kill switch. OFF in both
-        //     envs until the ED group below exists: flip it in the same change
-        //     that confirms the group was created.
+        //   RESEARCH_SECURITY_VIEWER_ENABLED -- master kill switch. On since the
+        //     ED group below was created (2026-11-17). Inert in prod while
+        //     EDIT_RESEARCH_SECURITY_DASHBOARD is off there.
         //   SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN -- the ED group whose
-        //     membership confers the role (NOT YET CREATED as of 2026-11-17).
+        //     membership confers the role.
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        RESEARCH_SECURITY_VIEWER_ENABLED: "off",
+        RESEARCH_SECURITY_VIEWER_ENABLED: "on",
         SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN:
           "ITS:Library:Scholars/research-security-viewer-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
