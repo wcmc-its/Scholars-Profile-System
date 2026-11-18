@@ -22,8 +22,13 @@ model Scholar {
   /// Pre-concatenated degree string from `weillCornellEduDegree` on the WOOFA
   /// faculty SOR (e.g. "MD", "MD, MPH"). Appended after preferredName as a
   /// postnominal credential at render time. Null for scholars with no SOR
-  /// row (postdocs, doctoral students, non-faculty).
+  /// row (postdocs, doctoral students, non-faculty). When the scholar has a
+  /// degree pick (`field_override` "postnominal", `lib/degree-picker.ts`) this
+  /// holds the pick; `directoryPostnominal` keeps the ED value underneath.
   postnominal             String?   @db.VarChar(64)
+  /// The ED/SOR degree string, always — what `postnominal` falls back to when
+  /// a degree pick is cleared or no longer matches ASMS. Written by the ED ETL.
+  directoryPostnominal    String?   @map("directory_postnominal") @db.VarChar(64)
   /// The RESOLVED display title — what every render surface reads (search
   /// hits, `/og` cards, popovers, result cards, the profile sidebar, `/edit`).
   /// Written by the ED ETL's title-resolution post-pass, NOT by the scholar

@@ -871,6 +871,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "off",
+              },
+              {
                 "Name": "MENTORING_COPUB_BRIDGE",
                 "Value": "on",
               },
@@ -5964,6 +5968,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_TITLE_RESOLUTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_DEGREE_PICKER",
                 "Value": "on",
               },
               {

@@ -36,6 +36,8 @@ import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import { DEPARTMENT_NAMES } from "@/lib/department-names";
 import { deriveProfessorialRank } from "@/lib/faculty-rank";
 import { isTitleResolutionEnabled } from "@/lib/edit/title-picker";
+import { isDegreePickerEnabled } from "@/lib/degree-picker";
+import { loadResolvedDegreePicks } from "@/lib/edit/degree-picks.server";
 import { formerFacultyRole } from "@/lib/mentee-suggestions/kind";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
@@ -928,6 +930,21 @@ async function main() {
         `(${withEntryDegree} from the entry, ${withPostnominal - withEntryDegree} from faculty SOR fallback)`,
     );
 
+    // Degree picker — a scholar's pick from their ASMS degrees replaces the ED
+    // string in `postnominal`; `directoryPostnominal` always keeps the ED value.
+    // A pick that no longer validates against ASMS falls back to ED (logged).
+    const degreePicks = isDegreePickerEnabled()
+      ? await loadResolvedDegreePicks(db.write)
+      : { resolved: new Map<string, string>(), stale: [] as string[] };
+    if (isDegreePickerEnabled()) {
+      console.log(
+        `[ED] degree picks: ${degreePicks.resolved.size} applied` +
+          (degreePicks.stale.length > 0
+            ? `, ${degreePicks.stale.length} stale (a picked degree left ASMS; ED value used): ${degreePicks.stale.join(", ")}`
+            : ""),
+      );
+    }
+
     // Existing scholars and slugs from the DB.
     const existing = await db.write.scholar.findMany({
       select: { cwid: true, slug: true, deletedAt: true, createdAt: true, campus: true, status: true },
@@ -1281,7 +1298,10 @@ async function main() {
           data: {
             preferredName: f.preferredName,
             fullName: f.fullName,
-            postnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+            postnominal:
+              degreePicks.resolved.get(f.cwid) ??
+              resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+            directoryPostnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
             // `primaryTitle` holds the RESOLVED display title, but the chief /
             // center-head tiers do not exist until the leader assignments are
             // written further down this run. So write the ED value here as a SEED
@@ -1349,7 +1369,10 @@ async function main() {
             cwid: f.cwid,
             preferredName: f.preferredName,
             fullName: f.fullName,
-            postnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+            postnominal:
+              degreePicks.resolved.get(f.cwid) ??
+              resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+            directoryPostnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
             // `primaryTitle` holds the RESOLVED display title, but the chief /
             // center-head tiers do not exist until the leader assignments are
             // written further down this run. So write the ED value here as a SEED

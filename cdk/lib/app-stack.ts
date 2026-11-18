@@ -1874,6 +1874,12 @@ export class AppStack extends Stack {
         // ED primary for the 8 derived titles that read worse than today's
         // (2026-09-23), then the ETL copy. Both on in both envs since then.
         SCHOLAR_TITLE_RESOLUTION: "on",
+        // SCHOLAR_DEGREE_PICKER — the Degrees picker on the /edit Name & title
+        // panel (lib/degree-picker.ts) and the ED ETL applying the pick. Read by
+        // BOTH the app and the ETL, so it is wired in etl-stack.ts's
+        // baseEnvironment too. Off ⇒ no picker, the route rejects the field, and
+        // the next nightly writes the ED value back. Staging first.
+        SCHOLAR_DEGREE_PICKER: envConfig.envName === "staging" ? "on" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in

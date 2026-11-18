@@ -118,6 +118,9 @@ export const EDITABLE_FIELDS = [
   // the upstream-scalar masking that made `slug` superuser-only.
   "primaryTitle",
   "primaryTitleRequest",
+  // Degree picker — a JSON array of degree tokens, each one of the scholar's
+  // ASMS degrees (`lib/degree-picker.ts`). Never free text.
+  "postnominal",
   ...SECTION_VISIBILITY_FIELDS,
 ] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];

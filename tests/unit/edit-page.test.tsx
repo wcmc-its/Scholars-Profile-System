@@ -39,6 +39,7 @@ const ctx: EditContext = {
   // #2719 — null is the flag-off shape: the Title row stays a plain read-only
   // value, which is what every assertion in this file expects.
   titlePicker: null,
+  degreePicker: null,
   scholar: {
     cwid: "self01",
     slug: "self-slug",
