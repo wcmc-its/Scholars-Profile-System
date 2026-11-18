@@ -924,7 +924,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_VIEWER_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN",
@@ -6020,7 +6020,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_VIEWER_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN",
