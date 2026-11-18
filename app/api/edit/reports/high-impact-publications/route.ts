@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { unitLabels } from "@/lib/edit/article-count-report";
@@ -28,7 +29,9 @@ export async function GET(request: Request) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const params = parseHighImpactParams(new URL(request.url).searchParams);
+  const params = parseHighImpactParams(new URL(request.url).searchParams, {
+    stage: resolveSearchPubsTranslationalStageFacet(),
+  });
   const generatedAt = new Date();
   const { articles } = await loadHighImpactTotals(params);
   const list = articles <= HIGH_IMPACT_LIST_CAP ? await loadHighImpactList(params) : null;

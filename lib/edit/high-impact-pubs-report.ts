@@ -27,12 +27,14 @@ import {
   POSITION_LABEL,
   scopeSql,
   type ArticleCountParams,
+  type ArticleCountParseOptions,
 } from "@/lib/edit/article-count-report";
 import { addCriteriaSheet, boldRow, overListCapNote, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { formatRoleCategory } from "@/lib/role-display";
+import { displayStage, translationalStageDisplay, type TranslationalStage } from "@/lib/translational-stage";
 import { htmlToPlainText } from "@/lib/utils";
 
 type JournalFamily = {
@@ -88,8 +90,12 @@ export type HighImpactParams = ArticleCountParams & {
  *  basis is report 8's (`basis=fy`: fiscal year July–June by the PubMed add
  *  date, `scopeSql`); absent = calendar year, which is what every link made
  *  before the redesign meant (they never carried `basis`). `jif` is ignored:
- *  an impact-factor floor belongs to report 8. */
-export function parseHighImpactParams(sp: URLSearchParams): HighImpactParams {
+ *  an impact-factor floor belongs to report 8. `opts.stage` (the stage flag,
+ *  resolved by the page / route) turns on report 8's `stage` param. */
+export function parseHighImpactParams(
+  sp: URLSearchParams,
+  opts: Pick<ArticleCountParseOptions, "stage"> = {},
+): HighImpactParams {
   const hasFilters = [...sp.keys()].some((k) => k !== "view");
   const year = String(new Date().getFullYear());
   const src = hasFilters
@@ -104,7 +110,7 @@ export function parseHighImpactParams(sp: URLSearchParams): HighImpactParams {
   const known = new Set(JOURNAL_FAMILIES.map((f) => f.key));
   const journals = src.getAll("journal").filter((k) => known.has(k));
   return {
-    ...parseArticleCountParams(src),
+    ...parseArticleCountParams(src, opts),
     jif: 0,
     journals: journals.length > 0 ? journals : [...known],
     view: sp.get("view") === "publications" ? "publications" : "summary",
@@ -146,6 +152,8 @@ export type HighImpactRow = {
   journal: string | null;
   year: number;
   articleType: string | null;
+  /** The stage as displayed (`displayStage`), else null. */
+  stage: TranslationalStage | null;
   jif: number | null;
   dateAdded: string | null;
   /** NIH iCite citation count (`publication.cited_by_count`); null = none on file. */
@@ -203,6 +211,8 @@ type RawRow = {
   journal: string | null;
   year: number | null;
   publication_type: string | null;
+  translational_stage: string | null;
+  translational_stage_confidence: string | null;
   jif: number | string | null;
   date_added_to_entrez: Date | null;
   cited_by_count: number | null;
@@ -229,7 +239,8 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
     SELECT p.pmid, p.title, p.journal, p.year, p.publication_type, j.impact_score_1 AS jif,
            p.date_added_to_entrez, p.cited_by_count, p.doi, p.volume, p.issue, p.pages,
            p.full_authors_string, p.authors_string, pa.position, s.preferred_name, s.cwid,
-           s.primary_department, s.role_category, pa.is_first, pa.is_last
+           s.primary_department, s.role_category, pa.is_first, pa.is_last,
+           p.translational_stage, p.translational_stage_confidence
     ${fromWhere}
      ORDER BY j.impact_score_1 DESC, p.date_added_to_entrez DESC, p.pmid, pa.position`;
   const byPmid = new Map<string, HighImpactRow>();
@@ -256,6 +267,7 @@ export async function loadHighImpactList(p: HighImpactParams): Promise<HighImpac
         journal: r.journal,
         year: Number(r.year),
         articleType: r.publication_type,
+        stage: displayStage(r.translational_stage, r.translational_stage_confidence),
         jif: r.jif === null ? null : Number(r.jif),
         dateAdded: r.date_added_to_entrez ? r.date_added_to_entrez.toISOString().slice(0, 10) : null,
         citations: r.cited_by_count === null ? null : Number(r.cited_by_count),
@@ -428,6 +440,7 @@ export async function buildHighImpactWorkbook(
       "Article type",
       "Year",
       "DOI",
+      ...(p.stages ? ["Translational stage"] : []),
     ]);
     boldRow(pubs, 1);
     pubs.views = [{ state: "frozen", ySplit: 1 }];
@@ -443,9 +456,10 @@ export async function buildHighImpactWorkbook(
         a.articleType,
         a.year,
         a.doi,
+        ...(p.stages ? [a.stage ? translationalStageDisplay(a.stage) : null] : []),
       ]);
     }
-    for (const [i, w] of [12, 70, 30, 12, 40, 14, 12, 16, 8, 28].entries()) pubs.getColumn(i + 1).width = w;
+    for (const [i, w] of [12, 70, 30, 12, 40, 14, 12, 16, 8, 28, 34].entries()) pubs.getColumn(i + 1).width = w;
     pubs.getColumn(2).alignment = { wrapText: true, vertical: "top" };
     pubs.getColumn(5).alignment = { wrapText: true, vertical: "top" };
   } else {
@@ -466,6 +480,7 @@ export function isHighImpactDefault(p: HighImpactParams): boolean {
     same(p.types, d.types) &&
     same(p.units, d.units) &&
     same(p.atypes, d.atypes) &&
+    (p.stages ?? []).length === 0 &&
     same(p.journals, d.journals) &&
     p.pos === d.pos &&
     p.basis === d.basis &&
@@ -544,6 +559,9 @@ export function highImpactChips(
     );
   }
   facet("Article type", p.atypes, (a) => a, (keep) => ({ atypes: p.atypes.filter(keep) }));
+  facet("Translational stage", p.stages ?? [], translationalStageDisplay, (keep) => ({
+    stages: (p.stages ?? []).filter(keep),
+  }));
   if (p.pos !== "any") chips.push({ group: "Author", value: POSITION_LABEL[p.pos], removeQuery: qs({ pos: "any" }) });
   return chips;
 }

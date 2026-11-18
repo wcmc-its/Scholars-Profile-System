@@ -287,6 +287,7 @@ describe("loadArticleList", () => {
         journal: "J Test",
         year: 2024,
         articleType: "Academic Article",
+        stage: null,
         jif: 12.5,
         dateAdded: "2024-03-05",
         doi: "10.1/x",
@@ -315,6 +316,7 @@ describe("loadArticleList", () => {
         journal: "J Test",
         year: 2025,
         articleType: "Academic Article",
+        stage: null,
         jif: null,
         dateAdded: null,
         doi: "10.1/x",
@@ -347,6 +349,7 @@ describe("buildArticleCountWorkbook", () => {
       journal: "J Test",
       year: 2024,
       articleType: "Review",
+      stage: null,
       jif: 12.5,
       dateAdded: "2024-03-05",
       doi: "10.1/x",
@@ -539,5 +542,125 @@ describe("unit default (bare URL)", () => {
     h.unitAdmins.mockResolvedValue([]);
     const r3 = await resolveArticleCountParams(parseArticleCountParams(bare, ARTICLE_COUNT_PARSE), bare, unitAdmin);
     expect(r3).toMatchObject({ defaulted: false, params: { units: [] } });
+  });
+});
+
+describe("translational stage (SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET)", () => {
+  const ON = { ...ARTICLE_COUNT_PARSE, stage: true };
+  const parse = (q: string) => parseArticleCountParams(new URLSearchParams(q), ON);
+
+  it("parser: off → undefined whatever the URL says; on → known stages in fixed order, deduped, unknown dropped", () => {
+    expect(parseArticleCountParams(new URLSearchParams("stage=T2")).stages).toBeUndefined();
+    expect(parseArticleCountParams(new URLSearchParams("stage=T2"), ARTICLE_COUNT_PARSE).stages).toBeUndefined();
+    expect(parse("").stages).toEqual([]);
+    expect(parse("stage=T3-4&stage=T0&stage=T0&stage=NA&stage=t1&stage=T9&stage=").stages).toEqual(["T0", "T3-4"]);
+  });
+
+  it("is a filter: not a bare URL, counted on the phone trigger, carried by the query string", () => {
+    expect(isBareArticleCountQuery(new URLSearchParams("stage=T2"))).toBe(false);
+    expect(articleCountActiveFilters(parse("stage=T1&stage=T2"))).toBe(2);
+    expect(new URLSearchParams(articleCountQueryString(parse("stage=T2&stage=T0"))).getAll("stage")).toEqual(["T0", "T2"]);
+    expect(articleCountQueryString(parseArticleCountParams(new URLSearchParams("stage=T2")))).not.toContain("stage");
+  });
+
+  it("SQL: the picked stages are bound, never interpolated, and a NULL confidence still matches", async () => {
+    await loadArticleList(parse("stage=T2&stage=T3-4&from=2025&to=2025"));
+    const { text, values } = lastSql();
+    expect(text).toContain(
+      "AND p.translational_stage IN (?,?) AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')",
+    );
+    expect(values).toEqual(["T2", "T3-4", 2025, 2025]);
+    expect(text).not.toContain("T3-4");
+  });
+
+  it("SQL: no stage picked, or the feature off → no stage clause", async () => {
+    await loadArticleList(parse("from=2025&to=2025"));
+    expect(lastSql().text).not.toContain("translational_stage IN");
+    h.queryRaw.mockClear();
+    await loadArticleCounts(parseArticleCountParams(new URLSearchParams("stage=T2&from=2025&to=2025")));
+    expect(lastSql().text).not.toContain("translational_stage");
+  });
+
+  it("by-year split: groups by year and displayed stage; the parts, with No stage, sum to the year's count", async () => {
+    h.queryRaw.mockResolvedValue([
+      { y: 2024, st: "T0", n: 3n },
+      { y: 2024, st: "T3-4", n: 4 },
+      { y: 2024, st: null, n: 10n },
+      { y: 2026, st: "T2", n: 1 },
+      { y: 2026, st: "NA", n: 2 },
+    ]);
+    const { rows, total } = await loadArticleCounts(parse("from=2024&to=2026"));
+    const { text, values } = lastSql();
+    expect(text).toContain(
+      "SELECT p.year AS y, CASE WHEN p.translational_stage IN (?,?,?,?) AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low') THEN p.translational_stage END AS st, COUNT(DISTINCT pa.pmid) AS n",
+    );
+    expect(text).toContain("GROUP BY y, st");
+    expect(values).toEqual(["T0", "T1", "T2", "T3-4", 2024, 2026]);
+    expect(rows).toEqual([
+      { year: 2024, count: 17, byStage: { T0: 3, T1: 0, T2: 0, "T3-4": 4, none: 10 } },
+      { year: 2025, count: 0, byStage: { T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 0 } },
+      { year: 2026, count: 3, byStage: { T0: 0, T1: 0, T2: 1, "T3-4": 0, none: 2 } },
+    ]);
+    for (const r of rows) expect(Object.values(r.byStage!).reduce((s, n) => s + n, 0)).toBe(r.count);
+    expect(total).toBe(20);
+  });
+
+  it("article list: the stage is the displayed one (low confidence and NA hidden, no confidence shown)", async () => {
+    const row = (pmid: string, translational_stage: string | null, translational_stage_confidence: string | null) => ({
+      pmid, y: 2025, title: "T", journal: "J", year: 2025, volume: null, issue: null, pages: null,
+      full_authors_string: "Roe R", authors_string: null, publication_type: "Review",
+      translational_stage, translational_stage_confidence, date_added_to_entrez: null, doi: null, jif: null,
+      preferred_name: "Test Person", cwid: "zzt9001", role_category: null, primary_department: null,
+      primary_org_code: null, is_first: 1, is_last: 0, position: 1,
+    });
+    h.queryRaw.mockResolvedValue([row("1", "T2", "high"), row("2", "T2", null), row("3", "T2", "low"), row("4", "NA", "high"), row("5", null, null)]);
+    const list = await loadArticleList(parse("from=2025&to=2025"));
+    expect(lastSql().text).toContain("p.translational_stage, p.translational_stage_confidence");
+    expect(list.map((a) => a.stage)).toEqual(["T2", "T2", null, null, null]);
+  });
+
+  it("workbook: Counts gets a column per stage plus No stage, Articles a stage column, Criteria a row", async () => {
+    const article = {
+      pmid: "100", citation: "C", journal: "J", year: 2024, articleType: "Review", stage: "T3-4" as const, jif: null,
+      dateAdded: null, doi: null, scholars: ["S"], title: "T", authors: [], matches: [], source: null,
+      id: { label: "PMID", value: "100", href: null },
+    };
+    const rows = [
+      { year: 2024, count: 5, byStage: { T0: 1, T1: 0, T2: 2, "T3-4": 1, none: 1 } },
+      { year: 2025, count: 2, byStage: { T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 2 } },
+    ];
+    const load = async (q: string) => {
+      const wb = new ExcelJS.Workbook();
+      const buf = await buildArticleCountWorkbook(parse(q), rows, 7, new Date(), [article, { ...article, pmid: "101", stage: null }]);
+      await wb.xlsx.load(buf as unknown as ExcelJS.Buffer);
+      const criteria = new Map<string, string>();
+      wb.getWorksheet("Criteria")!.eachRow((r) => criteria.set(String(r.getCell(1).value), String(r.getCell(2).value)));
+      return { wb, criteria };
+    };
+    const { wb, criteria } = await load("from=2024&to=2025&stage=T2&stage=T3-4");
+    const counts = wb.getWorksheet("Counts")!;
+    expect(counts.getRow(1).values).toEqual([
+      undefined, "Calendar year", "Articles", "T0 · Basic research", "T1 · Early translation",
+      "T2 · Clinical trials and efficacy", "T3–4 · Practice and population health", "No stage",
+    ]);
+    expect(counts.getRow(2).values).toEqual([undefined, 2024, 5, 1, 0, 2, 1, 1]);
+    expect(counts.getRow(4).values).toEqual([undefined, "Total", 7, 1, 0, 2, 1, 3]);
+    const articles = wb.getWorksheet("Articles")!;
+    expect((articles.getRow(1).values as unknown[]).slice(9)).toEqual(["Matching scholars", "Translational stage"]);
+    expect(articles.getRow(2).getCell(10).value).toBe("T3–4 · Practice and population health");
+    expect(articles.getRow(3).getCell(10).value).toBeNull();
+    expect(criteria.get("Translational stage")).toBe(
+      "T2 · Clinical trials and efficacy; T3–4 · Practice and population health (articles with no stage, or a low-confidence one, are excluded)",
+    );
+    expect((await load("from=2024&to=2025")).criteria.get("Translational stage")).toBe("All");
+  });
+
+  it("feature off: no stage columns and no Criteria row", async () => {
+    const p = parseArticleCountParams(new URLSearchParams("from=2024&to=2024&stage=T2"), ARTICLE_COUNT_PARSE);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await buildArticleCountWorkbook(p, [{ year: 2024, count: 1 }], 1, new Date(), [])) as unknown as ExcelJS.Buffer);
+    expect(wb.getWorksheet("Counts")!.getRow(1).values).toEqual([undefined, "Calendar year", "Articles"]);
+    expect(wb.getWorksheet("Articles")!.getRow(1).values).not.toContain("Translational stage");
+    expect(describeCriteria(p, new Date()).some(([k]) => k === "Translational stage")).toBe(false);
   });
 });

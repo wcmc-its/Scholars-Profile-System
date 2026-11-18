@@ -50,6 +50,7 @@ const ARTICLE = {
   journal: "J Test",
   year: 2024,
   articleType: "Review",
+  stage: null,
   jif: 12.5,
   dateAdded: "2024-03-05",
   doi: "10.1/x",
@@ -364,5 +365,50 @@ describe("citationAuthors", () => {
     const out = citationAuthors({ authors, matches: [{ cwid: "m", name: "", rank: 10 }, { cwid: "u", name: "", rank: 0 }] });
     expect(out.map((a) => a.text)).toEqual(["N1", "N2", "N3", "N4", "N5", "N6", "…", "N10", "…", "N20"]);
     expect(out.find((a) => a.cwid)).toEqual({ text: "N10", cwid: "m" });
+  });
+});
+
+describe("report 8 body — translational stage (SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const SPLIT = { T0: 1, T1: 0, T2: 2, "T3-4": 1, none: 1 };
+
+  it("flag off: no rail section, no split, and a stage in the URL is ignored", async () => {
+    const { body } = await renderBody({ f: "1", stage: "T2" });
+    expect(body.queryAllByTestId("rail-stage")).toEqual([]);
+    expect(body.queryAllByTestId("article-count-stage-split")).toEqual([]);
+    expect(body.queryByTestId("article-count-stage-note")).toBeNull();
+    expect(h.counts.mock.calls[0][0].stages).toBeUndefined();
+    expect(body.getByTestId("article-count-download").getAttribute("href")).not.toContain("stage=");
+  });
+
+  it("flag on: the section sits after Article type; the selection reaches the loader, the download and a removable chip", async () => {
+    vi.stubEnv("SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET", "on");
+    const { body } = await renderBody({ f: "1", stage: ["T3-4", "T0", "bogus"] });
+    const panel = body.getByTestId("article-count-rail-panel");
+    const labels = [...panel.querySelectorAll("details > summary")].map(
+      (s) => s.querySelector("span > span")?.textContent,
+    );
+    expect(labels.slice(-4)).toEqual(["Article type", "Translational stage", "Journal Impact Factor", "Author position"]);
+    const boxes = within(within(panel).getByTestId("rail-stage")).getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes.map((b) => [b.name, b.value, b.checked])).toEqual([
+      ["stage", "T0", true],
+      ["stage", "T1", false],
+      ["stage", "T2", false],
+      ["stage", "T3-4", true],
+    ]);
+    expect(h.counts.mock.calls[0][0].stages).toEqual(["T0", "T3-4"]);
+    expect(hrefOf(body.getByTestId("article-count-download")).searchParams.getAll("stage")).toEqual(["T0", "T3-4"]);
+    const chip = within(body.getByTestId("article-count-chips")).getByText("T0 · Basic research");
+    const remove = chip.closest("li, span, div")!.parentElement!.querySelector("a[href*='stage=']") as HTMLElement;
+    expect(remove).toBeTruthy();
+    expect(body.getByTestId("article-count-filters-sheet-trigger").textContent).toBe("Filters (2)");
+  });
+
+  it("flag on: each year shows its count by stage plus No stage, and the note says the parts add up", async () => {
+    vi.stubEnv("SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET", "on");
+    h.counts.mockResolvedValue({ rows: [{ year: 2024, count: 5, byStage: SPLIT }], total: 5 });
+    const { body } = await renderBody({ f: "1", from: "2024", to: "2024" });
+    expect(body.getByTestId("article-count-stage-split").textContent).toBe("T0 1 · T1 0 · T2 2 · T3–4 1 · No stage 1");
+    expect(body.getByTestId("article-count-stage-note").textContent).toMatch(/under No stage, so the parts add up/);
   });
 });

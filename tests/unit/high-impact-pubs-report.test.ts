@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({ queryRaw: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { read: { $queryRaw: h.queryRaw }, write: {} } }));
 
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
+import { Prisma } from "@/lib/generated/prisma/client";
 import {
   authorSegments,
   buildHighImpactWorkbook,
@@ -299,5 +300,65 @@ describe("buildHighImpactWorkbook", () => {
     const header = (wb.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(1);
     expect(header).toContain("Date added to PubMed");
     expect(header).not.toContain("Date added to Entrez");
+  });
+});
+
+describe("translational stage (SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET)", () => {
+  const parse = (q: string) => parseHighImpactParams(new URLSearchParams(q), { stage: true });
+
+  it("parser: off → undefined; on → report 8's rule (known stages only), and the bare URL keeps the awards defaults", () => {
+    expect(parseHighImpactParams(new URLSearchParams("stage=T2&pos=any")).stages).toBeUndefined();
+    expect(parse("stage=T2&stage=bogus&stage=T0&pos=any").stages).toEqual(["T0", "T2"]);
+    const bare = parse("");
+    expect(bare.stages).toEqual([]);
+    expect(bare.types).toEqual(["full_time_faculty"]);
+    expect(isHighImpactDefault(bare)).toBe(true);
+    expect(isHighImpactDefault({ ...bare, stages: ["T2"] })).toBe(false);
+  });
+
+  it("the query string round-trips the stages; a chip per stage removes only it", () => {
+    const p = parse("stage=T2&stage=T3-4&pos=any");
+    expect(parse(highImpactQueryString(p)).stages).toEqual(["T2", "T3-4"]);
+    const chips = highImpactChips(p).filter((c) => c.group === "Translational stage");
+    expect(chips.map((c) => c.value)).toEqual(["T2 · Clinical trials and efficacy", "T3–4 · Practice and population health"]);
+    expect(new URLSearchParams(chips[0].removeQuery!).getAll("stage")).toEqual(["T3-4"]);
+  });
+
+  it("SQL: the shared scope carries the stage clause (bound, NULL confidence matches) and no by-year split", async () => {
+    h.queryRaw.mockReset().mockResolvedValue([]);
+    await loadHighImpactList(parse("stage=T2&pos=any&journal=cell&from=2025&to=2025"));
+    const [strings, ...values] = h.queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    const sql = Prisma.sql(strings, ...values);
+    const text = sql.sql.replace(/\s+/g, " ");
+    expect(text).toContain(
+      "AND p.translational_stage IN (?) AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')",
+    );
+    expect(sql.values).toContain("T2");
+    expect(text).not.toContain("GROUP BY");
+    expect(text).not.toContain(" AS st");
+  });
+
+  it("workbook: a stage column on Publications and a Criteria row (All when unset); neither while off", async () => {
+    const row: HighImpactRow = {
+      pmid: "1", title: "T", journal: "Cell", year: 2025, articleType: "Review", stage: "T1", jif: null, dateAdded: null,
+      citations: null, doi: null, cite: "", id: { label: "PMID", value: "1", href: null }, byline: [], authors: [], people: [],
+    };
+    const load = async (p: ReturnType<typeof parseHighImpactParams>) => {
+      const wb = new ExcelJS.Workbook();
+      const buf = await buildHighImpactWorkbook(p, 2, [row, { ...row, pmid: "2", stage: null }], new Date("2026-09-24T00:00:00Z"));
+      await wb.xlsx.load(buf as unknown as ArrayBuffer);
+      return wb.getWorksheet("Publications")!;
+    };
+    const on = await load(parse("stage=T1&pos=any"));
+    expect((on.getRow(1).values as unknown[]).slice(-2)).toEqual(["DOI", "Translational stage"]);
+    expect(on.getRow(2).getCell(11).value).toBe("T1 · Early translation");
+    expect(on.getRow(3).getCell(11).value).toBeNull();
+    const off = await load(parseHighImpactParams(new URLSearchParams("stage=T1&pos=any")));
+    expect(off.getRow(1).values).not.toContain("Translational stage");
+
+    const at = new Date("2026-09-24T00:00:00Z");
+    expect(new Map(describeHighImpactCriteria(parse("stage=T1&pos=any"), at)).get("Translational stage")).toMatch(/^T1 · Early translation \(/);
+    expect(new Map(describeHighImpactCriteria(parse("pos=any"), at)).get("Translational stage")).toBe("All");
+    expect(new Map(describeHighImpactCriteria(parseHighImpactParams(new URLSearchParams("pos=any")), at)).has("Translational stage")).toBe(false);
   });
 });
