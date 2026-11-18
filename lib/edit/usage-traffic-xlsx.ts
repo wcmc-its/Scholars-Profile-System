@@ -43,6 +43,8 @@ export async function buildUsageTrafficWorkbook(
   overview: TrafficOverview,
   lists: TrafficExportRows,
   grain: Grain,
+  /** The unit name(s) a unit-scoped viewer's page sheets are limited to. */
+  scopeLabel?: string,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const start = trafficStart(overview);
@@ -70,6 +72,12 @@ export async function buildUsageTrafficWorkbook(
     ],
     ["Note", "Counts still include automated traffic the edge firewall let through."],
   ];
+  if (scopeLabel) {
+    summaryRows.push([
+      "Top pages and Landing pages sheets",
+      `Profile pages of ${scopeLabel} only. Every other sheet is site-wide.`,
+    ]);
+  }
   for (const r of summaryRows) summary.addRow(r);
   summary.getColumn(2).alignment = { wrapText: true, vertical: "top" };
 

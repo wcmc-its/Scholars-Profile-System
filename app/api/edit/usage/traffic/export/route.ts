@@ -7,6 +7,11 @@
  *
  * Same gate as the page (`canViewDashboard(session, "usage")`), re-checked per
  * request. A GET with no side effects.
+ *
+ * Same scope as the page too: for a department / division / center admin the
+ * Top pages and Landing pages sheets hold only their own people's profile
+ * pages (resolved from the session, never from the request), and the Summary
+ * sheet says so. The other sheets are site-wide for everyone.
  */
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -17,7 +22,11 @@ import {
   rangeFromSearchParams,
 } from "@/lib/api/usage-traffic";
 import { logEditDenial } from "@/lib/edit/authz";
-import { canViewDashboard } from "@/lib/edit/dashboard-access";
+import {
+  canViewDashboard,
+  loadDashboardScope,
+  loadScopeSlugs,
+} from "@/lib/edit/dashboard-access";
 import { editError } from "@/lib/edit/request";
 import { buildUsageTrafficWorkbook } from "@/lib/edit/usage-traffic-xlsx";
 
@@ -42,8 +51,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const range = rangeFromSearchParams(sp);
   const w = { since: range.since, until: range.until };
   try {
-    const [overview, lists] = await Promise.all([loadTrafficOverview(w), loadTrafficExportRows(w)]);
-    const buffer = await buildUsageTrafficWorkbook(overview, lists, grain);
+    const scope = await loadDashboardScope(session, "usage");
+    const [overview, lists] = await Promise.all([
+      loadTrafficOverview(w),
+      loadTrafficExportRows(w, scope.all ? undefined : await loadScopeSlugs(scope.memberCwids)),
+    ]);
+    const buffer = await buildUsageTrafficWorkbook(
+      overview,
+      lists,
+      grain,
+      scope.all ? undefined : scope.unitNames.join(", "),
+    );
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {

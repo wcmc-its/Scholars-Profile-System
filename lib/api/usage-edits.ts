@@ -19,7 +19,7 @@
 import { unstable_cache } from "next/cache";
 
 import { type EditHour, type RawEditHour, shapeEditsByHour } from "@/lib/api/usage-hourly";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
 /** Same TTL as the usage summary: the range ends yesterday, so its edits are settled. */
 const EDITS_CACHE_TTL_SECONDS = 43_200;
@@ -28,11 +28,17 @@ const DAY_MS = 86_400_000;
 
 export type UsageEditsClient = Pick<PrismaClient, "$queryRaw">;
 
-/** People's edits per hour in the inclusive UTC-day range `[since, until]`. */
+/**
+ * People's edits per hour in the inclusive UTC-day range `[since, until]`.
+ * `scopeFilter` (`activityScopeSql`) limits them to a unit-scoped viewer's
+ * people and units; that read is per viewer, so the page calls this uncached
+ * loader for it and never puts the result in the shared cache.
+ */
 export async function loadEditsByHourUncached(
   client: UsageEditsClient,
   since: string,
   until: string,
+  scopeFilter?: Prisma.Sql,
 ): Promise<EditHour[]> {
   const from = Date.parse(`${since}T00:00:00Z`);
   const to = Date.parse(`${until}T00:00:00Z`);
@@ -52,6 +58,7 @@ export async function loadEditsByHourUncached(
        AND actor_cwid NOT LIKE 'system-%'
        AND LOWER(actor_cwid) <> 'etl'
        AND (request_id IS NULL OR request_id NOT LIKE 'bulk-%')
+       AND (${scopeFilter ?? 1})
      GROUP BY hour`;
   return shapeEditsByHour(rows);
 }

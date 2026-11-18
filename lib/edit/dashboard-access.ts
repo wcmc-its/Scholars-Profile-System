@@ -13,7 +13,8 @@
  *
  * Activity is also open to a department / division / center admin, who sees
  * it limited to their own people and units ({@link loadDashboardScope},
- * decision 2026-11-17).
+ * decision 2026-11-17). The same admins see Usage's profile sections limited
+ * the same way.
  *
  * Server-only (reads `@/lib/db`).
  */
@@ -162,14 +163,24 @@ export type DashboardScope =
     };
 
 /**
- * The scope of the Activity dashboard for `s`. A superuser or an ad hoc
- * `dash:activity` grantee sees every edit, as before. Anyone else is here as a
+ * The scope of the Activity or Usage dashboard for `s`. A superuser or an ad
+ * hoc `dash:` grantee sees everything, as before. Anyone else is here as a
  * department / division / center admin (owner or curator) and sees those
  * units: the grants are read directly, so a comms steward's site-wide Profiles
  * scope does not widen Activity, and institution grants are left out.
+ *
+ * Usage keeps its site-wide view for the roles that had it for another reason
+ * than a unit: comms steward, observer, content editor, and a core-only admin
+ * (a core has no people to scope to).
  */
-export async function loadDashboardScope(s: EditSession, d: "activity"): Promise<DashboardScope> {
+export async function loadDashboardScope(
+  s: EditSession,
+  d: "activity" | "usage",
+): Promise<DashboardScope> {
   if (s.isSuperuser || (await registryAdmitsDashboard(s.cwid, d))) return { all: true };
+  if (d === "usage" && (s.isCommsSteward || s.isObserver === true || s.isContentEditor === true)) {
+    return { all: true };
+  }
   const scope = await loadDataQualityScope(
     { ...s, isSuperuser: false, isCommsSteward: false },
     db.read,
@@ -177,6 +188,9 @@ export async function loadDashboardScope(s: EditSession, d: "activity"): Promise
   // Unreachable (both site-wide roles are forced off above); narrows the type.
   if (scope.all) return { all: true };
   const units = { all: false as const, unitCodes: scope.unitCodes, centerCodes: scope.centerCodes };
+  if (d === "usage" && units.unitCodes.length === 0 && units.centerCodes.length === 0) {
+    return { all: true };
+  }
   const [memberCwids, granted] = await Promise.all([
     loadScopeMemberCwids(units, db.read),
     loadManageableUnits(s.cwid, db.read),
@@ -186,6 +200,33 @@ export async function loadDashboardScope(s: EditSession, d: "activity"): Promise
     unitNames: [...granted.departments, ...granted.divisions, ...granted.centers].map((u) => u.name),
     memberCwids: memberCwids ?? [],
   };
+}
+
+/**
+ * Every profile slug of `memberCwids`, lower-cased, mapped to the person's
+ * current slug: current slugs plus former ones from `slug_history`, so views
+ * of an old URL still count for the unit (and under the person's current
+ * slug). Usage matches CloudFront paths against the keys.
+ */
+export async function loadScopeSlugs(memberCwids: readonly string[]): Promise<Map<string, string>> {
+  const slugs = new Map<string, string>();
+  if (memberCwids.length === 0) return slugs;
+  const cwids = [...memberCwids];
+  const [scholars, former] = await Promise.all([
+    db.read.scholar.findMany({ where: { cwid: { in: cwids } }, select: { cwid: true, slug: true } }),
+    db.read.slugHistory.findMany({
+      where: { currentCwid: { in: cwids } },
+      select: { oldSlug: true, currentCwid: true },
+    }),
+  ]);
+  const current = new Map(scholars.map((r) => [r.cwid, r.slug]));
+  for (const r of former) {
+    const slug = current.get(r.currentCwid);
+    if (slug) slugs.set(r.oldSlug.toLowerCase(), slug);
+  }
+  // Current slugs last: a slug someone else now holds is theirs, not history.
+  for (const slug of current.values()) slugs.set(slug.toLowerCase(), slug);
+  return slugs;
 }
 
 /**
