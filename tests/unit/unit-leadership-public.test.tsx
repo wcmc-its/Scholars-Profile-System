@@ -89,6 +89,15 @@ describe("ViceChairsList", () => {
   const v = (cwid: string, preferredName: string, displayTitle: string, site: string | null = null) =>
     ({ cwid, preferredName, slug: cwid, displayTitle, tier: "vice", site }) as never;
 
+  it("uses two columns only for a list of six or more", () => {
+    const many = Array.from({ length: 6 }, (_, i) => v(`c${i}`, `Person ${i}`, "Vice Chair"));
+    const { container, rerender } = render(<ViceChairsList viceChairs={many} />);
+    expect(container.querySelector("ul")?.getAttribute("data-columns")).toBe("2");
+    expect(container.querySelector("ul")?.className).toContain("lg:columns-2");
+    rerender(<ViceChairsList viceChairs={many.slice(0, 5)} />);
+    expect(container.querySelector("ul")?.getAttribute("data-columns")).toBe("1");
+  });
+
   it("renders nothing for an empty list", () => {
     const { container } = render(<ViceChairsList viceChairs={[]} />);
     expect(container.innerHTML).toBe("");
