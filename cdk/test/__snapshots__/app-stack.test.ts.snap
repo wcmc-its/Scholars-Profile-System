@@ -764,7 +764,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "UNIT_LEADERSHIP_ROLES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORG_UNIT_ROLE_CONSOLE",

@@ -1631,9 +1631,10 @@ export class AppStack extends Stack {
         // lib/edit/unit-leadership-flags.ts): the Vice Chairs card on
         // /edit/department/[code] and POST /api/edit/unit-leadership. Read via
         // isUnitLeadershipEnabled() (=== "on"); when off the card is absent and
-        // the route 404s. Staging first; prod follows the seed and the
-        // department administrators being told.
-        UNIT_LEADERSHIP_ROLES: envConfig.envName === "staging" ? "on" : "off",
+        // the route 404s. Also gates the public department-page list, the
+        // profile title lines and report 23. Prod-on 2026-11-17 after the
+        // staging soak; prod rows seeded from the November 2026 audit.
+        UNIT_LEADERSHIP_ROLES: "on",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
