@@ -89,6 +89,7 @@ import { renderGrantAttributionReport } from "@/components/edit/reports/grant-at
 import { renderNihBiosketchesReport } from "@/components/edit/reports/nih-biosketches-body";
 import { renderMyncbiDiscrepanciesReport } from "@/components/edit/reports/myncbi-discrepancies-body";
 import { renderIdentityLinksReport } from "@/components/edit/reports/identity-links-body";
+import { renderViceChairsReport } from "@/components/edit/reports/vice-chairs-body";
 import { renderGrantsReport } from "@/components/edit/reports/grants-body";
 import { renderHighImpactPublicationsReport } from "@/components/edit/reports/high-impact-publications-body";
 import { renderMentoredPublicationsReport } from "@/components/edit/reports/mentored-publications-body";
@@ -248,6 +249,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   "21": { n: "21", gate: "unit", render: renderFkAwardsReport },
   // WCM scholars also holding a Cornell Ithaca NetID (etl/identity-links). Superusers only.
   "22": { n: "22", gate: "superuser", render: renderIdentityLinksReport },
+  // Vice Chair roles across departments (`unit_leadership_role`). Superusers only.
+  "23": { n: "23", gate: "superuser", render: renderViceChairsReport },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page
