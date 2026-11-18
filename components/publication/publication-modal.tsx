@@ -18,6 +18,7 @@ import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
+import { translationalStageDisplay } from "@/lib/translational-stage";
 import type {
   PublicationDetailCore,
   PublicationDetailMethodFamily,
@@ -501,6 +502,22 @@ function ModalContent({
             ecommonsLink={pub.ecommonsLink}
             pubmedUrl={pub.pubmedUrl}
           />
+          {pub.translationalStage ? (
+            <p
+              data-testid="pub-modal-stage"
+              className="text-muted-foreground text-[13px] leading-[1.45]"
+            >
+              Translational stage:{" "}
+              <a
+                href={methodologyHref("translationalStage")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-foreground underline underline-offset-[3px]"
+              >
+                {translationalStageDisplay(pub.translationalStage)}
+              </a>
+            </p>
+          ) : null}
         </div>
         {showTabs ? (
           // Hairline is an inset shadow on this wrapper, not a border on the

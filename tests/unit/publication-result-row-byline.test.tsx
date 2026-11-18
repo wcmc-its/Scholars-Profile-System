@@ -90,6 +90,23 @@ describe("PublicationResultRow — #718 author fallback", () => {
   });
 });
 
+describe("PublicationResultRow — translational stage", () => {
+  it("shows the stage on the journal/year line when the hit carries one", () => {
+    render(<PublicationResultRow hit={makeHit({ translationalStage: "T2" })} />);
+    const stage = screen.getByTestId("pub-row-stage");
+    expect(stage.textContent).toBe(" T2 · Clinical trials and efficacy");
+    expect(stage.parentElement?.textContent).toBe(
+      "Nature. 2024. T2 · Clinical trials and efficacy",
+    );
+  });
+
+  it("renders nothing when the hit has no stage (none, or flag off)", () => {
+    render(<PublicationResultRow hit={makeHit({})} />);
+    expect(screen.queryByTestId("pub-row-stage")).toBeNull();
+    expect(screen.queryByText(/Clinical trials|Unclassified/)).toBeNull();
+  });
+});
+
 // #1995 — the abstract text is no longer on the hit (it was ~11% of the
 // results-page flight payload); the row asks PublicationMeta to lazy-fetch it.
 describe("PublicationResultRow — lazy abstract wiring (#1995)", () => {

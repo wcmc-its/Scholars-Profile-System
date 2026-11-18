@@ -22,6 +22,8 @@ import {
 } from "@/lib/api/methods-overlay";
 import { methodFamilyPath } from "@/lib/method-url";
 import { toCsv } from "@/lib/csv";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { displayStage, type TranslationalStage } from "@/lib/translational-stage";
 import { htmlToPlainText } from "@/lib/utils";
 import {
   claimKey,
@@ -149,6 +151,10 @@ export type PublicationDetailPayload = {
     /** One-line plain-language synopsis per pmid (#329). Read from
      *  `Publication.synopsis`. Null when no synopsis exists. */
     synopsis: string | null;
+    /** Display-ready translational stage (`displayStage`). Absent when the
+     *  paper has no displayable stage or
+     *  `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off. */
+    translationalStage?: TranslationalStage;
   };
   topics: PublicationDetailTopic[];
   /** Confirmed WCM authors, suppression-filtered by the same resolver the search
@@ -559,6 +565,8 @@ export async function getPublicationDetail(
       ecommonsLink: true,
       meshTerms: true,
       synopsis: true,
+      translationalStage: true,
+      translationalStageConfidence: true,
       publicationTopics: {
         select: {
           parentTopicId: true,
@@ -732,6 +740,10 @@ export async function getPublicationDetail(
     }
   }
 
+  const translationalStage = resolveSearchPubsTranslationalStageFacet()
+    ? displayStage(pub.translationalStage, pub.translationalStageConfidence)
+    : null;
+
   return {
     pub: {
       pmid: pub.pmid,
@@ -758,6 +770,7 @@ export async function getPublicationDetail(
       ecommonsLink: pub.ecommonsLink,
       meshTerms: normalizeMeshTerms(pub.meshTerms),
       synopsis: pub.synopsis && pub.synopsis.length > 0 ? pub.synopsis : null,
+      ...(translationalStage ? { translationalStage } : {}),
     },
     topics,
     wcmAuthors: wcmAuthorsByPmid.get(pmid) ?? [],

@@ -130,7 +130,11 @@ import {
 } from "@/lib/api/search-flags";
 import { investigatorGrantMatchCounts } from "@/lib/api/search-funding";
 import { collapseResearchTypeChildren, parseResearchTypeValue } from "@/lib/research-type";
-import { TRANSLATIONAL_STAGES, isTranslationalStage } from "@/lib/translational-stage";
+import {
+  TRANSLATIONAL_STAGES,
+  isTranslationalStage,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 import { clinicalMeshMatch, type ClinicalAnchor } from "@/lib/clinical-mesh-anchors";
 import {
   selectEvidence,
@@ -1023,6 +1027,13 @@ export type PublicationHit = {
    * when `wcmAuthors` is non-empty (chips win).
    */
   authorsFallback: string | null;
+  /**
+   * The paper's display-ready translational stage (the index doc's
+   * `translationalStage`, already passed through `displayStage`). Absent when
+   * the paper has no displayable stage or `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`
+   * is off, so the row shows nothing.
+   */
+  translationalStage?: TranslationalStage;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -5597,6 +5608,8 @@ async function searchPublicationsCore(opts: {
       "impactJustification",
       "hasAbstract",
       "meshDescriptorUi",
+      // Shown on the row; requested only while its flag is on.
+      ...(translationalStageFacetOn ? ["translationalStage"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -5812,6 +5825,8 @@ async function searchPublicationsCore(opts: {
       // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
       // the match-provenance path; kept in the `_source` include list above.
       meshDescriptorUi?: string[];
+      // Display-ready stage; omitted on docs with none.
+      translationalStage?: string;
     };
     // SEARCH_PUB_HIGHLIGHT — `title` highlight fragment (whole field, marked),
     // present only when the flag is on and the title matched.
@@ -6133,6 +6148,9 @@ async function searchPublicationsCore(opts: {
               labels: pubProvenanceLabels,
             })
           : undefined,
+        ...(translationalStageFacetOn && isTranslationalStage(h._source.translationalStage)
+          ? { translationalStage: h._source.translationalStage }
+          : {}),
       };
     }),
     total: r.hits.total.value,

@@ -222,8 +222,11 @@ export async function POST(
     sort: req.sort,
     limit: req.limit !== undefined ? Math.min(req.limit, EXPORT_MAX_LIMIT) : undefined,
   };
-  const headers: ReadonlyArray<string> =
-    granularity === "authorship" ? AUTHORSHIP_HEADERS : ARTICLE_HEADERS;
+  // The stage column ships only while its flag is on.
+  const stageOn = resolveSearchPubsTranslationalStageFacet();
+  const headers: ReadonlyArray<string> = (
+    granularity === "authorship" ? AUTHORSHIP_HEADERS : ARTICLE_HEADERS
+  ).filter((h) => stageOn || h !== "translationalStage");
   const rows = granularity === "authorship"
     ? await fetchAuthorshipRows(csvReq)
     : await fetchArticleRows(csvReq);
