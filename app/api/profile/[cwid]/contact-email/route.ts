@@ -26,15 +26,11 @@ import { loadScholarContactEmail } from "@/lib/api/profile";
  *   - internal viewer + none/null/unknown    → { email: null, viewer: basis }
  * Never cached.
  *
- * Crawler hardening (2026-11-09 institution-email-reveal spec). A JS-rendering
- * indexer whose egress IP is on the WCM network counts as a "network" viewer, so
- * an on-mount reveal would land the address in a public search index:
- *   - bot-like User-Agent                    → same shape as external, no DB read
- *   - network viewer WITHOUT `?reveal=1`     → { email: null, viewer: "network",
- *                                                revealable } — the island renders
- *                                                a "Show email" button and only
- *                                                sends `?reveal=1` on click
- *   - session viewers are unaffected (auto-reveal on mount, as before)
+ * Crawler hardening: a bot-like User-Agent gets the external shape with no DB
+ * read. Network viewers auto-reveal like session viewers. The 2026-11-09
+ * click-to-reveal for them was dropped on 2026-11-18: 14 days of prod WAF logs
+ * showed no indexer crawling from WCM ranges (Siteimprove and the site search
+ * crawl come from off-network IPs, which are external here).
  */
 export const dynamic = "force-dynamic";
 
@@ -61,13 +57,5 @@ export async function GET(
 
   const row = await loadScholarContactEmail(cwid);
   const email = row && isEmailVisibleToViewer(row.emailVisibility, true) ? row.email : null;
-  // Network (anonymous on-campus) viewers get the address only on an explicit
-  // click-driven `?reveal=1`; otherwise just whether a click would yield one.
-  if (vc.basis !== "session" && new URL(request.url).searchParams.get("reveal") !== "1") {
-    return NextResponse.json(
-      { email: null, viewer: vc.basis, revealable: email !== null },
-      { headers: NO_STORE },
-    );
-  }
   return NextResponse.json({ email, viewer: vc.basis }, { headers: NO_STORE });
 }

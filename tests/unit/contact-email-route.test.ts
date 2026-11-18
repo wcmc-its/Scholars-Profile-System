@@ -21,11 +21,10 @@ vi.mock("@/lib/api/profile", () => ({ loadScholarContactEmail: vi.fn() }));
 
 const EMAIL = "person@med.cornell.edu";
 
-function call(cwid: string, opts: { reveal?: boolean; ua?: string } = {}) {
-  const qs = opts.reveal ? "?reveal=1" : "";
+function call(cwid: string, opts: { ua?: string } = {}) {
   const headers = opts.ua ? { "user-agent": opts.ua } : undefined;
   return GET(
-    new Request("http://localhost/api/profile/" + cwid + "/contact-email" + qs, {
+    new Request("http://localhost/api/profile/" + cwid + "/contact-email", {
       headers,
     }) as never,
     { params: Promise.resolve({ cwid }) },
@@ -57,14 +56,14 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     expect(loadScholarContactEmail).not.toHaveBeenCalled();
   });
 
-  it("network viewer + institution + ?reveal=1 → reveals the email for ANY cwid", async () => {
+  it("network viewer + institution → reveals the email for ANY cwid", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({
       email: EMAIL,
       emailVisibility: "institution",
     });
-    const body = await (await call("p001", { reveal: true })).json();
+    const body = await (await call("p001")).json();
     expect(body.email).toBe(EMAIL);
     expect(body.viewer).toBe("network");
     expect(loadScholarContactEmail).toHaveBeenCalledWith("p001");
@@ -102,9 +101,7 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     expect(body.email).toBeNull();
   });
 
-  // Crawler hardening (2026-11-09 institution-email-reveal spec).
-
-  it("network viewer WITHOUT ?reveal=1 → no address, revealable:true (button, not leak)", async () => {
+  it("network viewer → auto-reveals on the plain call (no click needed)", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({
@@ -112,21 +109,19 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
       emailVisibility: "institution",
     });
     const res = await call("p001");
-    const text = await res.text();
-    expect(text).not.toContain(EMAIL);
-    expect(JSON.parse(text)).toEqual({ email: null, viewer: "network", revealable: true });
+    expect(await res.json()).toEqual({ email: EMAIL, viewer: "network" });
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("network viewer WITHOUT ?reveal=1 + none → revealable:false (no dead button)", async () => {
+  it("network viewer + none → no address", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({ email: EMAIL, emailVisibility: "none" });
     const body = await (await call("p001")).json();
-    expect(body).toEqual({ email: null, viewer: "network", revealable: false });
+    expect(body).toEqual({ email: null, viewer: "network" });
   });
 
-  it("session viewer → auto-reveals without ?reveal=1", async () => {
+  it("session viewer → auto-reveals", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "session" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({
@@ -143,20 +138,20 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     "python-requests/2.32.3",
     "curl/8.7.1",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 LinkCheck by Siteimprove.com",
-  ])("bot UA %s → external shape even with ?reveal=1; never resolves viewer or loads", async (ua) => {
+  ])("bot UA %s → external shape; never resolves viewer or loads", async (ua) => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({
       email: EMAIL,
       emailVisibility: "institution",
     });
-    const body = await (await call("p001", { reveal: true, ua })).json();
+    const body = await (await call("p001", { ua })).json();
     expect(body).toEqual({ email: null, viewer: "external" });
     expect(resolveViewerContext).not.toHaveBeenCalled();
     expect(loadScholarContactEmail).not.toHaveBeenCalled();
   });
 
-  it("real browser UA from a network viewer still reveals on click", async () => {
+  it("real browser UA from a network viewer reveals", async () => {
     vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
     vi.mocked(resolveViewerContext).mockResolvedValue({ internal: true, basis: "network" });
     vi.mocked(loadScholarContactEmail).mockResolvedValue({
@@ -165,7 +160,7 @@ describe("GET /api/profile/[cwid]/contact-email", () => {
     });
     const ua =
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15";
-    const body = await (await call("p001", { reveal: true, ua })).json();
+    const body = await (await call("p001", { ua })).json();
     expect(body.email).toBe(EMAIL);
   });
 });

@@ -4635,9 +4635,7 @@ function ContactButton({ cwid }: { cwid: string }) {
       disabled={state === "loading"}
       onClick={() => {
         setState("loading");
-        // `?reveal=1`: this fetch is click-driven, so it is a deliberate reveal even
-        // for a network-basis viewer (route only auto-reveals to sessions).
-        fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email?reveal=1`)
+        fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email`)
           .then((r) => (r.ok ? r.json() : { email: null }))
           .then((d: { email?: string | null }) => {
             if (d?.email) {
