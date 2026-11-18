@@ -1456,6 +1456,8 @@ export class EtlStack extends Stack {
       "etl:reciter",
       "etl:reciter:coi-statements",
       "etl:orcid-candidates",
+      // Reads reciterdb authorship_review (open rows per byline ORCID iD).
+      "etl:orcid-authorship-impact",
       // Reads reciterdb authorship_review + external_article (OpenAlex-lane attribution).
       "etl:fundable-work",
       // Writes reciterdb `scholar_active` (prod only; dry run elsewhere).
@@ -2032,6 +2034,19 @@ export class EtlStack extends Stack {
       // and placed with it; tier:"continue" — a missed night just leaves last
       // night's mirror, and the step refuses to write on an empty read.
       { id: "OrcidCandidates", npmScript: "etl:orcid-candidates", external: true, tier: "continue" },
+      // Open authorship_review rows per byline ORCID iD → orcid_open_authorship, read
+      // by /edit/orcid-coverage only (counts per iD, no person). Same ReciterDB path,
+      // so external:true, right after the candidates it is joined to. Read-only
+      // against reciterdb, so no env flag. tier:"continue": it ends normally when
+      // authorship_review.byline_orcid is absent or not granted, and refuses to
+      // replace a non-empty table with an empty read; either way last night's rows
+      // stay and the page hides them once they are 48 hours old.
+      {
+        id: "OrcidAuthorshipImpact",
+        npmScript: "etl:orcid-authorship-impact",
+        external: true,
+        tier: "continue",
+      },
       { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
       // #2906 — InfoEd runs in BOTH envs. It was excluded from staging on
       // 2026-06-22 for a CIDR overlap that only bit the per-env scholars-dev

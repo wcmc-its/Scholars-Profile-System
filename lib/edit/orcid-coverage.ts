@@ -68,12 +68,52 @@
  * person-type table IS the type breakdown. The department table still groups
  * by `scholar.primary_department` (the NAME); only the filter changed.
  *
- * Five flat reads + one pure fold (`buildOrcidCoverage`), so the fold is
+ * Campus (`?campus=`): absent = WCM, and a WCM parse, fold, page and CSV are
+ * exactly what they were before the campus steps. `ithaca` = Cornell Ithaca rows
+ * only (`scholar.campus = 'ithaca'`, `status = 'external'`, the six
+ * `ITHACA_ROLES`; etl/ithaca-roster writes the Cornell department NAME to
+ * `primary_department`, so the department table groups on it unchanged). `all`
+ * = both, side by side: every row carries its `campus`, `campuses` holds each
+ * campus's tiles and person-type subtotal. Anything else is read as if `campus`
+ * were not in the URL at all: WCM, and on an otherwise bare visit the default
+ * person type too.
+ * The NIH filter, the `unit` filter, the eRA and the NIH counts are WCM
+ * concepts (no Cornell award, eRA or org-unit data is loaded): they never
+ * narrow or count Cornell Ithaca rows. On `ithaca` the parser drops `nih` /
+ * `unit`; on `all` they narrow the WCM half only. `type` is literal on every
+ * campus (a WCM-only selection leaves no Ithaca department), which is why the
+ * filter bar starts Both with no person type selected (`campusSwitch`).
+ *
+ * "Open authorship rows waiting" (`waitingRows`): reciterdb's `authorship_review`
+ * holds candidate authorships from Scopus and OpenAlex awaiting a curator, and a
+ * row can carry the ORCID iD the source attaches to that byline author.
+ * `etl/orcid-authorship-impact` copies, nightly, how many OPEN rows carry each
+ * iD (`orcid_open_authorship`: iD and count, no person). For each counted person
+ * the fold takes the person's iDs that are NOT yet confirmed in Scholars: their
+ * non-dismissed `orcid_candidate` iDs, plus `scholar.orcid` when it is set but
+ * unconfirmed. Each (person, iD) counts once, however many candidate sources
+ * name the iD. A person whose iD is already confirmed contributes 0: nothing is
+ * waiting on a confirmation. An iD that ANYONE has confirmed in Scholars is
+ * waiting on nobody, so it counts for no one: not for a namesake who holds it as
+ * a candidate, and not for the same person's row on the other campus (the loader
+ * reads every confirmed iD, not only the counted people's). `waitingRows` counts
+ * rows, not (person, row) pairs: an iD that is a candidate for two people in one
+ * table row, subtotal or total adds its open rows there ONCE. So a total can be
+ * less than the sum of the rows above it, and is never more than the open rows
+ * that exist. `waitingPeople` = people with at least one such row (both
+ * namesakes count). The tile is the person-type table's total (campus + `unit`
+ * + `nih`, every person type). When the table is empty or its `refreshed_at` is older
+ * than `OPEN_AUTHORSHIP_MAX_AGE_HOURS`, the fold is given no impact data and the
+ * tile, the columns and the CSV column are all absent (never a zero that looks
+ * like data): the page and CSV are then exactly what they were without it.
+ *
+ * Six flat reads + one pure fold (`buildOrcidCoverage`), so the fold is
  * testable on a fixture with no DB. ~11k scholar rows; no cache.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { toCsv } from "@/lib/csv";
 import { parsePersonFilter, personFilterCriteria, personFilterSql } from "@/lib/edit/person-filter";
+import { ITHACA_ROLES } from "@/lib/eligibility";
 import { PI_ROLES } from "@/lib/funding-roles";
 import { formatRoleCategory } from "@/lib/role-display";
 
@@ -92,6 +132,19 @@ export const NIH_FILTER_LABELS: Record<NihFilter, string> = {
  *  `type` (it IS the type breakdown). */
 export const DEFAULT_ROLE = "full_time_faculty";
 
+/** A scholar row's campus. */
+export type Campus = "wcm" | "ithaca";
+/** The `?campus=` views: one campus, or `all` = both side by side. */
+export type CampusView = Campus | "all";
+
+export const CAMPUS_LABELS: Record<Campus, string> = {
+  wcm: "Weill Cornell Medicine",
+  ithaca: "Cornell Ithaca",
+};
+
+/** The Ithaca headline tile's population, as `DEFAULT_ROLE` is WCM's. */
+export const ITHACA_HEADLINE_ROLE = "ithaca_faculty";
+
 export type OrcidCoverageParams = {
   /** Raw roleCategory values (`type`); empty = every person type. */
   types: string[];
@@ -99,12 +152,13 @@ export type OrcidCoverageParams = {
    *  empty = everyone. Undecodable-only values match nothing (`personFilterSql`). */
   units: string[];
   nih: NihFilter;
-  /** `scholar.campus`: WCM (absent = WCM) or Cornell Ithaca (Ithaca ORCID plan). */
-  campus?: "wcm" | "ithaca";
+  /** `scholar.campus`: WCM (absent = WCM), Cornell Ithaca, or `all` = both. */
+  campus?: CampusView;
 };
 
 /** `type` / `unit` via `parsePersonFilter`; an unknown `nih` falls back to `all`.
- *  A BARE visit (none of `type`, `unit`, `nih`, `role` in the URL) defaults the
+ *  A BARE visit (none of `type`, `unit`, `nih`, `role`, or a recognized `campus`,
+ *  in the URL) defaults the
  *  department table to full-time faculty; any form submit carries `nih`, so an
  *  empty type selection there means every type. Legacy links: a single
  *  `role=X` reads as `type=X` (`role=all` = every type) when no `type` is
@@ -122,7 +176,13 @@ export function parseOrcidCoverageParams(
   const person = parsePersonFilter(raw);
   const role = first("role");
   const nih = first("nih") ?? "all";
-  const bare = !["type", "unit", "nih", "role", "campus"].some(has);
+  // Absent or unknown = WCM, so a WCM parse is exactly what it was before the Ithaca step.
+  const rawCampus = first("campus");
+  const campus = rawCampus === "ithaca" || rawCampus === "all" ? rawCampus : undefined;
+  // An unrecognized `campus` is no campus at all: it does not end a bare visit.
+  const bare = !["type", "unit", "nih", "role"].some(has) && campus === undefined;
+  // `nih` and `unit` are WCM concepts: an Ithaca-only view drops them.
+  const wcmFilters = campus !== "ithaca";
   return {
     types:
       person.types.length > 0
@@ -134,10 +194,10 @@ export function parseOrcidCoverageParams(
           : bare
             ? [DEFAULT_ROLE]
             : [],
-    units: person.unitValues,
-    nih: (NIH_FILTERS as readonly string[]).includes(nih) ? (nih as NihFilter) : "all",
-    // Absent = WCM, so a WCM parse is exactly what it was before the Ithaca step.
-    ...(first("campus") === "ithaca" ? { campus: "ithaca" as const } : {}),
+    units: wcmFilters ? person.unitValues : [],
+    nih:
+      wcmFilters && (NIH_FILTERS as readonly string[]).includes(nih) ? (nih as NihFilter) : "all",
+    ...(campus ? { campus } : {}),
     ignoredLegacyDept: first("dept") !== undefined,
   };
 }
@@ -149,7 +209,7 @@ export function orcidCoverageActiveFilters(params: OrcidCoverageParams): number 
     params.types.length +
     params.units.length +
     (params.nih === "all" ? 0 : 1) +
-    (params.campus === "ithaca" ? 1 : 0)
+    (params.campus === "ithaca" || params.campus === "all" ? 1 : 0)
   );
 }
 
@@ -161,7 +221,7 @@ export function orcidCoverageQuery(params: OrcidCoverageParams): string {
   for (const t of params.types) q.append("type", t);
   for (const u of params.units) q.append("unit", u);
   q.set("nih", params.nih);
-  if (params.campus === "ithaca") q.set("campus", "ithaca");
+  if (params.campus === "ithaca" || params.campus === "all") q.set("campus", params.campus);
   return `?${q.toString()}`;
 }
 
@@ -172,6 +232,9 @@ export type ScholarRow = {
   orcid: string | null;
   /** Set when the person confirmed `orcid` in `/edit`; null for an Identity value. */
   orcidConfirmedAt: Date | null;
+  /** `scholar.campus`. Read only for `campus=all`, where the fold splits on it
+   *  (`ithaca` vs everything else); a one-campus fold takes it from the params. */
+  campus?: string;
 };
 export type CandidateRow = {
   cwid: string;
@@ -301,6 +364,45 @@ export function orcidVerdict(
   return { tier: "strong", orcid, accepted: rpmAccepted(orcid) };
 }
 
+/** One `orcid_open_authorship` row: how many open authorship rows carry this iD. */
+export type OpenAuthorshipRow = { orcid: string; openRows: number; refreshedAt: Date };
+/** Open rows per iD (bare, upper-case), and when the copy was taken. */
+export type OpenAuthorshipImpact = { byOrcid: ReadonlyMap<string, number>; refreshedAt: Date };
+
+/** Older than this, the open-row counts are not shown at all. */
+export const OPEN_AUTHORSHIP_MAX_AGE_HOURS = 48;
+
+/** Bare, upper-case iD: `https://orcid.org/0000-…-000x` → `0000-…-000X`. */
+const bareOrcid = (orcid: string) =>
+  orcid
+    .trim()
+    .replace(/^https?:\/\/orcid\.org\//i, "")
+    .toUpperCase();
+
+/** The open-row counts the fold may use, or null when there is nothing to show:
+ *  the table is empty, or its newest `refreshedAt` is more than
+ *  `OPEN_AUTHORSHIP_MAX_AGE_HOURS` before `now`. `confirmed` = iDs already
+ *  confirmed in Scholars by anyone: nothing waits on those, so they are left out
+ *  (the fold does the same for the people it is given; this covers everyone
+ *  else). Pure. */
+export function openAuthorshipImpact(
+  rows: readonly OpenAuthorshipRow[],
+  now: Date,
+  confirmed: Iterable<string> = [],
+): OpenAuthorshipImpact | null {
+  if (rows.length === 0) return null;
+  const refreshedAt = new Date(Math.max(...rows.map((r) => r.refreshedAt.getTime())));
+  if (now.getTime() - refreshedAt.getTime() > OPEN_AUTHORSHIP_MAX_AGE_HOURS * 3_600_000)
+    return null;
+  const byOrcid = new Map<string, number>();
+  for (const r of rows) {
+    const k = bareOrcid(r.orcid);
+    byOrcid.set(k, (byOrcid.get(k) ?? 0) + r.openRows);
+  }
+  for (const orcid of confirmed) byOrcid.delete(bareOrcid(orcid));
+  return { byOrcid, refreshedAt };
+}
+
 /** One row per NIH-funded cwid; `latestEnd` = MAX(grant.end_date) among its NIH
  *  awards, `pi` = holds a `PI_ROLES` role on at least one of them. */
 export type NihRow = { cwid: string; latestEnd: Date | null; pi: boolean };
@@ -328,16 +430,54 @@ export type CoverageCounts = {
   /** …of whom with an eRA account. `nihPi - nihPiEra` is the resolver gap. */
   nihPiEra: number;
 };
-export type CoverageRow = CoverageCounts & { key: string | null; label: string };
+/** Set on table rows and totals only when the fold was given open-row counts. */
+export type WaitingCounts = {
+  /** Open authorship rows carrying an iD these people hold and nobody has
+   *  confirmed. Rows, not (person, row) pairs: an iD two of them hold counts once. */
+  waitingRows?: number;
+  /** …and how many of these people have at least one such row. */
+  waitingPeople?: number;
+};
+export type CoverageRow = CoverageCounts &
+  WaitingCounts & {
+    key: string | null;
+    label: string;
+    /** Set on every row of a `campus=all` fold, and only there. */
+    campus?: Campus;
+  };
+export type CoverageTiles = {
+  overall: CoverageCounts;
+  /** The headline population: WCM full-time faculty (`DEFAULT_ROLE`), or Cornell
+   *  Ithaca faculty (`ITHACA_HEADLINE_ROLE`); on `campus=all`, both. */
+  fullTime: CoverageCounts;
+  /** WCM only — all zero for Cornell Ithaca (no award data), which shows no such tile. */
+  nihFullTime: CoverageCounts;
+};
+/** One campus of a `campus=all` fold. */
+export type CampusCoverage = {
+  campus: Campus;
+  label: string;
+  /** Unfiltered, like the top-level tiles. */
+  tiles: CoverageTiles;
+  /** The campus's person-type rows summed: the subtotal row. */
+  total: CoverageCounts & WaitingCounts;
+};
 
 export type OrcidCoverage = {
   params: OrcidCoverageParams;
   /** Always the unfiltered population — the three numbers anyone asks for. */
-  tiles: { overall: CoverageCounts; fullTime: CoverageCounts; nihFullTime: CoverageCounts };
-  /** Filtered by `unit` + `nih`; every person type; people desc. */
+  tiles: CoverageTiles;
+  /** Filtered by `unit` + `nih`; every person type; people desc. Cornell Ithaca:
+   *  `ITHACA_ROLES` order. `campus=all`: WCM's rows, then Cornell Ithaca's. */
   byRole: CoverageRow[];
-  /** Filtered by `type` + `unit` + `nih`; NIH-funded-without-ORCID desc (the action list). */
+  /** Filtered by `type` + `unit` + `nih`; NIH-funded-without-ORCID desc (the action list).
+   *  `campus=all`: both campuses' departments, people desc. */
   byDept: CoverageRow[];
+  /** `campus=all` only: WCM then Cornell Ithaca. */
+  campuses?: CampusCoverage[];
+  /** Present only when open-row counts are fresh enough to show: the person-type
+   *  table's total (campus + `unit` + `nih`, every person type). */
+  impact?: { refreshedAt: Date; rows: number; people: number };
   /** People (active, unfiltered) behind each inference rule, for the "Where
    *  inferences come from" panel. Counts overlap — one person can match several
    *  rules — and are NOT tiers: the fold still gives each person one tier. */
@@ -406,6 +546,30 @@ export const pct = (n: number, d: number) => (d === 0 ? "—" : `${((100 * n) / 
 
 const roleLabel = (key: string | null) => formatRoleCategory(key) ?? "Unclassified";
 
+const addCounts = (
+  a: CoverageCounts & WaitingCounts,
+  b: CoverageCounts & WaitingCounts,
+): CoverageCounts & WaitingCounts => ({
+  people: a.people + b.people,
+  orcid: a.orcid + b.orcid,
+  confirmed: a.confirmed + b.confirmed,
+  strong: a.strong + b.strong,
+  weak: a.weak + b.weak,
+  era: a.era + b.era,
+  both: a.both + b.both,
+  nihPeople: a.nihPeople + b.nihPeople,
+  nihOrcid: a.nihOrcid + b.nihOrcid,
+  nihStrong: a.nihStrong + b.nihStrong,
+  nihPi: a.nihPi + b.nihPi,
+  nihPiEra: a.nihPiEra + b.nihPiEra,
+  ...(a.waitingRows !== undefined || b.waitingRows !== undefined
+    ? {
+        waitingRows: (a.waitingRows ?? 0) + (b.waitingRows ?? 0),
+        waitingPeople: (a.waitingPeople ?? 0) + (b.waitingPeople ?? 0),
+      }
+    : {}),
+});
+
 export function buildOrcidCoverage(
   scholars: ScholarRow[],
   nih: NihRow[],
@@ -416,8 +580,11 @@ export function buildOrcidCoverage(
   dismissals: DismissalRow[] = [],
   /** cwids the `unit` selection matches (`personFilterSql`); null = no unit filter. */
   unitMatch: ReadonlySet<string> | null = null,
+  /** Open authorship rows per iD (`openAuthorshipImpact`); null = show nothing. */
+  impact: OpenAuthorshipImpact | null = null,
 ): OrcidCoverage {
-  const tiers = orcidTiers(withoutDismissed(candidates, dismissals));
+  const liveCandidates = withoutDismissed(candidates, dismissals);
+  const tiers = orcidTiers(liveCandidates);
   // `scholar.orcid` counts unless the person dismissed that very iD.
   const heldOrcid = new Set(
     withoutDismissed(
@@ -428,6 +595,30 @@ export function buildOrcidCoverage(
   const tierOf = (s: ScholarRow): OrcidTier =>
     heldOrcid.has(s.cwid) ? "asserted" : (tiers.get(s.cwid) ?? "none");
   const isConfirmed = (s: ScholarRow) => heldOrcid.has(s.cwid) && s.orcidConfirmedAt !== null;
+  // Open rows waiting on a confirmation: per person, the unconfirmed iDs that
+  // carry open rows (a Set, so an iD several sources name counts once). An iD
+  // somebody here has confirmed is waiting on nobody, whoever else holds it.
+  const waitingIds = new Map<string, Set<string>>();
+  if (impact !== null) {
+    const confirmedIds = new Set(
+      scholars.flatMap((s) => (s.orcid !== null && isConfirmed(s) ? [bareOrcid(s.orcid)] : [])),
+    );
+    const add = (cwid: string, orcid: string) => {
+      const id = bareOrcid(orcid);
+      if (confirmedIds.has(id) || !((impact.byOrcid.get(id) ?? 0) > 0)) return;
+      const k = cwid.toLowerCase();
+      const set = waitingIds.get(k);
+      if (set) set.add(id);
+      else waitingIds.set(k, new Set([id]));
+    };
+    for (const c of liveCandidates) add(c.cwid, c.orcid);
+    for (const s of scholars)
+      if (s.orcid !== null && heldOrcid.has(s.cwid) && s.orcidConfirmedAt === null)
+        add(s.cwid, s.orcid);
+  }
+  // A confirmed iD means nothing is waiting on this person, whatever else is on file.
+  const waitingIdsOf = (s: ScholarRow) =>
+    isConfirmed(s) ? undefined : waitingIds.get(s.cwid.toLowerCase());
   const nihEnd = new Map(nih.map((r) => [r.cwid, r.latestEnd]));
   const nihPi = new Set(nih.filter((r) => r.pi).map((r) => r.cwid));
   const era = new Set(eraCwids);
@@ -445,7 +636,13 @@ export function buildOrcidCoverage(
           ? isCurrent(s)
           : !isNih(s);
 
-  const count = (rows: ScholarRow[]): CoverageCounts => {
+  // `wcmFacts` = count the eRA and NIH columns; false for Cornell Ithaca rows, where
+  // nothing feeds them (a cwid string shared with an old WCM grant must not either).
+  const count = (rows: ScholarRow[], wcmFacts = true): CoverageCounts & WaitingCounts => {
+    let waitingRows = 0;
+    let waitingPeople = 0;
+    // Rows, not (person, row) pairs: an iD two of these people hold counts once.
+    const counted = new Set<string>();
     const c = {
       people: 0,
       orcid: 0,
@@ -463,7 +660,16 @@ export function buildOrcidCoverage(
     for (const s of rows) {
       const t = tierOf(s);
       const o = t === "asserted";
-      const e = era.has(s.cwid);
+      const e = wcmFacts && era.has(s.cwid);
+      const ids = waitingIdsOf(s);
+      if (ids) {
+        waitingPeople++;
+        for (const id of ids) {
+          if (counted.has(id)) continue;
+          counted.add(id);
+          waitingRows += impact?.byOrcid.get(id) ?? 0;
+        }
+      }
       c.people++;
       if (o) {
         c.orcid++;
@@ -472,7 +678,7 @@ export function buildOrcidCoverage(
       else if (t === "weak") c.weak++;
       if (e) c.era++;
       if (o && e) c.both++;
-      if (isNih(s)) {
+      if (wcmFacts && isNih(s)) {
         c.nihPeople++;
         if (o) c.nihOrcid++;
         else if (t === "strong") c.nihStrong++;
@@ -482,82 +688,195 @@ export function buildOrcidCoverage(
         }
       }
     }
-    return c;
+    return impact === null ? c : { ...c, waitingRows, waitingPeople };
   };
-  const group = (
-    rows: ScholarRow[],
-    key: (s: ScholarRow) => string | null,
-    label: (k: string | null) => string,
-  ) => {
-    const buckets = new Map<string | null, ScholarRow[]>();
-    for (const s of rows) {
-      const k = key(s);
-      const b = buckets.get(k);
-      if (b) b.push(s);
-      else buckets.set(k, [s]);
-    }
-    return [...buckets].map(([k, b]) => ({ key: k, label: label(k), ...count(b) }));
-  };
-
-  const fullTime = scholars.filter((s) => s.roleCategory === DEFAULT_ROLE);
-  const nihFiltered = scholars.filter(
-    (s) => nihOk(s) && (unitMatch === null || unitMatch.has(s.cwid)),
-  );
   const types = new Set(params.types);
+  const ithacaRank = (key: string | null) => {
+    const i = (ITHACA_ROLES as readonly string[]).indexOf(key ?? "");
+    return i === -1 ? ITHACA_ROLES.length : i;
+  };
 
-  const byRole = group(
-    nihFiltered,
-    (s) => s.roleCategory,
-    roleLabel,
-  ).sort((a, b) => b.people - a.people || a.label.localeCompare(b.label));
-  const byDept = group(
-    nihFiltered.filter((s) => types.size === 0 || (s.roleCategory !== null && types.has(s.roleCategory))),
-    (s) => s.primaryDepartment,
-    (k) => k ?? "No department",
-  ).sort(
-    (a, b) =>
-      nihNoOrcid(b) - nihNoOrcid(a) || b.people - a.people || a.label.localeCompare(b.label),
-  );
+  /** One campus's tiles and tables. `tag` stamps `campus` on every row (`campus=all`). */
+  const foldCampus = (campus: Campus, pop: ScholarRow[], tag: boolean) => {
+    const wcm = campus === "wcm";
+    const group = (
+      rows: ScholarRow[],
+      key: (s: ScholarRow) => string | null,
+      label: (k: string | null) => string,
+    ): CoverageRow[] => {
+      const buckets = new Map<string | null, ScholarRow[]>();
+      for (const s of rows) {
+        const k = key(s);
+        const b = buckets.get(k);
+        if (b) b.push(s);
+        else buckets.set(k, [s]);
+      }
+      return [...buckets].map(([k, b]) => ({
+        key: k,
+        label: label(k),
+        ...count(b, wcm),
+        ...(tag ? { campus } : {}),
+      }));
+    };
+    const headline = pop.filter(
+      (s) => s.roleCategory === (wcm ? DEFAULT_ROLE : ITHACA_HEADLINE_ROLE),
+    );
+    // The NIH and unit filters are WCM concepts: they never narrow Cornell Ithaca.
+    const filtered = wcm
+      ? pop.filter((s) => nihOk(s) && (unitMatch === null || unitMatch.has(s.cwid)))
+      : pop;
+    const byRole = group(filtered, (s) => s.roleCategory, roleLabel).sort(
+      (a, b) =>
+        (wcm ? 0 : ithacaRank(a.key) - ithacaRank(b.key)) ||
+        b.people - a.people ||
+        a.label.localeCompare(b.label),
+    );
+    const byDept = group(
+      filtered.filter(
+        (s) => types.size === 0 || (s.roleCategory !== null && types.has(s.roleCategory)),
+      ),
+      (s) => s.primaryDepartment,
+      (k) => k ?? "No department",
+    ).sort(
+      (a, b) =>
+        nihNoOrcid(b) - nihNoOrcid(a) || b.people - a.people || a.label.localeCompare(b.label),
+    );
+    return {
+      tiles: {
+        overall: count(pop, wcm),
+        fullTime: count(headline, wcm),
+        nihFullTime: count(wcm ? headline.filter(isNih) : [], wcm),
+      },
+      total: count(filtered, wcm),
+      filtered,
+      byRole,
+      byDept,
+    };
+  };
+  const sources = inferenceSourceCounts(liveCandidates, new Set(scholars.map((s) => s.cwid)));
+  const shown = (total: CoverageCounts & WaitingCounts) =>
+    impact === null
+      ? {}
+      : {
+          impact: {
+            refreshedAt: impact.refreshedAt,
+            rows: total.waitingRows ?? 0,
+            people: total.waitingPeople ?? 0,
+          },
+        };
 
+  if (params.campus === "all") {
+    const isIthaca = (s: ScholarRow) => s.campus === "ithaca";
+    const parts = (["wcm", "ithaca"] as const).map((campus) => ({
+      campus,
+      label: CAMPUS_LABELS[campus],
+      ...foldCampus(
+        campus,
+        scholars.filter((s) => isIthaca(s) === (campus === "ithaca")),
+        true,
+      ),
+    }));
+    const [w, i] = parts;
+    return {
+      params,
+      tiles: {
+        overall: addCounts(w.tiles.overall, i.tiles.overall),
+        fullTime: addCounts(w.tiles.fullTime, i.tiles.fullTime),
+        nihFullTime: addCounts(w.tiles.nihFullTime, i.tiles.nihFullTime),
+      },
+      byRole: parts.flatMap((p) => p.byRole),
+      // One list across campuses: the outreach column is WCM-only, so people desc.
+      byDept: parts
+        .flatMap((p) => p.byDept)
+        .sort(
+          (a, b) =>
+            b.people - a.people ||
+            a.label.localeCompare(b.label) ||
+            Number(a.campus === "ithaca") - Number(b.campus === "ithaca"),
+        ),
+      campuses: parts.map(({ campus, label, tiles, total }) => ({ campus, label, tiles, total })),
+      sources,
+      // Counted over both campuses at once, not summed: an iD held on both counts once.
+      ...shown(count([...w.filtered, ...i.filtered])),
+    };
+  }
+
+  const one = foldCampus(params.campus === "ithaca" ? "ithaca" : "wcm", scholars, false);
   return {
     params,
-    tiles: {
-      overall: count(scholars),
-      fullTime: count(fullTime),
-      nihFullTime: count(fullTime.filter(isNih)),
-    },
-    byRole,
-    byDept,
-    sources: inferenceSourceCounts(
-      withoutDismissed(candidates, dismissals),
-      new Set(scholars.map((s) => s.cwid)),
-    ),
+    tiles: one.tiles,
+    byRole: one.byRole,
+    byDept: one.byDept,
+    sources,
+    ...shown(one.total),
   };
 }
 
 export type OrcidCoverageClient = Pick<
   PrismaClient,
-  "scholar" | "grant" | "personNihProfile" | "orcidCandidate" | "orcidDismissal" | "$queryRaw"
+  | "scholar"
+  | "grant"
+  | "personNihProfile"
+  | "orcidCandidate"
+  | "orcidDismissal"
+  | "orcidOpenAuthorship"
+  | "$queryRaw"
 >;
+
+/** The open-row counts, and every iD confirmed in Scholars (any campus, any
+ *  status: the counted population is one campus's active people, but an iD
+ *  confirmed on any row is waiting on nobody). The second read happens only when
+ *  there are counts to show. Garnish on this page: a failed read (the table not
+ *  yet migrated, say) hides the tile and columns, it does not blank the coverage. */
+async function readOpenAuthorship(
+  db: OrcidCoverageClient,
+): Promise<{ rows: OpenAuthorshipRow[]; confirmed: string[] }> {
+  try {
+    const rows = await db.orcidOpenAuthorship.findMany({
+      select: { orcid: true, openRows: true, refreshedAt: true },
+    });
+    if (rows.length === 0) return { rows, confirmed: [] };
+    const confirmed = await db.scholar.findMany({
+      where: { deletedAt: null, orcid: { not: null }, orcidConfirmedAt: { not: null } },
+      select: { orcid: true },
+    });
+    return { rows, confirmed: confirmed.flatMap((s) => (s.orcid === null ? [] : [s.orcid])) };
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "orcid_coverage_open_authorship_read_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return { rows: [], confirmed: [] };
+  }
+}
 
 export async function loadOrcidCoverage(
   db: OrcidCoverageClient,
   params: OrcidCoverageParams,
 ): Promise<OrcidCoverage> {
-  const [scholars, nih, era, candidates, dismissals, unitRows] = await Promise.all([
+  const [scholars, nih, era, candidates, dismissals, unitRows, openAuthorship] = await Promise.all([
     // Same population the Identity ETL writes to (`etl/identity/index.ts`),
     // narrowed to status=active like every other console aggregate.
     db.scholar.findMany({
       where:
         params.campus === "ithaca"
           ? { deletedAt: null, campus: "ithaca", status: "external" }
-          : { deletedAt: null, status: "active" },
+          : params.campus === "all"
+            ? {
+                deletedAt: null,
+                OR: [{ status: "active" }, { campus: "ithaca", status: "external" }],
+              }
+            : { deletedAt: null, status: "active" },
       select: {
         cwid: true,
         roleCategory: true,
         primaryDepartment: true,
         orcid: true,
         orcidConfirmedAt: true,
+        // Only the two-campus fold splits on it; the one-campus reads are unchanged.
+        ...(params.campus === "all" ? { campus: true } : {}),
       },
     }),
     db.grant.groupBy({
@@ -585,8 +904,10 @@ export async function loadOrcidCoverage(
            WHERE s.deleted_at IS NULL AND s.status = 'active'
            ${personFilterSql({ types: [], unitValues: params.units }, { scholar: "s", centerMembership: "cm" })}`
       : Promise.resolve(null),
+    readOpenAuthorship(db),
   ]);
-  const today = new Date();
+  const now = new Date();
+  const today = new Date(now);
   today.setUTCHours(0, 0, 0, 0);
   // (cwid, role) rows → one NihRow per cwid.
   const byCwid = new Map<string, NihRow>();
@@ -606,6 +927,7 @@ export async function loadOrcidCoverage(
     candidates,
     dismissals,
     unitRows === null ? null : new Set(unitRows.map((r) => r.cwid)),
+    openAuthorshipImpact(openAuthorship.rows, now, openAuthorship.confirmed),
   );
 }
 
@@ -628,12 +950,23 @@ export const CSV_HEADERS = [
   "NIH PI without eRA account",
 ] as const;
 
+/** The last CSV column, present only when open-row counts are shown on the page. */
+export const CSV_WAITING_HEADER = "Open authorship rows waiting on ORCID confirmation";
+
 /** The department table as CSV — aggregates only, no per-person rows. "Confirmed
- *  ORCID" is the confirmed-in-`/edit` subset of "Asserted ORCID". */
-export function orcidCoverageCsv(rows: CoverageRow[]): string {
-  return toCsv(
-    CSV_HEADERS,
-    rows.map((r) => [
+ *  ORCID" is the confirmed-in-`/edit` subset of "Asserted ORCID". `campusColumn`
+ *  (`campus=all`) leads with a Campus column, and leaves a Cornell Ithaca row's
+ *  eRA and NIH cells blank: not tracked there, which is not the same as zero.
+ *  `waitingColumn` (the page shows open-row counts) appends `CSV_WAITING_HEADER`;
+ *  without it the CSV is exactly what it was before that column existed. */
+export function orcidCoverageCsv(
+  rows: CoverageRow[],
+  campusColumn = false,
+  waitingColumn = false,
+): string {
+  const cells = (r: CoverageRow) => {
+    const wcmOnly = (n: number) => (campusColumn && r.campus === "ithaca" ? "" : n);
+    return [
       r.label,
       r.people,
       r.orcid,
@@ -641,17 +974,25 @@ export function orcidCoverageCsv(rows: CoverageRow[]): string {
       r.people === 0 ? "" : ((100 * r.orcid) / r.people).toFixed(1),
       r.strong,
       r.weak,
-      r.era,
-      r.both,
-      neither(r),
-      r.nihPeople,
-      r.nihOrcid,
-      nihNoOrcid(r),
-      r.nihStrong,
-      r.nihPi,
-      piNoEra(r),
-    ]),
-  );
+      wcmOnly(r.era),
+      wcmOnly(r.both),
+      wcmOnly(neither(r)),
+      wcmOnly(r.nihPeople),
+      wcmOnly(r.nihOrcid),
+      wcmOnly(nihNoOrcid(r)),
+      wcmOnly(r.nihStrong),
+      wcmOnly(r.nihPi),
+      wcmOnly(piNoEra(r)),
+      ...(waitingColumn ? [r.waitingRows ?? 0] : []),
+    ];
+  };
+  const headers = waitingColumn ? [...CSV_HEADERS, CSV_WAITING_HEADER] : CSV_HEADERS;
+  return campusColumn
+    ? toCsv(
+        ["Campus", ...headers],
+        rows.map((r) => [CAMPUS_LABELS[r.campus ?? "wcm"], ...cells(r)]),
+      )
+    : toCsv(headers, rows.map(cells));
 }
 
 /** The export's criteria block: every filter the table reflects, "All" when
@@ -661,6 +1002,8 @@ export function orcidCoverageCriteria(
   params: OrcidCoverageParams,
   generatedAt: Date,
   labels: ReadonlyMap<string, string> = new Map(),
+  /** `OrcidCoverage.impact`: adds the open-row counts' date. Absent = no such row. */
+  impact?: { refreshedAt: Date },
 ): [string, string][] {
   return [
     ["Report", "ORCID coverage by department"],
@@ -668,13 +1011,30 @@ export function orcidCoverageCriteria(
     ...personFilterCriteria({ types: params.types, unitValues: params.units }, labels, (t) => roleLabel(t)),
     ["NIH funding", NIH_FILTER_LABELS[params.nih]],
     ...(params.campus === "ithaca" ? [["Campus", "Cornell Ithaca"] as [string, string]] : []),
+    ...(params.campus === "all"
+      ? ([
+          ["Campus", `Both: ${CAMPUS_LABELS.wcm} and ${CAMPUS_LABELS.ithaca}`],
+          [
+            "Campus note",
+            "Unit and NIH funding filters narrow Weill Cornell Medicine only; eRA and NIH columns are blank for Cornell Ithaca (not tracked)",
+          ],
+        ] as [string, string][])
+      : []),
+    ...(impact
+      ? [["Open authorship rows as of", impact.refreshedAt.toISOString()] as [string, string]]
+      : []),
   ];
 }
 
 /** The download: a two-column `Filter,Value` criteria block, ONE blank line,
  *  then the department table exactly as `orcidCoverageCsv` writes it. */
-export function orcidCoverageExportCsv(rows: CoverageRow[], criteria: [string, string][]): string {
-  return `${toCsv(["Filter", "Value"], criteria)}\r\n${orcidCoverageCsv(rows)}`;
+export function orcidCoverageExportCsv(
+  rows: CoverageRow[],
+  criteria: [string, string][],
+  campusColumn = false,
+  waitingColumn = false,
+): string {
+  return `${toCsv(["Filter", "Value"], criteria)}\r\n${orcidCoverageCsv(rows, campusColumn, waitingColumn)}`;
 }
 
 const FILENAME_SUMMARY_MAX = 60;
@@ -693,6 +1053,7 @@ export function orcidCoverageFilename(
     ...params.units.map((u) => labels.get(u) ?? u),
     ...(params.nih === "all" ? [] : [params.nih === "none" ? "no-nih" : `nih-${params.nih}`]),
     ...(params.campus === "ithaca" ? ["cornell-ithaca"] : []),
+    ...(params.campus === "all" ? ["both-campuses"] : []),
   ];
   const summary =
     parts

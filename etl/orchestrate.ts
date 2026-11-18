@@ -69,6 +69,9 @@ async function main() {
     // even before #443 lands.
     ["ReCiter-COI-Statements", "etl/reciter/backfill-coi-statements.ts"],
     ["RPM-orcid-candidates", "etl/orcid-candidates/index.ts"],
+    // Open authorship_review rows per byline ORCID iD, for /edit/orcid-coverage.
+    // Read-only against reciterdb; skips itself when the source is not ready.
+    ["ORCID-authorship-impact", "etl/orcid-authorship-impact/index.ts"],
     // Active scholars → reciterdb scholar_active for Publication Manager. Dry run
     // unless SCHOLARS_ENV=prod (staging and prod share one reciterdb).
     ["Scholar-active-export", "etl/scholar-active-export/index.ts"],

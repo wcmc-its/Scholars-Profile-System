@@ -8,6 +8,15 @@
  * GET form; nothing here fetches. The department rows arrive in the loader's
  * outreach order, which is the default sort — a click re-sorts, ties keep the
  * loader's order.
+ *
+ * Campus (`campus` prop; absent = WCM, unchanged): on Cornell Ithaca the eRA and
+ * NIH columns are dropped — nothing feeds them there. On both campuses the
+ * person-type table lists each campus under a heading row with a subtotal, the
+ * department table gains a Campus column, and a Cornell Ithaca row shows "—" in
+ * the WCM-only columns rather than a zero.
+ *
+ * `waiting` (the server has fresh open-authorship counts) appends one column to
+ * both tables on every campus; absent, the tables are exactly as before.
  */
 "use client";
 
@@ -21,7 +30,7 @@ import { Input } from "@/components/ui/input";
 // client bundle. The four one-line derivations it exports are mirrored below
 // (tests/unit/edit-orcid-coverage-page.test.tsx renders these cells against
 // the real `buildOrcidCoverage`, so a drift shows up there).
-import type { CoverageRow } from "@/lib/edit/orcid-coverage";
+import type { CampusCoverage, CoverageRow } from "@/lib/edit/orcid-coverage";
 import { cn } from "@/lib/utils";
 
 /** `DEFAULT_ROLE` in lib/edit/orcid-coverage. */
@@ -31,8 +40,13 @@ const nihNoOrcid = (c: CoverageRow) => c.nihPeople - c.nihOrcid;
 const piNoEra = (c: CoverageRow) => c.nihPi - c.nihPiEra;
 const pct = (n: number, d: number) => (d === 0 ? "—" : `${((100 * n) / d).toFixed(1)}%`);
 
+/** `CAMPUS_LABELS` in lib/edit/orcid-coverage. */
+const CAMPUS_LABELS = { wcm: "Weill Cornell Medicine", ithaca: "Cornell Ithaca" } as const;
+const campusLabel = (r: CoverageRow) => CAMPUS_LABELS[r.campus ?? "wcm"];
+
 type ColKey =
   | "name"
+  | "campus"
   | "people"
   | "bar"
   | "asserted"
@@ -47,11 +61,34 @@ type ColKey =
   | "nihA"
   | "nihNo"
   | "pi"
-  | "piNoEra";
+  | "piNoEra"
+  | "waiting";
 
 type Col = { key: ColKey; label: string; tip?: string; width: string };
 
 const NAME_COL: Col = { key: "name", label: "", width: "min-w-[150px]" };
+const CAMPUS_COL: Col = { key: "campus", label: "Campus", width: "" };
+
+/** Appended to either column set when the server sent open-authorship counts. */
+const WAITING_COL: Col = {
+  key: "waiting",
+  label: "Open rows waiting",
+  tip: "Open authorship rows carrying an ORCID iD these people have not yet confirmed",
+  width: "w-[104px]",
+};
+
+/** Columns fed by WCM-only data (eRA accounts, NIH awards): absent from the
+ *  Cornell Ithaca view, "—" on a Cornell Ithaca row of the two-campus view. */
+const WCM_ONLY: ReadonlySet<ColKey> = new Set([
+  "era",
+  "both",
+  "neither",
+  "nih",
+  "nihA",
+  "nihNo",
+  "pi",
+  "piNoEra",
+]);
 
 const SUMMARY_COLS: Col[] = [
   NAME_COL,
@@ -109,7 +146,7 @@ const ALL_COLS: Col[] = [
 type ColSet = "summary" | "all";
 
 /** The numeric value a column shows and sorts by. */
-function value(r: CoverageRow, key: Exclude<ColKey, "name">): number {
+function value(r: CoverageRow, key: Exclude<ColKey, "name" | "campus">): number {
   switch (key) {
     case "people":
       return r.people;
@@ -140,6 +177,8 @@ function value(r: CoverageRow, key: Exclude<ColKey, "name">): number {
       return r.nihPi;
     case "piNoEra":
       return piNoEra(r);
+    case "waiting":
+      return r.waitingRows ?? 0;
   }
 }
 
@@ -172,7 +211,9 @@ function CoverageBar({ r }: { r: CoverageRow }) {
 
 function Cell({ r, col, isName }: { r: CoverageRow; col: Col; isName: boolean }) {
   if (isName) return <td className="py-2.5 pr-3 pl-[18px] font-medium break-words">{r.label}</td>;
-  const key = col.key as Exclude<ColKey, "name">;
+  if (col.key === "campus")
+    return <td className="px-3 py-2.5 whitespace-nowrap">{campusLabel(r)}</td>;
+  const key = col.key as Exclude<ColKey, "name" | "campus">;
   if (key === "bar") {
     return (
       <td className="px-3 py-2.5">
@@ -183,6 +224,13 @@ function Cell({ r, col, isName }: { r: CoverageRow; col: Col; isName: boolean })
     );
   }
   const base = "px-3 py-2.5 text-right whitespace-nowrap tabular-nums last:pr-[18px]";
+  if (r.campus === "ithaca" && WCM_ONLY.has(key)) {
+    return (
+      <td className={cn(base, "text-muted-foreground")} title="Not tracked for Cornell Ithaca">
+        —
+      </td>
+    );
+  }
   if (key === "pct") {
     const high = r.people > 0 && r.orcid / r.people >= HIGH_SHARE;
     return (
@@ -209,7 +257,14 @@ function Cell({ r, col, isName }: { r: CoverageRow; col: Col; isName: boolean })
   }
   const v = value(r, key);
   return (
-    <td className={cn(base, v === 0 ? "text-apollo-border-strong" : "text-foreground")}>
+    <td
+      className={cn(base, v === 0 ? "text-apollo-border-strong" : "text-foreground")}
+      title={
+        key === "waiting"
+          ? `${v.toLocaleString()} open ${v === 1 ? "row" : "rows"} across ${(r.waitingPeople ?? 0).toLocaleString()} ${r.waitingPeople === 1 ? "person" : "people"}`
+          : undefined
+      }
+    >
       {v.toLocaleString()}
     </td>
   );
@@ -218,11 +273,16 @@ function Cell({ r, col, isName }: { r: CoverageRow; col: Col; isName: boolean })
 const thBase =
   "text-muted-foreground px-3 py-2.5 align-bottom text-[11.5px] leading-tight font-medium tracking-[0.06em] uppercase";
 
+/** One campus's block in the two-campus person-type table. */
+type RowGroup = { label: string; rows: CoverageRow[]; subtotal: CoverageRow };
+
 function Table({
   cols,
+  minWidth,
   firstHeader,
   caption,
   rows,
+  groups,
   testId,
   highlight,
   sort,
@@ -230,9 +290,12 @@ function Table({
   empty,
 }: {
   cols: Col[];
+  minWidth: string;
   firstHeader: string;
   caption: string;
   rows: CoverageRow[];
+  /** Two-campus view: `rows` split under a heading row each, with a subtotal. */
+  groups?: RowGroup[];
   testId: string;
   highlight?: (r: CoverageRow) => boolean;
   sort?: { key: ColKey; dir: 1 | -1 };
@@ -240,20 +303,15 @@ function Table({
   empty: React.ReactNode;
 }) {
   return (
-    <table
-      className={cn(
-        "w-full border-collapse text-sm",
-        cols === ALL_COLS ? "min-w-[1180px]" : "min-w-[760px]",
-      )}
-      data-testid={testId}
-    >
+    <table className={cn("w-full border-collapse text-sm", minWidth)} data-testid={testId}>
       <caption className="sr-only">{caption}</caption>
       <thead className="bg-apollo-surface-2 border-apollo-border-strong border-b">
         <tr>
           {cols.map((col, i) => {
             const label = i === 0 ? firstHeader : col.label;
             const active = sort?.key === col.key;
-            const align = i === 0 || col.key === "bar" ? "text-left" : "text-right";
+            const align =
+              i === 0 || col.key === "bar" || col.key === "campus" ? "text-left" : "text-right";
             return (
               <th
                 key={col.key}
@@ -293,35 +351,90 @@ function Table({
           })}
         </tr>
       </thead>
-      <tbody>
-        {rows.length === 0 ? (
-          <tr>
-            <td className="text-muted-foreground px-[18px] py-3" colSpan={cols.length}>
-              {empty}
-            </td>
-          </tr>
-        ) : (
-          rows.map((r, i) => (
+      {groups && rows.length > 0 ? (
+        // One row group per campus, so its heading cell is a header for exactly
+        // the rows beneath it.
+        groups.map((g, gi) => (
+          <tbody key={g.label}>
             <tr
-              key={r.key ?? "__null"}
               className={cn(
-                "hover:bg-apollo-page",
-                i > 0 && "border-apollo-border border-t",
-                highlight?.(r) && "bg-apollo-page",
+                "bg-apollo-surface-2",
+                gi > 0 && "border-apollo-border-strong border-t",
               )}
             >
-              {cols.map((col, ci) => (
-                <Cell key={col.key} r={r} col={col} isName={ci === 0} />
-              ))}
+              <th
+                scope="rowgroup"
+                colSpan={cols.length}
+                className="px-[18px] py-2 text-left text-[13px] font-semibold"
+              >
+                {g.label}
+              </th>
             </tr>
-          ))
-        )}
-      </tbody>
+            {[...g.rows, g.subtotal].map((r, i) => (
+              <tr
+                key={i === g.rows.length ? "__subtotal" : (r.key ?? "__null")}
+                className={cn(
+                  "border-apollo-border border-t",
+                  i === g.rows.length ? "font-semibold" : "hover:bg-apollo-page",
+                  i < g.rows.length && highlight?.(r) && "bg-apollo-page",
+                )}
+              >
+                {cols.map((col, ci) => (
+                  <Cell key={col.key} r={r} col={col} isName={ci === 0} />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        ))
+      ) : (
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td className="text-muted-foreground px-[18px] py-3" colSpan={cols.length}>
+                {empty}
+              </td>
+            </tr>
+          ) : (
+            rows.map((r, i) => (
+              <tr
+                key={r.campus ? `${r.campus}:${r.key ?? "__null"}` : (r.key ?? "__null")}
+                className={cn(
+                  "hover:bg-apollo-page",
+                  i > 0 && "border-apollo-border border-t",
+                  highlight?.(r) && "bg-apollo-page",
+                )}
+              >
+                {cols.map((col, ci) => (
+                  <Cell key={col.key} r={r} col={col} isName={ci === 0} />
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+      )}
     </table>
   );
 }
 
 const TOP_DEPTS = 15;
+
+/** Table min-widths, [without, with] the open-rows column. Wide enough to read;
+ *  the table scrolls inside its own container below that. */
+const MIN_WIDTH = {
+  ithaca: {
+    summary: ["min-w-[480px]", "min-w-[590px]"],
+    all: ["min-w-[640px]", "min-w-[750px]"],
+  },
+  wcm: {
+    summary: ["min-w-[760px]", "min-w-[870px]"],
+    all: ["min-w-[1180px]", "min-w-[1290px]"],
+  },
+  /** The two-campus department table: one more (Campus) column. */
+  bothDept: {
+    summary: ["min-w-[920px]", "min-w-[1030px]"],
+    all: ["min-w-[1340px]", "min-w-[1450px]"],
+  },
+} as const;
 
 export function CoverageTables({
   byRole,
@@ -331,6 +444,9 @@ export function CoverageTables({
   deptScope,
   downloadHref,
   defaultSort,
+  campus,
+  campuses,
+  waiting = false,
 }: {
   byRole: CoverageRow[];
   byDept: CoverageRow[];
@@ -343,6 +459,12 @@ export function CoverageTables({
   downloadHref: string;
   /** The column the loader's order corresponds to (descending). */
   defaultSort: "nihNo" | "people";
+  /** Absent = WCM. `ithaca` drops the WCM-only columns; `all` = both campuses. */
+  campus?: "ithaca" | "all";
+  /** `campus = "all"`: each campus's label and person-type subtotal. */
+  campuses?: CampusCoverage[];
+  /** The rows carry fresh open-authorship counts: show that column. */
+  waiting?: boolean;
 }) {
   const [colset, setColset] = React.useState<ColSet>("summary");
   const [sort, setSort] = React.useState<{ key: ColKey; dir: 1 | -1 }>({
@@ -351,13 +473,30 @@ export function CoverageTables({
   });
   const [query, setQuery] = React.useState("");
   const [showAll, setShowAll] = React.useState(false);
-  const cols = colset === "summary" ? SUMMARY_COLS : ALL_COLS;
+  const forCampus = (set: Col[]) => [
+    ...(campus === "ithaca" ? set.filter((c) => !WCM_ONLY.has(c.key)) : set),
+    ...(waiting ? [WAITING_COL] : []),
+  ];
+  const cols = forCampus(colset === "summary" ? SUMMARY_COLS : ALL_COLS);
+  const deptCols = campus === "all" ? [cols[0], CAMPUS_COL, ...cols.slice(1)] : cols;
+  const allCount = forCampus(ALL_COLS).length - 1;
+  const w = waiting ? 1 : 0;
+  const minWidth = MIN_WIDTH[campus === "ithaca" ? "ithaca" : "wcm"][colset][w];
+  const deptMinWidth = campus === "all" ? MIN_WIDTH.bothDept[colset][w] : minWidth;
 
   // Full-time faculty first: it is the population the tiles and the default
   // department filter are about.
   const roleRows = [...byRole].sort(
     (a, b) => Number(b.key === FULL_TIME_ROLE) - Number(a.key === FULL_TIME_ROLE),
   );
+  const roleGroups =
+    campus === "all" && campuses
+      ? campuses.map((c) => ({
+          label: c.label,
+          rows: roleRows.filter((r) => r.campus === c.campus),
+          subtotal: { ...c.total, key: null, label: `${c.label} subtotal`, campus: c.campus },
+        }))
+      : undefined;
 
   const q = query.trim().toLowerCase();
   const filtered = byDept
@@ -366,7 +505,9 @@ export function CoverageTables({
   const sorted = filtered
     .sort((a, b) => {
       if (sort.key === "name") return sort.dir * a.r.label.localeCompare(b.r.label) || a.i - b.i;
-      const k = sort.key as Exclude<ColKey, "name">;
+      if (sort.key === "campus")
+        return sort.dir * campusLabel(a.r).localeCompare(campusLabel(b.r)) || a.i - b.i;
+      const k = sort.key as Exclude<ColKey, "name" | "campus">;
       return sort.dir * (value(a.r, k) - value(b.r, k)) || a.i - b.i;
     })
     .map(({ r }) => r);
@@ -375,7 +516,9 @@ export function CoverageTables({
 
   const onSort = (key: ColKey) =>
     setSort((s) =>
-      s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "name" ? 1 : -1 },
+      s.key === key
+        ? { key, dir: s.dir === 1 ? -1 : 1 }
+        : { key, dir: key === "name" || key === "campus" ? 1 : -1 },
     );
 
   return (
@@ -397,7 +540,7 @@ export function CoverageTables({
               {(
                 [
                   ["summary", "Summary"],
-                  ["all", `All ${ALL_COLS.length - 1}`],
+                  ["all", `All ${allCount}`],
                 ] as const
               ).map(([k, label]) => (
                 <button
@@ -423,9 +566,11 @@ export function CoverageTables({
         <div className="border-apollo-border-strong bg-apollo-surface overflow-x-auto rounded-[13px] border">
           <Table
             cols={cols}
+            minWidth={minWidth}
             firstHeader="Person type"
             caption={roleCaption}
             rows={roleRows}
+            groups={roleGroups}
             testId="orcid-coverage-by-role"
             highlight={(r) => r.key === FULL_TIME_ROLE}
             empty="No one matches these filters."
@@ -481,7 +626,8 @@ export function CoverageTables({
         <div className="border-apollo-border-strong bg-apollo-surface overflow-hidden rounded-[13px] border">
           <div className="overflow-x-auto">
             <Table
-              cols={cols}
+              cols={deptCols}
+              minWidth={deptMinWidth}
               firstHeader="Department"
               caption={deptCaption}
               rows={deptRows}
