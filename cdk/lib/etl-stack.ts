@@ -1163,7 +1163,7 @@ export class EtlStack extends Stack {
       SCHOLAR_TITLE_RESOLUTION: "on",
       // SCHOLAR_DEGREE_PICKER — read by etl/ed/index.ts to apply scholars'
       // degree picks to Scholar.postnominal. Matches the app-stack.ts copy.
-      SCHOLAR_DEGREE_PICKER: envConfig.envName === "staging" ? "on" : "off",
+      SCHOLAR_DEGREE_PICKER: "on",
       // #718 -- publications-index exclusion of pubs with zero displayable WCM
       // authors (isRequireDisplayableAuthorEnabled, lib/search-index-docs.ts),
       // read by the search:index build (SearchIndexNightly / SearchIndexWeekly
