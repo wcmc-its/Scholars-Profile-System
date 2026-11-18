@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   detectLeadershipSite,
   isFullTimeFaculty,
+  leadershipTierLabel,
+  leadershipTierRank,
   parseFunctions,
   parseLeadershipTitle,
   serializeFunctions,
@@ -95,9 +97,35 @@ describe("parseLeadershipTitle", () => {
     ).toEqual([["research"], ["faculty_affairs"]]);
   });
 
+  it.each([
+    ["Deputy Vice Chair for Research", "deputy"],
+    ["Interim Executive Vice Chair", "interim executive"],
+    ["Co-Vice Chair of Education", "co"],
+    ["Professor and Executive Vice Chair for Academic Affairs", "executive"],
+    ["Professor of Medicine, Vice Chair for Research", "vice"],
+    ["Vice-Chairman", "vice"],
+  ])("reads an open-ended modifier: %s", (title, tier) => {
+    expect(parseLeadershipTitle(title)[0].tier).toBe(tier);
+  });
+
   it("returns nothing for a title with no Vice Chair in it", () => {
     expect(parseLeadershipTitle("Chair of Surgery")).toEqual([]);
     expect(parseLeadershipTitle("")).toEqual([]);
+  });
+});
+
+describe("modifier rank and label", () => {
+  it("orders by the first known word; an unknown modifier ranks with plain Vice Chairs", () => {
+    const ranked = ["assistant", "deputy", "interim executive", "vice", "senior", "associate"]
+      .map((t) => [t, leadershipTierRank(t)] as const)
+      .sort((a, b) => a[1] - b[1])
+      .map(([t]) => t);
+    expect(ranked).toEqual(["interim executive", "senior", "deputy", "vice", "associate", "assistant"]);
+  });
+
+  it("labels any modifier", () => {
+    expect(leadershipTierLabel("vice")).toBe("Vice Chair");
+    expect(leadershipTierLabel("interim executive")).toBe("Interim Executive Vice Chair");
   });
 });
 

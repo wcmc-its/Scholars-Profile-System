@@ -8,7 +8,8 @@ import type { PrismaClient } from "@/lib/generated/prisma/client";
 import {
   LEADERSHIP_FUNCTIONS,
   LEADERSHIP_SITES,
-  LEADERSHIP_TIERS,
+  PLAIN_TIER,
+  leadershipTierRank,
   isFullTimeFaculty,
   parseFunctions,
   parseLeadershipTitle,
@@ -119,10 +120,9 @@ export function validateLeadershipFields(
   const displayTitle = text(body.displayTitle, 255);
   if (!displayTitle) return bad("invalid_value", "displayTitle");
 
-  if (typeof body.tier !== "string" || !(LEADERSHIP_TIERS as readonly string[]).includes(body.tier)) {
-    return bad("invalid_value", "tier");
-  }
-  const tier = body.tier as LeadershipTier;
+  // The modifier ("Executive", "Deputy", …) is open-ended and always read from
+  // the published title, so it can never disagree with it. Not a request field.
+  const tier = parseLeadershipTitle(displayTitle)[0]?.tier ?? PLAIN_TIER;
 
   const rawFunctions = body.functions ?? [];
   if (
@@ -210,7 +210,7 @@ export async function loadPublicViceChairs(
     }))
     .sort(
       (a, b) =>
-        LEADERSHIP_TIERS.indexOf(a.tier) - LEADERSHIP_TIERS.indexOf(b.tier) ||
+        leadershipTierRank(a.tier) - leadershipTierRank(b.tier) ||
         a.preferredName.localeCompare(b.preferredName),
     );
 }
@@ -251,7 +251,7 @@ export async function loadProfileViceChairTitles(
   return [...rows]
     .sort(
       (a, b) =>
-        LEADERSHIP_TIERS.indexOf(a.tier as LeadershipTier) - LEADERSHIP_TIERS.indexOf(b.tier as LeadershipTier) ||
+        leadershipTierRank(a.tier) - leadershipTierRank(b.tier) ||
         a.displayTitle.localeCompare(b.displayTitle),
     )
     .flatMap((r) => {

@@ -239,7 +239,6 @@ describe("/api/edit/unit-leadership — add", () => {
   });
 
   it.each([
-    [{ tier: "deputy" }, "invalid_value", "tier"],
     [{ functions: ["research", "nope"] }, "invalid_value", "functions"],
     [{ displayTitle: "  " }, "invalid_value", "displayTitle"],
     [{ site: "nyp_mars" }, "invalid_value", "site"],
@@ -251,6 +250,14 @@ describe("/api/edit/unit-leadership — add", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error, field });
     expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("reads any modifier from the title and ignores a tier in the body", async () => {
+    const res = await POST(
+      post({ ...ADD, displayTitle: "Interim Deputy Vice Chair for Research", tier: "executive" }),
+    );
+    expect(res.status).toBe(200);
+    expect(m.txCreate.mock.calls[0][0].data.tier).toBe("interim deputy");
   });
 
   it("accepts a general Vice Chair with no functions", async () => {

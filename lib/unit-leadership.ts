@@ -11,17 +11,41 @@
  * bundle and must never import `@/lib/db`.
  */
 
-/** Display order: Executive first. */
-export const LEADERSHIP_TIERS = ["executive", "senior", "vice", "associate", "assistant"] as const;
-export type LeadershipTier = (typeof LEADERSHIP_TIERS)[number];
+/**
+ * The MODIFIER on a Vice Chair title: whatever the department writes before
+ * "Vice Chair" ("Executive", "Senior", "Deputy", "Interim Executive", …),
+ * lower-cased; `vice` when there is none. OPEN-ENDED on purpose — departments
+ * invent these and no list can predict them. It is read from the published
+ * title, never chosen from a menu, so it cannot disagree with the title.
+ *
+ * (The column and the field are still called `tier`.)
+ */
+export type LeadershipTier = string;
 
-export const LEADERSHIP_TIER_LABELS: Record<LeadershipTier, string> = {
-  executive: "Executive Vice Chair",
-  senior: "Senior Vice Chair",
-  vice: "Vice Chair",
-  associate: "Associate Vice Chair",
-  assistant: "Assistant Vice Chair",
-};
+/** The plain, unmodified value. */
+export const PLAIN_TIER = "vice";
+
+/**
+ * The modifiers with a known place in the display order, Executive first. Any
+ * other modifier ranks with the plain Vice Chairs.
+ */
+export const LEADERSHIP_TIERS = ["executive", "senior", "vice", "associate", "assistant"] as const;
+
+/** Display rank of a modifier: the first known word in it decides
+ *  ("interim executive" ranks with Executive); an unknown one ranks as plain. */
+export function leadershipTierRank(tier: string): number {
+  const known = tier
+    .split(" ")
+    .map((w) => (LEADERSHIP_TIERS as readonly string[]).indexOf(w))
+    .find((i) => i >= 0);
+  return known ?? LEADERSHIP_TIERS.indexOf(PLAIN_TIER);
+}
+
+/** "interim executive" -> "Interim Executive Vice Chair"; `vice` -> "Vice Chair". */
+export function leadershipTierLabel(tier: string): string {
+  if (tier === PLAIN_TIER || tier === "") return "Vice Chair";
+  return `${tier.replace(/\b[a-z]/g, (c) => c.toUpperCase())} Vice Chair`;
+}
 
 /**
  * Function codes. Order is the match order AND the stored order. A pattern is
@@ -94,7 +118,22 @@ export type ParsedLeadershipTitle = {
 };
 
 const VICE_CHAIR = /vice[- ]?chair(?:man|woman|person)?/i;
-const TIER_WORD = /\b(executive|senior|associate|assistant)\s+$/i;
+const MAX_TIER_LENGTH = 64;
+
+/**
+ * The modifier in the text before "Vice Chair": the words since the last
+ * comma, semicolon, slash or "and", so "Professor and Executive Vice Chair"
+ * reads as `executive`, not `professor and executive`.
+ */
+function modifierOf(before: string): string {
+  const tail = before.split(/[,;/&]|\band\b/i).pop() ?? "";
+  const words = tail
+    .toLowerCase()
+    .replace(/[^a-z -]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[ -]+|[ -]+$/g, "");
+  return words.slice(0, MAX_TIER_LENGTH).trim() || PLAIN_TIER;
+}
 
 const norm = (s: string) =>
   s
@@ -110,7 +149,7 @@ const norm = (s: string) =>
  *
  *  - "for", "of", "in" and a comma after "Vice Chair" are equivalent.
  *  - "Vice Chairman" / "Vice-Chair" parse as Vice Chair.
- *  - The tier is the word before "Vice Chair" (none = `vice`).
+ *  - The modifier is whatever precedes "Vice Chair" (none = `vice`); any wording is accepted.
  *  - The department's own name is not an area: "Vice Chair, Department of
  *    Surgery" has no function. Pass `departmentName` so "Vice Chair of
  *    Ophthalmology" reads the same way.
@@ -128,7 +167,7 @@ export function parseLeadershipTitle(title: string, departmentName?: string): Pa
     const displayTitle = raw.trim();
     const m = VICE_CHAIR.exec(displayTitle);
     if (!m) continue;
-    const tier = (TIER_WORD.exec(displayTitle.slice(0, m.index))?.[1].toLowerCase() ?? "vice") as LeadershipTier;
+    const tier = modifierOf(displayTitle.slice(0, m.index));
     const rest = displayTitle.slice(m.index + m[0].length);
     const site = detectLeadershipSite(rest);
 
@@ -220,7 +259,7 @@ export type UnitLeadershipRoleView = {
 export function sortLeadershipRoles<T extends { tier: LeadershipTier; name: string | null }>(rows: readonly T[]): T[] {
   return [...rows].sort(
     (a, b) =>
-      LEADERSHIP_TIERS.indexOf(a.tier) - LEADERSHIP_TIERS.indexOf(b.tier) ||
+      leadershipTierRank(a.tier) - leadershipTierRank(b.tier) ||
       (a.name ?? "").localeCompare(b.name ?? ""),
   );
 }
