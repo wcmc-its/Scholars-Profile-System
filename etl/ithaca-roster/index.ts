@@ -117,7 +117,9 @@ async function main(): Promise<number> {
     });
   }
   console.log(`ithaca-roster: ${summary}`);
-  return plan.create.length + changed.length + plan.prune.length;
+  // rowsProcessed = roster size, not rows changed: the integrity volume guard
+  // compares night to night, and a quiet night (few updates) is not a collapse.
+  return people.length;
 }
 
 if (!process.env.VITEST) {
