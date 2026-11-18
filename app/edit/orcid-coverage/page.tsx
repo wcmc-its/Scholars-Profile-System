@@ -16,6 +16,11 @@
  * Coverage and facets load independently: no coverage → the "temporarily
  * unavailable" notice; no facets → the numbers still render (the URL's
  * filters still apply) and the bar becomes a one-line notice.
+ * Campus (`?campus=`): absent = WCM, exactly as before; `ithaca` = Cornell Ithaca
+ * people (two tiles, no eRA / NIH columns or filters — nothing feeds them
+ * there); `all` = both, the tile groups side by side (stacked on a phone), the
+ * person-type table under a heading row per campus, a Campus column on the
+ * department table and in its CSV.
  * No trend — there is no history table (a nightly snapshot row is the 10-line
  * ETL step if one is ever wanted). The only bars are proportions of the
  * current counts.
@@ -38,8 +43,10 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
   type CoverageCounts,
+  type CoverageTiles,
   type InferenceSourceCounts,
   type OrcidCoverage,
+  CAMPUS_LABELS,
   NIH_FILTER_LABELS,
   NIH_FILTERS,
   STRONG_MIN_ACCEPTED,
@@ -50,6 +57,7 @@ import {
   pct,
 } from "@/lib/edit/orcid-coverage";
 import { unitLabels } from "@/lib/edit/person-filter";
+import { formatRoleCategory } from "@/lib/role-display";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { cn } from "@/lib/utils";
 
@@ -68,7 +76,16 @@ const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] 
 
 /** A headline number: the asserted share, a two-part bar (asserted + strong
  *  inference), and the counts behind it. Always the unfiltered population. */
-function Tile({ label, c }: { label: string; c: CoverageCounts }) {
+function Tile({
+  label,
+  c,
+  unconfirmed = " unconfirmed, from Identity)",
+}: {
+  label: string;
+  c: CoverageCounts;
+  /** The text after the unconfirmed count. Cornell Ithaca has no Identity import. */
+  unconfirmed?: string;
+}) {
   const w = (n: number) => `${c.people === 0 ? 0 : (100 * n) / c.people}%`;
   return (
     <div className={cn(cardClass, "flex flex-col gap-2.5 px-[18px] py-4")}>
@@ -96,7 +113,8 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
         <span>
           <span className="text-foreground font-medium">{c.orcid.toLocaleString()}</span> of{" "}
           {c.people.toLocaleString()} asserted ({c.confirmed.toLocaleString()} confirmed here,{" "}
-          {(c.orcid - c.confirmed).toLocaleString()} unconfirmed, from Identity)
+          {(c.orcid - c.confirmed).toLocaleString()}
+          {unconfirmed}
         </span>
         <span>
           <span className="text-foreground font-medium">+{c.strong.toLocaleString()}</span> more by
@@ -104,6 +122,26 @@ function Tile({ label, c }: { label: string; c: CoverageCounts }) {
         </span>
       </div>
     </div>
+  );
+}
+
+/** Cornell Ithaca's headline tiles. No NIH tile: no Cornell award data is loaded. */
+function IthacaTiles({ tiles }: { tiles: CoverageTiles }) {
+  return (
+    <>
+      <Tile label="All Cornell Ithaca people" c={tiles.overall} unconfirmed=" unconfirmed)" />
+      <Tile label="Cornell Ithaca faculty" c={tiles.fullTime} unconfirmed=" unconfirmed)" />
+    </>
+  );
+}
+
+function WcmTiles({ tiles }: { tiles: CoverageTiles }) {
+  return (
+    <>
+      <Tile label="All active people" c={tiles.overall} />
+      <Tile label="Full-time faculty" c={tiles.fullTime} />
+      <Tile label="NIH-funded full-time faculty" c={tiles.nihFullTime} />
+    </>
   );
 }
 
@@ -306,26 +344,62 @@ function Body({
   ignoredLegacyDept: boolean;
 }) {
   const { params, tiles } = data;
+  const ithaca = params.campus === "ithaca";
+  const both = params.campus === "all";
   const typeLabels = new Map((facets?.roleCategories ?? []).map((o) => [o.value, o.label]));
   const units = facets ? unitLabels(facets) : new Map<string, string>();
   const roleLabel =
     params.types.length === 0
       ? "all person types"
-      : orList(params.types.map((t) => typeLabels.get(t) ?? t));
+      : orList(
+          params.types.map(
+            // The facet load is WCM's: a Cornell Ithaca type is named by its display label.
+            (t) => typeLabels.get(t) ?? ((ithaca || both ? formatRoleCategory(t) : null) ?? t),
+          ),
+        );
   const RoleLabel = `${roleLabel[0].toUpperCase()}${roleLabel.slice(1)}`;
   const unitText =
     params.units.length === 0 ? "" : ` in ${orList(params.units.map((u) => units.get(u) ?? u))}`;
   const nihLabel = params.nih === "all" ? "" : ` · ${NIH_FILTER_LABELS[params.nih]}`;
+  // On both campuses the WCM-only filters (unit, NIH) narrow the WCM half only.
+  const wcmOnlyNote =
+    both && (params.units.length > 0 || params.nih !== "all")
+      ? ` Unit and NIH funding filters narrow ${CAMPUS_LABELS.wcm} only.`
+      : "";
+  const byPeople = ithaca || both || params.nih === "none";
   return (
     <>
-      <div
-        className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3"
-        data-testid="orcid-coverage-tiles"
-      >
-        <Tile label="All active people" c={tiles.overall} />
-        <Tile label="Full-time faculty" c={tiles.fullTime} />
-        <Tile label="NIH-funded full-time faculty" c={tiles.nihFullTime} />
-      </div>
+      {both && data.campuses ? (
+        <div className="grid gap-x-3.5 gap-y-6 md:grid-cols-2" data-testid="orcid-coverage-tiles">
+          {data.campuses.map((c) => (
+            <section
+              key={c.campus}
+              className="flex min-w-0 flex-col gap-3.5"
+              aria-labelledby={`orcid-coverage-tiles-${c.campus}-heading`}
+              data-testid={`orcid-coverage-tiles-${c.campus}`}
+            >
+              <h2
+                id={`orcid-coverage-tiles-${c.campus}-heading`}
+                className="m-0 text-[15px] font-semibold"
+              >
+                {c.label}
+              </h2>
+              {c.campus === "ithaca" ? (
+                <IthacaTiles tiles={c.tiles} />
+              ) : (
+                <WcmTiles tiles={c.tiles} />
+              )}
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div
+          className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3"
+          data-testid="orcid-coverage-tiles"
+        >
+          {ithaca ? <IthacaTiles tiles={tiles} /> : <WcmTiles tiles={tiles} />}
+        </div>
+      )}
 
       <InferenceSources s={data.sources} />
 
@@ -353,15 +427,21 @@ function Body({
       <CoverageTables
         byRole={data.byRole}
         byDept={data.byDept}
-        roleCaption={`Every person type${unitText}${nihLabel}.`}
+        roleCaption={
+          both
+            ? `Every person type${unitText}${nihLabel}, by campus.${wcmOnlyNote}`
+            : `Every person type${unitText}${nihLabel}.`
+        }
         deptCaption={`${RoleLabel}${unitText}${nihLabel}, ${
-          params.nih === "none"
+          byPeople
             ? "sorted by people."
             : "sorted by NIH-funded people without an asserted ORCID iD: the outreach list."
-        }`}
+        }${wcmOnlyNote}`}
         deptScope={params.types.length === 0 ? "All person types" : `${RoleLabel} only`}
         downloadHref={`/edit/orcid-coverage/export${orcidCoverageQuery(params)}`}
-        defaultSort={params.nih === "none" ? "people" : "nihNo"}
+        defaultSort={byPeople ? "people" : "nihNo"}
+        {...(ithaca || both ? { campus: params.campus as "ithaca" | "all" } : {})}
+        {...(both ? { campuses: data.campuses } : {})}
       />
     </>
   );

@@ -8,6 +8,13 @@
  * an empty type selection means "every type", not the bare-visit default
  * (`orcidCoverageQuery` in lib/edit/orcid-coverage — mirrored here because
  * that module pulls Prisma into the client bundle).
+ *
+ * Campus is a three-way choice: Weill Cornell Medicine (the default, no
+ * `campus` param), Cornell Ithaca, or Both (`campus=all`; the option's own value
+ * is "both" because `FacetPopover` reads a single-select "all" as "nothing
+ * selected"). NIH funding and the unit facets are WCM concepts: hidden on
+ * Cornell Ithaca, and on Both they narrow the WCM half only. Person type offers
+ * the six Cornell Ithaca roles whenever Ithaca people are in view.
  */
 "use client";
 
@@ -17,18 +24,29 @@ import * as React from "react";
 
 import { FacetPopover, type FacetDef } from "@/components/edit/facet-popover";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
-import type { NihFilter } from "@/lib/edit/orcid-coverage";
+import type { CampusView, NihFilter } from "@/lib/edit/orcid-coverage";
+import { ITHACA_ROLES } from "@/lib/eligibility";
+import { formatRoleCategory } from "@/lib/role-display";
 
-type Sel = { nih: NihFilter; types: string[]; units: string[]; campus?: "wcm" | "ithaca" };
+type Sel = { nih: NihFilter; types: string[]; units: string[]; campus?: CampusView };
 
 const BOTH = "Narrows both tables.";
+const WCM_HALF = "Narrows Weill Cornell Medicine only, in both tables.";
+
+const isIthacaRole = (t: string) => (ITHACA_ROLES as readonly string[]).includes(t);
+/** The Cornell Ithaca person types, in roster order. No counts: the facet load is WCM's. */
+const ITHACA_TYPE_OPTIONS = ITHACA_ROLES.map((value) => ({
+  value,
+  label: formatRoleCategory(value) ?? value,
+  count: -1,
+}));
 
 function query(s: Sel) {
   const q = new URLSearchParams();
   for (const t of s.types) q.append("type", t);
   for (const u of s.units) q.append("unit", u);
   q.set("nih", s.nih);
-  if (s.campus === "ithaca") q.set("campus", "ithaca");
+  if (s.campus === "ithaca" || s.campus === "all") q.set("campus", s.campus);
   return `?${q.toString()}`;
 }
 
@@ -59,7 +77,9 @@ export function CoverageFilterBar({
       .flatMap((d) => d.divisions)
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
   ];
-  const defs: FacetDef[] = [
+  const ithaca = sel.campus === "ithaca";
+  const wcmScope = sel.campus === "all" ? WCM_HALF : BOTH;
+  const allDefs: FacetDef[] = [
     {
       key: "campus",
       label: "Campus",
@@ -67,6 +87,7 @@ export function CoverageFilterBar({
       options: [
         { value: "wcm", label: "Weill Cornell Medicine", count: -1 },
         { value: "ithaca", label: "Cornell Ithaca", count: -1 },
+        { value: "both", label: "Both", count: -1 },
       ],
       scope: BOTH,
     },
@@ -75,12 +96,16 @@ export function CoverageFilterBar({
       label: "NIH funding",
       single: true,
       options: nihOptions.map(({ value, label }) => ({ value, label, count: -1 })),
-      scope: BOTH,
+      scope: wcmScope,
     },
     {
       key: "type",
       label: "Person type",
-      options: facets.roleCategories,
+      options: ithaca
+        ? ITHACA_TYPE_OPTIONS
+        : sel.campus === "all"
+          ? [...facets.roleCategories, ...ITHACA_TYPE_OPTIONS]
+          : facets.roleCategories,
       scope: "Narrows the department table only.",
     },
     {
@@ -88,7 +113,7 @@ export function CoverageFilterBar({
       label: "Department",
       options: deptOptions,
       search: `Search ${deptOptions.length} departments and divisions`,
-      scope: BOTH,
+      scope: wcmScope,
     },
     {
       key: "center",
@@ -96,38 +121,52 @@ export function CoverageFilterBar({
       // A memberless center can only return zero — hidden unless already selected.
       options: facets.centers.filter((c) => c.count > 0 || units.has(c.value)),
       search: `Search ${facets.centers.length} centers`,
-      scope: BOTH,
+      scope: wcmScope,
     },
     {
       key: "inst",
       label: "Institution",
       options: facets.institutions,
       search: `Search ${facets.institutions.length} institutions`,
-      scope: BOTH,
+      scope: wcmScope,
     },
   ];
+  // NIH awards and WCM org units do not exist for Cornell Ithaca people.
+  const defs = ithaca
+    ? allDefs.filter((d) => d.key === "campus" || d.key === "type")
+    : allDefs;
 
   const selected = (d: FacetDef): string[] =>
     d.key === "campus"
       ? sel.campus === "ithaca"
         ? ["ithaca"]
-        : []
+        : sel.campus === "all"
+          ? ["both"]
+          : []
       : d.key === "nih"
-      ? sel.nih === "all"
-        ? []
-        : [sel.nih]
-      : d.key === "type"
-        ? sel.types
-        : sel.units.filter((u) => d.options.some((o) => o.value === u));
+        ? sel.nih === "all"
+          ? []
+          : [sel.nih]
+        : d.key === "type"
+          ? sel.types
+          : sel.units.filter((u) => d.options.some((o) => o.value === u));
+  /** A campus switch keeps only the selections that still mean something there. */
+  const toCampus = (campus: CampusView): Sel =>
+    campus === "ithaca"
+      ? { nih: "all", units: [], types: sel.types.filter(isIthacaRole), campus }
+      : campus === "wcm"
+        ? { ...sel, types: sel.types.filter((t) => !isIthacaRole(t)), campus }
+        : { ...sel, campus };
   const toggle = (d: FacetDef, value: string) => {
-    if (d.key === "campus") return apply({ ...sel, campus: value === "ithaca" ? "ithaca" : "wcm" });
+    if (d.key === "campus")
+      return apply(toCampus(value === "ithaca" ? "ithaca" : value === "both" ? "all" : "wcm"));
     if (d.key === "nih") return apply({ ...sel, nih: value as NihFilter });
     const list = d.key === "type" ? sel.types : sel.units;
     const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
     apply(d.key === "type" ? { ...sel, types: next } : { ...sel, units: next });
   };
   const clear = (d: FacetDef) => {
-    if (d.key === "campus") return apply({ ...sel, campus: "wcm" });
+    if (d.key === "campus") return apply(toCampus("wcm"));
     if (d.key === "nih") return apply({ ...sel, nih: "all" });
     if (d.key === "type") return apply({ ...sel, types: [] });
     const mine = new Set(d.options.map((o) => o.value));
@@ -176,7 +215,7 @@ export function CoverageFilterBar({
               <span className="text-muted-foreground">{d.label}</span> {label}
               <button
                 type="button"
-                onClick={() => toggle(d, d.key === "nih" ? "all" : v)}
+                onClick={() => (d.single ? clear(d) : toggle(d, v))}
                 aria-label={`Remove ${d.label}: ${label}`}
                 className="text-muted-foreground hover:bg-apollo-surface-2 hover:text-foreground flex size-5 items-center justify-center rounded-full"
               >

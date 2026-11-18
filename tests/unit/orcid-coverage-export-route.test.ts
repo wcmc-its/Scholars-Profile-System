@@ -53,6 +53,24 @@ describe("GET /edit/orcid-coverage/export — unit labels", () => {
     expect(await res.text()).toContain("dept:N1234");
   });
 
+  it("campus=all leads the table with a Campus column; no campus and ithaca keep theirs", async () => {
+    const row = { people: 1, orcid: 0, confirmed: 0, strong: 0, weak: 0, era: 0, both: 0 };
+    const nih = { nihPeople: 0, nihOrcid: 0, nihStrong: 0, nihPi: 0, nihPiEra: 0 };
+    h.load.mockResolvedValue({
+      byDept: [{ key: "Physics", label: "Physics", campus: "ithaca", ...row, ...nih }],
+    });
+    const table = async (qs: string) => (await (await GET(req(qs))).text()).split("\r\n\r\n")[1];
+    const header = (await table("")).split("\r\n")[0];
+    expect(header.startsWith("Department,People,")).toBe(true);
+    expect((await table("?campus=ithaca")).split("\r\n")[0]).toBe(header);
+    expect((await table("?campus=mars")).split("\r\n")[0]).toBe(header);
+    const both = (await table("?campus=all")).split("\r\n");
+    expect(both[0]).toBe(`Campus,${header}`);
+    expect(both[1]).toBe("Cornell Ithaca,Physics,1,0,0,0.0,0,0,,,,,,,,,");
+    const res = await GET(req("?campus=all"));
+    expect(res.headers.get("Content-Disposition")).toMatch(/both-campuses/);
+  });
+
   it("skips the facet load when no unit is selected", async () => {
     const res = await GET(req(""));
     expect(res.status).toBe(200);

@@ -723,3 +723,244 @@ describe("inferenceSourceCounts", () => {
     ).toBe(0);
   });
 });
+
+describe("campus: WCM (default), Cornell Ithaca, both", () => {
+  const ith = (cwid: string, roleCategory: string, dept: string | null, orcid = false): ScholarRow => ({
+    ...s(cwid, roleCategory, dept, orcid, orcid),
+    campus: "ithaca",
+  });
+  // Anti-sorted against ITHACA_ROLES, and the biggest role (grad students) is last in it.
+  // "Dept A" also exists at WCM: the two must stay two rows.
+  const ITHACA: ScholarRow[] = [
+    ith("ig1", "ithaca_student_grad", "Physics"),
+    ith("ig2", "ithaca_student_grad", "Physics"),
+    ith("ig3", "ithaca_student_grad", "Dept A"),
+    ith("ir1", "ithaca_researcher", "Physics"),
+    ith("ip1", "ithaca_postdoc", "Physics", true),
+    ith("ie1", "ithaca_emeritus", null),
+    ith("it1", "ithaca_rte_faculty", "Dept A"),
+    ith("if1", "ithaca_faculty", "Physics", true),
+    ith("if2", "ithaca_faculty", "Dept A"),
+  ];
+  const WCM = SCHOLARS.map((r) => ({ ...r, campus: "wcm" }));
+  // An Ithaca cwid string on a grant and an eRA row: nothing WCM-only may count it.
+  const NIH_X = [...NIH, { cwid: "if1", latestEnd: new Date("2030-01-01T00:00:00Z"), pi: true }];
+  const ERA_X = [...ERA, "if1"];
+  const fold = (rows: ScholarRow[], raw: Record<string, string | string[]>, unit: Set<string> | null = null) =>
+    buildOrcidCoverage(rows, NIH_X, ERA_X, parseOrcidCoverageParams(raw), TODAY, CANDIDATES, [], unit);
+  const strip = <T extends { campus?: string }>(rows: T[]) =>
+    rows.map((r) => {
+      const copy = { ...r };
+      delete copy.campus;
+      return copy;
+    });
+
+  it("parse: absent campus is exactly the pre-campus parse; ithaca and all opt in; unknown → WCM", () => {
+    expect(parseOrcidCoverageParams({})).toEqual({
+      types: ["full_time_faculty"],
+      units: [],
+      nih: "all",
+      ignoredLegacyDept: false,
+    });
+    expect(parseOrcidCoverageParams({ type: "postdoc", unit: "dept:AB1", nih: "ever" })).toEqual({
+      types: ["postdoc"],
+      units: ["dept:AB1"],
+      nih: "ever",
+      ignoredLegacyDept: false,
+    });
+    expect(parseOrcidCoverageParams({ campus: "all", nih: "ever", unit: "dept:AB1" })).toMatchObject({
+      campus: "all",
+      nih: "ever",
+      units: ["dept:AB1"],
+      types: [],
+    });
+    // NIH and unit are WCM concepts: an Ithaca-only view drops them.
+    expect(parseOrcidCoverageParams({ campus: "ithaca", nih: "ever", unit: "dept:AB1" })).toEqual({
+      types: [],
+      units: [],
+      nih: "all",
+      campus: "ithaca",
+      ignoredLegacyDept: false,
+    });
+    for (const junk of ["mars", "ALL", "wcm", ""]) {
+      const p = parseOrcidCoverageParams({ campus: junk, nih: "ever" });
+      expect(p).not.toHaveProperty("campus");
+      expect(p).toEqual(parseOrcidCoverageParams({ nih: "ever" }));
+      expect(orcidCoverageQuery(p)).toBe("?nih=ever");
+    }
+    expect(parseOrcidCoverageParams(new URLSearchParams("campus=all")).campus).toBe("all");
+  });
+
+  it("query, active-filter count, criteria and filename carry the campus view", () => {
+    const all = parseOrcidCoverageParams({ campus: "all", nih: "ever" });
+    expect(orcidCoverageQuery(all)).toBe("?nih=ever&campus=all");
+    expect(parseOrcidCoverageParams(new URLSearchParams(orcidCoverageQuery(all).slice(1)))).toMatchObject(all);
+    expect(orcidCoverageActiveFilters(all)).toBe(2);
+    expect(orcidCoverageActiveFilters(parseOrcidCoverageParams({ nih: "ever" }))).toBe(1);
+    const at = new Date("2026-11-18T12:00:00Z");
+    expect(orcidCoverageCriteria(all, at).map(([k]) => k)).toEqual([
+      ...orcidCoverageCriteria(parseOrcidCoverageParams({ nih: "ever" }), at).map(([k]) => k),
+      "Campus",
+      "Campus note",
+    ]);
+    expect(orcidCoverageFilename(all, at)).toBe(
+      "orcid-coverage-by-department-nih-ever-both-campuses-2026-11-18.csv",
+    );
+  });
+
+  it("no campus: the fold and the CSV carry no campus anything, whatever the rows say", () => {
+    const before = build(parseOrcidCoverageParams({ nih: "ever" }));
+    const tagged = fold(WCM, { nih: "ever" });
+    expect(tagged).not.toHaveProperty("campuses");
+    for (const r of [...tagged.byRole, ...tagged.byDept]) expect(r).not.toHaveProperty("campus");
+    expect(JSON.stringify({ ...tagged, sources: 0 })).toBe(JSON.stringify({ ...before, sources: 0 }));
+    expect(orcidCoverageCsv(tagged.byDept)).toBe(orcidCoverageCsv(before.byDept));
+    expect(orcidCoverageCsv(tagged.byDept).startsWith("Department,People,")).toBe(true);
+  });
+
+  it("Cornell Ithaca: the six roles in roster order with their labels; departments by the Cornell department", () => {
+    const r = fold(ITHACA, { campus: "ithaca" });
+    expect(r.byRole.map((x) => [x.label, x.people])).toEqual([
+      ["Cornell Ithaca faculty", 2],
+      ["Cornell Ithaca RTE faculty", 1],
+      ["Cornell Ithaca emeritus", 1],
+      ["Cornell Ithaca postdoc", 1],
+      ["Cornell Ithaca research staff", 1],
+      ["Cornell Ithaca grad student", 3],
+    ]);
+    expect(r.byDept.map((x) => [x.label, x.people, x.orcid])).toEqual([
+      ["Physics", 5, 2],
+      ["Dept A", 3, 0],
+      ["No department", 1, 0],
+    ]);
+    // Headline tile = Ithaca faculty; no NIH tile population.
+    expect(r.tiles.overall).toMatchObject({ people: 9, orcid: 2, confirmed: 2 });
+    expect(r.tiles.fullTime).toMatchObject({ people: 2, orcid: 1 });
+    expect(r.tiles.nihFullTime.people).toBe(0);
+    // if1 sits on a grant and an eRA row by cwid string: still nothing WCM-only.
+    for (const c of [r.tiles.overall, ...r.byRole, ...r.byDept]) {
+      expect([c.era, c.both, c.nihPeople, c.nihOrcid, c.nihStrong, c.nihPi, c.nihPiEra]).toEqual([
+        0, 0, 0, 0, 0, 0, 0,
+      ]);
+    }
+    // `type` narrows the department table only, as at WCM.
+    const fac = fold(ITHACA, { campus: "ithaca", type: "ithaca_faculty" });
+    expect(fac.byDept.map((x) => [x.label, x.people])).toEqual([
+      ["Dept A", 1],
+      ["Physics", 1],
+    ]);
+    expect(fac.byRole).toEqual(r.byRole);
+    // The Ithaca CSV keeps the one-campus columns.
+    expect(orcidCoverageCsv(r.byDept).split("\r\n")[0]).toBe(orcidCoverageCsv([]).trimEnd());
+  });
+
+  it("both: each half is exactly its one-campus fold, and the totals are WCM + Ithaca", () => {
+    const wcm = fold(WCM, {});
+    const ithaca = fold(ITHACA, { campus: "ithaca" });
+    const all = fold([...ITHACA, ...WCM], { campus: "all", type: "full_time_faculty" });
+    const [w, i] = all.campuses!;
+    expect([w.campus, w.label, i.campus, i.label]).toEqual([
+      "wcm",
+      "Weill Cornell Medicine",
+      "ithaca",
+      "Cornell Ithaca",
+    ]);
+    expect(w.tiles).toEqual(wcm.tiles);
+    expect(i.tiles).toEqual(ithaca.tiles);
+    for (const k of Object.keys(wcm.tiles.overall) as (keyof typeof wcm.tiles.overall)[]) {
+      expect(all.tiles.overall[k]).toBe(wcm.tiles.overall[k] + ithaca.tiles.overall[k]);
+      expect(all.tiles.fullTime[k]).toBe(wcm.tiles.fullTime[k] + ithaca.tiles.fullTime[k]);
+      expect(w.total[k] + i.total[k]).toBe(all.tiles.overall[k]);
+    }
+    // Person types: WCM's rows then Ithaca's, each tagged; the subtotal is their sum.
+    expect(all.byRole.map((r) => r.campus)).toEqual([
+      ...wcm.byRole.map(() => "wcm"),
+      ...ithaca.byRole.map(() => "ithaca"),
+    ]);
+    expect(strip(all.byRole)).toEqual([...wcm.byRole, ...ithaca.byRole]);
+    expect(w.total.people).toBe(wcm.byRole.reduce((n, r) => n + r.people, 0));
+    expect(i.total.people).toBe(9);
+    // Departments: `type` is literal, so a WCM-only type leaves no Ithaca department.
+    expect(all.byDept.every((r) => r.campus === "wcm")).toBe(true);
+    expect(strip(all.byDept).sort((a, b) => a.label.localeCompare(b.label))).toEqual(
+      [...wcm.byDept].sort((a, b) => a.label.localeCompare(b.label)),
+    );
+  });
+
+  it("both: one department list, people desc, a same-named department once per campus", () => {
+    const all = fold([...WCM, ...ITHACA], { campus: "all" });
+    expect(all.byDept.map((r) => [r.campus, r.label, r.people])).toEqual([
+      ["ithaca", "Physics", 5],
+      ["wcm", "Dept A", 3],
+      ["ithaca", "Dept A", 3],
+      ["wcm", "Dept B", 3],
+      ["wcm", "Dept C", 2],
+      ["wcm", "No department", 1],
+      ["ithaca", "No department", 1],
+    ]);
+  });
+
+  it("both: the NIH and unit filters narrow the WCM half only", () => {
+    const all = fold([...WCM, ...ITHACA], { campus: "all", nih: "current" }, new Set(["f2", "f5", "ig1"]));
+    const [w, i] = all.campuses!;
+    expect(w.total.people).toBe(2); // f2 + f5: current AND in the unit
+    expect(i.total.people).toBe(9); // untouched
+    expect(all.byRole.filter((r) => r.campus === "ithaca").map((r) => r.people)).toEqual([
+      2, 1, 1, 1, 1, 3,
+    ]);
+    // Tiles stay unfiltered.
+    expect(w.tiles.overall.people).toBe(9);
+  });
+
+  it("both CSV: a leading Campus column; Ithaca rows leave the eRA and NIH cells blank", () => {
+    const all = fold([...WCM, ...ITHACA], { campus: "all" });
+    const lines = orcidCoverageCsv(all.byDept, true).trimEnd().split("\r\n");
+    expect(lines[0]).toBe(`Campus,${orcidCoverageCsv([]).trimEnd()}`);
+    expect(lines).toContain("Cornell Ithaca,Physics,5,2,2,40.0,0,0,,,,,,,,,");
+    expect(lines).toContain("Weill Cornell Medicine,Dept A,3,2,1,66.7,0,0,1,1,1,1,1,0,0,1,1");
+    expect(lines).toHaveLength(1 + all.byDept.length);
+    expect(lines.join("\n")).not.toMatch(/if1|ig1|0000-0002/);
+    // Without the flag the same rows print the one-campus columns.
+    expect(orcidCoverageCsv(all.byDept).startsWith("Department,")).toBe(true);
+    const exported = orcidCoverageExportCsv(all.byDept, [["Campus", "Both"]], true);
+    expect(exported).toBe(`Filter,Value\r\nCampus,Both\r\n\r\n${orcidCoverageCsv(all.byDept, true)}`);
+  });
+
+  it("loader: WCM and Ithaca reads are unchanged; all reads both populations plus campus", async () => {
+    const findMany = vi.fn().mockResolvedValue([...WCM, ...ITHACA]);
+    const queryRaw = vi.fn().mockResolvedValue([{ cwid: "f1" }]);
+    const client = {
+      scholar: { findMany },
+      grant: { groupBy: vi.fn().mockResolvedValue([]) },
+      personNihProfile: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidCandidate: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidDismissal: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: queryRaw,
+    } as unknown as OrcidCoverageClient;
+    const select = {
+      cwid: true,
+      roleCategory: true,
+      primaryDepartment: true,
+      orcid: true,
+      orcidConfirmedAt: true,
+    };
+    await loadOrcidCoverage(client, parseOrcidCoverageParams({ nih: "all" }));
+    expect(findMany.mock.calls[0][0]).toEqual({ where: { deletedAt: null, status: "active" }, select });
+    await loadOrcidCoverage(client, parseOrcidCoverageParams({ campus: "ithaca" }));
+    expect(findMany.mock.calls[1][0]).toEqual({
+      where: { deletedAt: null, campus: "ithaca", status: "external" },
+      select,
+    });
+    const r = await loadOrcidCoverage(client, parseOrcidCoverageParams({ campus: "all", unit: "dept:AB1" }));
+    expect(findMany.mock.calls[2][0]).toEqual({
+      where: {
+        deletedAt: null,
+        OR: [{ status: "active" }, { campus: "ithaca", status: "external" }],
+      },
+      select: { ...select, campus: true },
+    });
+    // The unit read stays WCM's (status = active): it can only ever match WCM rows.
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(r.campuses!.map((c) => c.total.people)).toEqual([1, 9]);
+  });
+});

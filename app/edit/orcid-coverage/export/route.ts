@@ -1,7 +1,8 @@
 /**
  * GET /edit/orcid-coverage/export — CSV of the `/edit/orcid-coverage`
  * department table (aggregates only — never a per-person list, see
- * `SCHOLAR_EXPORT_CAP`). Same `?type=&unit=&nih=` filter the page reads, parsed
+ * `SCHOLAR_EXPORT_CAP`). Same `?type=&unit=&nih=&campus=` filter the page reads
+ * (`campus=all` adds a leading Campus column; the other two keep theirs), parsed
  * and queried by the same functions (`parseOrcidCoverageParams`,
  * `loadOrcidCoverage`). The CSV opens with a `Filter,Value` criteria block
  * (`orcidCoverageCriteria`, the shared `personFilterCriteria` rows + NIH +
@@ -50,7 +51,11 @@ export async function GET(request: Request) {
       rows: byDept.length,
     }),
   );
-  const csv = orcidCoverageExportCsv(byDept, orcidCoverageCriteria(params, generatedAt, labels));
+  const csv = orcidCoverageExportCsv(
+    byDept,
+    orcidCoverageCriteria(params, generatedAt, labels),
+    params.campus === "all",
+  );
   return new NextResponse(csv, {
     status: 200,
     headers: {
