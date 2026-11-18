@@ -46,7 +46,12 @@ vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/lib/api/data-quality", () => ({ loadDataQualityFacets: h.mockFacets }));
 
 import EditOrcidCoveragePage from "@/app/edit/orcid-coverage/page";
-import { buildOrcidCoverage, parseOrcidCoverageParams } from "@/lib/edit/orcid-coverage";
+import {
+  buildOrcidCoverage,
+  openAuthorshipImpact,
+  parseOrcidCoverageParams,
+  type ScholarRow,
+} from "@/lib/edit/orcid-coverage";
 
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 const sp = (o: Record<string, string> = {}) => Promise.resolve(o);
@@ -607,5 +612,194 @@ describe("/edit/orcid-coverage — campus", () => {
       ["Weill Cornell Medicine subtotal", "1"],
       ["Cornell Ithaca subtotal", "4"],
     ]);
+  });
+});
+
+/** Open authorship rows waiting on an ORCID confirmation: one tile, one column in
+ *  each table, a definition; all absent when the fold has no fresh counts. */
+describe("/edit/orcid-coverage — open authorship rows waiting", () => {
+  const A = "0000-0002-1825-0097";
+  const B = "0000-0001-0000-000X";
+  const person = (
+    cwid: string,
+    roleCategory: string,
+    primaryDepartment: string,
+    orcid: string | null = null,
+    confirmed = false,
+    campus?: string,
+  ): ScholarRow => ({
+    cwid,
+    roleCategory,
+    primaryDepartment,
+    orcid,
+    orcidConfirmedAt: confirmed ? new Date("2026-09-20T00:00:00Z") : null,
+    ...(campus ? { campus } : {}),
+  });
+  const WCM = [
+    person("f1", "full_time_faculty", "Dept A", A, true), // confirmed: 0
+    person("f2", "full_time_faculty", "Dept A", A), // unconfirmed: 12
+    person("p1", "postdoc", "Dept B"), // candidate B: 1,300
+  ];
+  const ITHACA = [person("n1", "ithaca_faculty", "Physics", null, false, "ithaca")]; // candidate B too
+  const cand = (cwid: string) => ({
+    cwid,
+    orcid: B,
+    source: "orcid_email",
+    articlesAccepted: 0,
+    articlesRejected: 0,
+  });
+  const REFRESHED = new Date("2026-11-17T15:00:00Z");
+  const NOW = new Date("2026-11-18T12:00:00Z");
+  const withRows = (refreshedAt: Date | null) => {
+    const impact =
+      refreshedAt === null
+        ? null
+        : openAuthorshipImpact(
+            [
+              { orcid: A, openRows: 12, refreshedAt },
+              { orcid: B, openRows: 1300, refreshedAt },
+            ],
+            NOW,
+          );
+    h.mockLoad.mockImplementation(
+      async (_db: unknown, params: ReturnType<typeof parseOrcidCoverageParams>) =>
+        buildOrcidCoverage(
+          params.campus === "all" ? [...WCM, ...ITHACA] : params.campus === "ithaca" ? ITHACA : WCM,
+          [],
+          [],
+          params,
+          TODAY,
+          [cand("p1"), cand("n1")],
+          [],
+          null,
+          impact,
+        ),
+    );
+  };
+  const headers = (page: ReturnType<typeof within>, testId: string) =>
+    [...page.getByTestId(testId).querySelectorAll("thead th")].map((th) => th.textContent);
+  const lastCells = (page: ReturnType<typeof within>, testId: string) =>
+    [...page.getByTestId(testId).querySelectorAll("tbody tr")].map((tr) => [
+      tr.firstElementChild?.textContent,
+      tr.lastElementChild?.textContent,
+    ]);
+
+  it("with fresh counts: the tile, the definition, and a last column in both tables", async () => {
+    withRows(REFRESHED);
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({ searchParams: sp({ nih: "all" }) }),
+    );
+    const page = within(getByTestId("orcid-coverage-page"));
+    const tile = page.getByTestId("orcid-coverage-waiting").textContent;
+    expect(tile).toContain("Open authorship rows waiting on an ORCID confirmation");
+    expect(tile).toContain("1,312rows across 2 people");
+    expect(tile).toContain("Every person type.");
+    expect(tile).toContain("as of Nov 17, 2026");
+    // Inside the tile grid, after the three WCM tiles.
+    expect(page.getByTestId("orcid-coverage-tiles").lastElementChild).toBe(
+      page.getByTestId("orcid-coverage-waiting"),
+    );
+    expect(headers(page, "orcid-coverage-by-role").at(-1)).toBe("Open rows waiting");
+    expect(headers(page, "orcid-coverage-by-dept").at(-1)).toBe("Open rows waiting");
+    expect(lastCells(page, "orcid-coverage-by-role")).toEqual([
+      ["Full-time faculty", "12"],
+      ["Postdoc", "1,300"],
+    ]);
+    // The loader's order (people desc here) until the column is clicked.
+    expect(lastCells(page, "orcid-coverage-by-dept")).toEqual([
+      ["Dept A", "12"],
+      ["Dept B", "1,300"],
+    ]);
+    // The column is sortable like the others, and is in the full set too.
+    fireEvent.click(
+      within(page.getByTestId("orcid-coverage-by-dept")).getByText("Open rows waiting"),
+    );
+    expect(lastCells(page, "orcid-coverage-by-dept")[0]).toEqual(["Dept B", "1,300"]);
+    const cell = page.getByTestId("orcid-coverage-by-dept").querySelector("tbody tr td:last-child");
+    expect(cell?.getAttribute("title")).toBe("1,300 open rows across 1 person");
+    fireEvent.click(page.getByTestId("orcid-coverage-columns-all"));
+    expect(page.getByTestId("orcid-coverage-columns-all").textContent).toBe("All 15");
+    expect(headers(page, "orcid-coverage-by-role").at(-1)).toBe("Open rows waiting");
+    expect(getByTestId("orcid-coverage-page").textContent).toContain(
+      "A person whose iD is already confirmed counts zero.",
+    );
+  });
+
+  it("empty or stale table: no tile, no column, no definition; the page is what it is without the feature", async () => {
+    withRows(null);
+    const none = render(await EditOrcidCoveragePage({ searchParams: sp({ nih: "all" }) }));
+    const html = none.getByTestId("orcid-coverage-page").innerHTML;
+    const page = within(none.getByTestId("orcid-coverage-page"));
+    expect(page.queryByTestId("orcid-coverage-waiting")).toBeNull();
+    expect(headers(page, "orcid-coverage-by-role")).not.toContain("Open rows waiting");
+    expect(headers(page, "orcid-coverage-by-dept")).not.toContain("Open rows waiting");
+    expect(html).not.toContain("Open authorship rows");
+    expect(page.getByTestId("orcid-coverage-columns-all").textContent).toBe("All 14");
+    none.unmount();
+
+    // 49 hours old at NOW: `openAuthorshipImpact` gives the fold nothing.
+    withRows(new Date("2026-11-16T11:00:00Z"));
+    const stale = render(await EditOrcidCoveragePage({ searchParams: sp({ nih: "all" }) }));
+    expect(stale.getByTestId("orcid-coverage-page").innerHTML).toBe(html);
+  });
+
+  it("follows the campus: Cornell Ithaca alone, and a tile per campus side by side", async () => {
+    withRows(REFRESHED);
+    const one = render(await EditOrcidCoveragePage({ searchParams: sp({ campus: "ithaca" }) }));
+    const ithaca = within(one.getByTestId("orcid-coverage-page"));
+    expect(ithaca.getByTestId("orcid-coverage-waiting").textContent).toContain(
+      "1,300rows across 1 person",
+    );
+    expect(headers(ithaca, "orcid-coverage-by-dept")).toEqual([
+      "Department",
+      "People ↓",
+      "Coverage",
+      "Asserted",
+      "Open rows waiting",
+    ]);
+    one.unmount();
+
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({ searchParams: sp({ campus: "all", nih: "all" }) }),
+    );
+    const page = within(getByTestId("orcid-coverage-page"));
+    expect(page.queryByTestId("orcid-coverage-waiting")).toBeNull();
+    expect(page.getByTestId("orcid-coverage-waiting-wcm").textContent).toContain(
+      "1,312rows across 2 people",
+    );
+    expect(page.getByTestId("orcid-coverage-waiting-ithaca").textContent).toContain(
+      "1,300rows across 1 person",
+    );
+    expect(
+      within(page.getByTestId("orcid-coverage-tiles-ithaca")).getByTestId(
+        "orcid-coverage-waiting-ithaca",
+      ),
+    ).toBeTruthy();
+    expect(headers(page, "orcid-coverage-by-dept").slice(0, 2)).toEqual(["Department", "Campus"]);
+    expect(headers(page, "orcid-coverage-by-dept").at(-1)).toBe("Open rows waiting");
+    // The Cornell Ithaca row shows its count, not the "—" of a WCM-only column.
+    const physics = lastCells(page, "orcid-coverage-by-dept").find(
+      ([label]) => label === "Physics",
+    );
+    expect(physics).toEqual(["Physics", "1,300"]);
+    // Subtotal rows carry each campus's total.
+    expect(lastCells(page, "orcid-coverage-by-role")).toContainEqual([
+      "Weill Cornell Medicine subtotal",
+      "1,312",
+    ]);
+    expect(lastCells(page, "orcid-coverage-by-role")).toContainEqual([
+      "Cornell Ithaca subtotal",
+      "1,300",
+    ]);
+  });
+
+  it("the tile's scope names the unit and NIH filters it follows", async () => {
+    withRows(REFRESHED);
+    const { getByTestId } = render(
+      await EditOrcidCoveragePage({ searchParams: sp({ unit: "dept:AA1", nih: "none" }) }),
+    );
+    expect(
+      within(getByTestId("orcid-coverage-page")).getByTestId("orcid-coverage-waiting").textContent,
+    ).toContain("Every person type in Dept A · No NIH award on file.");
   });
 });

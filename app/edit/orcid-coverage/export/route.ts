@@ -6,7 +6,9 @@
  * and queried by the same functions (`parseOrcidCoverageParams`,
  * `loadOrcidCoverage`). The CSV opens with a `Filter,Value` criteria block
  * (`orcidCoverageCriteria`, the shared `personFilterCriteria` rows + NIH +
- * generated-at), one blank line, then the department table; the filename
+ * generated-at), one blank line, then the department table; when the page shows
+ * open authorship rows (`OrcidCoverage.impact`) the table gains that one last
+ * column and the criteria block its date, otherwise neither; the filename
  * carries a short filter summary. Gate order mirrors `/edit/data-sharing/export`:
  * no session → 401 · not `canViewUsage` → 404 · else text/csv attachment.
  */
@@ -35,7 +37,7 @@ export async function GET(request: Request) {
 
   const params = parseOrcidCoverageParams(new URL(request.url).searchParams);
   const generatedAt = new Date();
-  const [{ byDept }, labels] = await Promise.all([
+  const [{ byDept, impact }, labels] = await Promise.all([
     loadOrcidCoverage(db.read, params),
     // Labels only prettify the criteria block + filename; a facet-load failure
     // falls back to raw unit values (as the page captions do), not a 500.
@@ -53,8 +55,9 @@ export async function GET(request: Request) {
   );
   const csv = orcidCoverageExportCsv(
     byDept,
-    orcidCoverageCriteria(params, generatedAt, labels),
+    orcidCoverageCriteria(params, generatedAt, labels, impact),
     params.campus === "all",
+    impact !== undefined,
   );
   return new NextResponse(csv, {
     status: 200,

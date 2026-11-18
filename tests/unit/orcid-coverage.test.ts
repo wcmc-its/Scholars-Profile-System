@@ -10,6 +10,9 @@ import {
   buildOrcidCoverage,
   inferenceSourceCounts,
   loadOrcidCoverage,
+  openAuthorshipImpact,
+  CSV_WAITING_HEADER,
+  OPEN_AUTHORSHIP_MAX_AGE_HOURS,
   neither,
   nihNoOrcid,
   orcidCoverageCriteria,
@@ -962,5 +965,254 @@ describe("campus: WCM (default), Cornell Ithaca, both", () => {
     // The unit read stays WCM's (status = active): it can only ever match WCM rows.
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(r.campuses!.map((c) => c.total.people)).toEqual([1, 9]);
+  });
+});
+
+/** Open authorship rows waiting on an ORCID confirmation: `openAuthorshipImpact` (the
+ *  staleness gate) and the fold's per-person sum over unconfirmed iDs. */
+describe("open authorship rows waiting", () => {
+  const NOW = new Date("2026-11-18T12:00:00Z");
+  const FRESH = new Date("2026-11-18T03:00:00Z");
+  const A = "0000-0002-1825-0097"; // the iD `s(…, true)` puts on scholar.orcid
+  const B = "0000-0001-0000-000X";
+  const C = "0000-0001-0000-0003";
+  const D = "0000-0001-0000-0004";
+  const open = (orcid: string, openRows: number, refreshedAt = FRESH) => ({
+    orcid,
+    openRows,
+    refreshedAt,
+  });
+  const c = (cwid: string, orcid: string, source: string): CandidateRow => ({
+    cwid,
+    orcid,
+    source,
+    articlesAccepted: 5,
+    articlesRejected: 0,
+  });
+  const PEOPLE: ScholarRow[] = [
+    s("w1", "full_time_faculty", "Dept A", true, true), // confirmed A
+    s("w2", "full_time_faculty", "Dept A", true), // holds A, unconfirmed (Identity)
+    s("w3", "full_time_faculty", "Dept B"), // candidate B from two sources
+    s("w4", "postdoc", "Dept B"), // candidates C (dismissed) and D
+    s("w5", "postdoc", "Dept B"), // nothing on file
+  ];
+  const CANDS = [
+    c("w1", B, "rpm_inferred"), // a second iD beside a confirmed one: still 0
+    c("w3", B, "rpm_inferred"),
+    c("W3", B.toLowerCase(), "orcid_works"), // same person, same iD, another source
+    c("w4", C, "orcid_name"),
+    c("w4", D, "orcid_email"),
+  ];
+  const DISMISSED = [{ cwid: "w4", orcid: C }];
+  const IMPACT = openAuthorshipImpact([open(A, 10), open(B, 7), open(C, 100), open(D, 2)], NOW)!;
+  const ALL_TYPES = parseOrcidCoverageParams({ nih: "all" });
+  const run = (
+    impact: ReturnType<typeof openAuthorshipImpact>,
+    params = ALL_TYPES,
+    scholars = PEOPLE,
+    dismissals = DISMISSED,
+  ) => buildOrcidCoverage(scholars, [], [], params, TODAY, CANDS, dismissals, null, impact);
+
+  it("openAuthorshipImpact: an empty table or a copy older than 48 hours is nothing to show", () => {
+    expect(openAuthorshipImpact([], NOW)).toBeNull();
+    const hours = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
+    expect(OPEN_AUTHORSHIP_MAX_AGE_HOURS).toBe(48);
+    expect(openAuthorshipImpact([open(A, 1, hours(49))], NOW)).toBeNull();
+    const edge = openAuthorshipImpact([open(A, 1, hours(48))], NOW);
+    expect(edge?.refreshedAt).toEqual(hours(48));
+    // The newest row dates the copy; iDs are keyed bare and upper-case.
+    const mixed = openAuthorshipImpact(
+      [open(A, 1, hours(60)), open(B.toLowerCase(), 3, hours(1))],
+      NOW,
+    );
+    expect(mixed?.refreshedAt).toEqual(hours(1));
+    expect([...mixed!.byOrcid]).toEqual([
+      [A, 1],
+      [B, 3],
+    ]);
+  });
+
+  it("sums open rows over each person's unconfirmed iDs; a confirmed person contributes 0", () => {
+    const r = run(IMPACT);
+    const dept = Object.fromEntries(
+      r.byDept.map((d) => [d.label, [d.waitingRows, d.waitingPeople]]),
+    );
+    // Dept A: w1 confirmed → 0 (its candidate B ignored too); w2 holds A unconfirmed → 10.
+    expect(dept["Dept A"]).toEqual([10, 1]);
+    // Dept B: w3 → B once (7, not 14); w4 → D only (2; C is dismissed); w5 → 0.
+    expect(dept["Dept B"]).toEqual([9, 2]);
+    const role = Object.fromEntries(r.byRole.map((d) => [d.key, [d.waitingRows, d.waitingPeople]]));
+    expect(role).toEqual({ full_time_faculty: [17, 2], postdoc: [2, 1] });
+    expect(r.impact).toEqual({ refreshedAt: FRESH, rows: 19, people: 3 });
+  });
+
+  it("a dismissed pair is excluded: as a candidate, and as scholar.orcid", () => {
+    // Without the dismissal w4's C counts.
+    expect(run(IMPACT, ALL_TYPES, PEOPLE, []).impact).toMatchObject({ rows: 119, people: 3 });
+    // w2 dismissed the very iD on scholar.orcid: it counts nowhere.
+    expect(
+      run(IMPACT, ALL_TYPES, PEOPLE, [...DISMISSED, { cwid: "w2", orcid: A }]).impact,
+    ).toMatchObject({
+      rows: 9,
+      people: 2,
+    });
+  });
+
+  it("no impact data (empty or stale table): no waiting fields anywhere, and the result is what it was", () => {
+    const without = buildOrcidCoverage(PEOPLE, [], [], ALL_TYPES, TODAY, CANDS, DISMISSED);
+    const stale = run(openAuthorshipImpact([open(A, 10, new Date("2026-11-15T00:00:00Z"))], NOW));
+    expect(JSON.stringify(stale)).toBe(JSON.stringify(without));
+    expect(stale).not.toHaveProperty("impact");
+    for (const row of [...stale.byRole, ...stale.byDept, stale.tiles.overall]) {
+      expect(row).not.toHaveProperty("waitingRows");
+      expect(row).not.toHaveProperty("waitingPeople");
+    }
+    // Fresh data changes nothing but the added fields.
+    const strip = (o: unknown) =>
+      JSON.stringify(o, (k, v) =>
+        k === "waitingRows" || k === "waitingPeople" || k === "impact" ? undefined : v,
+      );
+    expect(strip(run(IMPACT))).toBe(strip(without));
+  });
+
+  it("the tile follows unit + NIH (the person-type table), not the type filter", () => {
+    const fac = run(IMPACT, parseOrcidCoverageParams({ type: "postdoc", nih: "all" }));
+    expect(fac.impact).toMatchObject({ rows: 19, people: 3 });
+    expect(fac.byDept.map((d) => [d.label, d.waitingRows])).toEqual([["Dept B", 2]]);
+    const unit = buildOrcidCoverage(
+      PEOPLE,
+      [],
+      [],
+      ALL_TYPES,
+      TODAY,
+      CANDS,
+      DISMISSED,
+      new Set(["w2"]),
+      IMPACT,
+    );
+    expect(unit.impact).toMatchObject({ rows: 10, people: 1 });
+  });
+
+  it("both campuses: each campus's subtotal carries its own rows; the total is their sum", () => {
+    const ithaca: ScholarRow[] = [
+      { ...s("n1", "ithaca_faculty", "Physics"), campus: "ithaca" },
+      { ...s("n2", "ithaca_postdoc", "Physics", true, true), campus: "ithaca" },
+    ];
+    const r = buildOrcidCoverage(
+      [...PEOPLE.map((p) => ({ ...p, campus: "wcm" })), ...ithaca],
+      [],
+      [],
+      parseOrcidCoverageParams({ campus: "all", nih: "all" }),
+      TODAY,
+      [
+        ...CANDS,
+        c("n1", D, "cornell_affiliation_manager"),
+        c("n2", D, "cornell_affiliation_manager"),
+      ],
+      DISMISSED,
+      null,
+      IMPACT,
+    );
+    const [w, i] = r.campuses!;
+    expect([w.total.waitingRows, w.total.waitingPeople]).toEqual([19, 3]);
+    // n1 → D (2); n2 is confirmed → 0.
+    expect([i.total.waitingRows, i.total.waitingPeople]).toEqual([2, 1]);
+    expect(r.impact).toMatchObject({ rows: 21, people: 4 });
+    const one = buildOrcidCoverage(
+      ithaca,
+      [],
+      [],
+      parseOrcidCoverageParams({ campus: "ithaca" }),
+      TODAY,
+      [c("n1", D, "cornell_affiliation_manager")],
+      [],
+      null,
+      IMPACT,
+    );
+    expect(one.impact).toMatchObject({ rows: 2, people: 1 });
+  });
+
+  it("CSV: the column and the criteria date appear only with impact data; without, byte-identical", () => {
+    const r = run(IMPACT);
+    const plain = orcidCoverageCsv(r.byDept);
+    expect(plain).toBe(
+      orcidCoverageCsv(
+        buildOrcidCoverage(PEOPLE, [], [], ALL_TYPES, TODAY, CANDS, DISMISSED).byDept,
+      ),
+    );
+    expect(plain.split("\r\n")[0]).not.toContain(CSV_WAITING_HEADER);
+    const lines = orcidCoverageCsv(r.byDept, false, true).split("\r\n");
+    expect(lines[0]).toBe(`${plain.split("\r\n")[0]},${CSV_WAITING_HEADER}`);
+    const byLabel = Object.fromEntries(
+      lines.slice(1).map((l) => [l.split(",")[0], l.split(",").at(-1)]),
+    );
+    expect(byLabel).toMatchObject({ "Dept A": "10", "Dept B": "9" });
+    // Each data line is the plain line plus the one cell.
+    plain
+      .split("\r\n")
+      .slice(1)
+      .forEach((l, n) => {
+        if (l !== "") expect(lines[n + 1].startsWith(`${l},`)).toBe(true);
+      });
+    const at = new Date("2026-11-18T12:00:00Z");
+    expect(orcidCoverageCriteria(ALL_TYPES, at, new Map(), r.impact)).toEqual([
+      ...orcidCoverageCriteria(ALL_TYPES, at),
+      ["Open authorship rows as of", FRESH.toISOString()],
+    ]);
+    expect(orcidCoverageExportCsv(r.byDept, [], false, true)).toContain(CSV_WAITING_HEADER);
+    expect(orcidCoverageExportCsv(r.byDept, [])).not.toContain(CSV_WAITING_HEADER);
+    // campus=all: the cell is filled for Cornell Ithaca too (it is not a WCM-only fact).
+    const both = orcidCoverageCsv(
+      [{ ...r.byDept[0], campus: "ithaca", waitingRows: 4 }],
+      true,
+      true,
+    ).split("\r\n");
+    expect(both[0].startsWith("Campus,Department,")).toBe(true);
+    expect(both[1].endsWith(",4")).toBe(true);
+  });
+
+  it("loadOrcidCoverage reads orcid_open_authorship; a failed read hides the numbers, not the page", async () => {
+    const base = {
+      scholar: {
+        findMany: vi.fn().mockResolvedValue([s("w2", "full_time_faculty", "Dept A", true)]),
+      },
+      grant: { groupBy: vi.fn().mockResolvedValue([]) },
+      personNihProfile: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidCandidate: { findMany: vi.fn().mockResolvedValue([]) },
+      orcidDismissal: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const fresh = new Date(Date.now() - 3_600_000);
+    const ok = await loadOrcidCoverage(
+      {
+        ...base,
+        orcidOpenAuthorship: { findMany: vi.fn().mockResolvedValue([open(A, 6, fresh)]) },
+      } as unknown as OrcidCoverageClient,
+      ALL_TYPES,
+    );
+    expect(ok.impact).toEqual({ refreshedAt: fresh, rows: 6, people: 1 });
+
+    const old = await loadOrcidCoverage(
+      {
+        ...base,
+        orcidOpenAuthorship: {
+          findMany: vi.fn().mockResolvedValue([open(A, 6, new Date(Date.now() - 49 * 3_600_000))]),
+        },
+      } as unknown as OrcidCoverageClient,
+      ALL_TYPES,
+    );
+    expect(old).not.toHaveProperty("impact");
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failed = await loadOrcidCoverage(
+      {
+        ...base,
+        orcidOpenAuthorship: { findMany: vi.fn().mockRejectedValue(new Error("no such table")) },
+      } as unknown as OrcidCoverageClient,
+      ALL_TYPES,
+    );
+    expect(failed).not.toHaveProperty("impact");
+    expect(failed.tiles.overall.people).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

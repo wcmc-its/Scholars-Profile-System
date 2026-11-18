@@ -71,6 +71,32 @@ describe("GET /edit/orcid-coverage/export — unit labels", () => {
     expect(res.headers.get("Content-Disposition")).toMatch(/both-campuses/);
   });
 
+  it("adds the open-authorship column and its date only when the loader returns impact", async () => {
+    const row = { people: 1, orcid: 0, confirmed: 0, strong: 0, weak: 0, era: 0, both: 0 };
+    const nih = { nihPeople: 0, nihOrcid: 0, nihStrong: 0, nihPi: 0, nihPiEra: 0 };
+    const byDept = [
+      { key: "Dept A", label: "Dept A", ...row, ...nih, waitingRows: 7, waitingPeople: 2 },
+    ];
+    const parts = async () => (await (await GET(req("?nih=all"))).text()).split("\r\n\r\n");
+
+    h.load.mockResolvedValue({ byDept });
+    const [criteria, table] = await parts();
+    expect(criteria).not.toContain("Open authorship rows");
+    expect(table.split("\r\n")[0].endsWith("NIH PI without eRA account")).toBe(true);
+    expect(table.split("\r\n")[1]).toBe("Dept A,1,0,0,0.0,0,0,0,0,1,0,0,0,0,0,0");
+
+    h.load.mockResolvedValue({
+      byDept,
+      impact: { refreshedAt: new Date("2026-11-17T15:00:00Z"), rows: 7, people: 2 },
+    });
+    const [criteria2, table2] = await parts();
+    expect(criteria2).toContain("Open authorship rows as of,2026-11-17T15:00:00.000Z");
+    expect(table2.split("\r\n")[0]).toBe(
+      `${table.split("\r\n")[0]},Open authorship rows waiting on ORCID confirmation`,
+    );
+    expect(table2.split("\r\n")[1]).toBe("Dept A,1,0,0,0.0,0,0,0,0,1,0,0,0,0,0,0,7");
+  });
+
   it("skips the facet load when no unit is selected", async () => {
     const res = await GET(req(""));
     expect(res.status).toBe(200);

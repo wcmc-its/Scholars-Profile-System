@@ -14,6 +14,9 @@
  * person-type table lists each campus under a heading row with a subtotal, the
  * department table gains a Campus column, and a Cornell Ithaca row shows "—" in
  * the WCM-only columns rather than a zero.
+ *
+ * `waiting` (the server has fresh open-authorship counts) appends one column to
+ * both tables on every campus; absent, the tables are exactly as before.
  */
 "use client";
 
@@ -58,12 +61,21 @@ type ColKey =
   | "nihA"
   | "nihNo"
   | "pi"
-  | "piNoEra";
+  | "piNoEra"
+  | "waiting";
 
 type Col = { key: ColKey; label: string; tip?: string; width: string };
 
 const NAME_COL: Col = { key: "name", label: "", width: "min-w-[150px]" };
 const CAMPUS_COL: Col = { key: "campus", label: "Campus", width: "" };
+
+/** Appended to either column set when the server sent open-authorship counts. */
+const WAITING_COL: Col = {
+  key: "waiting",
+  label: "Open rows waiting",
+  tip: "Open authorship rows carrying an ORCID iD these people have not yet confirmed",
+  width: "w-[104px]",
+};
 
 /** Columns fed by WCM-only data (eRA accounts, NIH awards): absent from the
  *  Cornell Ithaca view, "—" on a Cornell Ithaca row of the two-campus view. */
@@ -165,6 +177,8 @@ function value(r: CoverageRow, key: Exclude<ColKey, "name" | "campus">): number 
       return r.nihPi;
     case "piNoEra":
       return piNoEra(r);
+    case "waiting":
+      return r.waitingRows ?? 0;
   }
 }
 
@@ -243,7 +257,14 @@ function Cell({ r, col, isName }: { r: CoverageRow; col: Col; isName: boolean })
   }
   const v = value(r, key);
   return (
-    <td className={cn(base, v === 0 ? "text-apollo-border-strong" : "text-foreground")}>
+    <td
+      className={cn(base, v === 0 ? "text-apollo-border-strong" : "text-foreground")}
+      title={
+        key === "waiting"
+          ? `${v.toLocaleString()} open ${v === 1 ? "row" : "rows"} across ${(r.waitingPeople ?? 0).toLocaleString()} ${r.waitingPeople === 1 ? "person" : "people"}`
+          : undefined
+      }
+    >
       {v.toLocaleString()}
     </td>
   );
@@ -393,6 +414,24 @@ function Table({
 
 const TOP_DEPTS = 15;
 
+/** Table min-widths, [without, with] the open-rows column. Wide enough to read;
+ *  the table scrolls inside its own container below that. */
+const MIN_WIDTH = {
+  ithaca: {
+    summary: ["min-w-[480px]", "min-w-[590px]"],
+    all: ["min-w-[640px]", "min-w-[750px]"],
+  },
+  wcm: {
+    summary: ["min-w-[760px]", "min-w-[870px]"],
+    all: ["min-w-[1180px]", "min-w-[1290px]"],
+  },
+  /** The two-campus department table: one more (Campus) column. */
+  bothDept: {
+    summary: ["min-w-[920px]", "min-w-[1030px]"],
+    all: ["min-w-[1340px]", "min-w-[1450px]"],
+  },
+} as const;
+
 export function CoverageTables({
   byRole,
   byDept,
@@ -403,6 +442,7 @@ export function CoverageTables({
   defaultSort,
   campus,
   campuses,
+  waiting = false,
 }: {
   byRole: CoverageRow[];
   byDept: CoverageRow[];
@@ -419,6 +459,8 @@ export function CoverageTables({
   campus?: "ithaca" | "all";
   /** `campus = "all"`: each campus's label and person-type subtotal. */
   campuses?: CampusCoverage[];
+  /** The rows carry fresh open-authorship counts: show that column. */
+  waiting?: boolean;
 }) {
   const [colset, setColset] = React.useState<ColSet>("summary");
   const [sort, setSort] = React.useState<{ key: ColKey; dir: 1 | -1 }>({
@@ -427,22 +469,16 @@ export function CoverageTables({
   });
   const [query, setQuery] = React.useState("");
   const [showAll, setShowAll] = React.useState(false);
-  const baseCols = colset === "summary" ? SUMMARY_COLS : ALL_COLS;
-  const cols = campus === "ithaca" ? baseCols.filter((c) => !WCM_ONLY.has(c.key)) : baseCols;
+  const forCampus = (set: Col[]) => [
+    ...(campus === "ithaca" ? set.filter((c) => !WCM_ONLY.has(c.key)) : set),
+    ...(waiting ? [WAITING_COL] : []),
+  ];
+  const cols = forCampus(colset === "summary" ? SUMMARY_COLS : ALL_COLS);
   const deptCols = campus === "all" ? [cols[0], CAMPUS_COL, ...cols.slice(1)] : cols;
-  const allCount =
-    (campus === "ithaca" ? ALL_COLS.filter((c) => !WCM_ONLY.has(c.key)) : ALL_COLS).length - 1;
-  // Wide enough to read; the table scrolls inside its own container below that.
-  const minWidth =
-    campus === "ithaca"
-      ? colset === "all"
-        ? "min-w-[640px]"
-        : "min-w-[480px]"
-      : colset === "all"
-        ? "min-w-[1180px]"
-        : "min-w-[760px]";
-  const deptMinWidth =
-    campus === "all" ? (colset === "all" ? "min-w-[1340px]" : "min-w-[920px]") : minWidth;
+  const allCount = forCampus(ALL_COLS).length - 1;
+  const w = waiting ? 1 : 0;
+  const minWidth = MIN_WIDTH[campus === "ithaca" ? "ithaca" : "wcm"][colset][w];
+  const deptMinWidth = campus === "all" ? MIN_WIDTH.bothDept[colset][w] : minWidth;
 
   // Full-time faculty first: it is the population the tiles and the default
   // department filter are about.

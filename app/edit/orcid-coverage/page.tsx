@@ -21,6 +21,10 @@
  * there); `all` = both, the tile groups side by side (stacked on a phone), the
  * person-type table under a heading row per campus, a Campus column on the
  * department table and in its CSV.
+ * Open authorship rows waiting on an ORCID confirmation (`OrcidCoverage.impact`):
+ * one more tile and one more column in both tables and the CSV, only when the
+ * nightly copy is present and under 48 hours old; otherwise nothing is shown in
+ * their place and the page is exactly what it was.
  * No trend — there is no history table (a nightly snapshot row is the 10-line
  * ETL step if one is ever wanted). The only bars are proportions of the
  * current counts.
@@ -49,6 +53,7 @@ import {
   CAMPUS_LABELS,
   NIH_FILTER_LABELS,
   NIH_FILTERS,
+  OPEN_AUTHORSHIP_MAX_AGE_HOURS,
   STRONG_MIN_ACCEPTED,
   SUGGEST_MIN_ACCEPTED,
   loadOrcidCoverage,
@@ -125,6 +130,55 @@ function Tile({
   );
 }
 
+/** How much curator review work is waiting on ORCID confirmations: open authorship
+ *  rows carrying an iD the counted people have not yet confirmed. Unlike the
+ *  headline tiles it follows the filters (the person-type table's population). */
+function WaitingTile({
+  rows,
+  people,
+  refreshedAt,
+  scope,
+  testId,
+}: {
+  rows: number;
+  people: number;
+  refreshedAt: Date;
+  /** Who is counted, as a sentence: "Every person type in …." */
+  scope: string;
+  testId: string;
+}) {
+  return (
+    <div className={cn(cardClass, "flex flex-col gap-2.5 px-[18px] py-4")} data-testid={testId}>
+      <div className="text-muted-foreground text-xs font-medium tracking-[0.1em] uppercase">
+        Open authorship rows waiting on an ORCID confirmation
+      </div>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[32px] leading-none font-semibold tracking-[-0.01em] tabular-nums">
+          {rows.toLocaleString()}
+        </span>
+        <span className="text-muted-foreground text-sm">
+          {rows === 1 ? "row" : "rows"} across{" "}
+          <span className="text-foreground font-medium">{people.toLocaleString()}</span>{" "}
+          {people === 1 ? "person" : "people"}
+        </span>
+      </div>
+      <div className="text-muted-foreground flex flex-col gap-0.5 text-[13px]">
+        <span>{scope}</span>
+        <span>
+          Publications awaiting review as of{" "}
+          {refreshedAt.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            timeZone: "America/New_York",
+          })}
+          .
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Cornell Ithaca's headline tiles. No NIH tile: no Cornell award data is loaded. */
 function IthacaTiles({ tiles }: { tiles: CoverageTiles }) {
   return (
@@ -145,7 +199,7 @@ function WcmTiles({ tiles }: { tiles: CoverageTiles }) {
   );
 }
 
-function Definitions() {
+function Definitions({ waiting }: { waiting: boolean }) {
   return (
     <div className={cn(cardClass, "grid gap-x-8 gap-y-4 px-[22px] py-[18px] md:grid-cols-2")}>
       <Definition term="Asserted" swatch="bg-apollo-slate">
@@ -182,6 +236,15 @@ function Definitions() {
         Any NIH award on file for the person, whatever its dates. People add or confirm their iD
         in Scholars, under Identifiers &amp; profiles.
       </Definition>
+      {waiting ? (
+        <Definition term="Open authorship rows waiting">
+          Publications from Scopus or OpenAlex that are still awaiting review in Publication
+          Manager, where the source lists an ORCID iD for the author and that iD is one we hold for
+          the person but nobody has confirmed. Once the iD is confirmed, those rows can be settled
+          quickly. A person whose iD is already confirmed counts zero. Copied nightly; hidden when
+          the copy is more than {OPEN_AUTHORSHIP_MAX_AGE_HOURS} hours old.
+        </Definition>
+      ) : null}
     </div>
   );
 }
@@ -367,6 +430,7 @@ function Body({
       ? ` Unit and NIH funding filters narrow ${CAMPUS_LABELS.wcm} only.`
       : "";
   const byPeople = ithaca || both || params.nih === "none";
+  const { impact } = data;
   return (
     <>
       {both && data.campuses ? (
@@ -389,6 +453,20 @@ function Body({
               ) : (
                 <WcmTiles tiles={c.tiles} />
               )}
+              {impact ? (
+                <WaitingTile
+                  rows={c.total.waitingRows ?? 0}
+                  people={c.total.waitingPeople ?? 0}
+                  refreshedAt={impact.refreshedAt}
+                  // The unit and NIH filters narrow the WCM half only.
+                  scope={
+                    c.campus === "ithaca"
+                      ? "Every person type."
+                      : `Every person type${unitText}${nihLabel}.`
+                  }
+                  testId={`orcid-coverage-waiting-${c.campus}`}
+                />
+              ) : null}
             </section>
           ))}
         </div>
@@ -398,6 +476,15 @@ function Body({
           data-testid="orcid-coverage-tiles"
         >
           {ithaca ? <IthacaTiles tiles={tiles} /> : <WcmTiles tiles={tiles} />}
+          {impact ? (
+            <WaitingTile
+              rows={impact.rows}
+              people={impact.people}
+              refreshedAt={impact.refreshedAt}
+              scope={`Every person type${unitText}${nihLabel}.`}
+              testId="orcid-coverage-waiting"
+            />
+          ) : null}
         </div>
       )}
 
@@ -442,6 +529,7 @@ function Body({
         defaultSort={byPeople ? "people" : "nihNo"}
         {...(ithaca || both ? { campus: params.campus as "ithaca" | "all" } : {})}
         {...(both ? { campuses: data.campuses } : {})}
+        {...(impact ? { waiting: true } : {})}
       />
     </>
   );
@@ -525,7 +613,7 @@ export default async function EditOrcidCoveragePage({
               </>
             }
           >
-            <Definitions />
+            <Definitions waiting={coverage?.impact !== undefined} />
           </QueueIntro>
         </div>
         {coverage === null ? (
