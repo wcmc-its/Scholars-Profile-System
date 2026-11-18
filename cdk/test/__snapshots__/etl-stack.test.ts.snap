@@ -2322,6 +2322,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
@@ -3037,6 +3041,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
@@ -3689,6 +3697,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
@@ -4270,6 +4282,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TITLE_RESOLUTION",
                 "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
@@ -5292,6 +5308,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TITLE_RESOLUTION",
                 "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
@@ -14858,6 +14878,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
@@ -15573,6 +15597,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
@@ -16225,6 +16253,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLAR_DEGREE_PICKER",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_REQUIRE_DISPLAYABLE_AUTHOR",
                 "Value": "off",
               },
@@ -16805,6 +16837,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_TITLE_RESOLUTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_DEGREE_PICKER",
                 "Value": "on",
               },
               {
@@ -17827,6 +17863,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_TITLE_RESOLUTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLAR_DEGREE_PICKER",
                 "Value": "on",
               },
               {

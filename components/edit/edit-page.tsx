@@ -39,6 +39,7 @@ import {
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
 import { TitleField } from "@/components/edit/title-field";
+import { DegreeField } from "@/components/edit/degree-field";
 import { TechnologyEditCard } from "@/components/edit/technology-edit-card";
 import { NewsEditCard } from "@/components/edit/news-edit-card";
 import { DatasetsCard } from "@/components/edit/datasets-card";
@@ -1329,7 +1330,24 @@ function renderPanel(
                 ctx.scholar.primaryTitle
               ),
             },
-            { label: "Degrees", value: ctx.scholar.postnominal, issueId: "degrees-wrong" },
+            {
+              label: "Degrees",
+              issueId: "degrees-wrong",
+              alignTop: !!ctx.degreePicker && ctx.degreePicker.options.length > 0,
+              // Degree picker: ED by default; the scholar may pick from their
+              // ASMS degrees. Null = flag off, plain sourced value.
+              value: ctx.degreePicker ? (
+                <DegreeField
+                  cwid={cwid}
+                  options={ctx.degreePicker.options}
+                  selected={ctx.degreePicker.selected}
+                  directory={ctx.degreePicker.directory}
+                  current={ctx.scholar.postnominal}
+                />
+              ) : (
+                ctx.scholar.postnominal
+              ),
+            },
             { label: "Department", value: ctx.scholar.primaryDepartment, issueId: "department-wrong" },
             {
               label: "Institution",

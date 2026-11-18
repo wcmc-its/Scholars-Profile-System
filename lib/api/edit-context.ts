@@ -37,6 +37,8 @@ import {
 } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import type { ManualMentee } from "@/lib/edit/manual-mentee";
+import { isDegreePickerEnabled } from "@/lib/degree-picker";
+import { type DegreePickerState, loadDegreePickerState } from "@/lib/edit/degree-picks.server";
 import {
   isTitleResolutionEnabled,
   loadTitlePickerState,
@@ -712,6 +714,9 @@ export type EditContext = {
    *  pin, and any pending request. Null when `SCHOLAR_TITLE_RESOLUTION` is off
    *  (the Title row stays a plain read-only value) or the scholar vanished. */
   titlePicker: TitlePickerState | null;
+  /** Degree picker: the scholar's ASMS degree options and current pick. Null
+   *  when `SCHOLAR_DEGREE_PICKER` is off (the Degrees row stays read-only). */
+  degreePicker: DegreePickerState | null;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
   /** #1323 — historical appointments, reveal-to-show (curator / comms_steward). */
@@ -983,6 +988,7 @@ export async function loadEditContext(
       fullName: true,
       primaryTitle: true,
       postnominal: true,
+      directoryPostnominal: true,
       primaryDepartment: true,
       primaryOrgCode: true,
       email: true,
@@ -2115,6 +2121,9 @@ export async function loadEditContext(
       titlePicker: isTitleResolutionEnabled()
         ? await withRequesterName(await loadTitlePickerState(client, scholar.cwid), client)
         : null,
+      degreePicker: isDegreePickerEnabled()
+        ? await loadDegreePickerState(client, scholar.cwid, scholar.directoryPostnominal)
+        : null,
       scholar: {
         cwid: scholar.cwid,
         slug: scholar.slug,
@@ -2303,6 +2312,9 @@ export async function loadEditContext(
 
   return {
     titlePicker,
+    degreePicker: isDegreePickerEnabled()
+      ? await loadDegreePickerState(client, scholar.cwid, scholar.directoryPostnominal)
+      : null,
     scholar: {
       cwid: scholar.cwid,
       slug: scholar.slug,

@@ -228,7 +228,10 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           office: "Office of Faculty Affairs",
           email: FACULTY_AFFAIRS_EMAIL,
           sourceSystem: "ASMS (faculty system of record)",
-          note: "Your degree list is sourced from ASMS and imported into Enterprise Directory.",
+          // True with SCHOLAR_DEGREE_PICKER on or off: with it on, degrees ASMS
+          // already holds are chosen in the Degrees row; only a degree missing
+          // from ASMS needs Faculty Affairs.
+          note: "Your degrees are sourced from ASMS. Faculty Affairs can add a degree that is missing from ASMS.",
         }),
       },
       {

@@ -78,6 +78,8 @@ import {
   TITLE_REQUEST_FIELD,
 } from "@/lib/edit/title-picker";
 import { invalidateTitlesPendingCount } from "@/lib/edit/titles-queue";
+import { DEGREE_OVERRIDE_FIELD, isDegreePickerEnabled, validateDegreePick } from "@/lib/degree-picker";
+import { loadDegreeOptions } from "@/lib/edit/degree-picks.server";
 import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
@@ -196,6 +198,11 @@ async function handleScholarFieldEdit(params: {
     !isTitleResolutionEnabled()
   ) {
     return editError(400, "invalid_field", "fieldName");
+  }
+  // Degree picker — same dark-when-off shape.
+  if (fieldName === DEGREE_OVERRIDE_FIELD) {
+    if (!isDegreePickerEnabled()) return editError(400, "invalid_field", "fieldName");
+    return handleDegreeFieldEdit({ session, realCwid, impersonatedCwid, entityId, value, requestId });
   }
   if (fieldName === TITLE_OVERRIDE_FIELD || fieldName === TITLE_REQUEST_FIELD) {
     if (typeof value !== "string") return editError(400, "invalid_value", "value");
@@ -803,4 +810,118 @@ async function handleTitleFieldEdit(params: {
   }
 
   return editOk({ fieldName, value: clearing ? null : value, primaryTitle: nextTitle });
+}
+
+/**
+ * Degree picker. The scholar (or anyone who may edit their bio: superuser,
+ * comms_steward, granted proxy, unit admin) sets it directly — no approval,
+ * because every option comes from ASMS (Paul, 2026-11-18).
+ *
+ * `value` is an array of degree tokens, each one of `degreeOptions()` for this
+ * scholar; it is stored in display order. `value === ""` deletes the pick and
+ * restores the ED string from `Scholar.directoryPostnominal`. Writes
+ * `Scholar.postnominal` too, so the change shows now rather than at the next
+ * nightly; the ED ETL recomputes the same answer from the same module.
+ *
+ * Audit reuses `field_override` / `field_override_clear` (already in the ENUM;
+ * `field_name` is a VARCHAR), so no `scripts/sql/audit-log.sql` change.
+ */
+async function handleDegreeFieldEdit(params: {
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
+  requestId: string | null;
+  entityId: string;
+  value: unknown;
+}): Promise<NextResponse> {
+  const { session, realCwid, impersonatedCwid, requestId, entityId, value } = params;
+
+  // --- authorization (403) ---
+  const ov = await authorizeOverviewWrite({
+    session,
+    realCwid,
+    impersonatedCwid,
+    entityId,
+    proxyDb: db.read as unknown as ProxyLookup,
+    unitDb: db.read as unknown as UnitScholarLookup,
+  });
+  if (!ov.ok) {
+    logEditDenial({ actorCwid: session.cwid, targetCwid: entityId, path: PATH, reason: ov.reason });
+    return editError(403, ov.reason);
+  }
+  const viaUnitAdminUnit = ov.viaUnitAdminUnit;
+
+  // --- validation (400) — never free text ---
+  const scholar = await db.read.scholar.findUnique({
+    where: { cwid: entityId },
+    select: { directoryPostnominal: true },
+  });
+  if (!scholar) return editError(400, "invalid_target", "entityId");
+  const clearing = value === "";
+  let tokens: string[] | null = null;
+  if (!clearing) {
+    tokens = validateDegreePick(value, await loadDegreeOptions(db.read, entityId));
+    if (!tokens) return editError(400, "invalid_value", "value");
+  }
+  const stored = tokens ? JSON.stringify(tokens) : null;
+  const nextPostnominal = tokens ? tokens.join(", ") : scholar.directoryPostnominal;
+
+  try {
+    await db.write.$transaction(async (tx) => {
+      const key = {
+        entityType_entityId_fieldName: {
+          entityType: "scholar" as const,
+          entityId,
+          fieldName: DEGREE_OVERRIDE_FIELD,
+        },
+      };
+      const existing = await tx.fieldOverride.findUnique({ where: key, select: { value: true } });
+      if (stored === null) {
+        if (existing) await tx.fieldOverride.delete({ where: key });
+      } else {
+        await tx.fieldOverride.upsert({
+          where: key,
+          create: {
+            entityType: "scholar",
+            entityId,
+            fieldName: DEGREE_OVERRIDE_FIELD,
+            value: stored,
+            actorCwid: session.cwid,
+          },
+          update: { value: stored, actorCwid: session.cwid },
+        });
+      }
+      await tx.scholar.update({ where: { cwid: entityId }, data: { postnominal: nextPostnominal } });
+      await appendAuditRow(tx, {
+        actorCwid: realCwid,
+        impersonatedCwid,
+        targetEntityType: "scholar",
+        targetEntityId: entityId,
+        action: clearing ? "field_override_clear" : "field_override",
+        fieldsChanged: [DEGREE_OVERRIDE_FIELD],
+        beforeValues: { degree_pick: existing?.value ?? null },
+        afterValues: {
+          degree_pick: stored,
+          postnominal: nextPostnominal,
+          ...(viaUnitAdminUnit
+            ? {
+                edited_via: "unit_admin",
+                via_unit_type: viaUnitAdminUnit.kind,
+                via_unit_code: viaUnitAdminUnit.code,
+              }
+            : {}),
+        },
+        ts: new Date(),
+        requestId,
+      });
+    });
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
+  }
+
+  const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
+  if (profile) await reflectOverviewEdit(profile.slug);
+
+  return editOk({ fieldName: DEGREE_OVERRIDE_FIELD, value: tokens, postnominal: nextPostnominal });
 }

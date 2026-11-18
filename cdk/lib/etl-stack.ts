@@ -1161,6 +1161,9 @@ export class EtlStack extends Stack {
       // title-resolution post-pass. Matches the app-stack.ts copy. Turning it
       // off returns every title to override ?? ED primary on the next nightly.
       SCHOLAR_TITLE_RESOLUTION: "on",
+      // SCHOLAR_DEGREE_PICKER — read by etl/ed/index.ts to apply scholars'
+      // degree picks to Scholar.postnominal. Matches the app-stack.ts copy.
+      SCHOLAR_DEGREE_PICKER: envConfig.envName === "staging" ? "on" : "off",
       // #718 -- publications-index exclusion of pubs with zero displayable WCM
       // authors (isRequireDisplayableAuthorEnabled, lib/search-index-docs.ts),
       // read by the search:index build (SearchIndexNightly / SearchIndexWeekly
