@@ -27,7 +27,13 @@ export type CenterHistoryViewProps = {
   /** the audit read failed (e.g. the read role lacks SELECT on the audit table):
    *  render an honest "unavailable" notice instead of an empty/"no changes" state. */
   unavailable?: boolean;
+  /** lowercased CWID → display name, resolved server-side by the page. A CWID
+   *  absent here renders as itself (resolution failed). */
+  names?: Readonly<Record<string, string>>;
 };
+
+const nameFor = (names: Readonly<Record<string, string>>, cwid: string): string =>
+  names[cwid.trim().toLowerCase()] ?? cwid;
 
 const CHANGE_LABEL: Record<CenterAuditEntry["changeKind"], string> = {
   add: "Added",
@@ -92,6 +98,7 @@ export function CenterHistoryView({
   entries,
   windowDays,
   unavailable = false,
+  names = {},
 }: CenterHistoryViewProps) {
   return (
     <div className="bg-apollo-page min-h-screen">
@@ -148,13 +155,18 @@ export function CenterHistoryView({
                   >
                     <td className="px-3 py-2 whitespace-nowrap">{formatTs(e.ts)}</td>
                     <td className="px-3 py-2">
-                      {e.actorCwid}
+                      {nameFor(names, e.actorCwid)}
                       {e.impersonatedCwid && (
-                        <span className="text-muted-foreground"> (as {e.impersonatedCwid})</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          (as {nameFor(names, e.impersonatedCwid)})
+                        </span>
                       )}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">{CHANGE_LABEL[e.changeKind]}</td>
-                    <td className="px-3 py-2 font-medium whitespace-nowrap">{e.targetCwid || "—"}</td>
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">
+                      {e.targetCwid ? nameFor(names, e.targetCwid) : "—"}
+                    </td>
                     <td className="px-3 py-2">
                       <DiffSummary entry={e} />
                     </td>

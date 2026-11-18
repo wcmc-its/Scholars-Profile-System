@@ -104,6 +104,13 @@ describe("OpportunityIntakePanel — batches and status tabs", () => {
     expect(screen.getByText("solo.org")).toBeTruthy();
   });
 
+  it("names the submitter on a non-batch row, cwid as a secondary", async () => {
+    mockFetch(SUBMISSIONS, {}, { paa2013: "Paul Admin" });
+    render(<OpportunityIntakePanel />);
+    const row = (await screen.findByText("solo.org")).closest("li")!;
+    expect(row.textContent).toContain("Paul Admin (paa2013) ·");
+  });
+
   it("filters by status tab, with counts from the full list", async () => {
     mockFetch();
     render(<OpportunityIntakePanel />);

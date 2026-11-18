@@ -123,6 +123,7 @@ export function ConceptChipRow({ items, slug }: { items: ConceptItem[]; slug: st
             key={`${item.label}-${i}`}
             data-ccr-chip
             href={conceptHref(slug, item.ui)}
+            prefetch={false}
             onClick={(e) => e.stopPropagation()}
             className={`${CHIP_CLASS} ${FOCUS_RING}`}
           >

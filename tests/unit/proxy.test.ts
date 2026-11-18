@@ -91,6 +91,20 @@ const KNOWN_CWID_LATE = "zzz9002";
 const UNKNOWN_CWID = "zzz9999notincorpus";
 
 describe("proxy — B14 legacy VIVO redirects", () => {
+  it.each([
+    ["/display/pubid12345", "/scholars/by-pmid/12345"],
+    ["/individual/pubid12345/", "/scholars/by-pmid/12345"],
+  ])("301s legacy publication %s to %s", async (path, target) => {
+    const res = await proxy(new NextRequest(`${ORIGIN}${path}`));
+    expect(res.status).toBe(301);
+    expect(new URL(res.headers.get("location")!, ORIGIN).pathname).toBe(target);
+  });
+
+  it("does not redirect a malformed pubid", async () => {
+    const res = await proxy(new NextRequest(`${ORIGIN}/display/pubid12x`));
+    expect(res.status).not.toBe(301);
+  });
+
   it("301s /display/cwid-{cwid} to /scholars/by-cwid/{cwid} when the CWID is in the set (B14-3)", async () => {
     const res = await proxy(
       new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}`),

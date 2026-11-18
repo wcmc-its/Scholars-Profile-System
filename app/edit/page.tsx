@@ -24,6 +24,7 @@ import { isCoreDirector } from "@/lib/auth/core-director";
 import { isObserver } from "@/lib/auth/observer";
 import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { GLOBAL_ROLE_HOME, resolveGlobalRole } from "@/lib/auth/global-roles";
+import { isResearchSecurityDashboardEnabled } from "@/lib/edit/research-security-dashboard";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
@@ -50,7 +51,7 @@ import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { hasAnyReportAccess } from "@/lib/edit/report-access";
 import { registryDashboards } from "@/lib/auth/functional-role-authz";
 import { isDashboardFlagOn } from "@/lib/edit/dashboard-access";
-import { DASHBOARD_HREF, DASHBOARDS } from "@/lib/edit/functional-roles";
+import { DASHBOARD_HREF, DASHBOARDS, UNGRANTABLE_DASHBOARDS } from "@/lib/edit/functional-roles";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
@@ -152,7 +153,12 @@ export default async function EditSelfPage({
     // question. Was a single-role check (#2482); widened 2026-08-19 after
     // `/edit`'s own "Go to my own profile editor" link 404'd for the other
     // three roles, the same profile-less trap #2482 had already found once.
-    const globalRole = await resolveGlobalRole(editCwid);
+    // A role whose one page is dark has no home to send anyone to, and a
+    // sensitive role is not followed for a non-superuser's "View as".
+    const globalRole = await resolveGlobalRole(editCwid, {
+      viewerCwid: session.cwid,
+      exclude: isResearchSecurityDashboardEnabled() ? [] : ["research_security_viewer"],
+    });
     if (globalRole) {
       redirect(GLOBAL_ROLE_HOME[globalRole].href);
     }
@@ -210,7 +216,9 @@ export default async function EditSelfPage({
     // An ad hoc dashboard grantee (a `dash:` Reporting scope) with nothing
     // else: land on the first dashboard they hold whose flag is on.
     const granted = await registryDashboards(editCwid);
-    const dashboard = DASHBOARDS.find((d) => isDashboardFlagOn(d) && granted.has(d));
+    const dashboard = DASHBOARDS.find(
+      (d) => isDashboardFlagOn(d) && !UNGRANTABLE_DASHBOARDS.has(d) && granted.has(d),
+    );
     if (dashboard) {
       redirect(DASHBOARD_HREF[dashboard]);
     }
@@ -459,6 +467,7 @@ export default async function EditSelfPage({
             methodsTab={tabs.methods ? 0 : null}
             roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
             dataSharingTab={tabs.dataSharing ? 0 : null}
+            researchSecurityTab={tabs.researchSecurity}
             reportsTab={tabs.reports}
             newsTab={tabs.news}
             pendingNews={pendingNews}

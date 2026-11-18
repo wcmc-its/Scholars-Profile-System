@@ -8,7 +8,8 @@
  *
  * Body: { awardIds: string[] } — 1 to 50 distinct ids.
  *
- * Gate: exactly the PATCH's — `canEditUnit` on the center, checked before the
+ * Gate: exactly the PATCH's — `authorizeNci2aWrite` (`canEditUnit` on the
+ * center, or with `LEADER_REPORT_ACCESS` on a program leader of it), checked before the
  * body is looked at.
  *
  * One MySQL transaction. The rows are read INSIDE it (the writer, not the read
@@ -27,12 +28,8 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import {
-  canEditUnit,
-  getEffectiveUnitRole,
-  logEditDenial,
-  type UnitAdminLookup,
-} from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeNci2aWrite } from "@/lib/edit/unit-leader-access";
 import { NCI2A_ACCEPT_CAP, type Nci2aAcceptResult } from "@/lib/edit/nci-2a-report";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
@@ -60,12 +57,8 @@ export async function POST(
   const center = await db.read.center.findUnique({ where: { code }, select: { code: true } });
   if (!center) return editError(404, "unit_not_found", "code");
 
-  const effective = await getEffectiveUnitRole(
-    session,
-    { kind: "center", code: center.code },
-    db.read as unknown as UnitAdminLookup,
-  );
-  const authz = canEditUnit(session, effective);
+  // canEditUnit, or (LEADER_REPORT_ACCESS) a program leader of this center.
+  const authz = await authorizeNci2aWrite(session, center.code, db.read);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: realCwid,

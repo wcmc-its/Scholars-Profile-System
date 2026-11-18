@@ -12,21 +12,21 @@ sandbox, and flipping one env var.
 
 | Item          | Value                                                                                                                                          |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sender (From) | `no-reply-scholars@weill.cornell.edu`                                                                                                          |
+| Sender (From) | `no-reply@scholars-mail.weill.cornell.edu`                                                                                                          |
 | Flag env var  | `SELF_EDIT_REQUEST_CHANGE_SEND` (ships `off`)                                                                                                  |
-| From env var  | `SCHOLARS_MAIL_FROM` (ships `no-reply-scholars@weill.cornell.edu`)                                                                             |
-| IAM grant     | task role `sps-task-<env>-ses`: `ses:SendEmail`, `Resource: …:identity/*`, conditioned `ses:FromAddress = no-reply-scholars@weill.cornell.edu` |
+| From env var  | `SCHOLARS_MAIL_FROM` (ships `no-reply@scholars-mail.weill.cornell.edu`)                                                                             |
+| IAM grant     | task role `sps-task-<env>-ses`: `ses:SendEmail`, `Resource: …:identity/*`, conditioned `ses:FromAddress = no-reply@scholars-mail.weill.cornell.edu` |
 | Region        | the AppStack region (`SES` must be enabled there)                                                                                              |
 
 ## 1. Verify the sender identity (DKIM / domain)
 
-Do **not** use email-address verification — `no-reply-scholars@…` is an
+Do **not** use email-address verification — `no-reply@…` is an
 unattended mailbox and cannot click a verification link. Verify the **domain**
 (or a subdomain) with DKIM instead:
 
 1. In SES → **Verified identities** → _Create identity_ → **Domain**
-   (`weill.cornell.edu`, or a dedicated subdomain such as
-   `scholars.weill.cornell.edu` if central IT prefers to scope it).
+   — done: `scholars-mail.weill.cornell.edu` is verified (DKIM) and is the
+   sender domain.
 2. SES issues **three DKIM CNAME records**. File these with WCM central DNS
    (they own `weill.cornell.edu`). Verification completes when the CNAMEs
    resolve — typically minutes to a few hours.

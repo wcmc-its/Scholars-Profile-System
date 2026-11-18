@@ -32,7 +32,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isCwid } from "@/lib/cwid";
-import { MAX_MANUAL_MENTEES, type ManualMentee } from "@/lib/edit/manual-mentee";
+import {
+  MAX_CURRENT_POSITION,
+  MAX_MANUAL_MENTEES,
+  type ManualMentee,
+} from "@/lib/edit/manual-mentee";
 
 /** The editable draft the add / edit form works on (strings, blank = unset).
  *  Exported (with `MenteeForm` / `draftToEntry` / `mapErrorToMessage`) so the
@@ -42,9 +46,11 @@ export type Draft = {
   cwid: string;
   programLabel: string;
   year: string;
+  /** Optional so the suggestion cards' prefilled drafts need no change. */
+  currentPosition?: string;
 };
 
-const EMPTY_DRAFT: Draft = { name: "", cwid: "", programLabel: "", year: "" };
+const EMPTY_DRAFT: Draft = { name: "", cwid: "", programLabel: "", year: "", currentPosition: "" };
 
 const GENERIC_ERROR = "Something went wrong — your changes weren’t saved. Please try again.";
 
@@ -394,6 +400,24 @@ export function MenteeForm({
       </label>
       {!yearOk ? <p className="text-destructive text-xs">Please enter a four-digit year.</p> : null}
 
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="font-medium">Current position (optional)</span>
+        <Input
+          value={draft.currentPosition ?? ""}
+          onChange={(e) => set("currentPosition", e.target.value)}
+          placeholder="e.g. Assistant Professor, University of X"
+          maxLength={MAX_CURRENT_POSITION}
+          aria-describedby={`manual-mentee-position-help-${idPrefix}`}
+          data-testid={`manual-mentee-position-${idPrefix}`}
+        />
+        <span
+          id={`manual-mentee-position-help-${idPrefix}`}
+          className="text-muted-foreground text-xs"
+        >
+          Where they are now, if they&rsquo;ve moved on. Shown on the public profile.
+        </span>
+      </label>
+
       <div className="flex items-center gap-2">
         <Button
           type="button"
@@ -412,9 +436,15 @@ export function MenteeForm({
   );
 }
 
-/** A listed row's muted meta line: program · year. */
+/** A listed row's muted meta line: program · year · Now: current position. */
 function metaLine(row: ManualMentee): string {
-  return [row.programLabel, row.year ? String(row.year) : null].filter(Boolean).join(" · ");
+  return [
+    row.programLabel,
+    row.year ? String(row.year) : null,
+    row.currentPosition ? `Now: ${row.currentPosition}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** Blank optional strings drop out entirely — the validator stores no empty keys. */
@@ -426,6 +456,8 @@ export function draftToEntry(d: Draft): ManualMentee {
   if (programLabel) entry.programLabel = programLabel;
   const year = d.year.trim();
   if (year) entry.year = Number(year);
+  const currentPosition = (d.currentPosition ?? "").trim();
+  if (currentPosition) entry.currentPosition = currentPosition;
   return entry;
 }
 
@@ -435,6 +467,7 @@ function entryToDraft(row: ManualMentee): Draft {
     cwid: row.cwid ?? "",
     programLabel: row.programLabel ?? "",
     year: row.year ? String(row.year) : "",
+    currentPosition: row.currentPosition ?? "",
   };
 }
 

@@ -299,15 +299,21 @@ describe("/edit/core/[coreId] — non-Scholar staff names", () => {
   });
 
   it("falls back to ONE ED lookup for CWIDs neither Scholar nor a stored name covers", async () => {
-    mockResolveDirectoryNames.mockResolvedValue(new Map([["stf0001", "Sam Staff"]]));
+    mockResolveDirectoryNames.mockResolvedValue(
+      new Map([
+        ["stf0001", "Sam Staff"],
+        ["sup001", "Sue Super"],
+      ]),
+    );
     const result = await EditCorePage({ params: params("2"), searchParams: searchParams() });
     const props = findByType(result, mockSections)!.props;
     expect(mockResolveDirectoryNames).toHaveBeenCalledTimes(1);
-    expect(mockResolveDirectoryNames).toHaveBeenCalledWith(["stf0001"]);
+    // The granter rides the same batch, so "Granted by" reads as a name.
+    expect(mockResolveDirectoryNames).toHaveBeenCalledWith(["stf0001", "sup001"]);
     expect(props.leaders).toMatchObject([{ cwid: "stf0001", name: "Sam Staff" }]);
     expect(props.access).toMatchObject([
-      { cwid: "stf0001", name: "Sam Staff" },
-      { cwid: "stf0002", name: "Stored Name" },
+      { cwid: "stf0001", name: "Sam Staff", grantedByName: "Sue Super" },
+      { cwid: "stf0002", name: "Stored Name", grantedByName: "Sue Super" },
     ]);
   });
 

@@ -703,7 +703,7 @@ export async function runAssignments(
     const memberRows: MemberRow[] = await conn.query(
       "SELECT m.cwid, m.program_code, m.start_date, m.end_date, s.preferred_name, " +
         "s.pops_specialties, s.pops_board_certifications FROM center_membership m " +
-        "LEFT JOIN scholar s ON s.cwid = m.cwid WHERE m.center_code = 'meyer_cancer_center'",
+        "LEFT JOIN scholar s ON s.cwid = m.cwid AND s.campus = 'wcm' WHERE m.center_code = 'meyer_cancer_center'",
     );
     const members: Member[] = memberRows
       .filter((r) => {

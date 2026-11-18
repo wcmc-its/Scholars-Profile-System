@@ -27,11 +27,15 @@
  * Authz mirrors `/api/edit/center-program`: Curator/Owner of the center, or
  * Superuser/comms_steward (`canEditUnit`) — this is real dollar-figure award
  * data, gated like every other unit-content edit surface, not a public read.
+ * With `LEADER_REPORT_ACCESS` on, the center's leaders (program leaders
+ * included) may read it too (`authorizeUnitReportView`); writes are gated
+ * separately (`authorizeNci2aWrite`).
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeUnitReportView } from "@/lib/edit/unit-leader-access";
 import { loadNci2aReport } from "@/lib/edit/nci-2a-report.server";
 import { editError, editOk, resolveEditIdentity } from "@/lib/edit/request";
 
@@ -49,12 +53,8 @@ export async function GET(
   const center = await db.read.center.findUnique({ where: { code }, select: { code: true } });
   if (!center) return editError(404, "unit_not_found", "code");
 
-  const effective = await getEffectiveUnitRole(
-    session,
-    { kind: "center", code: center.code },
-    db.read as unknown as UnitAdminLookup,
-  );
-  const authz = canEditUnit(session, effective);
+  // Report data: the unit's editors, or (LEADER_REPORT_ACCESS) its leaders.
+  const authz = await authorizeUnitReportView(session, { kind: "center", code: center.code }, db.read);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: realCwid,

@@ -143,6 +143,7 @@ export function ActivitiesHeader<T extends string>({
           {picked && (
             <Link
               href={profilePath(picked.slug)}
+              prefetch={false}
               className="text-apollo-slate w-max text-[13px] hover:underline"
               data-testid="activities-picked-profile"
             >

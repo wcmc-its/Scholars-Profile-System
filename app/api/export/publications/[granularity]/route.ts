@@ -44,7 +44,11 @@ import type {
   WcmAuthorRole,
 } from "@/lib/api/search";
 import type { MentoringProgramKey } from "@/lib/api/mentoring-pmids";
-import { resolvePublicationMeshOnlyFilter } from "@/lib/api/search-flags";
+import {
+  resolvePublicationMeshOnlyFilter,
+  resolveSearchPubsTranslationalStageFacet,
+} from "@/lib/api/search-flags";
+import { isTranslationalStage } from "@/lib/translational-stage";
 import { toCsv, type CsvCell } from "@/lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -112,6 +116,13 @@ function parseBody(body: unknown): ExportRequest | null {
   // Institution facet — `searchPublications` gates it on
   // `SEARCH_PUB_INSTITUTION_FACET`; the export builders mirror the live clause.
   if (isStringArray(f.institution)) filters.institution = f.institution;
+  // Translational stage facet — the export builders apply this clause
+  // unconditionally, so gate the flag HERE (as with `meshOnly` below): a
+  // hand-crafted body cannot filter on the stage while the flag is off.
+  if (isStringArray(f.translationalStage) && resolveSearchPubsTranslationalStageFacet()) {
+    const stages = f.translationalStage.filter(isTranslationalStage);
+    if (stages.length > 0) filters.translationalStage = stages;
+  }
   // Issue #396 — "Show only MeSH-tagged matches". Unlike the department clause,
   // `searchPublications` does NOT gate `meshOnly` internally, so gate the flag
   // HERE (as the route/page do) to keep the off-is-inert contract uniform — a

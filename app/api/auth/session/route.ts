@@ -69,7 +69,7 @@ type ScholarLite = { slug: string; preferredName: string };
 type ImpersonatingBlock = {
   targetCwid: string;
   targetName: string;
-  role: "owner" | "curator" | "scholar" | "comms_steward" | GlobalRole;
+  role: "owner" | "curator" | "scholar" | "comms_steward" | "proxy" | GlobalRole;
   unitKind: ImpersonationUnitKind | null;
   unit: string | null;
   startedAt: number;
@@ -137,7 +137,7 @@ export async function GET(): Promise<NextResponse> {
   // this route was half the prod ALB p99 tail (p90 1.8 s, 2026-10-13). A
   // superuser now pays for the lookups it ignores below, in parallel and at no
   // latency cost. All are fail-closed: a directory hiccup just hides a surface.
-  const [superuser, developerRaw, contentEditorRaw, observer, commsStewardRaw, manageable] =
+  const [superuser, developerRaw, contentEditorRaw, observer, commsStewardRaw, manageable, proxyFor] =
     await Promise.all([
       isSuperuser(session.cwid).catch(() => false),
       // isDeveloper is self-gated by DEVELOPMENT_ENABLED.
@@ -150,6 +150,26 @@ export async function GET(): Promise<NextResponse> {
       isCoreDirector(session.cwid)
         .then((cd) => loadManageableUnits(session.cwid, db.read, { allCores: cd }))
         .catch(() => null),
+      // Scholars this cwid serves as an assigned proxy (#779) — one indexed
+      // lookup on `scholar_proxy.proxy_cwid`, then live scholar names.
+      Promise.resolve()
+        .then(() =>
+          db.read.scholarProxy.findMany({
+            where: { proxyCwid: session.cwid },
+            select: { scholarCwid: true },
+          }),
+        )
+        .then((rows) =>
+          rows.length === 0
+            ? []
+            : db.read.scholar.findMany({
+                where: { cwid: { in: rows.map((r) => r.scholarCwid) }, deletedAt: null },
+                select: { cwid: true, preferredName: true },
+                orderBy: { preferredName: "asc" },
+              }),
+        )
+        .then((rows) => rows.map((r) => ({ cwid: r.cwid, name: r.preferredName })))
+        .catch(() => []),
     ]);
 
   // GrantRecs Phase 4 — the top-nav "Researchers for funding" link is gated to the
@@ -191,6 +211,7 @@ export async function GET(): Promise<NextResponse> {
       isCommsSteward: commsSteward,
       managesUnits,
       isDeveloper: developer,
+      proxyFor,
     });
   }
 
@@ -236,7 +257,7 @@ export async function GET(): Promise<NextResponse> {
         .catch(() => null);
       impersonating = {
         targetCwid,
-        targetName: stewardName?.displayName ?? targetCwid,
+        targetName: stewardName?.displayName ?? (await directoryName(targetCwid)) ?? targetCwid,
         role: "comms_steward",
         unitKind: null,
         unit: null,
@@ -274,7 +295,10 @@ export async function GET(): Promise<NextResponse> {
         }));
         impersonating = {
           targetCwid,
-          targetName: grants.find((g) => g.granteeName)?.granteeName ?? targetCwid,
+          targetName:
+            grants.find((g) => g.granteeName)?.granteeName ??
+            (await directoryName(targetCwid)) ??
+            targetCwid,
           role: display.role,
           unitKind: display.unitKind,
           unit: display.unit,
@@ -287,12 +311,31 @@ export async function GET(): Promise<NextResponse> {
         // prevent. These roles have no name-resolution bridge of their own (no
         // steward_directory-equivalent), so the name comes from ED, degrading to
         // the bare CWID if the directory is unreachable — never missing.
-        const globalRole = await resolveGlobalRole(targetCwid).catch(() => null);
+        const globalRole = await resolveGlobalRole(targetCwid, {
+          viewerCwid: session.cwid,
+        }).catch(() => null);
         if (globalRole) {
           impersonating = {
             targetCwid,
             targetName: (await directoryName(targetCwid)) ?? targetCwid,
             role: globalRole,
+            unitKind: null,
+            unit: null,
+            startedAt: session.impersonating.startedAt,
+          };
+        } else if (
+          await db.read.scholarProxy
+            .findFirst({ where: { proxyCwid: targetCwid }, select: { proxyCwid: true } })
+            .then((row) => row !== null)
+            .catch(() => false)
+        ) {
+          // A proxy-only target (#3388 admits them at the POST gate): same
+          // stranding hazard as the branches above — without this the banner and
+          // its "Return to my view" exit never render.
+          impersonating = {
+            targetCwid,
+            targetName: (await directoryName(targetCwid)) ?? targetCwid,
+            role: "proxy",
             unitKind: null,
             unit: null,
             startedAt: session.impersonating.startedAt,

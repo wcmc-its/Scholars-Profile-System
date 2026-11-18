@@ -17,7 +17,8 @@
  * one place and invisible in the other.
  */
 
-export type Cadence = "nightly" | "nightly-mirrored" | "weekly" | "monthly" | "annual";
+export type Cadence =
+  "nightly" | "nightly-mirrored" | "weekly" | "weekly-mirrored" | "monthly" | "annual";
 
 export const HOUR_MS = 60 * 60 * 1000;
 
@@ -66,11 +67,27 @@ export const HOUR_MS = 60 * 60 * 1000;
  * `nightly` instead, don't: it also covers ~25 steps THIS repo runs inside the
  * nightly chain, where a 30h ceiling is correct and 54h would hide a real outage
  * for an extra day.
+ *
+ * `weekly-mirrored` is the weekly SLA plus the same one-night mirror lag, for a
+ * WEEKLY producer we sample nightly:
+ *
+ *   7d  gap between two on-time weekly producer runs
+ * + 1d  worst-case lag before OUR nightly mirrors the newest run
+ * + 1d  grace (the same day of grace `weekly` carries)
+ * = 9d  (216h)
+ *
+ * It exists for ReciterAI's tools maintain run, cron(30 3 ? * TUE *). On a
+ * normal week that lands 3.5h before the 07:00 UTC nightly reads it, which
+ * `weekly`'s day of grace would absorb. But the run has no Fargate timeout (the
+ * 2026-11-11 catch-up took 77 minutes), so a slow week can finish after 07:00
+ * and be read the following night, ~27h late, which `weekly` would grade Late
+ * on a healthy producer.
  */
 export const SLA_HOURS: Readonly<Record<Cadence, number>> = {
   nightly: 30,
   "nightly-mirrored": 54,
   weekly: 8 * 24,
+  "weekly-mirrored": 9 * 24,
   monthly: 40 * 24,
   annual: 400 * 24,
 };
@@ -178,48 +195,23 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // so a healthy night is mostly `equal`; the step throws on a dead API rather than grade green, which is why
   // its freshness row means something.
   "ORCID-push": { cadence: "nightly" },
-  // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
-  // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
+  // #794 — A2 tools taxonomy → scholar_tool. Our import runs every nightly
+  // (a 0-row success when the artifact is unchanged; both envs run
+  // SCHOLAR_TOOL_SOURCE=s3 since the 2026-07-06 cutover).
   //
-  // RE-ANCHORED AND ACKED, as one change. etl/tools/index.ts now stores the
-  // artifact's `generated_at` (§2.1), so this row finally grades the CONTENT
-  // rather than the liveness of our own import — and tools.json has carried
-  // generated_at 2026-06-23 since June, so it grades stale immediately. The ack
-  // is what makes that landable: the staleness becomes an accepted decision
-  // with a review date instead of a permanently red row nobody can fix, which
-  // is the cry-wolf failure the ack mechanism exists to prevent and the same
-  // shape as Spotlight's ack below.
+  // Graded on OUR import's run (`anchorOnRun`), the Spotlight pattern below:
+  // etl/tools/index.ts stores the manifest's `generated_at`, but a week with
+  // nothing to publish (maintain writes `skipped`, or `complete` with no
+  // upload) leaves it frozen, and grading that would paint a healthy producer
+  // Late. Kept `nightly` so the import's liveness and the #2190 retry check
+  // (RETRY_WINDOW_HOURS has no mirrored cadences) still cover this step.
   //
-  // Neither half works alone, which is why they are not separable:
-  //   - anchor without ack -> a red row with no route to green;
-  //   - ack without anchor -> INERT. `gradeSource` sets `acknowledged` from
-  //     `stale && ack active`, and a completedAt-anchored Tools is never stale,
-  //     so nothing is suppressed, the reason string reaches no reader, and
-  //     etl/freshness/index.ts's anti-clutter rule logs "ack is no longer
-  //     needed — remove it" on every heartbeat.
-  //
-  // `nightly` is kept, not widened: it is the honest cadence for our import,
-  // and no cadence would be honest for the producer, which has no EventBridge
-  // schedule at all and writes no STAGE# ledger row (see
-  // etl/dynamodb/producer-run-mapper.ts) — there is nothing to grade it
-  // against. The ack, not the cadence, is carrying the staleness.
-  //
-  // At `until`: renew as a deliberate decision, or drop BOTH halves. Once the
-  // producer is scheduled the ack becomes unnecessary and the anchor stands on
-  // its own.
-  Tools: {
-    cadence: "nightly",
-    ack: {
-      until: "2026-12-31",
-      // Reader-facing copy, same rule as Spotlight's below: this string is
-      // rendered to superusers on /edit/etl-status, so it stays plain English
-      // and the technical account stays in the comment above it.
-      reason:
-        "This data is refreshed by hand rather than on a schedule. The last " +
-        "hand-published refresh was 23 June 2026. A scheduled weekly refresh " +
-        "is being built; until it is live, no action is needed here.",
-    },
-  },
+  // Producer liveness is graded separately on `ReciterAI-tools` below, from
+  // the STAGE#tools_maintain#GLOBAL ledger row (EventBridge rule
+  // reciterai-tools-weekly, Tuesdays 03:30 UTC; ReciterAI #502/#503). The ack
+  // that used to sit here ("a scheduled weekly refresh is being built") is gone:
+  // that refresh is live.
+  Tools: { cadence: "nightly", anchorOnRun: true },
   // #2051 part B — deployed nightly steps (cdk/lib/etl-stack.ts
   // FamilySensitivityNightly / FamilySuppressionNightly, both tier:"continue",
   // both envs, no env split) writing sources "FamilySensitivity" /
@@ -297,6 +289,15 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // withEtlRun("DataSharing", main) call). Continue-tier, so freshness is the only
   // detector of a silently-dead schedule.
   DataSharing: { cadence: "weekly" },
+  // #3348 — the five bridge importers run by MentoringBridgeWeekly
+  // (cdk/lib/etl-stack.ts, tier:"continue", etl/mentoring/refresh.ts). Each
+  // writes its own etl_run row; continue-tier, so freshness is the only
+  // detector of a dead schedule or a stalled export.
+  "Mentee-Copubs-Import": { cadence: "weekly" },
+  "AOC-Mentee-Import": { cadence: "weekly" },
+  "Mentee-Copub-List-Import": { cadence: "weekly" },
+  "Learner-Pubs-Import": { cadence: "weekly" },
+  "Publication-Citing-Import": { cadence: "weekly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts InfoedBiosketchWeekly, tier:"continue")
   // that writes source "InfoEd-Biosketch" (etl/infoed-biosketch/index.ts withEtlRun).
   "InfoEd-Biosketch": { cadence: "weekly" },
@@ -306,6 +307,14 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Deployed weekly step (cdk/lib/etl-stack.ts IdentityLinksWeekly, tier:"continue")
   // that writes source "Identity-Links" (etl/identity-links/index.ts withEtlRun).
   "Identity-Links": { cadence: "weekly" },
+  // Nightly step (cdk/lib/etl-stack.ts IthacaRoster, tier:"continue") that writes
+  // source "Ithaca-Roster" (etl/ithaca-roster/index.ts withEtlRun).
+  "Ithaca-Roster": { cadence: "nightly" },
+  // Nightly step (cdk/lib/etl-stack.ts ResearchSecurity, tier:"continue") that writes
+  // source "Research-Security" (etl/research-security/index.ts withEtlRun). A night
+  // with RESEARCH_SECURITY_ETL off still records a run, so staleness here means the
+  // step stopped running or its source guard refused the replace.
+  "Research-Security": { cadence: "nightly" },
   // Deployed weekly step (cdk/lib/etl-stack.ts TechnologyWeekly, tier:"continue")
   // that writes source "Technology" (etl/technologies/index.ts) — continue-tier, so
   // freshness is the only detector of a silent no-op or a dropped schedule.
@@ -340,6 +349,18 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // Sources tab), so this detects the schedule dying or every list failing,
   // not one list quietly failing.
   HonorsLists: { cadence: "weekly" },
+  // Deployed steps that wrote etl_run rows but were never registered here, so
+  // /edit/etl-status (TRACKED x etl_run) never showed them. All continue-tier
+  // (or, for FeedbackDigest, their own machine), so freshness is their net.
+  CenterPubRelevance: { cadence: "nightly" }, // CenterPubRelevanceNightly
+  HeadshotMissing: { cadence: "nightly" }, // HeadshotMissingNightly
+  CancerCenterDiseaseAssignment: { cadence: "weekly" }, // CancerCenterDiseaseAssignmentsWeekly
+  JournalImpactFactor: { cadence: "weekly" }, // JournalImpactFactorWeekly
+  FundableWork: { cadence: "weekly" }, // FundableWorkWeekly
+  FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
+  // ED email-visibility bridge (export -> S3 -> import). Only the import writes a
+  // row; built only where edEmailVisibilityBridgeEnabled (staging today).
+  "ED-EmailVisibility-Import": { cadence: "weekly", envs: ["staging"] },
   // Monthly cadence. Spotlight is the one source whose producer is OUTSIDE this
   // repo: ReciterAI publishes the artifact and SPS only loads what it finds, so
   // the SLA here has to track the PRODUCER's schedule, not our loader's. That
@@ -461,6 +482,13 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // an anchor that is still the age of the output.
   "ReciterAI-grants": { cadence: "nightly-mirrored" },
   "ReciterAI-cores": { cadence: "weekly" },
+  // ReciterAI `pipeline_tools.maintain` (STAGE#tools_maintain#GLOBAL), weekly,
+  // Tuesdays 03:30 UTC. `weekly-mirrored` for the reason set out at SLA_HOURS:
+  // the run has no timeout, so a slow week is mirrored a night late. `skipped`
+  // (no new PMIDs that week) is a healthy outcome, so it counts as live, the
+  // same rule as the spotlight gate. No ack: the 2026-11-11 catch-up run is
+  // already in the ledger as `complete`, so this starts green.
+  "ReciterAI-tools": { cadence: "weekly-mirrored", liveStatuses: ["success", "skipped"] },
   // ReciterAI `pipeline_area_signals` (STAGE#area_signals#GLOBAL), daily after
   // the SPS nightly, so mirrored the following night like its siblings. Acked
   // because the producer is not deployed yet (ReciterAI build plan R2/R3,
@@ -475,6 +503,38 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
     },
   },
 };
+
+/**
+ * `etl_run` sources that are deliberately NOT in TRACKED: hand-run imports and
+ * one-offs with no schedule, so there is no cadence to be late against.
+ * `/edit/etl-status` lists any source seen recently that is in neither table as
+ * "not registered", and tests/unit/etl-status-tracked-guard.test.ts fails a
+ * deployed step whose source is in neither. Each entry says why.
+ */
+export const UNSCHEDULED: Readonly<Record<string, string>> = {
+  "ClinicalTrials-Import": "hand-run bridge import (etl:clinical-trials:import)",
+  "DataSharing-Import": "hand-run bridge import (etl:data-sharing:import)",
+  "ED-StewardNames-Import": "hand-run (etl:ed:import-steward-names)",
+  "ED-Student-Programs": "hand-run (etl:ed:student-programs)",
+  "InfoEd-Biosketch-backfill": "hand-run --backfill of the tracked InfoEd-Biosketch step",
+  "Jenzabar-GS-Faculty": "hand-run (etl:jenzabar:import-gs-faculty)",
+  "COI-Statements-Import": "hand-run (etl:reciter:import-coi-statements)",
+  "HonorsSeed-Import": "hand-run seed (etl:honors:import-seed)",
+  CancerTaxonomy: "hand-run (etl:cancer-taxonomy)",
+  MeSH: "hand-run descriptor load (etl:mesh)",
+  "iLab-Import": "hand-run quarterly import (etl:ilab:import)",
+  "RCR-Import": "hand-run bridge import (etl:reciter-rcr:import)",
+  ReciterRefresh: "operator-run scanner; see etl/reciter-refresh/index.ts",
+  FamilyReview: "hand-run (etl:family-review)",
+};
+
+/**
+ * Logged by etl:freshness once per unregistered source (see findUnregistered in
+ * lib/api/etl-status.ts). 🔴 MIRRORED in cdk/lib/observability-stack.ts
+ * ETL_HEARTBEAT_WARNS, whose metric filter counts it into sps-warn-<env>;
+ * tests/unit/etl-status-tracked-guard.test.ts fails if the two drift.
+ */
+export const UNREGISTERED_WARN_MARKER = "WARN unregistered";
 
 export interface SourceStatus {
   readonly source: string;

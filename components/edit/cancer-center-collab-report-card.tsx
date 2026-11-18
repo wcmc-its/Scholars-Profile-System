@@ -200,6 +200,9 @@ export type CancerCenterCollabReportCardProps = {
   keepQuery: string;
   /** SCHOLAR_EXPORT_CAP, from the server. */
   cap: number;
+  /** False for a leader-only viewer (LEADER_REPORT_ACCESS), who can't open the
+   *  roster editor: the "roster editor" links are left out. Default true. */
+  canEditRoster?: boolean;
 };
 
 export function CancerCenterCollabReportCard({
@@ -209,6 +212,7 @@ export function CancerCenterCollabReportCard({
   basePath,
   keepQuery,
   cap,
+  canEditRoster = true,
 }: CancerCenterCollabReportCardProps) {
   const [params, setParams] = React.useState<OptimizeParams>(initial);
   const set = (patch: Partial<OptimizeParams>) => setParams((p) => ({ ...p, ...patch }));
@@ -307,11 +311,17 @@ export function CancerCenterCollabReportCard({
           <Lock className="size-3.5 shrink-0" aria-hidden />
           <span>
             <strong className="font-semibold">Advisory only.</strong> Nothing here changes the
-            roster. Apply changes in the{" "}
-            <a href={rosterHref} className="text-apollo-slate hover:underline">
-              roster editor
-            </a>
-            .
+            roster.
+            {canEditRoster && (
+              <>
+                {" "}
+                Apply changes in the{" "}
+                <a href={rosterHref} className="text-apollo-slate hover:underline">
+                  roster editor
+                </a>
+                .
+              </>
+            )}
           </span>
         </div>
         <div className="flex max-w-[340px] flex-col items-start gap-1.5">
@@ -455,11 +465,13 @@ export function CancerCenterCollabReportCard({
                     </a>
                   </Button>
                 )}
-                <Button asChild size="sm">
-                  <a href={rosterHref} data-testid="om-roster-editor">
-                    Open in roster editor
-                  </a>
-                </Button>
+                {canEditRoster && (
+                  <Button asChild size="sm">
+                    <a href={rosterHref} data-testid="om-roster-editor">
+                      Open in roster editor
+                    </a>
+                  </Button>
+                )}
               </div>
             )}
           </div>

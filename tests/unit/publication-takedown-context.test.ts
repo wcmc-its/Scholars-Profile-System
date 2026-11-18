@@ -4,6 +4,13 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+vi.mock("@/lib/edit/person-names", () => ({
+  resolvePersonNames: vi.fn(async (cwids: string[]) =>
+    new Map(cwids.filter((c) => c === "adm001").map((c) => [c, "Ada Admin"])),
+  ),
+  nameOr: (m: Map<string, string>, c: string) => m.get(c.toLowerCase()) ?? c,
+}));
+
 import { loadPublicationTakedownContext } from "@/lib/api/publication-takedown-context";
 
 type AnyMock = ReturnType<typeof vi.fn>;
@@ -111,6 +118,7 @@ describe("loadPublicationTakedownContext — visibility states", () => {
       id: "sup-1",
       reason: "retraction notice",
       actorCwid: "adm001",
+      actorName: "Ada Admin",
       createdAt: new Date("2026-05-15"),
     });
     expect(ctx!.derivedDark).toBe(false);

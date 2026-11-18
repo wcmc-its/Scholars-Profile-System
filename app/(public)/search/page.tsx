@@ -55,6 +55,8 @@ import {
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
   EMPTY_QUERY_PEOPLE_SORT,
+  resolveSearchPeopleResearchTypeNested,
+  resolveSearchPubsTranslationalStageFacet,
 } from "@/lib/api/search-flags";
 import { resolveAreaConcentration } from "@/lib/api/area-concentration";
 import { isFullQueryMeshMatch } from "@/lib/api/normalize";
@@ -72,6 +74,7 @@ import {
   type PeopleSort,
   type PiFilter,
   type PublicationsSort,
+  type ResearchTypeFacetBucket,
   type SearchFacetBucket,
 } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
@@ -111,7 +114,14 @@ import { prisma } from "@/lib/db";
 import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
 import { institutionDisplayName } from "@/lib/institutions";
-import { researchTypeLabel } from "@/lib/research-type";
+import {
+  collapseResearchTypeChildren,
+  parseResearchTypeValue,
+  researchTypeChildRows,
+  researchTypeLabel,
+  toggleResearchTypeValue,
+} from "@/lib/research-type";
+import { isTranslationalStage, translationalStageDisplay } from "@/lib/translational-stage";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -120,6 +130,7 @@ import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { compactUnitName } from "@/lib/org-unit-names";
 import { htmlToPlainText } from "@/lib/utils";
+import { withoutSearchSource } from "@/lib/search/query-url";
 
 export const dynamic = "force-dynamic";
 
@@ -197,7 +208,9 @@ function SearchShellSkeleton() {
 }
 
 async function SearchBody({ searchParams }: { searchParams: SP }) {
-  const sp = await searchParams;
+  // `src=` only tags a suggestion click for the usage rollup; it never affects
+  // results, and dropping it here keeps it off every link this page builds.
+  const sp = withoutSearchSource(await searchParams);
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const rawType = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
   // Clinical trials tab (SEARCH_TRIALS_TAB). Off ⇒ `?type=trials` falls back to people.
@@ -372,9 +385,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // `institution`); accepted regardless of the per-tab
   // SEARCH_*_INSTITUTION_FACET flags (each search no-ops it while off).
   const institution = parseList(sp.institution);
-  // Research type facet ("lab" / "clinical"); no-op while
-  // SEARCH_PEOPLE_RESEARCH_TYPE_FACET is off.
-  const researchType = parseList(sp.researchType);
+  // Research type facet ("lab" / "clinical", nested children "lab:physician"
+  // etc.); no-op while SEARCH_PEOPLE_RESEARCH_TYPE_FACET is off. Children
+  // collapse to their parent while SEARCH_PEOPLE_RESEARCH_TYPE_NESTED is off,
+  // so a shared child link still filters and its chip reads as the parent.
+  const researchTypeRaw = parseList(sp.researchType);
+  const researchType = resolveSearchPeopleResearchTypeNested()
+    ? researchTypeRaw
+    : collapseResearchTypeChildren(researchTypeRaw);
 
   // Issue #233 — Principal Investigator facet. Single-select; `none` and
   // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
@@ -440,6 +458,14 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // tabs is active at a time). Only forwarded to `searchPublications` when the
   // flag is on; otherwise the array is dropped so a stale URL is inert.
   const pubDepartment = resolvePublicationDepartmentFilter() ? parseList(sp.department) : [];
+  // Translational stage facet — repeated `?translationalStage=` values (T0 /
+  // T1 / T2 / T3-4). Same gating as the Department filter above: dropped while
+  // `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off so a stale URL is inert (no
+  // filter, no chip, nothing carried into links or the export); values outside
+  // the four stages are dropped always.
+  const translationalStage = resolveSearchPubsTranslationalStageFacet()
+    ? parseList(sp.translationalStage).filter(isTranslationalStage)
+    : [];
   // Issue #396 — "Show only MeSH-tagged matches". The flag gates whether the
   // toggle renders at all; activation additionally needs `?searchMode=mesh-only`
   // present, so a stale param is inert when the flag is off (same gating shape
@@ -675,6 +701,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
             department: pubDepartment.length > 0 ? pubDepartment : undefined,
             institution: institution.length > 0 ? institution : undefined,
+            translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
             meshOnly: pubMeshOnly || undefined,
             mentoringPrograms:
               mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -791,6 +818,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: pubDepartment.length > 0 ? pubDepartment : undefined,
         institution: institution.length > 0 ? institution : undefined,
+        translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
         meshOnly: pubMeshOnly || undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
@@ -909,7 +937,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           as the results grid, so a tab switch — and the MeSH "Narrow to this
           concept only" / "Don't use MeSH" links inside the results — runs
           through the SAME shared useTransition as the facet / sort / pagination
-          links. Previously the tabs used a plain <Link> and lived outside the
+          links. Previously the tabs used a plain <Link prefetch={false}> and lived outside the
           provider: an in-page nav that only changes searchParams gets no
           loading.tsx fallback and no dim, so a slow round-trip read as "the
           click did nothing." Inside the provider the region dims + goes
@@ -928,7 +956,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           <div className="mx-auto max-w-[1280px] px-6 pt-6">
             <AZDirectory buckets={azBuckets} />
             <div className="mt-2 text-right">
-              <Link
+              <Link prefetch={false}
                 href="/browse"
                 className="text-sm text-[var(--color-accent-slate)] hover:underline"
               >
@@ -970,6 +998,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
                 institution={institution}
+                translationalStage={translationalStage}
                 meshOnly={pubMeshOnly}
                 meshOnlyFilterEnabled={meshOnlyFilterEnabled}
                 mentoringProgram={mentoringProgram}
@@ -1177,7 +1206,7 @@ function ModeTab({
   title?: string;
 }) {
   return (
-    <Link
+    <Link prefetch={false}
       href={href}
       scroll={false}
       title={title}
@@ -1404,7 +1433,10 @@ async function PeopleResults({
     buildUrl((sp) => {
       const current = sp.getAll(axis);
       sp.delete(axis);
-      if (current.includes(value)) {
+      if (axis === "researchType") {
+        // Nested: a child replaces its parent and vice versa.
+        for (const v of toggleResearchTypeValue(current, value)) sp.append(axis, v);
+      } else if (current.includes(value)) {
         for (const v of current) if (v !== value) sp.append(axis, v);
       } else {
         for (const v of current) sp.append(axis, v);
@@ -1683,6 +1715,7 @@ async function PublicationsResults({
   wcmAuthor,
   department,
   institution,
+  translationalStage,
   meshOnly,
   meshOnlyFilterEnabled,
   mentoringProgram,
@@ -1709,6 +1742,9 @@ async function PublicationsResults({
   /** Active `institution` multi-select filter (`Scholar.primaryOrgCode` codes),
    *  same shape as `department`. */
   institution: string[];
+  /** Active translational stages ("T0" / "T1" / "T2" / "T3-4"); empty when
+   *  `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off (the page drops the param). */
+  translationalStage: string[];
   /** Issue #396 — "Show only MeSH-tagged matches" active state (true only when
    *  the flag is on AND `?searchMode=mesh-only` is present). */
   meshOnly: boolean;
@@ -1790,6 +1826,7 @@ async function PublicationsResults({
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: department.length > 0 ? department : undefined,
         institution: institution.length > 0 ? institution : undefined,
+        translationalStage: translationalStage.length > 0 ? translationalStage : undefined,
         meshOnly: meshOnly || undefined,
         mentoringPrograms:
           mentoringProgram.length > 0 ? mentoringProgram : undefined,
@@ -1857,6 +1894,7 @@ async function PublicationsResults({
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     for (const v of department) sp.append("department", v);
     for (const v of institution) sp.append("institution", v);
+    for (const v of translationalStage) sp.append("translationalStage", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
     // Issue #396 — preserve the MeSH-only filter across every facet/sort/page
     // link so toggling another filter doesn't silently drop it. The toggle's
@@ -1939,6 +1977,12 @@ async function PublicationsResults({
     chips.push({
       label: displayPublicationType(publicationType),
       removeHref: buildUrl((sp) => sp.delete("publicationType")),
+    });
+  }
+  for (const v of translationalStage) {
+    chips.push({
+      label: translationalStageDisplay(v),
+      removeHref: removeMulti("translationalStage", v),
     });
   }
   for (const v of wcmAuthorRole) {
@@ -2070,6 +2114,8 @@ async function PublicationsResults({
         yearMin={yearMin}
         activePublicationType={publicationType}
         publicationTypes={result.facets.publicationTypes}
+        translationalStages={result.facets.translationalStages}
+        activeTranslationalStage={translationalStage}
         journalItems={journalItems}
         authorItems={authorItems}
         authorTotalDistinct={result.facets.wcmAuthorsTotal}
@@ -2134,6 +2180,8 @@ async function PublicationsResults({
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
                 department: department.length > 0 ? department : undefined,
                 institution: institution.length > 0 ? institution : undefined,
+                translationalStage:
+                  translationalStage.length > 0 ? translationalStage : undefined,
                 // Issue #396 — keep the export in lockstep with the displayed
                 // count: when MeSH-only is active the export carries it too, so
                 // the exported set equals the "N MeSH-tagged matches" shown.
@@ -2537,7 +2585,7 @@ async function TrialsResults({
             Filters
           </span>
           {chips.length > 0 ? (
-            <Link href={clearAllHref} scroll={false} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+            <Link prefetch={false} href={clearAllHref} scroll={false} className="text-xs font-medium text-[#2c4f6e] hover:underline">
               Clear all
             </Link>
           ) : null}
@@ -2719,7 +2767,7 @@ function FacetSidebarFunding({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link
+          <Link prefetch={false}
             href={clearAllHref}
             scroll={false}
             className="text-xs font-medium text-[#2c4f6e] hover:underline"
@@ -2915,7 +2963,7 @@ function FundingSortLinks({
       {opts.map((opt, i) => (
         <span key={opt.value}>
           {i > 0 ? <span className="text-muted-foreground"> · </span> : null}
-          <Link
+          <Link prefetch={false}
             href={buildHref(opt.value)}
             scroll={false}
             className={
@@ -2947,7 +2995,7 @@ function ActiveFilterChips({
       {chips.map((c, i) => {
         const aria = c.ariaLabel ?? (typeof c.label === "string" ? c.label : "filter");
         return (
-          <Link
+          <Link prefetch={false}
             key={`${aria}-${c.removeHref}-${i}`}
             href={c.removeHref}
             scroll={false}
@@ -2964,7 +3012,7 @@ function ActiveFilterChips({
           </Link>
         );
       })}
-      <Link
+      <Link prefetch={false}
         href={clearAllHref}
         scroll={false}
         className="ml-1 text-xs text-muted-foreground hover:text-[#2c4f6e]"
@@ -3070,7 +3118,7 @@ function ResultsToolbar({
                 <span aria-hidden="true" className="text-muted-foreground/60">
                   ·
                 </span>{" "}
-                <Link
+                <Link prefetch={false}
                   href={meshOnlyRemoveHref}
                   scroll={false}
                   className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
@@ -3090,7 +3138,7 @@ function ResultsToolbar({
                 <span aria-hidden="true" className="text-muted-foreground/60">
                   ·
                 </span>{" "}
-                <Link
+                <Link prefetch={false}
                   href={methodologyHref("impact")}
                   className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
                 >
@@ -3180,8 +3228,9 @@ function FacetSidebar({
   activeProfessorialRank: string[];
   activeEarlyStageInvestigator: boolean;
   activeInstitution: string[];
-  /** Research type facet buckets + active values; empty buckets ⇒ no group. */
-  researchTypes: SearchFacetBucket[];
+  /** Research type facet buckets + active values; empty buckets ⇒ no group.
+   *  `physician` / `other` child counts ride along when the nested flag is on. */
+  researchTypes: ResearchTypeFacetBucket[];
   activeResearchType: string[];
   toggleHref: (axis: string, value: string) => string;
   /** #2300 / #2306 — single-boolean toggle for `isClinical` /
@@ -3212,7 +3261,7 @@ function FacetSidebar({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link
+          <Link prefetch={false}
             href={clearAllHref}
             scroll={false}
             className="text-xs font-medium text-[#2c4f6e] hover:underline"
@@ -3241,16 +3290,35 @@ function FacetSidebar({
           Renders only when the response carries buckets (flag off /
           pre-reindex ⇒ no group). */}
       {researchTypes.length > 0 ? (
-        <FacetGroup label="Research type">
-          {sortActiveFirst(researchTypes, (b) => activeResearchType.includes(b.value)).map((b) => (
+        <FacetGroup label="Researcher type">
+          {sortActiveFirst(researchTypes, (b) =>
+            activeResearchType.some((v) => parseResearchTypeValue(v)?.kind === b.value),
+          ).flatMap((b) => [
             <FacetCheckbox
               key={b.value}
               label={researchTypeLabel(b.value)}
               count={b.count}
               isActive={activeResearchType.includes(b.value)}
               href={toggleHref("researchType", b.value)}
-            />
-          ))}
+            />,
+            ...researchTypeChildRows(b, activeResearchType).map((c) => (
+              <FacetCheckbox
+                key={c.value}
+                label={c.label}
+                count={c.count}
+                isActive={c.isActive}
+                href={toggleHref("researchType", c.value)}
+                nested
+                ariaLabel={`${researchTypeLabel(c.value)}, ${c.count.toLocaleString()}${c.isActive ? ", selected" : ""}`}
+              />
+            )),
+          ])}
+          {/* Once, after every parent: inside the flatMap above it repeated per bucket. */}
+          <li className="pt-1 text-[12.5px]">
+            <Link href={methodologyHref("researchType")} prefetch={false} className="text-[#2c4f6e] hover:underline">
+              How these are defined
+            </Link>
+          </li>
         </FacetGroup>
       ) : null}
 
@@ -3450,7 +3518,7 @@ function PiMinStepper({
           −
         </span>
       ) : (
-        <Link
+        <Link prefetch={false}
           href={setMinHref(value - 1)}
           scroll={false}
           aria-label={`Decrease minimum to ${value - 1}`}
@@ -3465,7 +3533,7 @@ function PiMinStepper({
           +
         </span>
       ) : (
-        <Link
+        <Link prefetch={false}
           href={setMinHref(value + 1)}
           scroll={false}
           aria-label={`Increase minimum to ${value + 1}`}
@@ -3482,6 +3550,8 @@ function FacetSidebarPubs({
   yearMin,
   activePublicationType,
   publicationTypes,
+  translationalStages,
+  activeTranslationalStage,
   journalItems,
   authorItems,
   authorTotalDistinct,
@@ -3505,6 +3575,11 @@ function FacetSidebarPubs({
   yearMin?: number;
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
+  /** Translational stage facet — buckets already in the fixed T0 → T3-4 order
+   *  (labelled here via `translationalStageDisplay`). Empty while
+   *  `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off / pre-reindex ⇒ no group. */
+  translationalStages: SearchFacetBucket[];
+  activeTranslationalStage: string[];
   journalItems: import("@/components/search/journal-facet").JournalFacetItem[];
   authorItems: import("@/components/search/author-facet").AuthorFacetItem[];
   authorTotalDistinct: number;
@@ -3552,7 +3627,7 @@ function FacetSidebarPubs({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link
+          <Link prefetch={false}
             href={clearAllHref}
             scroll={false}
             className="text-xs font-medium text-[#2c4f6e] hover:underline"
@@ -3673,6 +3748,30 @@ function FacetSidebarPubs({
         </FacetGroup>
       ) : null}
 
+      {/* Translational stage — ReciterAI's per-paper stage on the bench-to-
+          population spectrum (lib/translational-stage.ts). Multi-select; rows
+          stay in stage order rather than active-first or count order. Renders
+          only when the response carries buckets (flag off / pre-reindex ⇒ no
+          group). */}
+      {translationalStages.length > 0 ? (
+        <FacetGroup label="Translational stage">
+          {translationalStages.map((b) => (
+            <FacetCheckbox
+              key={b.value}
+              label={translationalStageDisplay(b.value)}
+              count={b.count}
+              isActive={activeTranslationalStage.includes(b.value)}
+              href={toggleHref("translationalStage", b.value)}
+            />
+          ))}
+          <li className="pt-1 text-[12.5px]">
+            <Link href={methodologyHref("translationalStage")} prefetch={false} className="text-[#2c4f6e] hover:underline">
+              How these are defined
+            </Link>
+          </li>
+        </FacetGroup>
+      ) : null}
+
       {journalItems.length > 0 ? (
         <JournalFacet items={journalItems} appendBase={appendBase("journal")} />
       ) : null}
@@ -3784,6 +3883,8 @@ function FacetCheckbox({
   wrap,
   radio,
   disabled,
+  nested,
+  ariaLabel,
 }: {
   label: React.ReactNode;
   tooltip?: string;
@@ -3803,6 +3904,12 @@ function FacetCheckbox({
    *  enforcement. Used by issue #233 to suppress the redundant `Has active
    *  grants` checkbox when `pi=active|multi` is set. */
   disabled?: boolean;
+  /** Indented child row under a parent checkbox (Research type children).
+   *  Applies to the default row only; its label wraps rather than truncates. */
+  nested?: boolean;
+  /** Accessible name for the default row, when the visible label is not enough on its own
+   *  (a nested child names its parent: two "Physician-scientist" rows otherwise). */
+  ariaLabel?: string;
 }) {
   const inputType = radio ? "radio" : "checkbox";
   if (disabled) {
@@ -3844,7 +3951,7 @@ function FacetCheckbox({
     return (
       <li className="py-1 leading-[1.4]">
         {wrapInTooltip(
-          <Link
+          <Link prefetch={false}
             href={href}
             scroll={false}
             title={tooltip ? undefined : fallbackTitle}
@@ -3870,13 +3977,16 @@ function FacetCheckbox({
     );
   }
   return (
-    <li className="flex items-center gap-2 py-1 leading-[1.4]">
+    <li className={`flex items-center gap-2 py-1 leading-[1.4]${nested ? " pl-5" : ""}`}>
       {wrapInTooltip(
-        <Link
+        <Link prefetch={false}
           href={href}
           scroll={false}
           title={tooltip ? undefined : fallbackTitle}
-          className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+          aria-label={ariaLabel}
+          // min-w-0: without it the link cannot shrink below its text, so the label never
+          // truncates and the count spills past the rail (long nested labels).
+          className={`flex min-w-0 flex-1 ${nested ? "items-start" : "items-center"} gap-2 text-[#1a1a1a] no-underline hover:no-underline`}
         >
           {/* readOnly input: state lives in the URL; the link toggles it. */}
           <input
@@ -3885,14 +3995,16 @@ function FacetCheckbox({
             checked={!!isActive}
             tabIndex={-1}
             aria-hidden="true"
-            className="cursor-pointer accent-[#2c4f6e]"
+            className={`cursor-pointer accent-[#2c4f6e]${nested ? " mt-[3px]" : ""}`}
           />
           {/* Truncate keeps the count column straight when names are short
             and predictable. The title attribute surfaces the full label
             on hover for the rare overflow. */}
-          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {/* A nested child wraps instead: "Clinical or population researcher" is the
+            whole point of the row and loses its meaning cut short. */}
+          <span className={`min-w-0 flex-1 ${nested ? "break-words" : "truncate"}`}>{label}</span>
           {count !== undefined ? (
-            <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">
+            <span className={`shrink-0 text-[12px] text-muted-foreground tabular-nums${nested ? " mt-[1px]" : ""}`}>
               {count.toLocaleString()}
             </span>
           ) : null}
@@ -3925,7 +4037,7 @@ function MeshOnlyEmptyState({ removeHref }: { removeHref: string }) {
     <div className="mt-12 flex flex-col items-center text-center">
       <div className="text-lg font-medium">No MeSH-tagged matches for this query.</div>
       <div className="mt-1 text-sm text-muted-foreground">
-        <Link
+        <Link prefetch={false}
           href={removeHref}
           scroll={false}
           className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
@@ -4014,7 +4126,7 @@ function PaginationButton({
     );
   }
   return (
-    <Link
+    <Link prefetch={false}
       href={href}
       className={
         active

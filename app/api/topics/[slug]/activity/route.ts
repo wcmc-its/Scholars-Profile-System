@@ -36,6 +36,8 @@ import {
 } from "@/lib/api/topic-activity";
 import type { TopicPublicationTier } from "@/lib/api/topics";
 import { CWID_PATTERN } from "@/lib/cwid";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { isTranslationalStage } from "@/lib/translational-stage";
 import { isTopicFeedGrantsTrialsOn } from "@/lib/taxonomy-flags";
 import { clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
@@ -72,7 +74,17 @@ export async function GET(
     if (sub !== null && !SUBTOPIC_RE.test(sub)) {
       return apiError("invalid subtopic", 400);
     }
-    const result = await getTopicActivityScholars(slug, { subtopic: sub ?? undefined });
+    // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — off, `stage` is ignored.
+    const stageFacet = resolveSearchPubsTranslationalStageFacet();
+    const stage = stageFacet ? sp.get("stage") : null;
+    if (stage !== null && !isTranslationalStage(stage)) {
+      return apiError("invalid stage", 400);
+    }
+    const result = await getTopicActivityScholars(slug, {
+      subtopic: sub ?? undefined,
+      ...(stage ? { stage } : {}),
+      ...(stageFacet ? { stageTotals: true } : {}),
+    });
     if (result === null) {
       return apiError("topic not found", 404);
     }

@@ -1,0 +1,107 @@
+/**
+ * Ithaca ORCID plan, step 2: Cornell Ithaca rows in ORCID curation. Seeds land on
+ * Ithaca rows only, Affiliation Manager pairs band strong only when the name
+ * agrees, nothing Ithaca is auto-confirmed, the queue and coverage filter by
+ * campus, and an iD another row holds is refused.
+ */
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/db", () => ({ db: {} }));
+
+import { mergeForScholars, toCandidates } from "@/etl/orcid-candidates/index";
+import { affiliationManagerBand, planAutoConfirm } from "@/etl/orcid-evidence/index";
+import { orcidCoverageQuery, orcidVerdict, parseOrcidCoverageParams } from "@/lib/edit/orcid-coverage";
+import { orcidQueueFilterKey, parseOrcidQueueFilter } from "@/lib/edit/orcid-queue";
+import { assertOrcidFree, OrcidQueueRefused } from "@/lib/edit/orcid-queue.server";
+
+const ID = "0000-0002-1825-0097";
+
+describe("Affiliation Manager seeds", () => {
+  it("land on Cornell Ithaca rows only, never on a WCM row with the same string", () => {
+    const { rows } = toCandidates([], [], [
+      { personIdentifier: "AB123", orcid: ID, updated_at: null },
+      { personIdentifier: "cd456", orcid: "not-an-id", updated_at: null },
+    ]);
+    expect(rows.map((r) => [r.cwid, r.source])).toEqual([["ab123", "cornell_affiliation_manager"]]);
+    expect(mergeForScholars(rows, new Set(["ab123"])).keep).toEqual([]);
+    expect(mergeForScholars(rows, new Set(), new Set(["ab123"])).keep).toHaveLength(1);
+  });
+});
+
+describe("affiliationManagerBand", () => {
+  const am = ["cornell_affiliation_manager"];
+  const ok = { competitor: false, nameAgrees: true };
+  it("lifts an uncontested, name-agreeing Affiliation Manager pair to strong", () => {
+    expect(affiliationManagerBand("moderate", ok, am)).toBe("strong");
+    expect(affiliationManagerBand("weak", ok, ["identity", ...am])).toBe("strong");
+    expect(affiliationManagerBand("email_verified", ok, am)).toBe("email_verified");
+  });
+  it("leaves a contested, name-mismatched or non-AM pair in its band", () => {
+    expect(affiliationManagerBand("moderate", { ...ok, competitor: true }, am)).toBe("moderate");
+    expect(affiliationManagerBand("moderate", { ...ok, nameAgrees: false }, am)).toBe("moderate");
+    expect(affiliationManagerBand("moderate", ok, ["identity"])).toBe("moderate");
+  });
+});
+
+describe("auto-confirm", () => {
+  it("never plans a Cornell Ithaca row, even an email-verified one", () => {
+    const plan = planAutoConfirm(
+      [
+        { cwid: "ab123", orcid: ID, band: "email_verified" },
+        { cwid: "abc2001", orcid: "0000-0001-5109-3700", band: "email_verified" },
+      ],
+      new Map([
+        ["ab123", null],
+        ["abc2001", null],
+      ]),
+      new Set(),
+      new Set(["abc2001"]),
+    );
+    expect(plan).toEqual([{ cwid: "abc2001", orcid: "0000-0001-5109-3700" }]);
+  });
+});
+
+describe("campus filters", () => {
+  it("queue: parses, keys and drops unknown campuses", () => {
+    const f = parseOrcidQueueFilter({ campus: ["ithaca", "mars"] });
+    expect(f.campuses).toEqual(["ithaca"]);
+    expect(orcidQueueFilterKey(f)).toBe("campus=ithaca");
+  });
+  it("coverage: WCM by default (today's URLs unchanged), Ithaca opts in", () => {
+    const wcm = parseOrcidCoverageParams({});
+    expect(wcm.campus ?? "wcm").toBe("wcm");
+    expect(orcidCoverageQuery(wcm)).not.toContain("campus");
+    const ith = parseOrcidCoverageParams({ campus: "ithaca" });
+    expect(ith.types).toEqual([]); // not the bare-visit full-time-faculty default
+    expect(orcidCoverageQuery(ith)).toContain("campus=ithaca");
+  });
+  it("coverage: an Affiliation Manager iD alone grades strong", () => {
+    expect(
+      orcidVerdict([
+        { cwid: "ab123", orcid: ID, source: "cornell_affiliation_manager", articlesAccepted: 0, articlesRejected: 0 },
+      ]).tier,
+    ).toBe("strong");
+  });
+});
+
+describe("assertOrcidFree", () => {
+  const tx = (holders: string[], linked: number) =>
+    ({
+      scholar: { findMany: vi.fn().mockResolvedValue(holders.map((cwid) => ({ cwid }))) },
+      scholarIdentityLink: { count: vi.fn().mockResolvedValue(linked) },
+    }) as never;
+  const code = (p: Promise<void>) =>
+    p.then(
+      () => "ok",
+      (e: unknown) => (e instanceof OrcidQueueRefused ? e.code : String(e)),
+    );
+
+  it("passes a free iD and an excepted holder", async () => {
+    expect(await code(assertOrcidFree(tx([], 0), "ab123", ID))).toBe("ok");
+    expect(await code(assertOrcidFree(tx(["x"], 0), "ab123", ID, "x"))).toBe("ok");
+  });
+  it("refuses an iD another row holds, naming a known cross-campus link", async () => {
+    expect(await code(assertOrcidFree(tx(["abc2001"], 0), "ab123", ID))).toBe("held_by_other");
+    expect(await code(assertOrcidFree(tx(["abc2001"], 1), "ab123", ID))).toBe("on_linked_record");
+  });
+});

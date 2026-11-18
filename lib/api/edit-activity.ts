@@ -27,7 +27,7 @@
  * dozens of rows, and because it keeps the pure `shapeSummary` untouched.
  */
 import { detailForAction, humanizeField } from "@/lib/api/scholar-audit";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
 /** Default rolling window the summary spans. */
 export const EDIT_ACTIVITY_WINDOW_DAYS = 30;
@@ -71,6 +71,14 @@ export type DirectoryLookup = (
 export type EditActivityClient = Pick<PrismaClient, "$queryRaw" | "scholar"> &
   Partial<Pick<PrismaClient, "center" | "core" | "publication">>;
 
+/**
+ * A unit-scoped viewer's row predicate (`activityScopeSql`,
+ * `lib/edit/dashboard-access.ts`): the edit targets one of their people or
+ * units. Built server-side and passed in, because this module reaches the
+ * client bundle and so cannot import `Prisma.sql` itself. Omitted = every row.
+ */
+export type EditActivityScopeFilter = Prisma.Sql;
+
 /** The one timezone the console reads dates in (WCM-local). */
 export const EDIT_ACTIVITY_TZ = "America/New_York";
 
@@ -83,22 +91,80 @@ export function isSystemActor(cwid: string): boolean {
   return cwid.startsWith("system-") || cwid.toLowerCase() === "etl";
 }
 
+/**
+ * Backend bulk jobs (e.g. `etl/bulk-confirm-strong`) write their audit rows
+ * under the CWID of the person who ran them (`--actor=<cwid>`), so the actor
+ * alone would credit that person with every row. What marks them is the
+ * `request_id` the job stamps on each row: `bulk-<job>-<iso time>`.
+ */
+export const BULK_REQUEST_PREFIX = "bulk-";
+
+/** True when an audit row was written by a backend bulk job ({@link BULK_REQUEST_PREFIX}). */
+export function isBulkJobRequest(requestId: string | null | undefined): boolean {
+  return typeof requestId === "string" && requestId.startsWith(BULK_REQUEST_PREFIX);
+}
+
+/**
+ * The synthetic actor a bulk job's rows are counted under, in place of the
+ * person who ran it. The `system-` prefix makes it an {@link isSystemActor}, so
+ * every automated-actor path (tiles, tags, name lookup) treats it as one.
+ */
+export const BULK_CONFIRM_ACTOR = "system-bulk-confirm";
+
+/**
+ * The actor an edit counts under: {@link BULK_CONFIRM_ACTOR} for a bulk-job
+ * row, else the audit row's own actor. `actorCwid` itself is never rewritten —
+ * it is who ran the job ("run by …").
+ */
+export function effectiveActor(e: { actorCwid: string; requestId?: string | null }): string {
+  return isBulkJobRequest(e.requestId) ? BULK_CONFIRM_ACTOR : e.actorCwid;
+}
+
 /** Who an edit was by, relative to what it touched. */
 export type EditorKind = "self" | "staff" | "automated";
 
 /**
- * `automated` = a machine actor; `self` = a scholar editing their OWN profile
- * (not through View-as); everything else is staff acting on someone's behalf.
+ * `automated` = a machine actor or a backend bulk job ({@link isBulkJobRequest});
+ * `self` = a scholar editing their OWN profile (not through View-as);
+ * everything else is staff acting on someone's behalf.
  */
 export function editorKind(e: {
   actorCwid: string;
   impersonatedCwid: string | null;
   entityType: string;
   entityId: string;
+  requestId?: string | null;
 }): EditorKind {
-  if (isSystemActor(e.actorCwid)) return "automated";
+  if (isSystemActor(e.actorCwid) || isBulkJobRequest(e.requestId)) return "automated";
   if (e.entityType === "scholar" && e.entityId === e.actorCwid && !e.impersonatedCwid) return "self";
   return "staff";
+}
+
+/** Display name for an automated actor: the bulk job by name, else the bare id. */
+export function automatedActorName(actor: string): string {
+  return actor === BULK_CONFIRM_ACTOR ? "Bulk confirm job" : actor;
+}
+
+/** An opaque entity id (a UUID, or anything long) that reads as noise in full. */
+export function isOpaqueId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) || id.length > 16;
+}
+
+/**
+ * Text for an entity with NO resolved name. A scholar keeps its CWID and a
+ * short code (a center code, a core id) stays as-is; an opaque id is never
+ * shown in full as if it were a person — it becomes its humanized entity kind
+ * plus the id's first 8 characters ("Reporter profile candidate cf58becd").
+ */
+export function unnamedEntityText(entityType: string, entityId: string): string {
+  if (entityType === "scholar" || !isOpaqueId(entityId)) return entityId;
+  return `${humanizeField(entityType)} ${entityId.slice(0, 8)}`;
+}
+
+/** "profile"/"profiles" when every entity is a scholar, else "record"/"records". */
+export function entityNoun(entityTypes: Iterable<string>, n: number): string {
+  const allScholars = [...entityTypes].every((t) => t === "scholar");
+  return `${allScholars ? "profile" : "record"}${n === 1 ? "" : "s"}`;
 }
 
 /** View-as bookkeeping: an audit trail, not an edit. */
@@ -178,6 +244,9 @@ export type RecentEdit = {
   action: string;
   entityType: string;
   entityId: string;
+  /** The audit row's `request_id`; a `bulk-` one marks a backend bulk job
+   *  ({@link isBulkJobRequest}), whose `actorCwid` is the person who ran it. */
+  requestId: string | null;
   /** Per-field before -> after for field-mutating actions (may be empty). */
   changes: FieldChange[];
   /** A compact fallback detail for non-field actions (proxy cwid, slug), else null. */
@@ -273,6 +342,8 @@ type RawRecent = {
   action: string;
   target_entity_type: string;
   target_entity_id: string;
+  /** Absent in rows from older callers/fixtures; treated as null. */
+  request_id?: string | null;
   fields_changed: unknown;
   before_values: unknown;
   after_values: unknown;
@@ -353,6 +424,7 @@ function shapeRecent(r: RawRecent): RecentEdit {
     action: r.action,
     entityType: r.target_entity_type,
     entityId: r.target_entity_id,
+    requestId: r.request_id ?? null,
     changes: buildChanges(r.fields_changed, r.before_values, r.after_values),
     detail: detailForAction(r.action, asJson(r.before_values), asJson(r.after_values)),
   };
@@ -442,22 +514,25 @@ export function shapeAnalytics(rows: readonly RawWindowRow[]): EditActivityAnaly
       impersonatedCwid: r.impersonated_cwid,
       entityType: r.target_entity_type,
       entityId: r.target_entity_id,
+      requestId: r.request_id ?? null,
     };
     const ent = `${e.entityType}:${e.entityId}`;
     const kind = editorKind(e);
+    // A bulk job's rows count under the job, not the person who ran it.
+    const actor = effectiveActor(e);
     kinds[kind] += 1;
-    if (kind === "self") selfEditors.add(e.actorCwid);
+    if (kind === "self") selfEditors.add(actor);
 
-    const a = byActor.get(e.actorCwid) ?? { edits: 0, kinds: { self: 0, staff: 0, automated: 0 }, ents: new Set() };
+    const a = byActor.get(actor) ?? { edits: 0, kinds: { self: 0, staff: 0, automated: 0 }, ents: new Set() };
     a.edits += 1;
     a.kinds[kind] += 1;
     a.ents.add(ent);
-    byActor.set(e.actorCwid, a);
+    byActor.set(actor, a);
 
     const dayKey = easternDayKey(toIso(r.ts));
     const d = days.get(dayKey) ?? { day: dayKey, self: 0, staff: 0, automated: 0, topActor: null, actors: new Map() };
     d[kind] += 1;
-    d.actors.set(e.actorCwid, (d.actors.get(e.actorCwid) ?? 0) + 1);
+    d.actors.set(actor, (d.actors.get(actor) ?? 0) + 1);
     days.set(dayKey, d);
 
     const keys = asJson(r.fields_changed);
@@ -653,8 +728,12 @@ export async function loadEditActivitySummary(
   now: Date = new Date(),
   directory?: DirectoryLookup,
   range: EditActivityRange = "30d",
+  scopeFilter?: EditActivityScopeFilter,
 ): Promise<EditActivitySummary> {
   const cutoff = rangeCutoff(range, now);
+  // The viewer's scope predicate, or a bound 1 (always true) for the
+  // site-wide view. ANDed into every read below.
+  const inScope = scopeFilter ?? 1;
 
   // Day buckets in WCM-local (Eastern) time, so they agree with the Eastern
   // timestamps the feed renders. A bound numeric offset needs no MySQL tz tables.
@@ -664,39 +743,51 @@ export async function loadEditActivitySummary(
     client.$queryRaw<RawPerDay[]>`
       SELECT DATE(CONVERT_TZ(ts, '+00:00', ${offset})) AS day, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        GROUP BY day
        ORDER BY day DESC`,
+    // Grouped by the EFFECTIVE actor (`effectiveActor`): a bulk job's rows
+    // ('bulk-%' request_id) count under 'system-bulk-confirm'
+    // (BULK_CONFIRM_ACTOR), not the person who ran it. The literals must track
+    // those constants (pinned by a unit test).
     client.$queryRaw<RawEditor[]>`
-      SELECT actor_cwid, COUNT(*) AS edits
+      SELECT CASE WHEN request_id LIKE 'bulk-%' THEN 'system-bulk-confirm' ELSE actor_cwid END
+               AS actor_cwid,
+             COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
-       GROUP BY actor_cwid
+       WHERE ts >= ${cutoff} AND (${inScope})
+       GROUP BY CASE WHEN request_id LIKE 'bulk-%' THEN 'system-bulk-confirm' ELSE actor_cwid END
        ORDER BY edits DESC
        LIMIT 20`,
     client.$queryRaw<RawEntity[]>`
       SELECT target_entity_type, target_entity_id, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        GROUP BY target_entity_type, target_entity_id
        ORDER BY edits DESC
        LIMIT 20`,
     client.$queryRaw<RawRecent[]>`
       SELECT id, ts, actor_cwid, impersonated_cwid, action,
-             target_entity_type, target_entity_id,
+             target_entity_type, target_entity_id, request_id,
              fields_changed, before_values, after_values
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        ORDER BY ts DESC, id DESC
        LIMIT 100`,
+    // Same effective-actor rule as the top-editors read: a bulk job counts as
+    // ONE automated editor ('system-bulk-confirm') and its rows as automated
+    // edits, never as the person who ran it.
     client.$queryRaw<RawEditorStats[]>`
-      SELECT COUNT(DISTINCT actor_cwid) AS editors,
-             COUNT(DISTINCT CASE WHEN actor_cwid LIKE 'system-%' THEN actor_cwid END)
+      SELECT COUNT(DISTINCT CASE WHEN request_id LIKE 'bulk-%' THEN 'system-bulk-confirm'
+                                 ELSE actor_cwid END) AS editors,
+             COUNT(DISTINCT CASE WHEN request_id LIKE 'bulk-%' THEN 'system-bulk-confirm'
+                                 WHEN actor_cwid LIKE 'system-%' THEN actor_cwid END)
                AS automated_editors,
-             CAST(COALESCE(SUM(CASE WHEN actor_cwid LIKE 'system-%' THEN 1 ELSE 0 END), 0)
+             CAST(COALESCE(SUM(CASE WHEN request_id LIKE 'bulk-%' OR actor_cwid LIKE 'system-%'
+                                    THEN 1 ELSE 0 END), 0)
                AS SIGNED) AS automated_edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}`,
+       WHERE ts >= ${cutoff} AND (${inScope})`,
     // Every window row, folded in JS. The value blobs are NOT read: only the
     // first few characters of the five "gained content" fields, rebuilt as tiny
     // JSON objects, which is all the empty -> filled test needs. That keeps an
@@ -707,7 +798,7 @@ export async function loadEditActivitySummary(
     // analytics undercount.
     client.$queryRaw<RawWindowRow[]>`
       SELECT ts, actor_cwid, impersonated_cwid, action,
-             target_entity_type, target_entity_id, fields_changed,
+             target_entity_type, target_entity_id, request_id, fields_changed,
              IF(JSON_VALID(before_values), JSON_OBJECT(
                'overview', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.overview')), 8),
                'orcid', LEFT(JSON_UNQUOTE(JSON_EXTRACT(before_values, '$.orcid')), 8),
@@ -723,7 +814,7 @@ export async function loadEditActivitySummary(
                'manualMentees', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.manualMentees')), 8)
              ), NULL) AS after_values
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff}
+       WHERE ts >= ${cutoff} AND (${inScope})
        LIMIT 500000`,
   ]);
 
@@ -779,16 +870,17 @@ export async function loadOlderEdits(
   asOf: Date = new Date(),
   directory?: DirectoryLookup,
   range: EditActivityRange = "30d",
+  scopeFilter?: EditActivityScopeFilter,
 ): Promise<EditActivityPage> {
   const cutoff = rangeCutoff(range, asOf);
   // LIMIT 101 = EDIT_ACTIVITY_RECENT_LIMIT + 1 look-ahead row (a literal, like
   // the first page's LIMIT 100: a bound LIMIT is driver-fragile).
   const rows = await client.$queryRaw<RawRecent[]>`
     SELECT id, ts, actor_cwid, impersonated_cwid, action,
-           target_entity_type, target_entity_id,
+           target_entity_type, target_entity_id, request_id,
            fields_changed, before_values, after_values
       FROM scholars_audit.manual_edit_audit
-     WHERE ts >= ${cutoff}
+     WHERE ts >= ${cutoff} AND (${scopeFilter ?? 1})
        AND (ts < ${cursor.ts} OR (ts = ${cursor.ts} AND id < ${cursor.id}))
      ORDER BY ts DESC, id DESC
      LIMIT 101`;
@@ -910,13 +1002,14 @@ export async function loadEditActivityCsv(
   range: EditActivityRange,
   asOf: Date,
   directory?: DirectoryLookup,
+  scopeFilter?: EditActivityScopeFilter,
 ): Promise<string> {
   const cutoff = rangeCutoff(range, asOf);
   const rows = await client.$queryRaw<RawExportRow[]>`
     SELECT id, ts, actor_cwid, impersonated_cwid, action,
-           target_entity_type, target_entity_id, fields_changed
+           target_entity_type, target_entity_id, request_id, fields_changed
       FROM scholars_audit.manual_edit_audit
-     WHERE ts >= ${cutoff} AND ts <= ${asOf}
+     WHERE ts >= ${cutoff} AND ts <= ${asOf} AND (${scopeFilter ?? 1})
      ORDER BY ts DESC, id DESC
      LIMIT 200000`;
   const edits = rows.map((r) => shapeRecent({ ...r, before_values: null, after_values: null }));

@@ -53,7 +53,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units" | "profiles" | "matcha";
+  id: "manage-profiles" | "methods" | "units" | "profiles" | "matcha" | "proxy";
   label: string;
   href: string;
 };
@@ -76,6 +76,9 @@ export type ConsoleLinkVerdicts = {
   managesUnits: boolean;
   /** `isDeveloper(cwid)` — gated by its own `DEVELOPMENT_ENABLED` kill switch. */
   isDeveloper: boolean;
+  /** Scholars this viewer serves as an assigned proxy (`scholar_proxy`, #779),
+   *  live (non-deleted) rows only. Optional — absent/empty means not a proxy. */
+  proxyFor?: { cwid: string; name: string }[];
 };
 
 /**
@@ -121,7 +124,22 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   }
 
   if (v.isDeveloper && !v.isSuperuser) {
-    links.push({ id: "matcha", label: "Matcha", href: "/edit/matcha" });
+    links.push({ id: "matcha", label: "Matcha: Open search", href: "/edit/matcha" });
+  }
+
+  // A proxy (pure administrative staff editing on a scholar's behalf, #779)
+  // holds no other role, so without this row their dropdown was just "Sign
+  // out". One scholar → straight to that editor; several → `/edit`, which
+  // renders the ProxyLanding chooser.
+  const proxyFor = v.proxyFor ?? [];
+  if (proxyFor.length === 1) {
+    links.push({
+      id: "proxy",
+      label: `Edit ${proxyFor[0].name}'s profile`,
+      href: `/edit/scholar/${encodeURIComponent(proxyFor[0].cwid)}`,
+    });
+  } else if (proxyFor.length > 1) {
+    links.push({ id: "proxy", label: "Profiles I edit", href: "/edit" });
   }
 
   return links;

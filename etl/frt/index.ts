@@ -37,7 +37,7 @@ async function buildNameIndex(): Promise<Map<string, Set<string>>> {
     }
   };
   for (const s of await db.write.scholar.findMany({
-    where: { deletedAt: null },
+    where: { deletedAt: null, campus: "wcm" },
     select: { cwid: true, preferredName: true, fullName: true },
   }))
     add(s.cwid, s.preferredName, s.fullName);

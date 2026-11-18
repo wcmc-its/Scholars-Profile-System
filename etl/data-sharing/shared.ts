@@ -197,7 +197,7 @@ export async function readSourceRows(): Promise<SourceRow[]> {
  *  institutional export's cwid case doesn't reliably match scholar.cwid).
  *  Used by the direct ETL and the import half. */
 export async function loadScholars(): Promise<Map<string, string>> {
-  const scholars = await db.write.scholar.findMany({ select: { cwid: true } });
+  const scholars = await db.write.scholar.findMany({ where: { campus: "wcm" }, select: { cwid: true } });
   const m = new Map<string, string>();
   for (const s of scholars) m.set(s.cwid.toLowerCase(), s.cwid);
   return m;

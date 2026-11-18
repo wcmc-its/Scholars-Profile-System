@@ -178,7 +178,7 @@ function AuthorRow({
         primaryActionHref={href}
         primaryActionLabel={primaryLabel}
       >
-        <Link
+        <Link prefetch={false}
           href={href}
           scroll={false}
           className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"

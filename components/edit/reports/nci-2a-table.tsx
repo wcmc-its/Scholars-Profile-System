@@ -125,7 +125,15 @@ type SaveSlots = (awardId: string, slots: number | null) => Promise<boolean>;
 
 /** A training award's trainee slots. Leaving the field saves; Esc undoes; a
  *  value that isn't a whole number in range reverts, never saves. */
-function TraineeSlotsField({ award, save }: { award: Nci2aAward; save: SaveSlots }) {
+function TraineeSlotsField({
+  award,
+  save,
+  readOnly,
+}: {
+  award: Nci2aAward;
+  save: SaveSlots;
+  readOnly: boolean;
+}) {
   const [draft, setDraft] = React.useState<string | undefined>(undefined);
   // The value this row saved, shown until the (possibly lagging) replica has it.
   const [saved, setSaved] = React.useState<number | null | undefined>(undefined);
@@ -156,6 +164,13 @@ function TraineeSlotsField({ award, save }: { award: Nci2aAward; save: SaveSlots
     setDraft(undefined);
   }
 
+  if (readOnly) {
+    return (
+      <div className="text-muted-foreground mt-1.5 text-xs" data-testid="nci-2a-trainee-slots-text">
+        Trainee slots {current == null ? "—" : current}
+      </div>
+    );
+  }
   return (
     <label className="text-muted-foreground mt-1.5 flex items-center gap-1.5 text-xs">
       Trainee slots
@@ -190,10 +205,13 @@ const value0 = (a: Nci2aAward) =>
 function PercentCell({
   award,
   save,
+  readOnly,
   children,
 }: {
   award: Nci2aAward;
   save: Save;
+  /** A view-only reader: the value as text, no input and no Accept. */
+  readOnly: boolean;
   /** Under the status pill: the note link. */
   children?: React.ReactNode;
 }) {
@@ -234,6 +252,23 @@ function PercentCell({
   }
 
   const value = draft ?? value0(award);
+  if (readOnly) {
+    return (
+      <div>
+        <span
+          className="text-sm tabular-nums"
+          title={award.cancerRelevantRationale ?? undefined}
+          data-testid="nci-2a-percent-text"
+        >
+          {value === "" ? "—" : `${value}%`}
+        </span>
+        <div className="mt-1.5">
+          <StatusPill award={award} />
+        </div>
+        {children}
+      </div>
+    );
+  }
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -334,7 +369,26 @@ function useNote(award: Nci2aAward, save: SaveNote) {
 
 type NoteState = ReturnType<typeof useNote>;
 
-function NoteLink({ award, note }: { award: Nci2aAward; note: NoteState }) {
+function NoteLink({
+  award,
+  note,
+  readOnly,
+}: {
+  award: Nci2aAward;
+  note: NoteState;
+  readOnly: boolean;
+}) {
+  if (readOnly) {
+    // The note as text, when there is one; nothing to add.
+    return note.current ? (
+      <p
+        className="text-muted-foreground mt-1.5 line-clamp-2 max-w-[180px] text-xs leading-[1.4]"
+        data-testid="nci-2a-note-text"
+      >
+        {note.current}
+      </p>
+    ) : null;
+  }
   if (note.open) return null;
   return (
     <button
@@ -378,7 +432,7 @@ function NoteEditor({ award, note }: { award: Nci2aAward; note: NoteState }) {
   );
 }
 
-function ProgramCell({ award, rosterHref }: { award: Nci2aAward; rosterHref: string }) {
+function ProgramCell({ award, rosterHref }: { award: Nci2aAward; rosterHref: string | null }) {
   const coded = award.allocations.filter((al) => al.programCode);
   const title =
     award.programFrom === "membership"
@@ -406,7 +460,13 @@ function ProgramCell({ award, rosterHref }: { award: Nci2aAward; rosterHref: str
       ))}
       {award.programFrom === "stored" && (
         <li className="text-muted-foreground text-xs">
-          Recorded at import · <Link href={rosterHref}>roster</Link>
+          Recorded at import
+          {rosterHref && (
+            <>
+              {" "}
+              · <Link href={rosterHref}>roster</Link>
+            </>
+          )}
         </li>
       )}
     </ul>
@@ -419,12 +479,14 @@ function Nci2aRow({
   saveNote,
   saveSlots,
   rosterHref,
+  readOnly,
 }: {
   award: Nci2aAward;
   save: Save;
   saveNote: SaveNote;
   saveSlots: SaveSlots;
-  rosterHref: string;
+  rosterHref: string | null;
+  readOnly: boolean;
 }) {
   const note = useNote(a, saveNote);
   return (
@@ -470,15 +532,17 @@ function Nci2aRow({
           >
             {a.projectTitle}
           </div>
-          {isTrainingAward(a) && <TraineeSlotsField award={a} save={saveSlots} />}
+          {isTrainingAward(a) && (
+            <TraineeSlotsField award={a} save={saveSlots} readOnly={readOnly} />
+          )}
         </td>
         <td className="p-3 text-right">{money(a.annualProjectDirectCosts)}</td>
         <td className={cn("p-3", !a.isPeerReviewed && "text-muted-foreground")}>
           {a.isPeerReviewed ? "Yes" : "No"}
         </td>
         <td className="px-3 py-2.5">
-          <PercentCell award={a} save={save}>
-            <NoteLink award={a} note={note} />
+          <PercentCell award={a} save={save} readOnly={readOnly}>
+            <NoteLink award={a} note={note} readOnly={readOnly} />
           </PercentCell>
         </td>
         <td className="p-3 text-right font-semibold">
@@ -488,7 +552,7 @@ function Nci2aRow({
           <ProgramCell award={a} rosterHref={rosterHref} />
         </td>
       </tr>
-      {note.open && (
+      {note.open && !readOnly && (
         <tr className="border-apollo-border border-b" data-testid="nci-2a-note-row">
           <td />
           <td colSpan={7} className="pr-5 pb-4">
@@ -505,6 +569,8 @@ const TH =
 
 export function Nci2aTable({
   centerCode,
+  readOnly = false,
+  showRosterLink = true,
   rows,
   resetKey,
   sort,
@@ -513,6 +579,12 @@ export function Nci2aTable({
   emptyMessage,
 }: {
   centerCode: string;
+  /** A view-only reader (a center leader who leads no program): no percent
+   *  input, Accept, note editor or trainee-slots field. The server refuses
+   *  their writes regardless (`authorizeNci2aWrite`). */
+  readOnly?: boolean;
+  /** Off for a leader-only viewer, who can't open the center roster editor. */
+  showRosterLink?: boolean;
   rows: ReadonlyArray<Nci2aAward>;
   /** The filter query string; paging resets when it changes. */
   resetKey: string;
@@ -540,8 +612,8 @@ export function Nci2aTable({
     [rows, written],
   );
   const { visible, hasMore, showMore, rangeLabel } = useShowMore(shown, 25, resetKey);
-  const rosterHref = `/edit/center/${encodeURIComponent(centerCode)}`;
-  const aiShown = visible.filter((a) => nci2aStatus(a) === "ai").length;
+  const rosterHref = showRosterLink ? `/edit/center/${encodeURIComponent(centerCode)}` : null;
+  const aiShown = readOnly ? 0 : visible.filter((a) => nci2aStatus(a) === "ai").length;
   const targets = bulkAcceptTargets(visible);
   const [confirming, setConfirming] = React.useState(false);
   const [bulkBusy, setBulkBusy] = React.useState(false);
@@ -752,6 +824,7 @@ export function Nci2aTable({
                   saveNote={saveNote}
                   saveSlots={saveSlots}
                   rosterHref={rosterHref}
+                  readOnly={readOnly}
                 />
               ))}
             </tbody>

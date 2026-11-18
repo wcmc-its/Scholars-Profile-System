@@ -13,10 +13,15 @@
 
 /** The badge's default-audience labels. */
 export const UNIT_AUDIENCE = "Unit owners and curators";
+/** `UNIT_AUDIENCE` / `UNIT_RULE` while `LEADER_REPORT_ACCESS` is on — picked
+ *  server-side by `unitReportAccess` (`lib/edit/unit-leader-access.ts`). */
+export const LEADER_UNIT_AUDIENCE = "Unit owners, curators and leaders";
 export const ADMIN_AUDIENCE = "All unit administrators";
 export const PERSON_AUDIENCE = "Superusers and comms stewards";
 export const UNIT_RULE =
   "Owners and Curators of the unit this report is opened for can run it, plus superusers and comms stewards.";
+export const LEADER_UNIT_RULE =
+  "Owners and Curators of the unit this report is opened for can run it, plus superusers and comms stewards. The unit's leaders can view it.";
 export const ADMIN_RULE =
   "Every unit administrator — an Owner or Curator of any unit — can run it, plus superusers and comms stewards.";
 /** The badge list's line under the default audience for a person-gated report

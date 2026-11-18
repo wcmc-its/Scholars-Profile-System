@@ -1664,6 +1664,7 @@ function renderPanel(
             mode={voiceMode}
             scholarName={scholarName}
             mentees={ctx.mentees}
+            currentPositions={ctx.menteeCurrentPositions}
             delegated={delegated}
           />
         </div>

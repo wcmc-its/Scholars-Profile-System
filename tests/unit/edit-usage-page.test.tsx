@@ -1,10 +1,10 @@
 /**
  * `app/edit/usage/page.tsx` — the 2026-09 revision layout: KPI row, pageviews
- * chart, ranked Top profiles / Top search terms (names resolved from slugs,
+ * chart, ranked Top profiles / Top typed + suggested search terms (names resolved from slugs,
  * Show all), Traffic sources cards, and the uptime card. Each data source
  * fails soft on its own. Renders are scoped to the page root.
  */
-import { fireEvent, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
@@ -12,6 +12,12 @@ const h = vi.hoisted(() => ({
   mockCanViewUsage: vi.fn(),
   mockLoadUsage: vi.fn(),
   mockLoadHealth: vi.fn(),
+  mockLoadTraffic: vi.fn(),
+  mockLoadEdits: vi.fn(),
+  mockLoadEditsUncached: vi.fn(),
+  mockScope: vi.fn(),
+  mockScopeSlugs: vi.fn(),
+  mockProfileViews: vi.fn(),
   mockFindMany: vi.fn(),
   mockPush: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -26,8 +32,25 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockGetEditSession }));
 vi.mock("@/lib/edit/usage-access", () => ({ canViewUsage: h.mockCanViewUsage }));
-vi.mock("@/lib/api/usage-summary", () => ({ loadUsageSummary: h.mockLoadUsage }));
-vi.mock("@/lib/api/service-health", () => ({ loadServiceHealth: h.mockLoadHealth }));
+vi.mock("@/lib/api/usage-summary", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/usage-summary")>()),
+  loadUsageSummary: h.mockLoadUsage,
+  loadScopedProfileViews: h.mockProfileViews,
+}));
+vi.mock("@/lib/edit/dashboard-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/edit/dashboard-access")>()),
+  loadDashboardScope: h.mockScope,
+  loadScopeSlugs: h.mockScopeSlugs,
+}));
+vi.mock("@/lib/api/usage-traffic", () => ({ loadTrafficOverview: h.mockLoadTraffic }));
+vi.mock("@/lib/api/service-health", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
+  loadServiceHealth: h.mockLoadHealth,
+}));
+vi.mock("@/lib/api/usage-edits", () => ({
+  loadEditsByHour: h.mockLoadEdits,
+  loadEditsByHourUncached: h.mockLoadEditsUncached,
+}));
 vi.mock("@/components/edit/console-shell", () => ({
   ConsoleShell: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -59,7 +82,13 @@ import {
   pctLabel,
   shortDay,
 } from "@/app/edit/usage/usage-format";
-import { PageviewsChart, UsageRangePicker } from "@/app/edit/usage/usage-widgets";
+import {
+  HourlyTrafficChart,
+  PageviewsChart,
+  UsageRangePicker,
+} from "@/app/edit/usage/usage-widgets";
+import { EMPTY_HOURLY, shapeEditsByHour } from "@/lib/api/usage-hourly";
+import { shapeHourly } from "@/lib/api/usage-summary";
 
 const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 
@@ -80,25 +109,41 @@ const SUMMARY = {
     { term: "widgets", searches: 12 },
     { term: "gizmos", searches: 3 },
   ],
-  referrers: [
-    { label: "(direct)", hits: 900 },
-    { label: "example.org", hits: 100 },
-  ],
+  suggestedSearchTerms: [{ term: "sprockets", searches: 5 }],
+  searchVolume: { typed: 120, suggested: 40 },
   geo: [{ label: "North America", hits: 1000 }],
   device: [
     { label: "desktop", hits: 990 },
     { label: "mobile", hits: 10 },
   ],
+  hourly: EMPTY_HOURLY,
 };
 
+const TRAFFIC_EMPTY = {
+  since: "2026-08-26",
+  until: "2026-09-24",
+  firstDt: null,
+  kpi: { hits: 0, pageviews: 0, visitorsAvg: 0, visitorDays: 0 },
+  sourcesDaily: [],
+  referrers: { total: 0, other: 0, siteOnly: 0 },
+  aiDaily: [],
+  vendors: [],
+};
+
+// The raw CloudWatch reads (ServiceHealthData); the page windows them to the
+// selected range with the real summarizeServiceHealth. The clock is pinned to
+// 2026-09-25 below, so "Last 7 days" = Sep 18-24, "Last 30 days" = Aug 26 -
+// Sep 24 and "Last 90 days" = Jun 27 - Sep 24; alarm history (30-day
+// retention) starts Aug 26.
 const HEALTH = {
-  windowDays: 30,
-  uptimePercent: 99.987,
-  alarmFirings: 2,
-  monthly: [
-    { month: "2026-07", availabilityPercent: 99.5, totalRequests: 500, lowTraffic: true },
-    { month: "2026-08", availabilityPercent: 99.98, totalRequests: 40_000, lowTraffic: false },
+  daily: [
+    { date: "2026-07-15", requestCount: 400, elb5xx: 0, target5xx: 2 }, // 99.50%, low traffic
+    { date: "2026-08-10", requestCount: 30_000, elb5xx: 0, target5xx: 8 }, // outside 30 days
+    { date: "2026-09-02", requestCount: 10_000, elb5xx: 0, target5xx: 9 }, // inside 30, not 7
+    { date: "2026-09-20", requestCount: 10_000, elb5xx: 1, target5xx: 0 }, // inside 7
   ],
+  alarmFiringTimes: ["2026-09-01T03:00:00.000Z", "2026-09-21T04:00:00.000Z"],
+  alarmHistoryFrom: "2026-08-26T12:00:00.000Z",
 };
 
 async function renderPage(params: Record<string, string> = {}) {
@@ -112,13 +157,27 @@ async function renderPage(params: Record<string, string> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-25T12:00:00Z"));
   h.mockGetEditSession.mockResolvedValue(ADMIN);
   h.mockCanViewUsage.mockResolvedValue(true);
   h.mockLoadUsage.mockResolvedValue(SUMMARY);
   h.mockLoadHealth.mockResolvedValue(HEALTH);
+  // Traffic sections have their own tests (usage-traffic-widgets); here they
+  // render their empty state so no list fetch fires.
+  h.mockLoadTraffic.mockResolvedValue(TRAFFIC_EMPTY);
+  h.mockLoadEdits.mockResolvedValue([]);
+  h.mockLoadEditsUncached.mockResolvedValue([]);
+  h.mockScope.mockResolvedValue({ all: true });
+  h.mockScopeSlugs.mockResolvedValue(new Map());
+  h.mockProfileViews.mockResolvedValue({ byDay: [], bySlug: [] });
   h.mockFindMany.mockResolvedValue([
     { slug: "test-person-1", cwid: "tst0001", preferredName: "Test Person One" },
   ]);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("/edit/usage", () => {
@@ -136,8 +195,48 @@ describe("/edit/usage", () => {
     expect(root.getByText("about 225 a day")).toBeTruthy();
     expect(root.getByTestId("usage-busiest-day").textContent).toBe("700");
     expect(root.getByTestId("usage-busiest-day").nextElementSibling?.textContent).toBe("Aug 27");
-    expect(root.getByTestId("service-health-uptime").textContent).toBe("99.99%");
+    expect(root.getByTestId("service-health-uptime").textContent).toBe("99.95%");
+    expect(root.getByTestId("service-health-uptime").nextElementSibling?.textContent).toBe(
+      "last 30 days",
+    );
     expect(root.getByTestId("service-health-alarm-firings").textContent).toBe("2");
+  });
+
+  // Regression (2026-11-13): the uptime + alarm tiles were pinned to a fixed
+  // 30-day window, so switching the Range never changed them.
+  it("windows the uptime and alarm tiles to the selected range", async () => {
+    const tiles = async (params: Record<string, string>) => {
+      document.body.innerHTML = "";
+      const root = await renderPage(params);
+      const up = root.getByTestId("service-health-uptime");
+      const al = root.getByTestId("service-health-alarm-firings");
+      return [
+        up.textContent,
+        up.nextElementSibling?.textContent,
+        al.textContent,
+        al.nextElementSibling?.textContent,
+      ];
+    };
+    expect(await tiles({ range: "7" })).toEqual([
+      "99.99%",
+      "last 7 days",
+      "1",
+      "fired in last 7 days",
+    ]);
+    expect(await tiles({})).toEqual(["99.95%", "last 30 days", "2", "fired in last 30 days"]);
+    // 90 days reaches past CloudWatch's 30-day alarm history: say so.
+    expect(await tiles({ range: "90" })).toEqual([
+      "99.96%",
+      "last 90 days",
+      "2",
+      "fired since Aug 26 (CloudWatch keeps 30 days)",
+    ]);
+    expect(await tiles({ range: "custom", from: "2026-07-01", to: "2026-07-31" })).toEqual([
+      "99.50%",
+      "Jul 1 – Jul 31",
+      "—",
+      "CloudWatch keeps only 30 days of alarm history",
+    ]);
   });
 
   it("names resolved profiles (with the hover card), keeps unresolved slugs, and toggles Show all", async () => {
@@ -157,6 +256,49 @@ describe("/edit/usage", () => {
     expect(terms.queryByRole("button", { name: /Show all/ })).toBeNull();
   });
 
+  it("lists typed search terms apart from suggested terms clicked", async () => {
+    const root = await renderPage();
+    const typed = within(root.getByTestId("usage-top-search-terms"));
+    expect(typed.getByText("Top typed search terms")).toBeTruthy();
+    expect(typed.getByText(/left out as automated/)).toBeTruthy();
+    expect(typed.getByText(/Counted from Nov 14/)).toBeTruthy();
+    expect(typed.queryByText("sprockets")).toBeNull();
+
+    const suggested = within(root.getByTestId("usage-suggested-search-terms"));
+    expect(suggested.getByText("Suggested searches")).toBeTruthy();
+    expect(suggested.getByText("sprockets")).toBeTruthy();
+    expect(suggested.queryByText("widgets")).toBeNull();
+  });
+
+  it("shows an empty suggested list (e.g. days before tagging) without hiding typed terms", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, suggestedSearchTerms: [] });
+    const root = await renderPage();
+    expect(
+      within(root.getByTestId("usage-suggested-search-terms")).getByText(
+        "No suggestion clicks in the window.",
+      ),
+    ).toBeTruthy();
+    expect(within(root.getByTestId("usage-top-search-terms")).getByText("widgets")).toBeTruthy();
+  });
+
+  it("drops the bot search terms table", async () => {
+    const root = await renderPage();
+    expect(root.queryByTestId("usage-bot-search-terms")).toBeNull();
+  });
+
+  it("shows search volume split into typed and suggested", async () => {
+    const root = await renderPage();
+    expect(root.getByTestId("usage-searches").textContent).toBe("160");
+    expect(root.getByText("120 typed · 40 from suggestions")).toBeTruthy();
+  });
+
+  it("says so when the range has no searches at all", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, searchVolume: { typed: 0, suggested: 0 } });
+    const root = await renderPage();
+    expect(root.getByTestId("usage-searches").textContent).toBe("0");
+    expect(root.getByText("no searches recorded")).toBeTruthy();
+  });
+
   it("falls back to slugs when the name lookup fails", async () => {
     h.mockFindMany.mockRejectedValue(new Error("db down"));
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -171,6 +313,26 @@ describe("/edit/usage", () => {
     expect(traffic.getByText("Desktop")).toBeTruthy();
     expect(traffic.getByText("99.0%")).toBeTruthy();
     expect(traffic.getByText("1.0%")).toBeTruthy();
+  });
+
+  it("replaces the old Referrers card with the traffic sections, read for the page's range", async () => {
+    const root = await renderPage({ range: "7" });
+    expect(within(root.getByTestId("usage-traffic-sources")).queryByText("Referrers")).toBeNull();
+    expect(root.getByTestId("usage-traffic")).toBeTruthy();
+    expect(root.getByTestId("traffic-empty").textContent).toContain("No traffic detail yet");
+    expect(root.getByTestId("traffic-download-excel").getAttribute("href")).toBe(
+      "/api/edit/usage/traffic/export?range=7&grain=week",
+    );
+    expect(h.mockLoadTraffic).toHaveBeenCalledWith({ since: "2026-09-18", until: "2026-09-24" });
+  });
+
+  it("fails soft when the traffic rollup can't be read", async () => {
+    h.mockLoadTraffic.mockRejectedValue(new Error("athena"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    expect(root.getByTestId("usage-traffic-unavailable")).toBeTruthy();
+    expect(root.getByTestId("usage-total-pageviews")).toBeTruthy();
+    expect(root.getByTestId("usage-traffic-sources")).toBeTruthy();
   });
 
   it("renders the uptime card with month labels and a lighter low-traffic bar", async () => {
@@ -200,6 +362,127 @@ describe("/edit/usage", () => {
   });
 });
 
+describe("/edit/usage for a unit admin", () => {
+  const SCOPE = {
+    all: false,
+    unitNames: ["Department of Testing", "Alpha Center"],
+    unitCodes: ["N1000"],
+    centerCodes: ["ctr_alpha"],
+    memberCwids: ["tst0001", "tst0002"],
+  };
+
+  beforeEach(() => {
+    h.mockGetEditSession.mockResolvedValue({ cwid: "adm002", isSuperuser: false, isCommsSteward: false });
+    h.mockScope.mockResolvedValue(SCOPE);
+    h.mockScopeSlugs.mockResolvedValue(
+      new Map([
+        ["test-person-1", "test-person-1"],
+        ["test-person-1-old", "test-person-1"],
+        ["test-person-2", "test-person-2"],
+      ]),
+    );
+    h.mockProfileViews.mockResolvedValue({
+      byDay: [
+        { day: "2026-08-27", views: 15 },
+        { day: "2026-08-26", views: 30 },
+      ],
+      bySlug: [
+        { slug: "test-person-2", views: 10 },
+        { slug: "test-person-1", views: 30 },
+        { slug: "test-person-1-old", views: 5 },
+      ],
+    });
+  });
+
+  it("a site-wide viewer's page has no Site-wide heading and the plain title", async () => {
+    h.mockGetEditSession.mockResolvedValue(ADMIN);
+    h.mockScope.mockResolvedValue({ all: true });
+    const root = await renderPage();
+    expect(root.getByRole("heading", { level: 1 }).textContent).toBe("Usage");
+    expect(root.queryByTestId("usage-site-wide")).toBeNull();
+    expect(h.mockProfileViews).not.toHaveBeenCalled();
+    expect(h.mockScope).toHaveBeenCalledWith(ADMIN, "usage");
+  });
+
+  it("names the units in the title and intro", async () => {
+    const root = await renderPage();
+    expect(root.getByRole("heading", { level: 1 }).textContent).toBe(
+      "Usage: Department of Testing, Alpha Center",
+    );
+    expect(
+      root.getByText(/Profile usage for your units, then site-wide usage, Aug 26 – Aug 29\./),
+    ).toBeTruthy();
+  });
+
+  it("shows the unit's own pageviews, busiest day and profiles (former slug counted, not cut to a site top list)", async () => {
+    const root = await renderPage();
+    expect(root.getByTestId("usage-total-pageviews").textContent).toBe("45");
+    expect(root.getByTestId("usage-busiest-day").textContent).toBe("30");
+    expect(root.getByTestId("usage-busiest-day").nextElementSibling?.textContent).toBe("Aug 26");
+    const profiles = within(root.getByTestId("usage-top-profiles"));
+    expect(profiles.getByText("Test Person One")).toBeTruthy();
+    expect(profiles.getByText("/test-person-2")).toBeTruthy();
+    expect(profiles.queryByText("/test-person-9")).toBeNull();
+    expect(profiles.queryByText("/test-person-3")).toBeNull();
+    expect(h.mockFindMany.mock.calls[0][0].where.slug.in).toEqual(["test-person-1", "test-person-2"]);
+    // The read is for the unit's own slugs, from the scope, over the page's range.
+    const [window, slugs] = h.mockProfileViews.mock.calls[0];
+    expect(window).toMatchObject({ since: "2026-08-26", until: "2026-09-24" });
+    expect([...slugs]).toEqual(["test-person-1", "test-person-1-old", "test-person-2"]);
+  });
+
+  it("keeps every other section, unchanged, after a Site-wide heading", async () => {
+    const root = await renderPage();
+    const heading = root.getByTestId("usage-site-wide");
+    expect(within(heading).getByRole("heading", { level: 2 }).textContent).toBe("Site-wide");
+    const after = (testId: string) =>
+      heading.compareDocumentPosition(root.getByTestId(testId)) & Node.DOCUMENT_POSITION_FOLLOWING;
+    for (const id of [
+      "usage-searches",
+      "service-health-uptime",
+      "service-health-alarm-firings",
+      "usage-top-search-terms",
+      "usage-suggested-search-terms",
+      "usage-traffic",
+      "usage-traffic-sources",
+      "service-health-trend",
+    ]) {
+      expect(after(id), id).toBeTruthy();
+    }
+    for (const id of ["usage-total-pageviews", "usage-busiest-day", "usage-top-profiles"]) {
+      expect(after(id), id).toBeFalsy();
+    }
+    expect(root.getByTestId("usage-searches").textContent).toBe("160");
+    expect(root.getAllByTestId("usage-total-pageviews")).toHaveLength(1);
+    expect(root.getAllByTestId("usage-top-profiles")).toHaveLength(1);
+  });
+
+  it("reads the edits line for the viewer's scope, outside the shared cache", async () => {
+    const hourly = shapeHourly([{ dt: "2026-09-20", slot: "14|human", hits: "5" }]);
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-08-26", hourly });
+    const root = await renderPage();
+    expect(h.mockLoadEdits).not.toHaveBeenCalled();
+    expect(h.mockLoadEditsUncached).toHaveBeenCalledTimes(1);
+    const [, since, until, filter] = h.mockLoadEditsUncached.mock.calls[0];
+    expect([since, until]).toEqual(["2026-08-26", "2026-09-24"]);
+    expect(filter.values).toEqual(["tst0001", "tst0002", "N1000", "ctr_alpha"]);
+    expect(root.getByTestId("usage-hourly-legend-edits").textContent).toContain(
+      "Profile edits, your units (right scale)",
+    );
+  });
+
+  it("fails soft when the unit's own read fails: the site-wide sections still draw", async () => {
+    h.mockProfileViews.mockRejectedValue(new Error("athena"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    expect(root.getByTestId("usage-unit-unavailable")).toBeTruthy();
+    expect(root.queryByTestId("usage-total-pageviews")).toBeNull();
+    expect(root.queryByTestId("usage-top-profiles")).toBeNull();
+    expect(root.getByTestId("usage-site-wide")).toBeTruthy();
+    expect(root.getByTestId("usage-searches").textContent).toBe("160");
+  });
+});
+
 describe("/edit/usage range", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -223,6 +506,23 @@ describe("/edit/usage range", () => {
       expect.objectContaining({ key: "launch", since: "2026-07-01", until: "2026-09-24" }),
     );
     expect(root.getByTestId("usage-range-trigger").textContent).toContain("Since launch");
+  });
+
+  it("shows each range's own search totals", async () => {
+    h.mockLoadUsage.mockImplementation(async (range: { since: string }) => ({
+      ...SUMMARY,
+      searchVolume:
+        range.since === "2026-09-18"
+          ? { typed: 30, suggested: 70 }
+          : { typed: 1200, suggested: 300 },
+    }));
+    const week = await renderPage({ range: "7" });
+    expect(week.getByTestId("usage-searches").textContent).toBe("100");
+    expect(week.getByText("30 typed · 70 from suggestions")).toBeTruthy();
+    cleanup();
+    const launch = await renderPage({ range: "launch" });
+    expect(launch.getByTestId("usage-searches").textContent).toBe("1,500");
+    expect(launch.getByText("1,200 typed · 300 from suggestions")).toBeTruthy();
   });
 
   it("shows a custom range's dates on the trigger", async () => {
@@ -319,6 +619,216 @@ describe("PageviewsChart gaps", () => {
     // 7 window days; the fixture has rows for Aug 26-29 only.
     expect(slots).toHaveLength(7);
     expect(slots.filter((s) => s.getAttribute("data-gap") === "true")).toHaveLength(3);
+  });
+});
+
+describe("Traffic by hour", () => {
+  // Two rolled UTC days. Nov 17 15Z = 10 AM Eastern has an outage (errors).
+  const ROWS = [
+    { dt: "2026-11-16", slot: "15|human", hits: "120" },
+    { dt: "2026-11-16", slot: "15|bot", hits: "40" },
+    { dt: "2026-11-17", slot: "15|human", hits: "10" },
+    { dt: "2026-11-17", slot: "15|error", hits: "300" },
+    { dt: "2026-11-17", slot: "16|bot", hits: "7" },
+  ];
+  const traffic = shapeHourly(ROWS);
+  const svgOf = (el: HTMLElement) => el.querySelector("svg[role='img']") as SVGSVGElement;
+  /** Click the bar at index `i` of `n` (jsdom has no layout, so stub the box). */
+  const clickBar = (svg: SVGSVGElement, i: number, n: number) => {
+    svg.getBoundingClientRect = () => ({ left: 0, width: n * 10 }) as DOMRect;
+    fireEvent.click(svg, { clientX: i * 10 + 5 });
+  };
+
+  it("shows an empty state on the page before hourly data exists", async () => {
+    const root = await renderPage();
+    expect(root.getByTestId("usage-hourly-empty").textContent).toContain(
+      "No hourly data in this range yet",
+    );
+    expect(root.getByTestId("usage-hourly-empty").textContent).toContain(
+      "(served, bot or challenged, and error requests by hour)",
+    );
+    expect(root.queryByTestId("usage-hourly-chart")).toBeNull();
+  });
+
+  it("renders the chart on the page and says when hourly data starts", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-10-18", hourly: traffic });
+    const root = await renderPage();
+    const chart = root.getByTestId("usage-hourly-chart");
+    expect(root.queryByTestId("usage-hourly-empty")).toBeNull();
+    expect(chart.textContent).toContain("Hourly data starts Nov 16.");
+    // 48 hourly slots; three stacked series present.
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(48);
+    expect(svgOf(chart).querySelectorAll("rect[data-series='error']")).toHaveLength(1);
+  });
+
+  it("shows the hour's counts in Eastern time on hover/tap", () => {
+    const { getByTestId } = render(<HourlyTrafficChart traffic={traffic} since="2026-11-16" />);
+    const chart = getByTestId("usage-hourly-chart");
+    // Index 39 = Nov 17 15Z = Nov 17 10 AM EST.
+    clickBar(svgOf(chart), 39, 48);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0 · Error 300",
+    );
+    expect(chart.textContent).not.toContain("Hourly data starts");
+  });
+
+  it("labels the classes honestly in the legend, aria label and help text", () => {
+    const { getByTestId } = render(<HourlyTrafficChart traffic={traffic} since="2026-11-16" />);
+    const chart = getByTestId("usage-hourly-chart");
+    expect(getByTestId("usage-hourly-legend-human").textContent).toBe("Served");
+    expect(getByTestId("usage-hourly-legend-bot").textContent).toBe("Bot or challenged");
+    expect(getByTestId("usage-hourly-legend-error").textContent).toBe("Error");
+    expect(svgOf(chart).getAttribute("aria-label")).toBe(
+      "Page requests per hour (Eastern): served, bot or challenged, and error, 48 hours",
+    );
+    expect(chart.textContent).toContain(
+      "Served traffic still includes automated clients that passed the firewall, so a flat curve around the clock suggests automation.",
+    );
+    expect(chart.textContent).not.toMatch(/\bHuman\b|\bBot\b(?! or challenged)/);
+    // No edits prop: no line, no legend entry, no right axis.
+    expect(chart.querySelector("[data-testid='usage-hourly-legend-edits']")).toBeNull();
+    expect(chart.querySelector("[data-testid='usage-hourly-edits-axis']")).toBeNull();
+  });
+
+  // Nov 17 15Z (10 AM EST) has 4 edits; 16Z has 2; Nov 16 15Z has 2.
+  const EDITS = shapeEditsByHour([
+    { hour: "2026-11-16 15", edits: 2n },
+    { hour: "2026-11-17 15", edits: 4n },
+    { hour: "2026-11-17 16", edits: "2" },
+  ]);
+
+  it("draws profile edits as a line on a right-hand scale and reads them out", () => {
+    const { getByTestId } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" edits={EDITS} />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    const line = svgOf(chart).querySelector("polyline[data-series='edits']");
+    expect(line).not.toBeNull();
+    // One point per hourly slot; the 4-edit hour peaks at the scale top.
+    const points = line!.getAttribute("points")!.split(" ");
+    expect(points).toHaveLength(48);
+    expect(points[39]).toBe("39.5,0");
+    expect(points[40]).toBe("40.5,50");
+    expect(points[0]).toBe("0.5,100");
+    expect(getByTestId("usage-hourly-edits-axis").textContent).toBe("024");
+    expect(getByTestId("usage-hourly-legend-edits").textContent).toBe(
+      "Profile edits (right scale)",
+    );
+    clickBar(svgOf(chart), 39, 48);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0 · Error 300 · Profile edits 4",
+    );
+    expect(svgOf(chart).getAttribute("aria-label")).toContain(
+      "profile edits as a line on the right-hand scale",
+    );
+    // Toggle the line off from the legend.
+    fireEvent.click(getByTestId("usage-hourly-legend-edits"));
+    expect(svgOf(chart).querySelector("polyline")).toBeNull();
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0 · Error 300",
+    );
+  });
+
+  it("averages edits per day by hour of day over the traffic's covered days", () => {
+    const { getByTestId, getByRole } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" edits={EDITS} />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    fireEvent.click(getByRole("button", { name: "By hour of day" }));
+    clickBar(svgOf(chart), 10, 24);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "10 AM ET, average per day: Served 65 · Bot or challenged 20 · Error 150 · Profile edits 3",
+    );
+  });
+
+  it("shows a short note instead of the line when edits are unavailable", () => {
+    const { getByTestId } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" edits={null} />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    expect(getByTestId("usage-hourly-edits-unavailable").textContent).toBe(
+      "Profile edits unavailable right now.",
+    );
+    expect(svgOf(chart).querySelector("polyline")).toBeNull();
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(48);
+  });
+
+  it("reads edits for the range on the page and draws the line", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-10-18", hourly: traffic });
+    h.mockLoadEdits.mockResolvedValue(EDITS);
+    const root = await renderPage();
+    expect(h.mockLoadEdits).toHaveBeenCalledTimes(1);
+    expect(h.mockLoadEdits.mock.calls[0][1]).toMatchObject({
+      since: "2026-08-26",
+      until: "2026-09-24",
+    });
+    const chart = root.getByTestId("usage-hourly-chart");
+    expect(svgOf(chart).querySelector("polyline[data-series='edits']")).not.toBeNull();
+  });
+
+  it("fails soft when the edits read throws: the card still draws, the line is dropped", async () => {
+    h.mockLoadUsage.mockResolvedValue({ ...SUMMARY, since: "2026-10-18", hourly: traffic });
+    h.mockLoadEdits.mockRejectedValue(new Error("audit read denied"));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const root = await renderPage();
+    const chart = root.getByTestId("usage-hourly-chart");
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(48);
+    expect(svgOf(chart).querySelector("polyline")).toBeNull();
+    expect(root.getByTestId("usage-hourly-edits-unavailable")).toBeTruthy();
+    // The rest of the page is untouched.
+    expect(root.getByTestId("usage-total-pageviews").textContent).toBe("900");
+    expect(errSpy.mock.calls.some((c) => String(c[0]).includes("usage_edits_by_hour_failed"))).toBe(
+      true,
+    );
+    errSpy.mockRestore();
+  });
+
+  it("skips the edits read when the card has no hourly data", async () => {
+    await renderPage();
+    expect(h.mockLoadEdits).not.toHaveBeenCalled();
+  });
+
+  it("toggles a series from the legend", () => {
+    const { getByTestId } = render(<HourlyTrafficChart traffic={traffic} since="2026-11-16" />);
+    const chart = getByTestId("usage-hourly-chart");
+    const legend = getByTestId("usage-hourly-legend-error");
+    expect(legend.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(legend);
+    expect(legend.getAttribute("aria-pressed")).toBe("false");
+    expect(svgOf(chart).querySelectorAll("rect[data-series='error']")).toHaveLength(0);
+    expect(svgOf(chart).querySelectorAll("rect[data-series='human']")).toHaveLength(2);
+    clickBar(svgOf(chart), 39, 48);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "Nov 17, 10 AM ET: Served 10 · Bot or challenged 0",
+    );
+  });
+
+  it("folds the range into 24 hours of the day, averaged per day", () => {
+    const { getByTestId, getByRole } = render(
+      <HourlyTrafficChart traffic={traffic} since="2026-11-16" />,
+    );
+    const chart = getByTestId("usage-hourly-chart");
+    fireEvent.click(getByRole("button", { name: "By hour of day" }));
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(24);
+    expect(chart.textContent).toContain("Average per day over 2 days.");
+    clickBar(svgOf(chart), 10, 24);
+    expect(getByTestId("usage-hourly-readout").textContent).toBe(
+      "10 AM ET, average per day: Served 65 · Bot or challenged 20 · Error 150",
+    );
+  });
+
+  it("caps the timeline to the most recent 30 days and says so", () => {
+    const long = shapeHourly(
+      Array.from({ length: 40 }, (_, i) => ({
+        dt: new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10),
+        slot: "12|human",
+        hits: "1",
+      })),
+    );
+    const { getByTestId } = render(<HourlyTrafficChart traffic={long} since="2026-10-01" />);
+    const chart = getByTestId("usage-hourly-chart");
+    expect(svgOf(chart).querySelectorAll("g")).toHaveLength(720);
+    expect(chart.textContent).toContain("Showing the most recent 30 days of the range.");
   });
 });
 

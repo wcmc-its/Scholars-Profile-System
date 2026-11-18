@@ -65,6 +65,20 @@ describe("FRT mentee suggestions", () => {
     expect(screen.getByTestId("frt-mentee-link-12").textContent).toBe("Change person");
   });
 
+  it("a linked CWID the server couldn't name shows the reported name, not the CWID twice", () => {
+    render(
+      <MenteeSuggestionsCard
+        cwid="self01"
+        suggestions={[]}
+        frtMentees={[frt({ id: 13, menteeName: "Kai Moss", menteeCwid: "kam3003" })]}
+        manualMentees={[]}
+      />,
+    );
+    const text = screen.getByTestId("frt-mentee-match-13").textContent ?? "";
+    expect(text).toContain("WCM person: Kai Moss");
+    expect(text.match(/kam3003/g)).toHaveLength(1);
+  });
+
   it("Add as mentee writes the matched CWID and keeps existing name-only entries", async () => {
     renderCard();
     fireEvent.click(screen.getByTestId("frt-mentee-add-12"));

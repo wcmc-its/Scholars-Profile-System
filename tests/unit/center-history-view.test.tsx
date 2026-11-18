@@ -66,6 +66,26 @@ describe("CenterHistoryView", () => {
     expect(back.getAttribute("href")).toBe("/edit/center/meyer_cancer_center");
   });
 
+  it("renders resolved names for actor and member; CWID only as fallback", () => {
+    render(
+      <CenterHistoryView
+        centerCode="meyer_cancer_center"
+        centerName="Meyer"
+        entries={[
+          entry({ id: "n1", actorCwid: "cur0001", impersonatedCwid: "own0002", targetCwid: "abc1001" }),
+        ]}
+        windowDays={90}
+        names={{ cur0001: "Cara Curator", abc1001: "Ada Member" }}
+      />,
+    );
+    const row = screen.getByTestId("center-history-row-n1");
+    expect(row.textContent).toContain("Cara Curator");
+    expect(row.textContent).toContain("Ada Member");
+    expect(row.textContent).not.toContain("cur0001");
+    expect(row.textContent).not.toContain("abc1001");
+    expect(row.textContent).toMatch(/as own0002/);
+  });
+
   it("renders an add row: actor, change label, member, dash diff", () => {
     render(
       <CenterHistoryView

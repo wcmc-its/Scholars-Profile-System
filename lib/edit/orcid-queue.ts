@@ -142,6 +142,7 @@ export const ORCID_CANDIDATE_SOURCES = [
   "orcid_name",
   "infoed_biosketch",
   "infoed_biosketch_name",
+  "cornell_affiliation_manager",
 ] as const;
 export type OrcidCandidateSource = (typeof ORCID_CANDIDATE_SOURCES)[number];
 
@@ -155,6 +156,15 @@ export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
   orcid_name: "ORCID name only",
   infoed_biosketch: "NIH biosketch",
   infoed_biosketch_name: "NIH biosketch (name match)",
+  cornell_affiliation_manager: "Cornell Affiliation Manager",
+};
+
+/** `scholar.campus`: WCM, or Cornell Ithaca (Ithaca ORCID plan). */
+export const ORCID_QUEUE_CAMPUSES = ["wcm", "ithaca"] as const;
+export type OrcidQueueCampus = (typeof ORCID_QUEUE_CAMPUSES)[number];
+export const ORCID_QUEUE_CAMPUS_LABEL: Record<OrcidQueueCampus, string> = {
+  wcm: "Weill Cornell Medicine",
+  ithaca: "Cornell Ithaca",
 };
 
 export function isOrcidCandidateSource(v: unknown): v is OrcidCandidateSource {
@@ -317,9 +327,15 @@ export type OrcidQueueFilter = {
   types: string[];
   units: string[];
   sources: OrcidCandidateSource[];
+  campuses: OrcidQueueCampus[];
 };
 
-export const EMPTY_ORCID_QUEUE_FILTER: OrcidQueueFilter = { types: [], units: [], sources: [] };
+export const EMPTY_ORCID_QUEUE_FILTER: OrcidQueueFilter = {
+  types: [],
+  units: [],
+  sources: [],
+  campuses: [],
+};
 
 /** Unit kinds the queue offers (no centers). */
 const QUEUE_UNIT = /^(dept|div|inst):[^\s]{1,64}$/;
@@ -331,11 +347,14 @@ export function orcidQueueFilterKey(f: OrcidQueueFilter): string {
   for (const t of [...f.types].sort()) q.append("type", t);
   for (const u of [...f.units].sort()) q.append("unit", u);
   for (const s of [...f.sources].sort()) q.append("source", s);
+  for (const c of [...f.campuses].sort()) q.append("campus", c);
   return q.toString();
 }
 
 export function isEmptyOrcidQueueFilter(f: OrcidQueueFilter): boolean {
-  return f.types.length === 0 && f.units.length === 0 && f.sources.length === 0;
+  return (
+    f.types.length === 0 && f.units.length === 0 && f.sources.length === 0 && f.campuses.length === 0
+  );
 }
 
 /** `?type=…&unit=…&source=…` for the page's links. Pure. */
@@ -441,6 +460,8 @@ export type OrcidQueueSummaryCandidate = {
  *  auto-confirmed iDs are in it, flagged by `autoConfirmed`. */
 export type OrcidQueueSummary = {
   cwid: string;
+  /** `scholar.campus` (absent on summaries built before the Ithaca ORCID step). */
+  campus?: OrcidQueueCampus;
   name: string;
   /** For Name A–Z: the last word of the scholar's full name. */
   surname: string;
@@ -597,5 +618,10 @@ export function parseOrcidQueueFilter(
     types: uniq(list("type").filter((t) => t.length <= 72)).slice(0, MAX_FILTER_VALUES),
     units: uniq(list("unit").filter((u) => QUEUE_UNIT.test(u))).slice(0, MAX_FILTER_VALUES),
     sources: uniq(list("source").filter(isOrcidCandidateSource)),
+    campuses: uniq(
+      list("campus").filter((c): c is OrcidQueueCampus =>
+        (ORCID_QUEUE_CAMPUSES as readonly string[]).includes(c),
+      ),
+    ),
   };
 }

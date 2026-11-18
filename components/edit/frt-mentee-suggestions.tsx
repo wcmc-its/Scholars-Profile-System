@@ -314,7 +314,7 @@ function FrtRow({
       <p className="text-sm" data-testid={`frt-mentee-match-${r.id}`}>
         {r.menteeCwid ? (
           <>
-            WCM person: <span className="font-medium">{r.menteeCwidName ?? r.menteeCwid}</span>{" "}
+            WCM person: <span className="font-medium">{r.menteeCwidName ?? r.menteeName}</span>{" "}
             <span className="text-muted-foreground text-xs">
               {r.menteeCwid}
               {r.cwidAssigned ? "" : " · matched by name"}

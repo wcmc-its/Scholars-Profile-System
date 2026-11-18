@@ -49,6 +49,7 @@ export type AdminSubnavActive =
   | "role-vocabulary"
   | "coi"
   | "data-sharing"
+  | "research-security"
   | "activity"
   | "usage"
   | "orcid-coverage"
@@ -114,6 +115,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   /** Read-only dashboards; no writes. */
   coi: "insights",
   "data-sharing": "insights",
+  "research-security": "insights",
   activity: "insights",
   usage: "insights",
   "orcid-coverage": "insights",
@@ -157,6 +159,7 @@ export function AdminSubnav({
   methodsTab,
   roleVocabularyTab,
   dataSharingTab,
+  researchSecurityTab = false,
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
@@ -224,6 +227,9 @@ export function AdminSubnav({
    *  Data Quality, there is no natural per-unit cut here). A number shows it
    *  (passed `0` — no badge). */
   dataSharingTab?: number | null;
+  /** Shows the "Research security" tab: flag- and role-gated by the
+   *  `researchSecurity` predicate (superuser or research_security_viewer). */
+  researchSecurityTab?: boolean;
   /** Whether to show the superuser list surfaces (Profile URLs /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).
    *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
@@ -416,6 +422,40 @@ export function AdminSubnav({
         label: "Reports",
         activeIsLink: true,
       },
+      // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
+      // (`activityTab`); no separate flag.
+      {
+        show: superuserSurfaces || activityTab,
+        id: "activity",
+        href: "/edit/activity",
+        label: "Activity",
+      },
+      // Wider audience than the other superuser tabs: a superuser OR any unit admin
+      // (via `usageTab`, set when `canViewUsage` passes).
+      { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
+      // Read-only ETL health board, labelled "Data sync" (route and id keep
+      // `etl-status`). Superuser, or an ad hoc grantee (`etlStatusTab`); no
+      // separate flag.
+      {
+        show: superuserSurfaces || etlStatusTab,
+        id: "etl-status",
+        href: "/edit/etl-status",
+        label: "Data sync",
+      },
+      {
+        show: superuserSurfaces || orcidCoverageTab,
+        id: "orcid-coverage",
+        href: "/edit/orcid-coverage",
+        label: "ORCID",
+      },
+      // The ORCID librarian confirmation queue, beside the coverage it closes.
+      {
+        show: orcidQueueTab,
+        id: "orcid-queue",
+        href: "/edit/orcid-queue",
+        label: "ORCID queue",
+        count: pendingOrcidQueue ?? undefined,
+      },
       // COI is public data (decision 2026-10-01): `coiTab` admits observers,
       // content editors and ad hoc grantees (the `coi` predicate).
       {
@@ -430,38 +470,11 @@ export function AdminSubnav({
         href: "/edit/data-sharing",
         label: "Data sharing",
       },
-      // Fleet-wide edit-activity oversight. Superuser, or an ad hoc grantee
-      // (`activityTab`); no separate flag.
       {
-        show: superuserSurfaces || activityTab,
-        id: "activity",
-        href: "/edit/activity",
-        label: "Activity",
-      },
-      // Wider audience than the other superuser tabs: a superuser OR any unit admin
-      // (via `usageTab`, set when `canViewUsage` passes).
-      { show: superuserSurfaces || usageTab, id: "usage", href: "/edit/usage", label: "Usage" },
-      {
-        show: superuserSurfaces || orcidCoverageTab,
-        id: "orcid-coverage",
-        href: "/edit/orcid-coverage",
-        label: "ORCID coverage",
-      },
-      // The ORCID librarian confirmation queue, beside the coverage it closes.
-      {
-        show: orcidQueueTab,
-        id: "orcid-queue",
-        href: "/edit/orcid-queue",
-        label: "ORCID queue",
-        count: pendingOrcidQueue ?? undefined,
-      },
-      // Read-only ETL health board. Superuser, or an ad hoc grantee
-      // (`etlStatusTab`); no separate flag.
-      {
-        show: superuserSurfaces || etlStatusTab,
-        id: "etl-status",
-        href: "/edit/etl-status",
-        label: "ETL status",
+        show: researchSecurityTab,
+        id: "research-security",
+        href: "/edit/research-security",
+        label: "Research security",
       },
       // Gated on the same `CORE_PAGES` flag as the public core surfaces, so it stays
       // dark in any env where cores aren't live yet (staging-on / prod-off).
@@ -478,7 +491,7 @@ export function AdminSubnav({
         show: (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled(),
         id: "matcha",
         href: "/edit/matcha",
-        label: "Matcha",
+        label: "Matcha: Open search",
       },
       // Grant Matcha — Matcha seeded from a funding opportunity. Same audience
       // as Matcha, additionally dark while GRANT_MATCHA is off (both flags read
@@ -490,7 +503,7 @@ export function AdminSubnav({
           (superuserSurfaces || viewerCanUseMatcha) && isMatchaEnabled() && isGrantMatchaEnabled(),
         id: "grant-matcha",
         href: "/edit/grant-matcha",
-        label: "Grant Matcha",
+        label: "Matcha: Grants",
       },
       // Fundable work — scored WCM abstracts and preprints for CTL. Matcha's
       // audience, its own flag (FUNDABLE_WORK).
@@ -498,7 +511,7 @@ export function AdminSubnav({
         show: (superuserSurfaces || viewerCanUseMatcha) && isFundableWorkEnabled(),
         id: "fundable-work",
         href: "/edit/fundable-work",
-        label: "Matcha for emergent research",
+        label: "Matcha: Emerging research",
       },
     ] satisfies TabSpec[]
   ).filter((t) => t.show);

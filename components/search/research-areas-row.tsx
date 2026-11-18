@@ -237,7 +237,7 @@ function AreaChip({ area }: { area: TaxonomyMatch }) {
   return (
     <HoverCard openDelay={300} closeDelay={120}>
       <HoverCardTrigger asChild>
-        <Link
+        <Link prefetch={false}
           href={area.href}
           className={`group inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-[#E2E0D8] bg-[#F2F1EC] px-[11px] py-[5px] text-[13px] leading-none text-[#2b2f36] no-underline transition-colors hover:border-[#C8102E] hover:bg-[#fdeaec] hover:text-[#8f1320] ${FOCUS_RING}`}
         >
@@ -277,7 +277,7 @@ function AreaPreview({ area }: { area: TaxonomyMatch }) {
           </>
         ) : null}
       </div>
-      <Link
+      <Link prefetch={false}
         href={area.href}
         className="mt-2 inline-flex items-center gap-1 text-[12.5px] font-medium text-[#1f51a8] no-underline hover:underline"
       >
@@ -298,7 +298,7 @@ function MethodChip({ match }: { match: TaxonomyMatch }) {
   return (
     <HoverCard openDelay={300} closeDelay={120}>
       <HoverCardTrigger asChild>
-        <Link
+        <Link prefetch={false}
           href={match.href}
           className={`group inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-[#ecdcc8] bg-[#fbf4ea] px-[11px] py-[5px] text-[13px] leading-none text-[#2b2f36] no-underline transition-colors hover:border-[#b5701f] hover:bg-[#f6ead8] hover:text-[#7a3f15] ${FOCUS_RING}`}
         >
@@ -338,7 +338,7 @@ export function MethodPreview({ match }: { match: TaxonomyMatch }) {
           </>
         ) : null}
       </div>
-      <Link
+      <Link prefetch={false}
         href={match.href}
         className="mt-2 inline-flex items-center gap-1 text-[12.5px] font-medium text-[#1f51a8] no-underline hover:underline"
       >

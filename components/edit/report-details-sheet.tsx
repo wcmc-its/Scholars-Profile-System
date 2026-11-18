@@ -362,11 +362,12 @@ function AccessSection({ access, onChange }: { access: ReportAccessPopoverProps;
         <PersonAccessList {...access} onChange={onChange} />
       ) : (
         <div className="border-apollo-border-strong bg-apollo-surface rounded-lg border px-3 py-2.5">
-          <div className="text-sm">{access.mode === "admin" ? ADMIN_AUDIENCE : UNIT_AUDIENCE}</div>
+          <div className="text-sm">{access.mode === "admin" ? ADMIN_AUDIENCE : (access.audience ?? UNIT_AUDIENCE)}</div>
           <div className={HELP}>
             {access.mode === "admin"
               ? "Any Owner or Curator of a unit, plus superusers and comms stewards."
-              : "Owners and Curators of the unit this report is opened for, plus superusers and comms stewards."}{" "}
+              : (access.rule ??
+                "Owners and Curators of the unit this report is opened for, plus superusers and comms stewards.")}{" "}
             <Link href="/edit/administrators" className="text-apollo-maroon underline-offset-2 hover:underline">
               Manage unit administrators
             </Link>

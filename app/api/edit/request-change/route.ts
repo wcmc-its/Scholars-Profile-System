@@ -21,6 +21,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { canAccessScholarEditPage, logEditDenial } from "@/lib/edit/authz";
 import { isMailerConfigured, sendMail } from "@/lib/edit/mailer";
+import { resolvePersonNames } from "@/lib/edit/person-names";
 import { recordRequestChangeAttempt } from "@/lib/edit/rate-limit";
 import {
   editError,
@@ -121,6 +122,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     where: { cwid: target },
     select: { preferredName: true },
   });
+  // Actor (and a profile-less target) named via Scholar → WCM directory; never throws.
+  const names = await resolvePersonNames([target, session.cwid]);
 
   // --- send (the request fails only if the send itself fails) ---
   let messageId: string;
@@ -132,12 +135,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       text: composeBody({
         attribute,
         targetCwid: target,
-        targetName: targetScholar?.preferredName ?? null,
+        targetName: targetScholar?.preferredName ?? names.get(target.toLowerCase()) ?? null,
         issueLabel: resolved.issueLabel,
         itemLabel: typeof itemId === "string" ? itemId : undefined,
         sourceSystem: resolved.sourceSystem,
         detail: typeof detail === "string" ? detail : undefined,
         actorCwid: session.cwid,
+        actorName: names.get(session.cwid.toLowerCase()) ?? null,
       }),
     });
     messageId = sent.messageId;

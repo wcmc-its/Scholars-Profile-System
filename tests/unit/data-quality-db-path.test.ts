@@ -219,6 +219,7 @@ function scholar(over: Row): Row {
     hasHeadshot: null,
     headshotCheckedAt: null,
     deletedAt: null,
+    campus: "wcm",
     deptName: null,
     rosterProminence: null,
     rosterLeadershipTier: null,

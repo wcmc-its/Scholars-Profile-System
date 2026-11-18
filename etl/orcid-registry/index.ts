@@ -510,6 +510,8 @@ async function main(): Promise<number> {
   }
 
   const scholars: ScholarRow[] = await db.write.scholar.findMany({
+    // Cornell Ithaca rows opt in with the Ithaca ORCID step, not here.
+    where: { campus: "wcm" },
     select: {
       cwid: true,
       email: true,

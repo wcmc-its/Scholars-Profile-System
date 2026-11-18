@@ -45,7 +45,7 @@ jobs:
           npx cdk synth -q -c env=staging -o ../synth/staging > /dev/null
           npx cdk synth -q -c env=prod -c allowLatestAppImage=true -o ../synth/prod > /dev/null
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 

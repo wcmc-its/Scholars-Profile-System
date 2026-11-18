@@ -105,6 +105,7 @@ import {
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
 import { ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
+import { unitReportAccess } from "@/lib/edit/unit-leader-access";
 import {
   isReportKey,
   loadReportMeta,
@@ -244,10 +245,10 @@ export default async function EditReportPage({
             audience: "Superusers",
             rule: "Only superusers can run the all-cores roll-up.",
           }
-        : { mode: "unit" };
+        : unitReportAccess();
     render = () => def.render({ n, code, kind, ctx, session, searchParams: sp, basePath });
     if (kind === "core") {
-      loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n);
+      loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n, ctx.viewOnly === true);
     }
   } else if (def.gate === "admin") {
     if (!(await canViewArticleCountReport(session))) notFound();
@@ -335,6 +336,7 @@ async function coreReportsHeader(
   coreId: string,
   coreName: string,
   n: ReportKey,
+  viewOnly: boolean,
 ): Promise<ReactNode> {
   const [units, meta] = await Promise.all([
     loadReportableUnitsForActor(session, db.read, ["core"]),
@@ -362,6 +364,7 @@ async function coreReportsHeader(
       tabs={tabs}
       current={n}
       allCount={all ? options.length - 1 : undefined}
+      viewOnly={viewOnly}
     />
   );
 }

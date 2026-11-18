@@ -11,10 +11,12 @@
  *   2. granted proxy (#779)          — `isGrantedProxy` + fail-closed conflict re-check
  *   3. org-unit owner/curator (#728) — `resolveEditableUnitViaUnitAdmin`
  *
- * Legs 2 and 3 run ONLY for a non-impersonating request (`impersonatedCwid ===
- * null`), and are keyed on `realCwid` (NEVER the effective `session.cwid`): a
- * proxy / unit-admin is its own identity, and the `impersonatedCwid === null`
- * gate stops a #637 overlay from riding a delegated grant (IS-1). A granted proxy
+ * Legs 2 and 3 key on the human who holds the grant: `realCwid` normally, and
+ * under "View as" the viewed-as `impersonatedCwid` — but only after a live
+ * `isSuperuser(realCwid)` re-check. Only a superuser can start an overlay and a
+ * superuser may already write every scholar, so this confers nothing new; it
+ * makes saves under View as a proxy / unit admin match the editor #3060 renders.
+ * An overlay whose real human lost superuser is denied `not_self`. A granted proxy
  * that fails the conflict re-check is a hard `proxy_conflict` deny — it does NOT
  * fall through to the unit-admin leg (matches the field route's original flow).
  *
@@ -22,7 +24,7 @@
  * the edit in its B03 audit row. Pure of side effects (no logging) — each caller
  * logs its own `edit_authz_denied` at its own site, preserving its log shape.
  */
-import type { EditSession } from "@/lib/auth/superuser";
+import { isSuperuser, type EditSession } from "@/lib/auth/superuser";
 import { authorizeFieldEdit } from "@/lib/edit/authz";
 import {
   checkProxyConflictingRole,
@@ -55,13 +57,20 @@ export async function authorizeOverviewWrite(args: {
     return { ok: true, viaUnitAdminUnit: null };
   }
 
-  // Delegated legs are for a non-impersonating actor only (IS-1).
-  if (impersonatedCwid !== null) return { ok: false, reason: "not_self" };
+  // Delegated legs key on the grant holder: the real human, or under View as the
+  // viewed-as user while the real human is still a live superuser (#3060 parity).
+  let actor = realCwid;
+  if (impersonatedCwid !== null) {
+    if (!(await isSuperuser(realCwid).catch(() => false))) {
+      return { ok: false, reason: "not_self" };
+    }
+    actor = impersonatedCwid;
+  }
 
   // Leg 2 — scholar-assigned proxy (#779). The fail-closed D3/D4 conflict re-check
-  // runs on the proxy's OWN cwid (= realCwid when not impersonating).
-  if (await isGrantedProxy(realCwid, entityId, proxyDb)) {
-    const conflict = await checkProxyConflictingRole(realCwid, proxyDb);
+  // runs on the proxy's OWN cwid.
+  if (await isGrantedProxy(actor, entityId, proxyDb)) {
+    const conflict = await checkProxyConflictingRole(actor, proxyDb);
     return conflict.ok
       ? { ok: true, viaUnitAdminUnit: null }
       : { ok: false, reason: "proxy_conflict" };
@@ -69,7 +78,7 @@ export async function authorizeOverviewWrite(args: {
 
   // Leg 3 — org-unit owner/curator (#728 / Amendment 4). The resolver re-reads
   // `unit_admin` every call, so a lost role takes effect on the next request.
-  const unit = await resolveEditableUnitViaUnitAdmin(realCwid, entityId, unitDb);
+  const unit = await resolveEditableUnitViaUnitAdmin(actor, entityId, unitDb);
   if (unit) return { ok: true, viaUnitAdminUnit: unit };
 
   return { ok: false, reason: "not_self" };

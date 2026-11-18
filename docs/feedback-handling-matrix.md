@@ -89,7 +89,7 @@ The locked destinations are not duplicated here as a second authority — they a
 - `facultyaffairs@med.cornell.edu` — Office of Faculty Affairs (degrees, education).
 - `osra-operations@med.cornell.edu` (cc `scholars@weill.cornell.edu`) — Office of Sponsored Research Administration (funding).
 - `scholars@weill.cornell.edu` — Scholars team.
-- `no-reply-scholars@weill.cornell.edu` — SES sender identity (the #160 Phase-2 server-send `From`; not a destination).
+- `no-reply@scholars-mail.weill.cornell.edu` — SES sender identity (the #160 Phase-2 server-send `From`; not a destination).
 
 ### 3.2 Mailbox → assignment-group mapping
 

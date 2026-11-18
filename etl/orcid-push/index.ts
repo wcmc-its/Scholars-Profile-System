@@ -216,13 +216,17 @@ async function main(): Promise<number> {
   );
   const targets = (
     await db.write.scholar.findMany({
-      where: { deletedAt: null, orcid: { not: null } },
+      // Ithaca rows join when the Ithaca ORCID step makes SPS their sole writer.
+      where: { deletedAt: null, orcid: { not: null }, campus: "wcm" },
       select: { cwid: true, orcid: true },
       orderBy: { cwid: "asc" },
     })
   ).filter((t) => !sandboxCwids.has(t.cwid));
   const dismissals = (
     await db.write.orcidDismissal.findMany({
+      // WCM rows only, like the targets: a dismissal on a Cornell Ithaca row must not
+      // clear Identity until SPS is the sole writer of Ithaca iDs (plan step 4).
+      where: { scholar: { campus: "wcm" } },
       select: { cwid: true, orcid: true },
       orderBy: [{ cwid: "asc" }, { orcid: "asc" }],
     })

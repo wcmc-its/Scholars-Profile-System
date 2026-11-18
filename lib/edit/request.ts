@@ -300,7 +300,12 @@ export async function resolveEditIdentityForWrite(): Promise<
  * `IMPERSONATION_READONLY=true` AND an overlay is live, every write is refused
  * here with `403 impersonation_readonly` before any handler mutates.
  */
-export async function readEditRequest(request: NextRequest): Promise<EditRequestResult> {
+export async function readEditRequest(
+  request: NextRequest,
+  /** Override the body cap for a route that legitimately posts more (the Matcha export). */
+  opts: { maxBytes?: number } = {},
+): Promise<EditRequestResult> {
+  const maxBytes = opts.maxBytes ?? MAX_BODY_BYTES;
   // Defense in depth beyond SameSite=Lax.
   const origin = verifyRequestOrigin(request);
   if (!origin.ok) {
@@ -323,13 +328,13 @@ export async function readEditRequest(request: NextRequest): Promise<EditRequest
 
   // Size-bounded body read — declared length first, then a post-read backstop.
   const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+  if (Number.isFinite(declared) && declared > maxBytes) {
     return { ok: false, response: editError(413, "body_too_large") };
   }
   let parsed: unknown;
   try {
     const raw = await request.text();
-    if (raw.length > MAX_BODY_BYTES) {
+    if (raw.length > maxBytes) {
       return { ok: false, response: editError(413, "body_too_large") };
     }
     parsed = JSON.parse(raw);

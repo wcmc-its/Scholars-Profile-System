@@ -265,6 +265,16 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Finds WCM scholars who probably also hold a Cornell Ithaca NetID, for a superuser report.",
     origin: "external", // sibling ReCiterDB (Cornell roster)
   },
+  "Ithaca-Roster": {
+    label: "Cornell Ithaca Roster",
+    description: "Loads Cornell Ithaca faculty, postdocs and grad students as hidden records for ORCID curation.",
+    origin: "external", // sibling ReCiterDB (Cornell roster)
+  },
+  "Research-Security": {
+    label: "Research Security Screen",
+    description: "Copies the watch-list co-publication screen for the research security dashboard.",
+    origin: "external", // sibling ReCiterDB (watchlist_match, watchlist_funding_flag)
+  },
   "InfoEd-Biosketch": {
     label: "NIH Biosketches",
     description: "Reads NIH biosketches from InfoEd grant applications for ORCID iDs and statement text.",
@@ -274,6 +284,32 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     label: "Dataset Deposits",
     description: "Adds a scholar's shared research datasets to their profile's Datasets section.",
     origin: "external", // sibling ReCiterDB
+  },
+  // #3348 — the five ReCiterDB mentoring/cited-by bridge imports (weekly).
+  "Mentee-Copubs-Import": {
+    label: "Mentee Co-publications",
+    description: "Counts the papers each mentor co-authored with their mentees, for the profile mentoring section.",
+    origin: "external",
+  },
+  "AOC-Mentee-Import": {
+    label: "MD Scholarly-Project Mentees",
+    description: "Loads Areas of Concentration mentor and student pairs from ReCiterDB.",
+    origin: "external",
+  },
+  "Mentee-Copub-List-Import": {
+    label: "Mentee Co-publication Lists",
+    description: "Lists the papers behind each mentor and mentee co-publication count, with their authors.",
+    origin: "external",
+  },
+  "Learner-Pubs-Import": {
+    label: "MD Learner Publications",
+    description: "Loads all publications by Areas of Concentration students, for the mentored-publications report.",
+    origin: "external",
+  },
+  "Publication-Citing-Import": {
+    label: "Cited-by Lists",
+    description: "Loads which papers cite each publication, for the publication detail view.",
+    origin: "external",
   },
   Technology: {
     label: "Available Technologies",
@@ -287,7 +323,7 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   FundingDigest: {
     label: "Funding Digest",
-    description: "Submits new opportunities from the Research Dean's weekly funding email to Grant Matcha.",
+    description: "Submits new opportunities from the Research Dean's weekly funding email to Matcha: Grants.",
     origin: "external", // Research Dean digest, via SES to S3, then ReciterAI
   },
   "AreaSignal-inputs": {
@@ -301,6 +337,36 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description:
       "Checks public honor lists (academies, fellowships) for Weill Cornell scholars and queues each new match for curator approval.",
     origin: "external", // public roster pages of the conferring bodies
+  },
+  CenterPubRelevance: {
+    label: "Cancer Relevance of Center Publications",
+    description: "Scores center members' new papers for cancer relevance in center reports.",
+    origin: "external", // PubMed EFetch affiliations + Bedrock scoring
+  },
+  CancerCenterDiseaseAssignment: {
+    label: "Cancer Center Disease Assignments",
+    description: "Proposes disease-area assignments for Cancer Center members to curate.",
+    origin: "internal", // SPS-DB taxonomy + person rollup only
+  },
+  JournalImpactFactor: {
+    label: "Journal Impact Factors",
+    description: "Journal impact factors used in publication reports.",
+    origin: "external", // ReCiterDB JCR snapshot
+  },
+  FundableWork: {
+    label: "Fundable Work",
+    description: "Conference abstracts and preprints scored for private-funding potential.",
+    origin: "external", // OpenAlex + ReCiterDB
+  },
+  FeedbackDigest: {
+    label: "Feedback Digest Email",
+    description: "Emails the weekly summary of site feedback to the Scholars team.",
+    origin: "internal", // SPS-DB feedback rows, sent via SES
+  },
+  "ED-EmailVisibility-Import": {
+    label: "Email Visibility",
+    description: "Whether each scholar's email address is shown on their profile.",
+    origin: "external", // WCM Enterprise Directory release codes, via S3
   },
   NewsClips: {
     label: "Media highlights",
@@ -344,6 +410,12 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     label: "Research AI: Weekly Scoring",
     description:
       "The weekly research-AI job that scores new publications and files them under research areas. Stands behind Research Topics & Scores.",
+    origin: "external", // ReCiterAI-run job, read from its own run ledger
+  },
+  "ReciterAI-tools": {
+    label: "Research AI: Weekly Methods & Tools",
+    description:
+      "The weekly research-AI job that adds methods and tools from new publications. Stands behind Methods & Tools. Skipping a week with nothing new is normal; not running at all is not.",
     origin: "external", // ReCiterAI-run job, read from its own run ledger
   },
   "ReciterAI-spotlight-gate": {

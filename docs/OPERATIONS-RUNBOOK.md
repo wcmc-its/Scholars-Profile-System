@@ -4,7 +4,7 @@ Scholars Profile System · Weill Cornell Medicine · scholars.weill.cornell.edu
 
 | | | | |
 |---|---|---|---|
-| **Last updated** | **2026-11-10** | **Version** | 2.2 |
+| **Last updated** | **2026-11-11** | **Version** | 2.3 |
 | **Owner** | Paul Albert, SPS service owner (paa2013@med.cornell.edu) | **Next review** | 2027-02-09 (quarterly) |
 | **Audience** | Anyone responding to an SPS issue: ITS Operations, on-call staff, SPS engineers | **Checked against** | Repo commit `bca752e` (2026-11-09): `cdk/lib/*`, `docs/SLOs.md`, `docs/oncall.md`, `docs/cloudfront-cache-spec.md` |
 
@@ -26,6 +26,8 @@ Scholars Profile System · Weill Cornell Medicine · scholars.weill.cornell.edu
 > **When sources disagree**
 >
 > The linked deep docs win over this runbook, and the CDK code (`cdk/lib/*`) wins over any doc. If you find drift, fix this runbook and update **Last updated** above.
+>
+> This runbook also exists as a Word copy (`SPS-Operations-Runbook.docx`) for ITS Operations, made from this file. **Whenever this file changes, update the Word copy too**, and keep its **Version** and **Last updated** in step.
 
 ## Contents
 
@@ -1070,6 +1072,7 @@ AWS console, Athena, workgroup `sps-usage-<env>` (top right), **Saved queries** 
 | Saved query (add `-<env>`) | Answers | Reads |
 |---|---|---|
 | `sps-usage-daily-pageviews`, `-top-profiles`, `-search-terms`, `-referrers`, `-geo`, `-device` | Page views, top profiles, search terms, referrers, location, device | Daily rollup (aggregates only) |
+| `sps-traffic-daily-totals`, `-referrer-pages`, `-ai-agents` | Hits, human page views and estimated visitors by day; top external referring pages; requests by declared AI agent | `daily_traffic` rollup (aggregates only) |
 | `sps-perf-slow-routes` | p50, p95, p99 time and p95 time-to-first-byte by route (50+ hits) | Raw logs, last 7 days |
 | `sps-perf-errors-by-route` | 4xx and 5xx counts and 5xx rate by route | Raw logs, last 7 days |
 | `sps-perf-cache-hit` | Mix of edge cache outcomes (hit, miss, refresh, error) | Raw logs, last 7 days |
@@ -1084,6 +1087,7 @@ AWS console, Athena, workgroup `sps-usage-<env>` (top right), **Saved queries** 
 - **Usage** (`/edit/usage`): page views by day, top profiles, search terms, referrers, location and device, for the last 7, 30 or 90 days, since launch, or a custom range (from 2026-05-22). Open to superusers and unit admins. Also the **Usage** tab in the admin menu. Shows "unavailable" if Athena fails, or if `Sps-App-<env>` and `Sps-Analytics-<env>` haven't both been deployed with the usage settings.
 - **Edit activity** (`/edit/activity`): edits per day, top editors and most-edited records over 30 days. Superusers only, not linked in the menu. Shows "unavailable" if the read-only database role lacks access to `scholars_audit`.
 - Profile counts are keyed on the root URL (`/carl-f-nathan`). If a new top-level site section starts being counted as a profile, add it to the reserved-route list in `cdk/lambda/cf-usage-rollup/queries.ts` and backfill. Raw logs expire after 90 days, so a backfill can only fix roughly the last 85 days; use `scripts/backfills/2026-09-25-usage-rollup-history.ts --env=<env> --dry-run` first.
+- The rollup Lambda writes two tables per day: `daily_usage` and `daily_traffic` (totals, referrer and landing pages, top pages, AI agents). Its event takes an optional `"tables": ["usage"]` or `["traffic"]` (default both), so `daily_traffic` can be re-rolled without touching `daily_usage`, e.g. `{"date":"2026-11-15","tables":["traffic"]}`. Each day runs one Athena query per table inside the Lambda's 10-minute timeout, so roll a long range one day per invocation rather than as a single `backfillFrom`/`backfillTo` event.
 
 ### Cost guardrails
 
@@ -1407,6 +1411,7 @@ Master index: [DOCUMENTATION-REGISTRY.md](./DOCUMENTATION-REGISTRY.md), organize
 
 | Version | Date | Changes |
 |---|---|---|
+| 2.3 | 2026-11-11 | Added a note that the Word copy must be updated whenever the Markdown changes, and brought the Word copy up to date with 2.1 and 2.2. |
 | 2.2 | 2026-11-10 | Patching: Dependabot security, digest and patch-only PRs merge automatically; new fixable critical or high image findings in prod alert to Teams. |
 | 2.1 | 2026-11-10 | Added Patching (who patches each layer, Inspector image scanning, severity targets, weekly review) and the weekly patch review to Recurring tasks. |
 | 2.0 | 2026-11-09 | Rewritten for responders: triage table, severity levels, contacts up front, 19 step-by-step playbooks, glossary and open-items list. Local development section removed (see README). Checked against repo commit `bca752e`. Corrections:<br>Profiles **are** cached at origin and edge since 2026-10-02; the old guidance said they weren't.<br>Alarm catalog updated from code: added `sps-edge-origin-down`, `-unreachable`, `-origin-cert-expiring`, `-probe-stalled`, `sps-aurora-acu`, `sps-opensearch-breaker`, `sps-etl-duration-margin`, `sps-etl-retry-storm` and the job alarms; the composite now has five inputs.<br>ETL: prod schedules are enabled (removed "disabled until launch"); weekly run is now Sunday 12:00 UTC; staging nightly is 07:45 UTC.<br>Sizing: prod app tasks are 2 vCPU / 4 GB; staging Aurora maximum is 4 ACU; OpenSearch domain names updated.<br>SAML certificate deadline is past; now tracked as a cleanup check.<br>Stack count reconciled (10 classes; 9 deploy in prod, 8 in staging). DR images *are* replicated to us-west-2.<br>Fixed broken repo links and section references; search check now uses the live site instead of localhost. |

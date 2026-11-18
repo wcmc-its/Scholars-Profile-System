@@ -30,6 +30,7 @@ function entry(over: Partial<ScholarAuditEntry> & { id: string }): ScholarAuditE
     actionLabel: "Updated profile",
     fields: ["Overview"],
     detail: null,
+    detailCwid: null,
     ...over,
   };
 }
@@ -102,6 +103,34 @@ describe("ScholarHistoryView", () => {
     const row = screen.getByTestId("scholar-history-row-2");
     expect(row.textContent).toContain("Granted proxy editor");
     expect(row.textContent).toContain("prx0003");
+  });
+
+  it("renders resolved names for actor, impersonated subject and proxy; CWID only as fallback", () => {
+    render(
+      <ScholarHistoryView
+        cwid="abc1001"
+        scholarName="Jane"
+        entries={[
+          entry({
+            id: "n1",
+            actorCwid: "sup0001",
+            impersonatedCwid: "own0002",
+            action: "proxy_grant",
+            fields: [],
+            detail: "prx0003",
+            detailCwid: "prx0003",
+          }),
+        ]}
+        windowDays={90}
+        names={{ sup0001: "Sue Super", prx0003: "Pat Proxy" }}
+      />,
+    );
+    const row = screen.getByTestId("scholar-history-row-n1");
+    expect(row.textContent).toContain("Sue Super");
+    expect(row.textContent).toContain("Pat Proxy");
+    expect(row.textContent).not.toContain("sup0001");
+    expect(row.textContent).not.toContain("prx0003");
+    expect(row.textContent).toMatch(/as own0002/); // unresolved → CWID fallback
   });
 
   it("shows the impersonation note when impersonatedCwid is set", () => {

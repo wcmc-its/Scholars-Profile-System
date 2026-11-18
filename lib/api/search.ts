@@ -119,7 +119,9 @@ import {
   resolveSearchPeopleEsiFacet,
   resolveSearchPeopleInstitutionFacet,
   resolveSearchPeopleResearchTypeFacet,
+  resolveSearchPeopleResearchTypeNested,
   resolveSearchPubInstitutionFacet,
+  resolveSearchPubsTranslationalStageFacet,
   resolveSearchPeoplePubCountDampen,
   type PeoplePubCountDampenMode,
   resolveFundingConceptGrants,
@@ -127,6 +129,8 @@ import {
   type Scope,
 } from "@/lib/api/search-flags";
 import { investigatorGrantMatchCounts } from "@/lib/api/search-funding";
+import { collapseResearchTypeChildren, parseResearchTypeValue } from "@/lib/research-type";
+import { TRANSLATIONAL_STAGES, isTranslationalStage } from "@/lib/translational-stage";
 import { clinicalMeshMatch, type ClinicalAnchor } from "@/lib/clinical-mesh-anchors";
 import {
   selectEvidence,
@@ -309,6 +313,12 @@ export type PublicationsFilters = {
    *  Accepted regardless of `SEARCH_PUB_INSTITUTION_FACET`; a no-op (no clause,
    *  no facet) while it's off / pre-reindex. */
   institution?: string[];
+  /** Translational stage facet — multi-select on the pub doc's
+   *  `translationalStage` keyword ("T0" | "T1" | "T2" | "T3-4",
+   *  lib/translational-stage.ts). OR within group. Ignored (no clause, no
+   *  facet) while `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off; values
+   *  outside the four stages are dropped. */
+  translationalStage?: string[];
   /** Mentoring activity facet. Multi-select on the mentee's program at time
    *  of mentorship: 'md' (AOC + AOC-2025), 'mdphd' (MD-PhD), 'ecr' (Early
    *  Career Researcher). Selecting one or more buckets restricts results to
@@ -1017,6 +1027,45 @@ export type PublicationHit = {
 
 export type SearchFacetBucket = { value: string; count: number };
 
+/** Research type bucket. `physician` / `other` are the nested child counts
+ *  (`isPhysician` true / false), present only while
+ *  `SEARCH_PEOPLE_RESEARCH_TYPE_NESTED` is on; both 0 before the reindex. */
+export type ResearchTypeFacetBucket = SearchFacetBucket & { physician?: number; other?: number };
+
+/**
+ * People `researchType` filter clause. A bare kind ("lab") matches the kind; a
+ * child ("lab:physician" / "lab:other") also requires `isPhysician`. Values
+ * are OR'd. Nested off ⇒ children collapse to their parent, so the clause is
+ * the plain `terms` shape it was before the children existed.
+ */
+export function researchTypeFilterClause(
+  values: readonly string[] | undefined,
+  nested: boolean,
+): Record<string, unknown> | null {
+  if (!values || values.length === 0) return null;
+  const vals = nested ? [...values] : collapseResearchTypeChildren(values);
+  const plain: string[] = [];
+  const children: Record<string, unknown>[] = [];
+  for (const v of vals) {
+    const p = parseResearchTypeValue(v);
+    if (p?.child) {
+      children.push({
+        bool: {
+          filter: [
+            { term: { researchType: p.kind } },
+            { term: { isPhysician: p.child === "physician" } },
+          ],
+        },
+      });
+    } else {
+      plain.push(v);
+    }
+  }
+  if (children.length === 0) return { terms: { researchType: plain } };
+  const should = [...(plain.length > 0 ? [{ terms: { researchType: plain } }] : []), ...children];
+  return { bool: { should, minimum_should_match: 1 } };
+}
+
 /** Issue #88 — Author facet bucket, hydrated server-side with display name +
  *  slug. #1410 — the avatar endpoint was dropped from the payload (it was
  *  ~95 bytes on each of up to 500 buckets, ~24% of the whole response) because
@@ -1123,7 +1172,7 @@ export type PeopleSearchResult = {
     institutions: SearchFacetBucket[];
     /** Research type facet buckets ("lab" / "clinical"). Empty while
      *  `SEARCH_PEOPLE_RESEARCH_TYPE_FACET` is off (or pre-reindex). */
-    researchTypes: SearchFacetBucket[];
+    researchTypes: ResearchTypeFacetBucket[];
   };
 };
 
@@ -1198,6 +1247,11 @@ export type PublicationsSearchResult = {
      *  page labels them via `institutionDisplayName`). Empty while
      *  `SEARCH_PUB_INSTITUTION_FACET` is off (or pre-reindex) — never omitted. */
     institutions: SearchFacetBucket[];
+    /** Translational stage facet — `translationalStage` buckets in the fixed
+     *  T0 → T3-4 order, non-zero counts only, computed excluding the axis
+     *  itself. Empty while `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is off (or
+     *  pre-reindex) — never omitted. */
+    translationalStages: SearchFacetBucket[];
   };
 };
 
@@ -2584,10 +2638,10 @@ async function searchPeopleCore(opts: {
       ? { terms: { primaryOrgCode: filters.institution } }
       : null;
   const researchTypeFacetOn = resolveSearchPeopleResearchTypeFacet();
-  const researchTypeClause =
-    researchTypeFacetOn && filters.researchType && filters.researchType.length > 0
-      ? { terms: { researchType: filters.researchType } }
-      : null;
+  const researchTypeNestedOn = resolveSearchPeopleResearchTypeNested();
+  const researchTypeClause = researchTypeFacetOn
+    ? researchTypeFilterClause(filters.researchType, researchTypeNestedOn)
+    : null;
   const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
   const topicClause = topicCwidFilter && topicCwidFilter.length > 0
     ? { terms: { cwid: topicCwidFilter } }
@@ -3115,7 +3169,20 @@ async function searchPeopleCore(opts: {
       ? {
           researchTypes: {
             filter: { bool: { filter: filtersExcept("researchType") } },
-            aggs: { keys: { terms: { field: "researchType", size: 10 } } },
+            aggs: {
+              keys: {
+                terms: { field: "researchType", size: 10 },
+                // Nested children: physician / non-physician within each kind.
+                ...(researchTypeNestedOn
+                  ? {
+                      aggs: {
+                        physician: { filter: { term: { isPhysician: true } } },
+                        other: { filter: { term: { isPhysician: false } } },
+                      },
+                    }
+                  : {}),
+              },
+            },
           },
         }
       : {}),
@@ -3796,7 +3863,13 @@ async function searchPeopleCore(opts: {
       // Present only when SEARCH_PEOPLE_INSTITUTION_FACET is on.
       institutions?: { keys: { buckets: Bucket[] } };
       // Present only when SEARCH_PEOPLE_RESEARCH_TYPE_FACET is on.
-      researchTypes?: { keys: { buckets: Bucket[] } };
+      researchTypes?: {
+        keys: {
+          buckets: Array<
+            Bucket & { physician?: { doc_count: number }; other?: { doc_count: number } }
+          >;
+        };
+      };
       attributionMatch?: { doc_count: number };
     };
   };
@@ -4764,6 +4837,9 @@ async function searchPeopleCore(opts: {
       researchTypes: (r.aggregations?.researchTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
+        ...(b.physician && b.other
+          ? { physician: b.physician.doc_count, other: b.other.doc_count }
+          : {}),
       })),
     },
   };
@@ -5233,6 +5309,18 @@ async function searchPublicationsCore(opts: {
     institutionFacetOn && filters.institution && filters.institution.length > 0
       ? { terms: { wcmAuthorInstitutions: filters.institution } }
       : null;
+  // Translational stage facet — flag-gated like the two above: off → no
+  // clause even if a stale `?translationalStage=` is present, so the field's
+  // absence pre-reindex can never empty the result set. Values outside the
+  // four displayable stages are dropped before they reach the query.
+  const translationalStageFacetOn = resolveSearchPubsTranslationalStageFacet();
+  const translationalStageValues = translationalStageFacetOn
+    ? (filters.translationalStage ?? []).filter(isTranslationalStage)
+    : [];
+  const translationalStageClause =
+    translationalStageValues.length > 0
+      ? { terms: { translationalStage: translationalStageValues } }
+      : null;
   // Mentoring activity facet — union the precomputed pmid sets for the
   // selected program buckets. Empty union (e.g. all programs empty) becomes
   // a match_none clause so a stale-cache state returns zero rows rather
@@ -5294,6 +5382,7 @@ async function searchPublicationsCore(opts: {
   if (wcmAuthorClause) userAxisFilters.push(wcmAuthorClause);
   if (departmentClause) userAxisFilters.push(departmentClause);
   if (institutionClause) userAxisFilters.push(institutionClause);
+  if (translationalStageClause) userAxisFilters.push(translationalStageClause);
   if (mentoringClause) userAxisFilters.push(mentoringClause);
 
   const filtersExcept = (
@@ -5305,6 +5394,7 @@ async function searchPublicationsCore(opts: {
       | "wcmAuthor"
       | "department"
       | "institution"
+      | "translationalStage"
       | "mentoring",
   ) => {
     const out: Record<string, unknown>[] = [];
@@ -5315,6 +5405,8 @@ async function searchPublicationsCore(opts: {
     if (axis !== "wcmAuthor" && wcmAuthorClause) out.push(wcmAuthorClause);
     if (axis !== "department" && departmentClause) out.push(departmentClause);
     if (axis !== "institution" && institutionClause) out.push(institutionClause);
+    if (axis !== "translationalStage" && translationalStageClause)
+      out.push(translationalStageClause);
     if (axis !== "mentoring" && mentoringClause) out.push(mentoringClause);
     return out;
   };
@@ -5418,6 +5510,7 @@ async function searchPublicationsCore(opts: {
         mentoringPrograms: { md: 0, mdphd: 0, phd: 0, postdoc: 0, ecr: 0 },
         departments: [],
         institutions: [],
+        translationalStages: [],
       },
     };
   }
@@ -5502,7 +5595,7 @@ async function searchPublicationsCore(opts: {
       "impactScore",
       "topicImpacts",
       "impactJustification",
-      "abstract",
+      "hasAbstract",
       "meshDescriptorUi",
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
@@ -5644,6 +5737,21 @@ async function searchPublicationsCore(opts: {
             },
           }
         : {}),
+      // Translational stage facet agg, attached ONLY when
+      // `SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET` is on (same absent-key-while-off
+      // posture). The field holds at most the four displayable stages.
+      ...(translationalStageFacetOn
+        ? {
+            translationalStages: {
+              filter: aggBoolFor(filtersExcept("translationalStage")),
+              aggs: {
+                keys: {
+                  terms: { field: "translationalStage", size: TRANSLATIONAL_STAGES.length },
+                },
+              },
+            },
+          }
+        : {}),
       // Mentoring activity facet — contextual counts per program bucket.
       // One named filters-of-filters agg with 5 sub-buckets, each scoped to
       // the bucket's pmids + filtersExcept("mentoring") + the q-bound must.
@@ -5697,10 +5805,9 @@ async function searchPublicationsCore(opts: {
       topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
       // Issue #316 PR-C follow-up — optional pass-through justification text.
       impactJustification?: string;
-      // Issue #288 PR-A — pass-through abstract. ETL writes empty string on
-      // pubs with no abstract, so this is always-present in practice but
-      // optional-typed for defensive null handling on older index docs.
-      abstract?: string;
+      // Whether the pub has an abstract; the text itself is lazy-loaded from the DB.
+      // Optional: docs indexed before this field existed lack it.
+      hasAbstract?: boolean;
       // Issue #707 — descriptor UIs this publication is tagged with (#259 uses
       // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
       // the match-provenance path; kept in the `_source` include list above.
@@ -5725,6 +5832,8 @@ async function searchPublicationsCore(opts: {
     departments?: { keys: { buckets: Bucket[] } };
     // Present only when SEARCH_PUB_INSTITUTION_FACET is on.
     institutions?: { keys: { buckets: Bucket[] } };
+    // Present only when SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET is on.
+    translationalStages?: { keys: { buckets: Bucket[] } };
     mentoringPrograms?: {
       buckets: Record<MentoringProgramKey, { doc_count: number }>;
     };
@@ -5754,6 +5863,8 @@ async function searchPublicationsCore(opts: {
         query,
         userAxisFilters,
         useDepartmentFilter,
+        // The stage agg is attached only while its flag is on.
+        translationalStageFacetOn,
         // The mentoring agg embeds per-program pmid lists that aren't otherwise
         // in the key; fingerprint their size so a ReciterDB recovery
         // (empty→full buckets) busts the cache instead of serving zero
@@ -6010,8 +6121,10 @@ async function searchPublicationsCore(opts: {
         impactScore,
         conceptImpactScore,
         impactJustification,
-        hasAbstract:
-          typeof h._source.abstract === "string" && h._source.abstract.length > 0,
+        // ponytail: docs indexed before `hasAbstract` existed lack it; default true so the
+        // toggle still shows (the lazy fetch says "Abstract unavailable" for the ~5% without
+        // one). Drop the `?? true` after the first full reindex.
+        hasAbstract: h._source.hasAbstract ?? true,
         matchProvenance: pubProvenanceOn
           ? computeMatchProvenance({
               publicationMeshUi: h._source.meshDescriptorUi,
@@ -6064,8 +6177,25 @@ async function searchPublicationsCore(opts: {
         value: b.key,
         count: b.doc_count,
       })),
+      // Translational stage facet — fixed T0 → T3-4 order (not count order),
+      // non-zero stages only; `[]` while the flag is off / pre-reindex.
+      translationalStages: orderTranslationalStageBuckets(
+        r.aggregations?.translationalStages?.keys.buckets ?? [],
+      ),
     },
   };
+}
+
+/** Terms-agg buckets → facet rows in the fixed stage order, dropping zero
+ *  counts and any key that is not one of the four displayable stages. */
+function orderTranslationalStageBuckets(
+  buckets: ReadonlyArray<{ key: string; doc_count: number }>,
+): SearchFacetBucket[] {
+  const countByStage = new Map(buckets.map((b) => [b.key, b.doc_count]));
+  return TRANSLATIONAL_STAGES.flatMap((stage) => {
+    const count = countByStage.get(stage) ?? 0;
+    return count > 0 ? [{ value: stage, count }] : [];
+  });
 }
 
 /**
@@ -6672,7 +6802,8 @@ export async function suggestEntities(
       c.confidence === "entry-term"
         ? `MeSH concept · via "${c.matchedForm}"`
         : "MeSH concept",
-    href: searchHref(c.name),
+    // `suggest` tags the click for the usage rollup (typed vs suggested terms).
+    href: searchHref(c.name, "suggest"),
   });
 
   if (!useV2) {

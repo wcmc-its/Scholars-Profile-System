@@ -69,7 +69,7 @@ function PeopleLine({ people, total }: { people: Person[]; total: number }) {
       {shown.map((p, i) => (
         <span key={p.key}>
           {p.slug ? (
-            <Link href={profilePath(p.slug)} className="text-apollo-slate hover:underline">
+            <Link href={profilePath(p.slug)} prefetch={false} className="text-apollo-slate hover:underline">
               {p.name}
             </Link>
           ) : (

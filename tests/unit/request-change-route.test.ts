@@ -18,7 +18,9 @@ const {
   mockTransaction,
   mockScholarFindUnique,
   mockRecordAttempt,
+  mockResolvePersonNames,
 } = vi.hoisted(() => ({
+  mockResolvePersonNames: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockIsMailerConfigured: vi.fn(),
   mockSendMail: vi.fn(),
@@ -50,6 +52,7 @@ vi.mock("@/lib/edit/mailer", () => ({
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
 vi.mock("@/lib/edit/rate-limit", () => ({ recordRequestChangeAttempt: mockRecordAttempt }));
+vi.mock("@/lib/edit/person-names", () => ({ resolvePersonNames: mockResolvePersonNames }));
 vi.mock("@/lib/db", () => ({
   db: {
     write: { $transaction: mockTransaction },
@@ -77,6 +80,7 @@ beforeEach(() => {
   mockGetEditSession.mockResolvedValue(SELF);
   mockIsMailerConfigured.mockReturnValue(true);
   mockSendMail.mockResolvedValue({ messageId: "msg-1" });
+  mockResolvePersonNames.mockResolvedValue(new Map());
   mockAppendAuditRow.mockResolvedValue(undefined);
   // Within the limit by default; the rate-limit tests below opt into a block.
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 20 });
@@ -134,6 +138,15 @@ describe("POST /api/edit/request-change", () => {
     mockScholarFindUnique.mockResolvedValue(null);
     await POST(post({ attribute: "education", issueId: "education-wrong" }));
     expect(mockSendMail.mock.calls[0][0].text).toContain("Scholar: self01");
+  });
+
+  it("names the actor in the signature via resolvePersonNames", async () => {
+    mockScholarFindUnique.mockResolvedValue({ email: null, preferredName: "Jane Scholar" });
+    mockResolvePersonNames.mockResolvedValue(new Map([["self01", "Jane Scholar"]]));
+    await POST(post({ attribute: "education", issueId: "education-wrong" }));
+    expect(mockSendMail.mock.calls[0][0].text).toContain(
+      "Sent from the WCM Scholars profile editor by Jane Scholar (self01).",
+    );
   });
 
   it("carries the cc for an OSRA funding request", async () => {

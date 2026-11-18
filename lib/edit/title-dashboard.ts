@@ -23,6 +23,8 @@
  * ETL post-pass resolves from, so the report cannot disagree with the
  * nightly. No table, no migration. Server-only (reads the database).
  */
+import { createHash } from "node:crypto";
+
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { loadTitleCandidates, type TitleResolutionClient, type TitleCandidates } from "@/etl/ed/title-resolution";
 import { isTitleResolutionEnabled, loadChairedDepartments } from "@/lib/edit/title-picker";
@@ -106,6 +108,10 @@ export type TitleDashboardRow = {
   conflictNotes: string[];
   /** Every tier row, for the inline picker. */
   options: TitleOption[];
+  /** An operator accepted this row's discrepancy as of its CURRENT inputs
+   *  (a `primaryTitleAccepted` marker whose fingerprint still matches, #3362):
+   *  it leaves "Needs review". Set by the loader; absent = not accepted. */
+  accepted?: boolean;
 };
 
 /**
@@ -280,9 +286,86 @@ export async function loadTitleDashboard(client: DashboardClient): Promise<Title
     }
   }
   const nameByCwid = new Map(names.map((n) => [n.cwid, displayName(n)]));
-  return listed
+  const rows = listed
     .map((r) => ({ ...r, name: nameByCwid.get(r.cwid) ?? r.cwid }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  return applyTitleAcceptances(client, rows);
+}
+
+/**
+ * "Accept discrepancy" (#3362): an operator says the auto-selected title is
+ * right even though the row is flagged. Stored as a `field_override` row
+ * (`entityType: "scholar"`, this field name) whose value is a
+ * {@link TitleAcceptMarker}: no table, no migration, and it rides the
+ * curated-table backup with every other `field_override` row. Nothing reads it
+ * but this module. It is NOT in `EDITABLE_FIELDS`, so `/api/edit/field` will
+ * not write it, and it never touches `Scholar.primaryTitle` (the title stays
+ * unpinned; the ladder keeps working). Written by `/api/edit/title-accept`.
+ */
+export const TITLE_ACCEPT_FIELD = "primaryTitleAccepted";
+
+/** The marker's JSON value: the fingerprint of the inputs that were reviewed,
+ *  plus the auto-selected title as the operator saw it (for the audit trail). */
+export type TitleAcceptMarker = { fingerprint: string; title: string | null };
+
+/**
+ * What an acceptance is keyed to: the auto-selected title (the ladder's winner,
+ * ignoring any pin) and everything that put the row under "Needs review" (its
+ * review reasons and their notes: the role/title mismatches, the unverified
+ * claims, who else holds or claims the unit). A new role, a different auto
+ * title or a new conflict changes it, and the row comes back. Informational
+ * reasons (`leadership`, `pinned`) are left out, so a pin alone does not
+ * resurrect an accepted flag.
+ */
+export function titleAcceptFingerprint(
+  r: Pick<
+    TitleDashboardRow,
+    "winner" | "reasons" | "mismatchNotes" | "unverifiedNotes" | "conflictNotes"
+  >,
+): string {
+  const canonical = JSON.stringify({
+    v: 1,
+    auto: r.winner?.value ?? null,
+    reasons: r.reasons.filter((x) => TITLE_REVIEW_REASONS.includes(x)).sort(),
+    notes: [...r.mismatchNotes, ...r.unverifiedNotes, ...r.conflictNotes].sort(),
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+/** A stored marker, or null when the value is not one (never throws). */
+export function parseTitleAcceptMarker(value: string): TitleAcceptMarker | null {
+  try {
+    const v = JSON.parse(value) as unknown;
+    if (typeof v !== "object" || v === null) return null;
+    const { fingerprint, title } = v as Record<string, unknown>;
+    if (typeof fingerprint !== "string" || fingerprint.length === 0) return null;
+    return { fingerprint, title: typeof title === "string" ? title : null };
+  } catch {
+    return null;
+  }
+}
+
+/** Mark each flagged row whose stored acceptance still matches its current
+ *  inputs. A stale marker (inputs changed) is simply ignored, not deleted. */
+export async function applyTitleAcceptances(
+  client: Pick<PrismaClient, "fieldOverride">,
+  rows: TitleDashboardRow[],
+): Promise<TitleDashboardRow[]> {
+  const flagged = rows.filter((r) => r.reasons.some((x) => TITLE_REVIEW_REASONS.includes(x)));
+  if (flagged.length === 0) return rows;
+  const markers = await client.fieldOverride.findMany({
+    where: {
+      entityType: "scholar",
+      fieldName: TITLE_ACCEPT_FIELD,
+      entityId: { in: flagged.map((r) => r.cwid) },
+    },
+    select: { entityId: true, value: true },
+  });
+  const byCwid = new Map(markers.map((m) => [m.entityId, parseTitleAcceptMarker(m.value)]));
+  return rows.map((r) => {
+    const m = byCwid.get(r.cwid);
+    return m && m.fingerprint === titleAcceptFingerprint(r) ? { ...r, accepted: true } : r;
+  });
 }
 
 /** A scholar's name for the report: some rows carry an EMPTY
@@ -327,7 +410,7 @@ export const TITLE_TAB_LABEL: Record<TitleTab, string> = {
 /** The one-line note under the tabs. */
 export const TITLE_TAB_NOTE: Record<TitleTab, string> = {
   review:
-    "Unverified working titles, conflicting roles, mismatched text, close contests and leadership titles that lost. Fix the source or pin a title.",
+    "Unverified working titles, conflicting roles, mismatched text, close contests and leadership titles that lost. Fix the source, pin a title, or accept the discrepancy when the auto title is right.",
   pinned: "Pins override the ladder. Remove pins that now match what the ladder would pick anyway.",
   fyi: "Leadership titles the ladder resolved cleanly. Listed for comms review; usually no action.",
   all: "Every scholar on this report.",
@@ -350,9 +433,12 @@ export const TITLE_REVIEW_REASONS: readonly TitleReason[] = [
   "leadershipLost",
 ] as const;
 
-/** The tab a row lives under (never "all"). */
-export function titleTabOf(r: Pick<TitleDashboardRow, "reasons">): Exclude<TitleTab, "all"> {
-  if (r.reasons.some((x) => TITLE_REVIEW_REASONS.includes(x))) return "review";
+/** The tab a row lives under (never "all"). An accepted discrepancy
+ *  ({@link applyTitleAcceptances}) no longer needs review. */
+export function titleTabOf(
+  r: Pick<TitleDashboardRow, "reasons" | "accepted">,
+): Exclude<TitleTab, "all"> {
+  if (!r.accepted && r.reasons.some((x) => TITLE_REVIEW_REASONS.includes(x))) return "review";
   return r.reasons.includes("pinned") ? "pinned" : "fyi";
 }
 
@@ -396,7 +482,13 @@ export function formatTitleRank(rank: number | null | undefined): string {
 
 /** The operator notes on a row: the mismatch reasons, then the redundant pin. */
 export function titleRowNotes(r: TitleDashboardRow): string[] {
-  return [...r.mismatchNotes, ...r.unverifiedNotes, ...r.conflictNotes, ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : [])];
+  return [
+    ...r.mismatchNotes,
+    ...r.unverifiedNotes,
+    ...r.conflictNotes,
+    ...(r.pinRedundant ? ["Pin matches ladder — can unpin"] : []),
+    ...(r.accepted ? ["Discrepancy accepted: auto title confirmed"] : []),
+  ];
 }
 
 /** The rank of what is displayed by rule: the pin's (its tier row when it is

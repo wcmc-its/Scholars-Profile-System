@@ -26,6 +26,7 @@ const c = (
   lastName,
   emails: [],
   orcids: [],
+  cwid: null,
   name: null,
   department: null,
   title: null,
@@ -93,6 +94,20 @@ describe("identity-links matcher", () => {
     );
     expect(links.map((l) => l.cwid)).toEqual(["abc2001"]);
     expect(links[0].signals).toEqual({ ed: true, name: true });
+  });
+
+  it("a CWID in the Cornell directory makes a known pair and settles both sides", () => {
+    const links = matchIdentities(
+      [w("abc2001", "Ann Smith")],
+      [
+        c("as1", "Ann", "Smith", { cwid: "abc2001" }),
+        // would be a strong email pair, but abc2001 is already settled
+        c("as2", "Al Other", "Person", { emails: ["abc2001@med.cornell.edu"] }),
+        c("zz9", "Zed", "Gone", { cwid: "zzz9999" }), // CWID no scholar holds
+      ],
+    );
+    expect(links.map((l) => [l.cwid, l.netid, l.band])).toEqual([["abc2001", "as1", "known"]]);
+    expect(links[0].signals).toEqual({ cornell: true, name: true });
   });
 
   it("ignores an ED NetID that is not on the Cornell roster", () => {

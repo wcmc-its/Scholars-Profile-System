@@ -23,4 +23,12 @@ describe("TrySuggestionsChips", () => {
     expect(searchLinks.length).toBeGreaterThan(0);
     for (const p of searchLinks) expect(p.prefetch).toBe(false);
   });
+
+  it("tags every chip src=chip so the usage rollup counts it as suggested, not typed", () => {
+    linkProps.length = 0;
+    render(<TrySuggestionsChips count={6} />);
+    const searchLinks = linkProps.filter((p) => String(p.href).startsWith("/search"));
+    expect(searchLinks.length).toBeGreaterThan(0);
+    for (const p of searchLinks) expect(String(p.href)).toMatch(/^\/search\?q=[^&]+&src=chip$/);
+  });
 });

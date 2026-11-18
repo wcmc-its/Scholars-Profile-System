@@ -32,6 +32,8 @@ import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { resolvePersonNames } from "@/lib/edit/person-names";
+import { loadExternalMembersByCuid } from "@/lib/api/external-members";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +99,24 @@ export default async function EditCenterHistoryPage({
     );
   }
 
+  // Actor / impersonated / member CWIDs → display names (never throws; an
+  // unresolved CWID falls back to itself in the view).
+  // An external (Ithaca) member's targetCwid is a CUID/netid that can collide
+  // with an unrelated WCM cwid, so name externals from external_member only and
+  // keep them out of the WCM lookup.
+  const externals = await loadExternalMembersByCuid(
+    [...new Set(entries.map((e) => e.targetCwid).filter(Boolean))],
+  ).catch(() => new Map<string, { displayName: string }>());
+  const resolved = await resolvePersonNames(
+    entries.flatMap((e) => [
+      e.actorCwid,
+      e.impersonatedCwid,
+      externals.has(e.targetCwid) ? null : e.targetCwid,
+    ]),
+  );
+  for (const [cuid, m] of externals) resolved.set(cuid.toLowerCase(), m.displayName);
+  const names = Object.fromEntries(resolved);
+
   return (
     <CenterHistoryView
       centerCode={ctx.unit.code}
@@ -104,6 +124,7 @@ export default async function EditCenterHistoryPage({
       entries={entries}
       windowDays={CENTER_AUDIT_WINDOW_DAYS}
       unavailable={unavailable}
+      names={names}
     />
   );
 }

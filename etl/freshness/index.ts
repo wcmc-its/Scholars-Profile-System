@@ -32,8 +32,9 @@
  * Prisma clients on import. Every deployed cadence step writes an `etl_run` row
  * (the stragglers — search:index, revalidate, the weekly grant enrichers, the
  * COI-statements backfill — were wrapped in `withEtlRun` by the
- * reliability-audit PR-4). Sources seen in `etl_run` but absent from that table
- * are reported as "untracked" and never alarm (manual/on-demand runs).
+ * reliability-audit PR-4). A source seen in `etl_run` in the last 30 days but
+ * absent from both TRACKED and UNSCHEDULED is logged as `WARN unregistered`
+ * (warn tier, sps-warn-<env>); it never sets the exit code.
  * Entries with an `envs` list are only checked in those envs — the cadences
  * genuinely differ per env (InfoEd is excluded from the staging nightly over
  * the 10.20/16 CIDR overlap; MeshAnchor is staging-only until its soak signs
@@ -43,9 +44,11 @@
  */
 import { db } from "@/lib/db";
 import { freshnessAnchor } from "@/etl/freshness/anchor";
+import { UNREGISTERED_WINDOW_DAYS, findUnregistered } from "@/lib/api/etl-status";
 import {
   type SourceStatus,
   TRACKED,
+  UNREGISTERED_WARN_MARKER,
   ackState,
   gradeSource,
   isTrackedInEnv,
@@ -180,19 +183,22 @@ async function main(): Promise<void> {
     }
   }
 
-  // Surface sources present in etl_run but not in the SLA table, so a new
-  // cadence source is not silently unmonitored. Informational only.
-  const distinct = await db.read.etlRun.findMany({
-    distinct: ["source"],
-    select: { source: true },
-  });
-  const untracked = distinct
-    .map((r) => r.source)
-    .filter((s) => !(s in TRACKED))
-    .sort();
-  if (untracked.length > 0) {
-    console.log(`[freshness] untracked sources (not alarmed): ${untracked.join(", ")}`);
+  // A source that ran recently but is in neither TRACKED nor UNSCHEDULED is a
+  // scheduled job nobody registered: nothing grades its freshness. WARN tier,
+  // like margin: the marker is counted into sps-warn-<env> (ObservabilityStack)
+  // and never sets the exit code. Same list /edit/etl-status shows.
+  const unregistered = await findUnregistered(db.read, now);
+  for (const u of unregistered) {
+    console.warn(
+      `[freshness] ${UNREGISTERED_WARN_MARKER} ${u.source}: last ran ` +
+        `${u.lastStartedAt.toISOString()} but is not in TRACKED or UNSCHEDULED ` +
+        `(lib/etl/freshness-policy.ts) — register it so its freshness is graded`,
+    );
   }
+  console.log(
+    `[freshness] unregistered: ${unregistered.length} source(s) ran in the last ` +
+      `${UNREGISTERED_WINDOW_DAYS}d without being registered (warn tier, sps-warn)`,
+  );
 
   const { margins, retries } = await evaluateMargins(now);
   const breaches = margins.filter((m) => m.level !== "ok");

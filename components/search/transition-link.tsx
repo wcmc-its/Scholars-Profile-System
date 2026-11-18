@@ -188,5 +188,5 @@ export function TransitionLink({ href, onClick, scroll, ...rest }: TransitionLin
     else router.push(href, options);
   }
 
-  return <Link href={href} scroll={scroll} onClick={handleClick} {...rest} />;
+  return <Link prefetch={false} href={href} scroll={scroll} onClick={handleClick} {...rest} />;
 }

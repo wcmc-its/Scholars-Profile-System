@@ -7,8 +7,10 @@
  * the window matches the page's KPIs and chart), plus the names those rows
  * need.
  *
- * Same gate as the page (`canViewDashboard(session, "activity")`: superuser or
- * an ad hoc grant), re-checked on every GET. A read has no CSRF
+ * Same gate as the page (`canViewDashboard(session, "activity")`: superuser,
+ * an ad hoc grant, or a department / division / center admin), re-checked on
+ * every GET. A unit admin gets only their own units' rows: the scope is
+ * resolved from the session here, never taken from the request. A read has no CSRF
  * surface and a cross-origin read can't see the response (CORS), so the
  * session + gate re-check is the whole gate (the `GET
  * /api/edit/slugs` pattern). No flag: this only pages further through the
@@ -18,7 +20,11 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { decodeCursor, loadOlderEdits, parseAsOf, parseRange } from "@/lib/api/edit-activity";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { canViewDashboard } from "@/lib/edit/dashboard-access";
+import {
+  activityScopeSql,
+  canViewDashboard,
+  loadDashboardScope,
+} from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { resolveDirectoryPeople } from "@/lib/edit/directory-names";
@@ -48,7 +54,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const range = parseRange(request.nextUrl.searchParams.get("range"));
 
   try {
-    const page = await loadOlderEdits(db.read, cursor, asOf, resolveDirectoryPeople, range);
+    const scope = await loadDashboardScope(session, "activity");
+    const page = await loadOlderEdits(
+      db.read,
+      cursor,
+      asOf,
+      resolveDirectoryPeople,
+      range,
+      activityScopeSql(scope),
+    );
     return editOk({ ...page });
   } catch (err) {
     console.error(

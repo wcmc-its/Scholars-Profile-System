@@ -153,7 +153,13 @@ describe("buildContentSecurityPolicy", () => {
   it("keeps the production policy free of dev-only relaxations", () => {
     const csp = parseCsp(buildContentSecurityPolicy({ isProduction: true }));
     expect(csp["script-src"]).not.toContain("'unsafe-eval'");
-    expect(csp["connect-src"]).toBe("'self'");
+    expect(csp["connect-src"]).toBe("'self' https://*.awswaf.com");
+  });
+
+  it("allows the WAF challenge SDK that CloudFront inserts into HTML", () => {
+    const csp = parseCsp(buildContentSecurityPolicy({ isProduction: true }));
+    expect(csp["script-src"]).toContain("https://*.awswaf.com");
+    expect(csp["connect-src"]).toContain("https://*.awswaf.com");
   });
 
   it("grants the dev server unsafe-eval and websocket origins for HMR", () => {

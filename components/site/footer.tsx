@@ -13,7 +13,6 @@ export function SiteFooter() {
           >
             Help &amp; support
           </Link>
-          <span className="text-xs">Phase 1 prototype</span>
         </div>
       </div>
     </footer>

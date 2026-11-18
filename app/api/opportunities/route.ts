@@ -13,6 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
+import { nameOr, resolvePersonNames } from "@/lib/edit/person-names";
 import { asPrestige } from "@/lib/funding/prestige";
 import { FACULTY_STAGES, facultyPiMayHold, requirementsFrom } from "@/lib/funding/screening";
 
@@ -187,13 +188,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (pa !== pb) return pb - pa;
     return (a.title ?? "").localeCompare(b.title ?? "");
   });
+  const page = rows.slice(0, limit);
+  // One batched name lookup for the admin view's "suppressed … by <name>" note.
+  const suppressorNames = await resolvePersonNames(page.map((r) => r.suppressedBy));
   // BigInt award fields → number for JSON (mirrors the detail route).
-  const opportunities = rows
-    .slice(0, limit)
+  const opportunities = page
     .map(({ eligibility, eligibilityFlags, topicVector, primaryTopicId, ...r }) => ({
       ...r,
       awardCeiling: r.awardCeiling == null ? null : Number(r.awardCeiling),
       awardFloor: r.awardFloor == null ? null : Number(r.awardFloor),
+      suppressedByName: r.suppressedBy ? nameOr(suppressorNames, r.suppressedBy) : null,
       // Screening spec §3.1 — false means no WCM faculty PI can hold this award (13.2% of the
       // corpus). The browse gates on it by default; the flag is fail-open, so absent data is `true`.
       facultyPiEligible: facultyPiMayHold(eligibilityFlags, eligibility),

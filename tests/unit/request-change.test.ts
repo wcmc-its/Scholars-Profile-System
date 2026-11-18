@@ -130,7 +130,19 @@ describe("composeBody", () => {
       issueLabel: "An academic appointment is missing",
       actorCwid: "adm001",
     });
-    expect(body).toContain("by adm001 on behalf of scholar9.");
+    expect(body).toContain("by adm001 on behalf of Scholar Nine (scholar9).");
+  });
+
+  it("names the actor when actorName is resolved", () => {
+    const body = composeBody({
+      attribute: "appointments",
+      targetCwid: "scholar9",
+      targetName: "Scholar Nine",
+      issueLabel: "An academic appointment is missing",
+      actorCwid: "adm001",
+      actorName: "Ada Admin",
+    });
+    expect(body).toContain("by Ada Admin (adm001) on behalf of Scholar Nine (scholar9).");
   });
 
   it("collapses CRLF in the single-line fields (header/format guard)", () => {

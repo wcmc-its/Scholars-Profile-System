@@ -52,6 +52,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isMatchaAdminEnabled } from "@/lib/edit/grant-recs";
+import { resolvePersonNames } from "@/lib/edit/person-names";
 import {
   deleteSubmission,
   findDuplicate,
@@ -106,22 +107,17 @@ export async function GET(): Promise<NextResponse> {
       logEditFailure(`${PATH}#titles`, err);
     }
   }
-  // Same decoration posture for the batch header's "<name> (<cwid>)" — one batched
-  // scholar join over the page's submitter cwids, fail-soft to the bare cwid (a
-  // submitter who is not a scholar row, e.g. IT staff, simply has no entry).
+  // Same decoration posture for submitter attribution (batch header and single rows):
+  // Scholar name, then the WCM directory (IT staff have no scholar row); a cwid
+  // neither source names simply has no entry and renders bare. Never throws.
   const submitterCwids = [...new Set(submissions.map((s) => s.submittedBy).filter(Boolean))];
-  let submitterNames: Record<string, string> = {};
-  if (submitterCwids.length > 0) {
-    try {
-      const rows = await db.read.scholar.findMany({
-        where: { cwid: { in: submitterCwids } },
-        select: { cwid: true, preferredName: true },
-      });
-      submitterNames = Object.fromEntries(rows.map((r) => [r.cwid, r.preferredName]));
-    } catch (err) {
-      logEditFailure(`${PATH}#submitterNames`, err);
-    }
-  }
+  const resolved = await resolvePersonNames(submitterCwids);
+  const submitterNames: Record<string, string> = Object.fromEntries(
+    submitterCwids.flatMap((c) => {
+      const name = resolved.get(c.toLowerCase());
+      return name ? [[c, name]] : [];
+    }),
+  );
   return editOk({ submissions, opportunityTitles, submitterNames });
 }
 

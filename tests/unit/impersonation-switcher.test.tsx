@@ -87,6 +87,25 @@ describe("ImpersonationSwitcher exact-CWID fallback", () => {
     expect(alert.textContent).not.toContain("Couldn’t load people");
   });
 
+  it("titles the confirm with the directory-resolved name, not the typed CWID", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const body = url.includes("/api/directory/people")
+        ? { ok: true, people: [{ cwid: "prx001", name: "Pat Proxy", title: null }] }
+        : [];
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    render(<Harness />);
+
+    fireEvent.change(screen.getByLabelText("Search people to view as"), {
+      target: { value: "prx001" },
+    });
+    fireEvent.click(await screen.findByTestId("impersonation-view-as-exact-cwid"));
+
+    expect(await screen.findByText("View as Pat Proxy?")).toBeTruthy();
+    expect(screen.getByText(/with Pat’s permissions/)).toBeTruthy();
+  });
+
   it("does NOT offer the fallback for a multi-word query (a name search, never a CWID)", async () => {
     stubFetches([]);
     render(<Harness />);

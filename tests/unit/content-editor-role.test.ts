@@ -249,6 +249,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   matcha: "deny",
   "matcha/brief": "deny",
   "matcha/contacts": "deny",
+  "matcha/export": "deny",
   "matcha/pitch": "deny",
   "mentee-suggestions/[id]/dismiss": "deny",
   "mentee-suggestions/[id]/restore": "deny",
@@ -287,7 +288,10 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "slug-request": "deny",
   "sponsor-match": "deny",
   suppress: "allow",
+  // #3362 — the pin gate: superuser / comms steward only, never a content editor.
+  "title-accept": "deny",
   unit: "allow",
+  "unit-leadership": "allow",
 };
 
 /** Predicates (or the flag itself) through which a content editor's write passes. */

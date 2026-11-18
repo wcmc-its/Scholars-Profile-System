@@ -30,6 +30,7 @@ vi.mock("@/lib/db", () => {
         center: none,
         core: none,
         stewardDirectory: none,
+        scholarProxy: none,
       },
     },
   };

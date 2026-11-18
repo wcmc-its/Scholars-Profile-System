@@ -23,6 +23,7 @@
  * loads under vitest with a fake client — matching `edit-roster.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { resolveDirectoryNames } from "@/lib/edit/directory-names";
 import {
   RESERVED_SLUGS,
   checkSlugCollision,
@@ -474,7 +475,8 @@ export async function countSlugRegistrySegments(
 /** Display extras for one page of registry rows — what the row shapes above
  *  do not carry. Keyed by CWID / slug; a key missing = unknown. */
 export type SlugRegistryExtras = {
-  /** Name + primary department per CWID on the page. */
+  /** Name + primary department per CWID on the page — row subjects AND the
+   *  actors who pinned / decided them (staff named via the directory). */
   people: Record<string, { name: string | null; department: string | null }>;
   /** CWIDs on the page whose slug is pinned by an override. */
   pinned: string[];
@@ -501,6 +503,15 @@ export async function loadSlugRegistryExtras(
         : segment === "requested"
           ? (rows as RequestedSlugRow[]).map((r) => r.forCwid)
           : [];
+  // Actors (who pinned an override / decided a request) — named in the same
+  // scholar read, then the WCM directory for staff with no scholar row.
+  const actorCwids =
+    segment === "override"
+      ? (rows as OverrideSlugRow[]).map((r) => r.setByCwid)
+      : segment === "requested"
+        ? (rows as RequestedSlugRow[]).flatMap((r) => (r.decidedByCwid ? [r.decidedByCwid] : []))
+        : [];
+  if (actorCwids.length) cwids.push(...actorCwids.filter((c) => !cwids.includes(c)));
   const bases =
     segment === "collisions" ? [...new Set((rows as ActiveSlugRow[]).map((r) => r.slug.replace(/-\d+$/, "")))] : [];
   if (cwids.length === 0 && bases.length === 0) return extras;
@@ -527,6 +538,14 @@ export async function loadSlugRegistryExtras(
   ]);
   for (const p of people) {
     extras.people[p.cwid] = { name: p.preferredName ?? p.fullName ?? null, department: p.primaryDepartment ?? null };
+  }
+  const unnamed = [...new Set(actorCwids)].filter((c) => !extras.people[c]?.name);
+  if (unnamed.length) {
+    const dir = await resolveDirectoryNames(unnamed);
+    for (const c of unnamed) {
+      const name = dir.get(c.toLowerCase());
+      if (name) extras.people[c] = { name, department: extras.people[c]?.department ?? null };
+    }
   }
   extras.pinned = overrides.map((o) => o.entityId);
   for (const b of bases) {
@@ -556,8 +575,9 @@ export type SlugStatus =
       cwid: string;
       name: string | null;
     }
-  /** Pinned by another CWID's override (segment C). */
-  | { state: "taken"; slug: string; held: "override"; cwid: string }
+  /** Pinned by another CWID's override (segment C). `name` is the holder's
+   *  scholar name (inactive/deleted included), or null when unknown. */
+  | { state: "taken"; slug: string; held: "override"; cwid: string; name: string | null }
   /** A former slug of a different live scholar — claiming it breaks that 301
    *  (segment B, the #29 identity-bleed guard). */
   | {
@@ -629,7 +649,18 @@ export async function resolveSlugStatus(
     select: { entityId: true },
   });
   if (override) {
-    return { state: "taken", slug: value, held: "override", cwid: override.entityId };
+    // No deletedAt/status filter: the pinned holder may be inactive.
+    const holder = await client.scholar.findFirst({
+      where: { cwid: override.entityId },
+      select: { preferredName: true, fullName: true },
+    });
+    return {
+      state: "taken",
+      slug: value,
+      held: "override",
+      cwid: override.entityId,
+      name: holder?.preferredName ?? holder?.fullName ?? null,
+    };
   }
 
   const former = await client.slugHistory.findUnique({

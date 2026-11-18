@@ -21,8 +21,10 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { ScholarHistoryView } from "@/components/edit/scholar-history-view";
+import { isSystemActor } from "@/lib/api/edit-activity";
 import { loadScholarAuditHistory, SCHOLAR_AUDIT_WINDOW_DAYS } from "@/lib/api/scholar-audit";
 import { db } from "@/lib/db";
+import { resolvePersonNames } from "@/lib/edit/person-names";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { resolveScholarEditAccess } from "@/lib/edit/scholar-edit-access";
 
@@ -95,6 +97,16 @@ export default async function EditScholarHistoryPage({
     );
   }
 
+  // Actor / impersonated / proxy CWIDs → display names (never throws; an
+  // unresolved CWID — or a `system-*` machine actor — renders as itself).
+  const names = Object.fromEntries(
+    await resolvePersonNames(
+      entries
+        .flatMap((e) => [e.actorCwid, e.impersonatedCwid, e.detailCwid])
+        .filter((c): c is string => !!c && !isSystemActor(c)),
+    ),
+  );
+
   return (
     <ScholarHistoryView
       cwid={targetCwid}
@@ -102,6 +114,7 @@ export default async function EditScholarHistoryPage({
       entries={entries}
       windowDays={SCHOLAR_AUDIT_WINDOW_DAYS}
       unavailable={unavailable}
+      names={names}
     />
   );
 }

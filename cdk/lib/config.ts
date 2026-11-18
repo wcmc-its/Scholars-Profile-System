@@ -18,7 +18,14 @@ export type EnvName = "staging" | "prod";
  * drift. Verifying this identity (DKIM CNAMEs) + leaving the SES sandbox are ops
  * steps (docs/ses-sender-verification.md).
  */
-export const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
+export const SCHOLARS_MAIL_FROM = "no-reply@scholars-mail.weill.cornell.edu";
+
+/**
+ * The sender domain's DEFAULT configuration set (InboundMailStack). SESv2
+ * authorizes SendEmail against it as well as the identity, so every SES grant
+ * must list both or the send is denied.
+ */
+export const SCHOLARS_MAIL_CONFIG_SET = "scholars-mail-default";
 
 /** Resolved configuration for one environment. */
 export interface SpsEnvConfig {
@@ -455,7 +462,7 @@ export interface SpsEnvConfig {
    * 301s every request on them to the canonical domain (legacy VIVO profile
    * paths to `/scholars/by-cwid/{cwid}`, everything else to `/`). The cert at
    * {@link edgeCertArn} must cover each one. Prod only: `vivo.weill.cornell.edu`
-   * moves here at the VIVO cutover (#945).
+   * moved here at the VIVO cutover (#945); `vivo.med.cornell.edu` followed.
    */
   readonly edgeAliasDomains?: readonly string[];
   /**
@@ -899,11 +906,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
     // stripping them (#1506). Live values read from the distribution config.
     edgeCustomDomain: "scholars.weill.cornell.edu",
-    // Covers scholars + vivo (SAN). Replaced 95f77e69-... (scholars only) for
-    // the VIVO hostname cutover (#945).
+    // Covers scholars + vivo.weill + vivo.med (SAN). Replaced 04baf746-...
+    // (scholars + vivo.weill) to move vivo.med.cornell.edu off the retired
+    // VIVO account's redirect ALB (#945 follow-up).
     edgeCertArn:
-      "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
-    edgeAliasDomains: ["vivo.weill.cornell.edu"],
+      "arn:aws:acm:us-east-1:665083158573:certificate/80637162-668f-4742-8bef-c8c0588e5077",
+    edgeAliasDomains: ["vivo.weill.cornell.edu", "vivo.med.cornell.edu"],
     // #432: public launch Wed 2026-11-11, same Sps-Edge-prod deploy as the
     // VIVO alias. Takes effect only on that manual deploy.
     edgePublic: true,

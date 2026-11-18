@@ -680,7 +680,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
@@ -705,6 +705,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "EDIT_DATA_SHARING_DASHBOARD",
                 "Value": "on",
+              },
+              {
+                "Name": "EDIT_RESEARCH_SECURITY_DASHBOARD",
+                "Value": "off",
               },
               {
                 "Name": "RECITER_REJECT_SEND",
@@ -756,6 +760,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_DISEASE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "UNIT_LEADERSHIP_ROLES",
                 "Value": "on",
               },
               {
@@ -847,6 +855,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "LEADER_REPORT_ACCESS",
+                "Value": "on",
+              },
+              {
                 "Name": "ORCID_CONNECT_BASE",
                 "Value": "https://orcid.org",
               },
@@ -909,6 +921,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
                 "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_VIEWER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/research-security-viewer-role",
               },
               {
                 "Name": "OBSERVER_ENABLED",
@@ -1015,7 +1035,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SHOW_BETA_BADGE",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
@@ -1099,6 +1119,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_NESTED",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET",
                 "Value": "on",
               },
               {
@@ -4795,11 +4823,14 @@ service:
               "Action": "ses:SendEmail",
               "Condition": {
                 "StringEquals": {
-                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                  "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu",
                 },
               },
               "Effect": "Allow",
-              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+              "Resource": [
+                "arn:aws:ses:us-east-1:123456789012:identity/*",
+                "arn:aws:ses:us-east-1:123456789012:configuration-set/scholars-mail-default",
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -5745,7 +5776,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
@@ -5769,6 +5800,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_DATA_SHARING_DASHBOARD",
+                "Value": "on",
+              },
+              {
+                "Name": "EDIT_RESEARCH_SECURITY_DASHBOARD",
                 "Value": "on",
               },
               {
@@ -5821,6 +5856,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_DISEASE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "UNIT_LEADERSHIP_ROLES",
                 "Value": "on",
               },
               {
@@ -5912,6 +5951,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "LEADER_REPORT_ACCESS",
+                "Value": "on",
+              },
+              {
                 "Name": "ORCID_CONNECT_BASE",
                 "Value": "https://sandbox.orcid.org",
               },
@@ -5974,6 +6017,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN",
                 "Value": "ITS:Library:Scholars/data-sharing-viewer-role",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_VIEWER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/research-security-viewer-role",
               },
               {
                 "Name": "OBSERVER_ENABLED",
@@ -6080,7 +6131,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SHOW_BETA_BADGE",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
@@ -6164,6 +6215,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_RESEARCH_TYPE_NESTED",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET",
                 "Value": "on",
               },
               {
@@ -7121,7 +7180,7 @@ service:
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d.zip",
+          "S3Key": "8fefc46b7a95598bbe46da69916e535333bc7d3258fc9c124ada1a0589b59bfb.zip",
         },
         "Handler": "__entrypoint__.handler",
         "MemorySize": 128,
@@ -8443,7 +8502,7 @@ service:
         "ClientIDList": [
           "sts.amazonaws.com",
         ],
-        "CodeHash": "c0d9f24649426c60a1bc01108070535a40353ae6cd8ceccb812969319b936e5d",
+        "CodeHash": "8fefc46b7a95598bbe46da69916e535333bc7d3258fc9c124ada1a0589b59bfb",
         "RejectUnauthorized": false,
         "ServiceToken": {
           "Fn::GetAtt": [
@@ -10037,11 +10096,14 @@ service:
               "Action": "ses:SendEmail",
               "Condition": {
                 "StringEquals": {
-                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                  "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu",
                 },
               },
               "Effect": "Allow",
-              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+              "Resource": [
+                "arn:aws:ses:us-east-1:123456789012:identity/*",
+                "arn:aws:ses:us-east-1:123456789012:configuration-set/scholars-mail-default",
+              ],
             },
           ],
           "Version": "2012-10-17",

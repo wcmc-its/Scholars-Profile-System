@@ -100,6 +100,7 @@ describe("shapeScholarAuditRows", () => {
       actionLabel: "Updated profile",
       fields: ["Overview"],
       detail: null,
+      detailCwid: null,
       actorCwid: "self0001",
     });
     expect(a.ts).toBe("2026-06-01T12:00:00.000Z");
@@ -109,6 +110,7 @@ describe("shapeScholarAuditRows", () => {
       actionLabel: "Granted proxy editor",
       fields: [],
       detail: "prx0003",
+      detailCwid: "prx0003",
       impersonatedCwid: "own0002",
     });
     // a DATETIME(3) string round-trips to an ISO instant

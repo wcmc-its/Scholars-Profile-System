@@ -1393,10 +1393,11 @@ describe("EdgeStack", () => {
         expect(dc.Aliases).toEqual([
           "scholars.weill.cornell.edu",
           "vivo.weill.cornell.edu",
+          "vivo.med.cornell.edu",
         ]);
         const cert = dc.ViewerCertificate as Record<string, unknown>;
         expect(cert.AcmCertificateArn).toBe(
-          "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
+          "arn:aws:acm:us-east-1:665083158573:certificate/80637162-668f-4742-8bef-c8c0588e5077",
         );
         expect(cert.SslSupportMethod).toBe("sni-only");
       });
@@ -1463,11 +1464,15 @@ describe("EdgeStack", () => {
   });
 
   describe("legacy VIVO host alias (#945)", () => {
-    it("prod attaches vivo.weill.cornell.edu beside the canonical alias", () => {
+    it("prod attaches the vivo.weill and vivo.med hosts beside the canonical alias", () => {
       const { template } = buildEdgeStack("prod");
       template.hasResourceProperties("AWS::CloudFront::Distribution", {
         DistributionConfig: Match.objectLike({
-          Aliases: ["scholars.weill.cornell.edu", "vivo.weill.cornell.edu"],
+          Aliases: [
+            "scholars.weill.cornell.edu",
+            "vivo.weill.cornell.edu",
+            "vivo.med.cornell.edu",
+          ],
         }),
       });
     });
@@ -1510,7 +1515,10 @@ describe("EdgeStack", () => {
 
     describe("redirect handler", () => {
       const handler = new Function(
-        `${legacyHostRedirectCode("scholars.weill.cornell.edu", ["vivo.weill.cornell.edu"])}; return handler;`,
+        `${legacyHostRedirectCode("scholars.weill.cornell.edu", [
+          "vivo.weill.cornell.edu",
+          "vivo.med.cornell.edu",
+        ])}; return handler;`,
       )() as (e: unknown) => {
         statusCode?: number;
         headers: Record<string, { value: string }>;
@@ -1525,11 +1533,23 @@ describe("EdgeStack", () => {
         ["/", "/"],
         ["/vivosearch", "/"],
         ["/display/cwid-aer2006/extra", "/"],
+        ["/display/pubid37423492", "/scholars/by-pmid/37423492"],
+        ["/individual/pubid123/", "/scholars/by-pmid/123"],
+        ["/display/pubid12x", "/"],
+        ["/display/pubid1234567890", "/"],
       ])("vivo host %s -> 301 %s", (uri, path) => {
         const res = run("VIVO.weill.cornell.edu", uri);
         expect(res.statusCode).toBe(301);
         expect(res.headers.location.value).toBe(
           `https://scholars.weill.cornell.edu${path}`,
+        );
+      });
+
+      it("vivo.med host redirects the same way", () => {
+        const res = run("vivo.med.cornell.edu", "/display/cwid-aer2006");
+        expect(res.statusCode).toBe(301);
+        expect(res.headers.location.value).toBe(
+          "https://scholars.weill.cornell.edu/scholars/by-cwid/aer2006",
         );
       });
 
@@ -1580,6 +1600,7 @@ describe("EdgeStack", () => {
           "AWSManagedRulesKnownBadInputsRuleSet",
           "AWSManagedRulesSQLiRuleSet",
           "AWSManagedRulesBotControlRuleSet",
+          "AWSManagedRulesBotControlRuleSet-Targeted",
           "rate-limit",
         ]),
       );
@@ -1877,6 +1898,195 @@ describe("EdgeStack", () => {
         const rate = rules.find((x) => x.Name === "rate-limit");
         // Labels are visible only to later-priority rules.
         expect(Number(bot?.Priority)).toBeLessThan(Number(rate?.Priority));
+      });
+
+      describe("#3368 option 4: Bot Control TARGETED + Challenge on /search*", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        type BotRule = {
+          Name: string;
+          Priority: number;
+          OverrideAction?: Record<string, unknown>;
+          Statement: {
+            ManagedRuleGroupStatement?: {
+              Name: string;
+              ManagedRuleGroupConfigs: Array<{
+                AWSManagedRulesBotControlRuleSet: { InspectionLevel: string };
+              }>;
+              RuleActionOverrides?: Array<{
+                Name: string;
+                ActionToUse: Record<string, unknown>;
+              }>;
+              ScopeDownStatement?: unknown;
+            };
+          };
+        };
+        const rules = acl.Rules as BotRule[];
+        const byName = (n: string) => rules.find((r) => r.Name === n);
+        const common = byName("AWSManagedRulesBotControlRuleSet");
+        const targeted = byName("AWSManagedRulesBotControlRuleSet-Targeted");
+        const searchMatch = {
+          ByteMatchStatement: {
+            SearchString: "/search",
+            FieldToMatch: { UriPath: {} },
+            PositionalConstraint: "STARTS_WITH",
+            TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
+          },
+        };
+
+        it("splits Bot Control into two mutually exclusive instances", () => {
+          const mrg = (r: BotRule | undefined) =>
+            r?.Statement.ManagedRuleGroupStatement;
+          expect(mrg(common)?.Name).toBe("AWSManagedRulesBotControlRuleSet");
+          expect(mrg(targeted)?.Name).toBe("AWSManagedRulesBotControlRuleSet");
+          expect(
+            mrg(common)?.ManagedRuleGroupConfigs[0]
+              ?.AWSManagedRulesBotControlRuleSet.InspectionLevel,
+          ).toBe("COMMON");
+          expect(
+            mrg(targeted)?.ManagedRuleGroupConfigs[0]
+              ?.AWSManagedRulesBotControlRuleSet.InspectionLevel,
+          ).toBe("TARGETED");
+          // Exactly complementary scope-downs: no request billed twice, and
+          // every request still gets one Bot Control pass for its labels.
+          // TARGETED is off-campus /search only: campus (the WCM allowlist)
+          // is never challenged or shown a CAPTCHA on /search.
+          const targetedScope = mrg(targeted)?.ScopeDownStatement;
+          expect(targetedScope).toEqual({
+            AndStatement: {
+              Statements: [
+                searchMatch,
+                {
+                  NotStatement: {
+                    Statement: {
+                      IPSetReferenceStatement: { Arn: expect.anything() },
+                    },
+                  },
+                },
+              ],
+            },
+          });
+          expect(mrg(common)?.ScopeDownStatement).toEqual({
+            NotStatement: { Statement: targetedScope },
+          });
+          expect(
+            rules.filter(
+              (r) =>
+                r.Statement.ManagedRuleGroupStatement?.Name ===
+                "AWSManagedRulesBotControlRuleSet",
+            ),
+          ).toHaveLength(2);
+        });
+
+        it("COMMON stays label-only; TARGETED enforces its own actions", () => {
+          expect(common?.OverrideAction).toHaveProperty("Count");
+          expect(targeted?.OverrideAction).toHaveProperty("None");
+        });
+
+        it("challenges tokenless /search requests and keeps common rules in Count", () => {
+          const overrides =
+            targeted?.Statement.ManagedRuleGroupStatement?.RuleActionOverrides ??
+            [];
+          const actionOf = (n: string) =>
+            Object.keys(overrides.find((o) => o.Name === n)?.ActionToUse ?? {});
+          expect(actionOf("TGT_TokenAbsent")).toEqual(["Challenge"]);
+          expect(actionOf("TGT_SignalBrowserAutomationExtension")).toEqual([
+            "Count",
+          ]);
+          // Ordinary facet clicking tripped it: no CAPTCHA for session volume.
+          expect(actionOf("TGT_VolumetricSession")).toEqual(["Count"]);
+          for (const n of [
+            "CategoryAI",
+            "CategoryHttpLibrary",
+            "SignalAutomatedBrowser",
+            "SignalNonBrowserUserAgent",
+          ]) {
+            expect(actionOf(n)).toEqual(["Count"]);
+          }
+          // Nothing is overridden to Block: the targeted instance only ever
+          // challenges/CAPTCHAs by override; defaults handle the rest.
+          expect(
+            overrides.filter((o) => "Block" in o.ActionToUse),
+          ).toHaveLength(0);
+        });
+
+        it("labels land before every rule that reads them", () => {
+          const p = (n: string) => Number(byName(n)?.Priority);
+          for (const reader of ["search-block-bots", "rate-limit"]) {
+            expect(p("AWSManagedRulesBotControlRuleSet")).toBeLessThan(
+              p(reader),
+            );
+            expect(p("AWSManagedRulesBotControlRuleSet-Targeted")).toBeLessThan(
+              p(reader),
+            );
+          }
+          const priorities = rules.map((r) => Number(r.Priority));
+          expect(new Set(priorities).size).toBe(priorities.length);
+        });
+
+        // An expired or otherwise rejected token must count as no token, or a
+        // harvested token could be replayed past both rules after it expires.
+        const noValidToken = {
+          OrStatement: {
+            Statements: ["absent", "rejected"].map((state) => ({
+              LabelMatchStatement: {
+                Scope: "LABEL",
+                Key: `awswaf:managed:token:${state}`,
+              },
+            })),
+          },
+        };
+
+        it("lets tokenless /search page loads through until they surge in aggregate", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const always = rules.find((r) => r.Name === "search-challenge-tokenless") as any;
+          // The always-on rule is limited to client navigations.
+          expect(JSON.stringify(always?.Statement)).toContain('"SearchString":"_rsc="');
+          expect(JSON.stringify(always?.Statement)).toContain('"Name":"rsc"');
+          // ...and to page loads that carry a facet walk's worth of parameters.
+          expect(JSON.stringify(always?.Statement)).toContain(
+            '"RegexString":"(&[^&]*){3}"',
+          );
+          const deep = /(&[^&]*){3}/;
+          expect(deep.test("q=cardiology")).toBe(false);
+          expect(deep.test("q=jane+doe&type=people")).toBe(false);
+          expect(deep.test("q=a&type=people&page=2")).toBe(false);
+          expect(deep.test("q=a&type=people&deptDiv=N1&activity=has_grants")).toBe(true);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const surge = rules.find((r) => r.Name === "search-challenge-tokenless-surge") as any;
+          expect(surge?.Action).toHaveProperty("Challenge");
+          const rate = surge?.Statement.RateBasedStatement;
+          expect(rate?.AggregateKeyType).toBe("CONSTANT");
+          expect(rate?.Limit).toBe(300);
+          expect(rate?.ScopeDownStatement.AndStatement.Statements).toContainEqual(noValidToken);
+          expect(Number(surge?.Priority)).toBeGreaterThan(Number(always?.Priority));
+        });
+
+        it("challenges /search requests with no valid token (absent or rejected), after Bot Control", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rule = rules.find((r) => r.Name === "search-challenge-tokenless") as any;
+          expect(rule?.Action).toHaveProperty("Challenge");
+          const stmts = rule?.Statement.AndStatement?.Statements ?? [];
+          expect(stmts).toContainEqual(noValidToken);
+          expect(Number(rule?.Priority)).toBeGreaterThan(Number(targeted?.Priority));
+        });
+
+        it("sets a 4h challenge immunity so search sessions are not re-challenged every 5 min", () => {
+          expect(acl.ChallengeConfig).toEqual({
+            ImmunityTimeProperty: { ImmunityTime: 14400 },
+          });
+          // Same for a solved CAPTCHA (default 300s re-prompted mid-session).
+          expect(acl.CaptchaConfig).toEqual({
+            ImmunityTimeProperty: { ImmunityTime: 14400 },
+          });
+        });
+
+        it("has CloudFront insert the challenge SDK so browsers get a token before /search", () => {
+          expect(acl.AssociationConfig).toEqual({
+            ChallengeJavascriptSdkInjection: { CLOUDFRONT: {} },
+          });
+        });
       });
 
       it("ENFORCES the per-IP rate rule, exempting verified bots (#1434 + #125)", () => {

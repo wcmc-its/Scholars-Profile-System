@@ -33,7 +33,8 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import { canEditUnit, getEffectiveUnitRole, logEditDenial, type UnitAdminLookup } from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeNci2aWrite } from "@/lib/edit/unit-leader-access";
 import { NCI2A_NOTE_MAX, NCI2A_TRAINEE_SLOTS_MAX } from "@/lib/edit/nci-2a-report";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
@@ -73,12 +74,8 @@ export async function PATCH(
   // 400-vs-403 as a side channel to probe which program codes are real (400
   // invalid_program_code vs 403), on data this route's own doc calls "gated
   // like every other unit-content edit surface, not a public read."
-  const effective = await getEffectiveUnitRole(
-    session,
-    { kind: "center", code: center.code },
-    db.read as unknown as UnitAdminLookup,
-  );
-  const authz = canEditUnit(session, effective);
+  // canEditUnit, or (LEADER_REPORT_ACCESS) a program leader of this center.
+  const authz = await authorizeNci2aWrite(session, center.code, db.read);
   if (!authz.ok) {
     logEditDenial({
       actorCwid: realCwid,

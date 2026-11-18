@@ -24,6 +24,7 @@ import {
 } from "@/lib/taxonomy-flags";
 import { Spotlight } from "@/components/shared/spotlight";
 import { TopicRailLayout } from "@/components/topic/topic-rail-layout";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -215,6 +216,7 @@ export default async function TopicPage({
           scholarNames={scholarCards}
           loadMore={isTaxonomyFeedLoadMoreOn()}
           activityFeed={isTopicFeedGrantsTrialsOn()}
+          stageFilter={resolveSearchPubsTranslationalStageFacet()}
         />
       </section>
     </main>

@@ -52,6 +52,7 @@ import {
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
 import { bookCitationParts, citationIdentifier, formatVolIssuePages } from "@/lib/citation";
 import { displayPublicationType } from "@/lib/publication-types";
+import { translationalStageLabel } from "@/lib/translational-stage";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
 import { lastNameKey } from "@/lib/last-name-key";
 
@@ -117,6 +118,12 @@ async function fetchPmidsForBibliography(
   // when SEARCH_PUB_INSTITUTION_FACET is on; mirror the live clause exactly.
   if (filters.institution && filters.institution.length > 0) {
     filter.push({ terms: { wcmAuthorInstitutions: filters.institution } });
+  }
+  // Translational stage facet — same contract: the page and the export route
+  // only pass `translationalStage` when SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET
+  // is on; mirror the live clause exactly.
+  if (filters.translationalStage && filters.translationalStage.length > 0) {
+    filter.push({ terms: { translationalStage: filters.translationalStage } });
   }
   // Issue #1025 — Mentoring-activity facet. Resolve the selected program
   // buckets to a pmid union exactly as `searchPublications` does; an empty
@@ -322,6 +329,9 @@ function buildFilterSummary(req: WordExportRequest, count: number): string {
   if (f.publicationType) bits.push(displayPublicationType(f.publicationType));
   if (f.wcmAuthorRole && f.wcmAuthorRole.length > 0) {
     bits.push(f.wcmAuthorRole.map((r) => `${r} author`).join(" / "));
+  }
+  if (f.translationalStage && f.translationalStage.length > 0) {
+    bits.push(f.translationalStage.map(translationalStageLabel).join(" / "));
   }
   if (f.journal && f.journal.length > 0) {
     bits.push(`${f.journal.length} journal${f.journal.length === 1 ? "" : "s"}`);

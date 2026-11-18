@@ -48,7 +48,7 @@ export function mapStartError(code: string): string {
     case "not_superuser":
       return "Only superusers can use “View as”.";
     case "target_not_found":
-      return "That person isn’t an active scholar, unit admin, or role holder — nothing to view as.";
+      return "That person isn’t an active scholar, unit admin, proxy editor, or role holder — nothing to view as.";
     default:
       return "Couldn’t start “View as” — please try again.";
   }

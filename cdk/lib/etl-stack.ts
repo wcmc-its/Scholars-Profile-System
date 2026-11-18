@@ -23,7 +23,7 @@ import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
-import { SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
+import { SCHOLARS_MAIL_CONFIG_SET, SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
 import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 import { drCurationBackupBucketName } from "./dr-backup-vault-stack";
 import { CLIPS_PREFIX, FUNDING_PREFIX, inboundMailBucketName } from "./inbound-mail-stack";
@@ -626,6 +626,26 @@ export class EtlStack extends Stack {
       ],
     });
 
+    // #3348 — etl:mentoring:refresh (MentoringBridgeWeekly) WRITES the bridge
+    // NDJSON it then imports. Its own policy, not the ReciterAI one (pinned
+    // Scan/GetObject-only). PutObject only, scoped to this env's sub-prefix, so
+    // one env can never overwrite the other's products (export-copubs reads the
+    // env's own DB, so they differ). The reads stay on the GetObject grant above
+    // (`mentoring/*`, `citations/*`).
+    new iam.Policy(this, "EtlTaskRoleMentoringBridgeExportPolicy", {
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:PutObject"],
+          resources: [
+            `arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/${env}/*`,
+            `arn:aws:s3:::wcmc-reciterai-artifacts/citations/${env}/*`,
+          ],
+        }),
+      ],
+    });
+
     // Inbound mail — etl:news-clips (clips/) and etl:funding-digest (funding/)
     // list + read the raw emails SES drops into the account-wide inbound-mail
     // bucket (cdk/lib/inbound-mail-stack.ts, prod-app singleton), and the
@@ -776,7 +796,10 @@ export class EtlStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["ses:SendEmail"],
-          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          resources: [
+            `arn:aws:ses:${this.region}:${this.account}:identity/*`,
+            `arn:aws:ses:${this.region}:${this.account}:configuration-set/${SCHOLARS_MAIL_CONFIG_SET}`,
+          ],
           conditions: { StringEquals: { "ses:FromAddress": SCHOLARS_MAIL_FROM } },
         }),
       ],
@@ -990,6 +1013,14 @@ export class EtlStack extends Stack {
         this,
         `/sps/${env}/etl/feedback-digest-recipient`,
       ),
+      // OpenAlex "polite pool" contact (lib/seo/openalex.ts mailtoFromEnv), read by
+      // etl:fundable-work. From SSM at deploy time for the same reason as the
+      // digest recipient above: no address in this public repo. Create
+      // `/sps/<env>/etl/openalex-mailto` before deploying, or the deploy fails.
+      OPENALEX_MAILTO: ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/etl/openalex-mailto`,
+      ),
       // #485 — the search:index build holds the full corpus graph in memory
       // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
       // the task well under the container limit; pin the heap to ~85% of the
@@ -1051,6 +1082,28 @@ export class EtlStack extends Stack {
       // 322 shared_only->strong and 331 weak->moderate, reviewed and approved.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ORCID_HISTORY_BAND: "on",
+      // Ithaca ORCID plan, step 1 — etl:ithaca-roster writes Cornell Ithaca scholar
+      // rows only when this is exactly "on"; otherwise it logs the counts it would
+      // write. Staging on; prod off until the staging load is reviewed.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ITHACA_ROSTER: env === "prod" ? "off" : "on",
+      // Ithaca ORCID plan, step 2 — Cornell Ithaca rows join ORCID curation: Affiliation
+      // Manager and Identity candidates (etl:orcid-candidates, etl:identity) and evidence
+      // scoring (etl:orcid-evidence), only when this is exactly "on". Never auto-confirmed
+      // and never pushed, whatever the value. Staging on; prod off until the staging queue
+      // is reviewed. Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ITHACA_ORCID_CURATION: env === "prod" ? "off" : "on",
+      // Research security dashboard — etl:research-security copies reciterdb's
+      // watch-list screen (sensitive, per-person) into research_security_* only
+      // when this is exactly "on"; otherwise the step reads and writes nothing.
+      // OFF in both environments. Staging and prod read the SAME reciterdb, and
+      // the step throws (and alarms nightly) if watchlist_match is absent or
+      // holds fewer than 1,000 rows. Turn staging on in the change that confirms
+      // ReCiterDB's v3.13 tables exist there and one collectAffiliations run
+      // with RESEARCH_SECURITY_MODE=apply has finished; prod after the staging
+      // copy is checked against the 2026-10-29 workbook.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      RESEARCH_SECURITY_ETL: "off",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
@@ -1412,6 +1465,8 @@ export class EtlStack extends Stack {
       "etl:orcid-evidence",
       // Reads reciterdb identity_cornell_current + pubsource_orcid_person.
       "etl:identity-links",
+      // Reads reciterdb identity_cornell_current/_hr/_directory.
+      "etl:ithaca-roster",
       "etl:asms",
       "etl:infoed",
       "etl:infoed-biosketch",
@@ -1421,7 +1476,12 @@ export class EtlStack extends Stack {
       "etl:reporter",
       "etl:clinical-trials",
       "etl:data-sharing",
+      // Reads reciterdb watchlist_match / watchlist_funding_flag + authorship.
+      "etl:research-security",
       "etl:journal-impact-factor",
+      // #3348 — exports the mentoring/cited-by bridge products from reciterdb,
+      // then imports them (etl/mentoring/refresh.ts).
+      "etl:mentoring:refresh",
     ]);
     // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
     // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
@@ -1517,7 +1577,14 @@ export class EtlStack extends Stack {
     // merge pushes a new image, and each push re-reports every known CVE as a
     // fresh finding, so a staging rule would post the same cards several times
     // a day. Prod pushes only on a prod deploy. Only ACTIVE findings with a fix
-    // available are actionable; suppressed (accepted) findings are not ACTIVE.
+    // available are actionable.
+    //
+    // Inspector suppression rules do NOT stop these events: each new image
+    // digest creates fresh findings that are emitted as ACTIVE before the
+    // suppression applies. So the accepted npm-CLI-in-node-base-image findings
+    // (#3340) are excluded here by path instead. The $or keeps OS-package
+    // findings, which have no filePath; a bare anything-but would drop them.
+    // Remove the $or once the npm CLI is gone from BOTH the app and etl images.
     if (env === "prod") {
       new events.Rule(this, "InspectorImageFindingRule", {
         ruleName: `sps-image-vulnerability-${env}`,
@@ -1536,6 +1603,10 @@ export class EtlStack extends Stack {
                 },
               },
             },
+            $or: [
+              { packageVulnerabilityDetails: { vulnerablePackages: { filePath: [{ "anything-but": { prefix: "/usr/local/lib/node_modules/npm/" } }] } } },
+              { packageVulnerabilityDetails: { vulnerablePackages: { filePath: [{ exists: false }] } } },
+            ],
           },
         },
         targets: [
@@ -1925,6 +1996,11 @@ export class EtlStack extends Stack {
       // scholar set it links against is tonight's. tier:"continue": a missed
       // night leaves last night's roster, and the step refuses a short feed.
       { id: "CtscRoster", npmScript: "etl:ctsc-roster", external: true, tier: "continue" },
+      // Ithaca ORCID plan, step 1 — Cornell Ithaca people as hidden scholar rows
+      // (campus 'ithaca', status 'external'). After Ed: ED claims a row first when
+      // someone joins WCM. Reads reciterdb, so the sources family. Writes only when
+      // ITHACA_ROSTER is "on" (else logs counts). tier:"continue": no public data.
+      { id: "IthacaRoster", npmScript: "etl:ithaca-roster", external: true, tier: "continue" },
       // #1679 — tier:"continue", NOT "abort". etl:reciter's source-volume guard
       // (lib/etl-guard.ts) REFUSES to write on a >20% source-row drop, so a
       // guard refusal leaves the publication table at its last-good rows —
@@ -1944,6 +2020,13 @@ export class EtlStack extends Stack {
         external: true,
         tier: "continue",
       },
+      // Research security dashboard — reciterdb's watch-list screen joined to
+      // current authorship → research_security_* (read by /edit/research-security
+      // only). Same ReciterDB path as Reciter, so external:true and placed after
+      // it. Writes only when RESEARCH_SECURITY_ETL is "on" (else reads nothing).
+      // tier:"continue": a missed night, or the step refusing an empty or
+      // implausibly small source, leaves last night's copy and warns.
+      { id: "ResearchSecurity", npmScript: "etl:research-security", external: true, tier: "continue" },
       // RPM ORCID candidates (inferred + admin-entered) → orcid_candidate, read by
       // /edit/orcid-coverage only. Same ReciterDB path as Reciter, so external:true
       // and placed with it; tier:"continue" — a missed night just leaves last
@@ -2280,6 +2363,18 @@ export class EtlStack extends Stack {
       {
         id: "DataSharingWeekly",
         npmScript: "etl:data-sharing",
+        external: true,
+        tier: "continue",
+      },
+      // #3348 — mentoring co-pub + cited-by bridge refresh, previously run only
+      // by hand. Exports from reciterdb (in-VPC, same path as DataSharingWeekly)
+      // to env-scoped S3 keys, then runs the five bridge importers, each of which
+      // records its own etl_run row for freshness (lib/etl/freshness-policy.ts).
+      // `continue` — a reciterdb hiccup leaves last week's tables in place and
+      // must never abort the weekly chain.
+      {
+        id: "MentoringBridgeWeekly",
+        npmScript: "etl:mentoring:refresh",
         external: true,
         tier: "continue",
       },

@@ -1630,7 +1630,9 @@ export function CenterRosterCard({
                                 Not shown publicly
                               </Badge>
                             )}
-                          {m.scholarState === "unknown" && (
+                          {/* Only when the WCM directory couldn't name them
+                              either — the server falls back to the CWID then. */}
+                          {m.scholarState === "unknown" && m.name === m.cwid && (
                             <Badge
                               variant="outline"
                               className="border-apollo-border rounded-full"

@@ -244,6 +244,24 @@ describe("/api/edit/roster — center", () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ ok: false, error: "not_curator" });
   });
+
+  it("a center leader is still 403 with LEADER_REPORT_ACCESS on (leaders view reports, never the roster)", async () => {
+    const prev = process.env.LEADER_REPORT_ACCESS;
+    process.env.LEADER_REPORT_ACCESS = "on";
+    try {
+      mockGetEditSession.mockResolvedValue({ cwid: "lead001", isSuperuser: false });
+      mockUnitAdminFindMany.mockResolvedValue([]);
+      const res = await POST(
+        post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "add" }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "not_curator" });
+      expect(mockTransaction).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.LEADER_REPORT_ACCESS;
+      else process.env.LEADER_REPORT_ACCESS = prev;
+    }
+  });
 });
 
 describe("/api/edit/roster — division", () => {

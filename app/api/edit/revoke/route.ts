@@ -113,7 +113,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
         if (remaining === 0) {
           await tx.scholar.updateMany({
-            where: { cwid: suppression.entityId },
+            // WCM rows only: never turn a Cornell Ithaca ('external') row active.
+            where: { cwid: suppression.entityId, campus: "wcm" },
             data: { status: "active" },
           });
         }

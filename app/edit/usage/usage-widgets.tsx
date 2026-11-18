@@ -20,6 +20,17 @@ import {
   isRealIsoDate,
   usageRangeHref,
 } from "@/lib/api/usage-range";
+import {
+  type ClassCounts,
+  type EditHour,
+  type HourlyTraffic,
+  TRAFFIC_CLASSES,
+  type TrafficClass,
+  editsHourOfDayAverages,
+  hourLabel,
+  hourOfDayAverages,
+  hourlyTimeline,
+} from "@/lib/api/usage-hourly";
 import { toCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 
@@ -270,6 +281,363 @@ export function PageviewsChart({ data }: { data: ChartDay[] }) {
   );
 }
 
+/** Series styling for the hourly chart: error stacks at the baseline in the
+ *  warm brick red so an outage reads at a glance; served (the `human` class)
+ *  is the slate the pageviews chart uses; bot or challenged a muted tan. The
+ *  labels say what the edge can actually tell apart: a "human" request is one
+ *  the firewall served, which includes automation that got past it. */
+const SERIES: Record<TrafficClass, { label: string; fill: string; swatch: string }> = {
+  error: { label: "Error", fill: "fill-apollo-brick", swatch: "bg-apollo-brick" },
+  human: { label: "Served", fill: "fill-apollo-slate", swatch: "bg-apollo-slate" },
+  bot: {
+    label: "Bot or challenged",
+    fill: "fill-[var(--apollo-signal-affinity)]",
+    swatch: "bg-[var(--apollo-signal-affinity)]",
+  },
+};
+/** Bottom-to-top stack order. */
+const STACK: TrafficClass[] = ["error", "human", "bot"];
+/** Days of hourly bars the timeline shows at most (720 bars). */
+const HOURLY_TIMELINE_DAYS = 30;
+
+function fmtCount(v: number, avg: boolean): string {
+  if (!avg) return v.toLocaleString();
+  return v >= 10 ? Math.round(v).toLocaleString() : (Math.round(v * 10) / 10).toLocaleString();
+}
+
+/** "Served 120 · Bot or challenged 40 · Error 2" over the visible series. */
+function countsLine(c: ClassCounts, shown: TrafficClass[], avg: boolean): string {
+  return TRAFFIC_CLASSES.filter((k) => shown.includes(k))
+    .map((k) => `${SERIES[k].label} ${fmtCount(c[k], avg)}`)
+    .join(" · ");
+}
+
+const EDITS_LABEL = "Profile edits";
+
+/** "Traffic by hour": page requests per Eastern hour, stacked served / bot or
+ *  challenged / error, across the range (capped to the last 30 days), or
+ *  folded into 24 hours of the day (average per day), with people's profile
+ *  edits as a line on its own right-hand scale. The legend toggles series;
+ *  hover (or tap) a bar for its counts. An hour with no rollup data is a gap.
+ *  `edits` null means the audit-log read failed: no line, a short note. */
+export function HourlyTrafficChart({
+  traffic,
+  since,
+  edits,
+  editsLabel = EDITS_LABEL,
+}: {
+  traffic: HourlyTraffic;
+  since: string;
+  /** Profile edits by hour; null when unavailable, omitted for no line. */
+  edits?: EditHour[] | null;
+  /** The edits line's name; a unit-scoped page says whose edits it counts. */
+  editsLabel?: string;
+}) {
+  const [mode, setMode] = useState<"timeline" | "hourOfDay">("timeline");
+  const [hidden, setHidden] = useState<TrafficClass[]>([]);
+  const [editsHidden, setEditsHidden] = useState(false);
+  const [hover, setHover] = useState<number | null>(null);
+  const shown = TRAFFIC_CLASSES.filter((k) => !hidden.includes(k));
+  const avg = mode === "hourOfDay";
+  const hasEdits = Array.isArray(edits);
+  const showEdits = hasEdits && !editsHidden;
+
+  const { slots, capped } = hourlyTimeline(traffic.buckets, HOURLY_TIMELINE_DAYS);
+  const bars: { key: number; counts: ClassCounts | null; tip: string }[] = avg
+    ? hourOfDayAverages(traffic).map((r) => ({
+        key: r.hour,
+        counts: r,
+        tip: `${hourLabel(r.hour)} ET, average per day`,
+      }))
+    : slots.map((s) => ({
+        key: s.at,
+        counts: s.counts,
+        tip: `${shortDay(s.day)}, ${hourLabel(s.hour)} ET`,
+      }));
+  const total = (c: ClassCounts | null) => (c ? shown.reduce((a, k) => a + c[k], 0) : 0);
+  const top = niceCeil(Math.max(...bars.map((b) => total(b.counts)), 1));
+  const ticks = [0, top / 2, top];
+  const n = Math.max(bars.length, 1);
+  const pad = n > 120 ? 0 : 0.12;
+  const hb = hover === null ? null : (bars[hover] ?? null);
+
+  // The edits line: one value per bar, on its own scale.
+  const editValues: number[] = !hasEdits
+    ? []
+    : avg
+      ? editsHourOfDayAverages(edits, traffic)
+      : (() => {
+          const byAt = new Map(edits.map((e) => [e.at, e.edits]));
+          return slots.map((s) => byAt.get(s.at) ?? 0);
+        })();
+  const editTop = niceCeil(Math.max(...editValues, 1));
+  const editTicks = [0, editTop / 2, editTop];
+  const editPoints = editValues.map((v, i) => `${i + 0.5},${100 - (v / editTop) * 100}`).join(" ");
+  const readout = (b: (typeof bars)[number], i: number): string => {
+    const parts: string[] = [];
+    if (b.counts === null) parts.push("no data");
+    else {
+      const line = countsLine(b.counts, shown, avg);
+      if (line) parts.push(line);
+    }
+    if (showEdits) parts.push(`${editsLabel} ${fmtCount(editValues[i] ?? 0, avg)}`);
+    return `${b.tip}: ${parts.join(" · ") || "all series hidden"}`;
+  };
+
+  // X labels: hour of day every 3 hours; the timeline at Eastern midnights,
+  // about eight across.
+  const labels: { i: number; text: string }[] = avg
+    ? bars.filter((b) => b.key % 3 === 0).map((b) => ({ i: b.key, text: hourLabel(b.key) }))
+    : (() => {
+        const mids = slots.flatMap((s, i) => (s.hour === 0 ? [{ i, text: shortDay(s.day) }] : []));
+        const stride = Math.max(1, Math.ceil(mids.length / 8));
+        return mids.filter((_, j) => j % stride === 0);
+      })();
+
+  const pick = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const i = Math.floor(((e.clientX - r.left) / r.width) * n);
+    setHover(i >= 0 && i < bars.length ? i : null);
+  };
+  const toggle = (k: TrafficClass) =>
+    setHidden(hidden.includes(k) ? hidden.filter((x) => x !== k) : [...hidden, k]);
+
+  return (
+    <section
+      className="border-apollo-border-strong bg-apollo-surface flex flex-col gap-3.5 rounded-[13px] border px-4 pt-5 pb-4 sm:px-[22px]"
+      data-testid="usage-hourly-chart"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h2 className="text-[17px] font-semibold">Traffic by hour</h2>
+        <div className="border-apollo-border-strong flex rounded-lg border p-0.5 text-[13px]">
+          {(
+            [
+              ["timeline", "Timeline"],
+              ["hourOfDay", "By hour of day"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={mode === key}
+              onClick={() => {
+                setMode(key);
+                setHover(null);
+              }}
+              className={cn(
+                "rounded-md px-2.5 py-1",
+                mode === key
+                  ? "bg-apollo-slate-tint text-apollo-slate font-medium"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {TRAFFIC_CLASSES.map((k) => {
+          const on = !hidden.includes(k);
+          return (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={on}
+              onClick={() => toggle(k)}
+              className={cn(
+                "inline-flex items-center gap-1.5 text-[13px]",
+                on ? "text-foreground" : "text-muted-foreground line-through",
+              )}
+              data-testid={`usage-hourly-legend-${k}`}
+            >
+              <span
+                className={cn(
+                  "size-2.5 rounded-[2px]",
+                  on ? SERIES[k].swatch : "border-apollo-border-strong border bg-transparent",
+                )}
+                aria-hidden="true"
+              />
+              {SERIES[k].label}
+            </button>
+          );
+        })}
+        {hasEdits ? (
+          <button
+            type="button"
+            aria-pressed={!editsHidden}
+            onClick={() => setEditsHidden(!editsHidden)}
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[13px]",
+              editsHidden ? "text-muted-foreground line-through" : "text-foreground",
+            )}
+            data-testid="usage-hourly-legend-edits"
+          >
+            <span
+              className={cn(
+                "h-0.5 w-3 rounded-full",
+                editsHidden ? "bg-apollo-border-strong" : "bg-[var(--apollo-ink)]",
+              )}
+              aria-hidden="true"
+            />
+            {editsLabel} (right scale)
+          </button>
+        ) : edits === null ? (
+          <span
+            className="text-muted-foreground text-[13px]"
+            data-testid="usage-hourly-edits-unavailable"
+          >
+            Profile edits unavailable right now.
+          </span>
+        ) : null}
+        <span
+          className="text-muted-foreground text-[13px]"
+          aria-live="polite"
+          data-testid="usage-hourly-readout"
+        >
+          {hb && hover !== null ? readout(hb, hover) : "Hover a bar for the counts"}
+        </span>
+      </div>
+      <div
+        className={cn(
+          "grid gap-2",
+          hasEdits ? "grid-cols-[40px_minmax(0,1fr)_32px]" : "grid-cols-[40px_minmax(0,1fr)]",
+        )}
+      >
+        <div className="text-muted-foreground relative h-[220px] text-[11.5px] tabular-nums">
+          {ticks.map((t) => (
+            <span
+              key={t}
+              className="absolute right-0 translate-y-1/2"
+              style={{ bottom: `${(t / top) * 100}%` }}
+            >
+              {fmtCount(t, avg)}
+            </span>
+          ))}
+        </div>
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="relative h-[220px]">
+            {ticks.map((t) => (
+              <div
+                key={t}
+                className={cn(
+                  "absolute inset-x-0 border-t",
+                  t ? "border-apollo-border" : "border-apollo-border-strong",
+                )}
+                style={{ bottom: `${(t / top) * 100}%` }}
+              />
+            ))}
+            <svg
+              className="absolute inset-0 h-full w-full"
+              viewBox={`0 0 ${n} 100`}
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={
+                (avg
+                  ? "Average page requests per day by hour of day (Eastern): served, bot or challenged, and error"
+                  : `Page requests per hour (Eastern): served, bot or challenged, and error, ${bars.length} hours`) +
+                (hasEdits ? "; profile edits as a line on the right-hand scale" : "")
+              }
+              onMouseMove={pick}
+              onClick={pick}
+              onMouseLeave={() => setHover(null)}
+            >
+              {hover !== null ? (
+                <rect x={hover} y={0} width={1} height={100} className="fill-apollo-surface-2" />
+              ) : null}
+              {bars.map((b, i) => {
+                const c = b.counts;
+                if (!c) return null;
+                let y = 100;
+                return (
+                  <g key={b.key}>
+                    {STACK.filter((k) => shown.includes(k)).map((k) => {
+                      const h = (c[k] / top) * 100;
+                      y -= h;
+                      return h > 0 ? (
+                        <rect
+                          key={k}
+                          x={i + pad}
+                          y={y}
+                          width={1 - 2 * pad}
+                          height={h}
+                          className={SERIES[k].fill}
+                          data-series={k}
+                        />
+                      ) : null;
+                    })}
+                  </g>
+                );
+              })}
+              {showEdits && editValues.length > 0 ? (
+                <polyline
+                  points={editPoints}
+                  fill="none"
+                  className="stroke-[var(--apollo-ink)]"
+                  strokeWidth={1.75}
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                  data-series="edits"
+                />
+              ) : null}
+            </svg>
+          </div>
+          <div className="text-muted-foreground relative h-4 text-[11.5px]" aria-hidden="true">
+            {labels.map((l, j) => (
+              <span
+                key={l.i}
+                className={cn(
+                  "absolute -translate-x-1/2 whitespace-nowrap",
+                  // Every other label at phone width.
+                  j % 2 === 1 && "max-sm:invisible",
+                )}
+                style={{ left: `${((l.i + (avg ? 0.5 : 0)) / n) * 100}%` }}
+              >
+                {l.text}
+              </span>
+            ))}
+          </div>
+        </div>
+        {hasEdits ? (
+          <div
+            className="text-muted-foreground relative h-[220px] text-[11.5px] tabular-nums"
+            data-testid="usage-hourly-edits-axis"
+          >
+            {editTicks.map((t) => (
+              <span
+                key={t}
+                className="absolute left-0 translate-y-1/2"
+                style={{ bottom: `${(t / editTop) * 100}%` }}
+              >
+                {fmtCount(t, avg)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <p className="text-muted-foreground text-[12.5px] leading-normal">
+        Page requests (not assets or API calls), Eastern time.{" "}
+        {avg
+          ? `Average per day over ${traffic.days.toLocaleString()} day${traffic.days === 1 ? "" : "s"}. `
+          : capped
+            ? `Showing the most recent ${HOURLY_TIMELINE_DAYS} days of the range. `
+            : ""}
+        Bot or challenged is declared crawlers plus requests the edge firewall challenged, blocked
+        or rate-limited. Served traffic still includes automated clients that passed the firewall,
+        so a flat curve around the clock suggests automation. Error is a server error (5xx), which
+        is what an outage looks like.
+        {hasEdits
+          ? " Profile edits are saves people made in the edit console (automated and bulk-job edits left out), on the right-hand scale."
+          : ""}
+        {traffic.firstDay && traffic.firstDay > since
+          ? ` Hourly data starts ${shortDay(traffic.firstDay)}.`
+          : ""}
+      </p>
+    </section>
+  );
+}
+
 export type RankRow = {
   label: string;
   count: number;
@@ -306,6 +674,7 @@ export function RankTable({
   csvName,
   rows,
   emptyLabel,
+  note,
 }: {
   testId: string;
   title: string;
@@ -315,6 +684,8 @@ export function RankTable({
   csvName: string;
   rows: RankRow[];
   emptyLabel: string;
+  /** Muted one-liner under the title (what the list counts). */
+  note?: string;
 }) {
   const [open, setOpen] = useState(false);
   const shown = open ? rows : rows.slice(0, COLLAPSED_ROWS);
@@ -352,6 +723,11 @@ export function RankTable({
           <span className="text-muted-foreground text-xs tracking-[.08em] uppercase">{unit}</span>
         </div>
       </div>
+      {note ? (
+        <p className="text-muted-foreground -mt-1 px-4 pb-2.5 text-[12.5px] leading-normal sm:px-5">
+          {note}
+        </p>
+      ) : null}
       {rows.length === 0 ? (
         <p className="border-apollo-border text-muted-foreground border-t px-4 py-3 text-sm sm:px-5">
           {emptyLabel}
@@ -405,7 +781,12 @@ function RankLabel({ row }: { row: RankRow }) {
   }
   if (!row.cwid) {
     return (
-      <Link href={row.href} className={cn(cls, "hover:text-apollo-slate")} title={row.tip}>
+      <Link
+        href={row.href}
+        prefetch={false}
+        className={cn(cls, "hover:text-apollo-slate")}
+        title={row.tip}
+      >
         {row.label}
       </Link>
     );
@@ -416,6 +797,7 @@ function RankLabel({ row }: { row: RankRow }) {
     <ScholarHoverCard cwid={row.cwid}>
       <Link
         href={row.href}
+        prefetch={false}
         className={cn(cls, "hover:text-apollo-slate")}
         onTouchEnd={(e) => {
           e.preventDefault();

@@ -96,7 +96,9 @@ export function isSectionVisibilityField(value: string): value is SectionVisibil
  * manual Highlights override (a JSON array of PMIDs), gated by the
  * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; `manualMentees` is the #2011
  * mentor-entered mentee list (a JSON array of objects, see
- * `lib/edit/manual-mentee.ts`); `profileLinks` is the #2699 external-profile
+ * `lib/edit/manual-mentee.ts`); `menteeCurrentPositions` is the mentor's
+ * "Current position" text for training-record mentees (a JSON object keyed by
+ * mentee CWID, same module); `profileLinks` is the #2699 external-profile
  * links object (a JSON object of canonical URLs, see
  * `lib/edit/profile-links.ts`); the `SECTION_VISIBILITY_FIELDS` are the
  * section-visibility booleans. The allowlist only narrows the field name;
@@ -107,6 +109,7 @@ export const EDITABLE_FIELDS = [
   "slug",
   "selectedHighlightPmids",
   "manualMentees",
+  "menteeCurrentPositions",
   "profileLinks",
   // #2719 — the display-title picker. `primaryTitle` is an operator's pick,
   // `primaryTitleRequest` a scholar's (or proxy's) pending request for one.

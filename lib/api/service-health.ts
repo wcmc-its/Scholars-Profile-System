@@ -1,9 +1,10 @@
 /**
- * The "Service health" section on `/edit/usage`: a 30-day uptime tile, an
- * availability-alarm-firings tile, and a monthly "Uptime since launch (July
- * 2026)" trend. Reads CloudWatch directly at runtime — never baked into the
- * image — using two task-def env vars the AppStack task definition sets from
- * live CDK references (cdk/lib/app-stack.ts, "Service-health section" block):
+ * The "Service health" section on `/edit/usage`: an uptime tile and an
+ * availability-alarm-firings tile over the page's selected Range, and a
+ * monthly "Uptime since launch (July 2026)" trend. Reads CloudWatch directly
+ * at runtime — never baked into the image — using two task-def env vars the
+ * AppStack task definition sets from live CDK references (cdk/lib/app-stack.ts,
+ * "Service-health section" block):
  *   - SPS_PUBLIC_ALB_FULL_NAME — the public ALB's AWS/ApplicationELB dimension
  *     name, for RequestCount / HTTPCode_ELB_5XX_Count / HTTPCode_Target_5XX_Count.
  *   - SPS_APP_UNAVAILABLE_ALARM — the `sps-app-unavailable-<env>` composite
@@ -39,8 +40,9 @@ import {
   GetMetricDataCommand,
 } from "@aws-sdk/client-cloudwatch";
 
-/** Rolling window the uptime + alarm-firings tiles cover. */
-export const SERVICE_HEALTH_WINDOW_DAYS = 30;
+/** CloudWatch keeps alarm history for 30 days, so the alarm-firings tile can
+ *  never look further back than this (see summarizeServiceHealth). */
+export const ALARM_HISTORY_RETENTION_DAYS = 30;
 /** Cache TTL — mirrors USAGE_CACHE_TTL_SECONDS in usage-summary.ts. */
 const SERVICE_HEALTH_CACHE_TTL_SECONDS = 43_200; // 12h
 
@@ -76,10 +78,34 @@ export type MonthlyAvailability = {
   lowTraffic: boolean;
 };
 
+/** The raw CloudWatch reads, cached once and shared by every range (JSON-safe:
+ *  the unstable_cache round-trip would turn Dates into strings anyway). */
+export type ServiceHealthData = {
+  /** UTC-daily ALB series from launch (or 12 months back) through yesterday. */
+  daily: DailyAlbPoint[];
+  /** ISO timestamps of every transition INTO ALARM CloudWatch still holds. */
+  alarmFiringTimes: string[];
+  /** ISO start of the alarm-history lookback (fetch time minus
+   *  ALARM_HISTORY_RETENTION_DAYS); nothing earlier can be counted. */
+  alarmHistoryFrom: string;
+};
+
+/** The dashboard window the tiles summarize (inclusive UTC days, YYYY-MM-DD). */
+export type ServiceHealthWindow = { since: string; until: string };
+
 export type ServiceHealthSummary = {
-  windowDays: number;
-  uptimePercent: number;
-  alarmFirings: number;
+  /** Availability over the window's days that have ALB data; null when no
+   *  day in the window does (e.g. a custom range before ALB history began). */
+  uptimePercent: number | null;
+  /** Transitions into ALARM counted over [alarmSince, window.until]; null when
+   *  the whole window is older than CloudWatch's retained alarm history. */
+  alarmFirings: number | null;
+  /** "full": the count covers the whole window. "partial": the window starts
+   *  before the retained history, so only [alarmSince, until] is counted.
+   *  "none": nothing in the window is still retained. */
+  alarmCoverage: "full" | "partial" | "none";
+  /** First day (YYYY-MM-DD) the alarm count covers. */
+  alarmSince: string;
   monthly: MonthlyAvailability[];
 };
 
@@ -146,11 +172,16 @@ export function bucketMonthlyAvailability(daily: DailyAlbPoint[]): MonthlyAvaila
     }));
 }
 
-/** The 30-day tile: aggregates the trailing `windowDays` UTC days present in
- *  `daily` (the caller always fetches at least that many). */
-export function computeTrailingUptimePercent(daily: DailyAlbPoint[], windowDays: number): number {
-  const tail = daily.slice(-windowDays);
-  const totals = tail.reduce(
+/** Availability over the days of `daily` inside `[since, until]` (inclusive
+ *  YYYY-MM-DD); null when no day of the series falls in the window. */
+export function computeWindowUptimePercent(
+  daily: DailyAlbPoint[],
+  since: string,
+  until: string,
+): number | null {
+  const inWindow = daily.filter((d) => d.date >= since && d.date <= until);
+  if (inWindow.length === 0) return null;
+  const totals = inWindow.reduce(
     (acc, d) => ({
       elb5xx: acc.elb5xx + d.elb5xx,
       target5xx: acc.target5xx + d.target5xx,
@@ -161,16 +192,41 @@ export function computeTrailingUptimePercent(daily: DailyAlbPoint[], windowDays:
   return computeAvailabilityPercent(totals.elb5xx, totals.target5xx, totals.requestCount);
 }
 
-/** Combines the daily series + alarm-firing count into the page view model. */
-export function shapeServiceHealth(
-  daily: DailyAlbPoint[],
-  alarmFirings: number,
+/**
+ * Pure: the cached CloudWatch reads -> the tiles for the page's selected
+ * window. Uptime covers exactly the window's days. Alarm firings cover the
+ * window too, except that CloudWatch keeps only ALARM_HISTORY_RETENTION_DAYS
+ * of alarm history: a window starting earlier is counted from the oldest
+ * retained day ("partial"), and one ending before it has no count ("none").
+ * Days compare as UTC calendar dates, so "Last 30 days" (which starts exactly
+ * 30 days back) reads as fully covered.
+ */
+export function summarizeServiceHealth(
+  data: ServiceHealthData,
+  window: ServiceHealthWindow,
 ): ServiceHealthSummary {
+  const historyFrom = data.alarmHistoryFrom.slice(0, 10);
+  let alarmCoverage: ServiceHealthSummary["alarmCoverage"] = "full";
+  let alarmSince = window.since;
+  if (window.until < historyFrom) {
+    alarmCoverage = "none";
+  } else if (window.since < historyFrom) {
+    alarmCoverage = "partial";
+    alarmSince = historyFrom;
+  }
+  const alarmFirings =
+    alarmCoverage === "none"
+      ? null
+      : data.alarmFiringTimes.filter((t) => {
+          const day = t.slice(0, 10);
+          return day >= alarmSince && day <= window.until;
+        }).length;
   return {
-    windowDays: SERVICE_HEALTH_WINDOW_DAYS,
-    uptimePercent: computeTrailingUptimePercent(daily, SERVICE_HEALTH_WINDOW_DAYS),
+    uptimePercent: computeWindowUptimePercent(data.daily, window.since, window.until),
     alarmFirings,
-    monthly: bucketMonthlyAvailability(daily),
+    alarmCoverage,
+    alarmSince,
+    monthly: bucketMonthlyAvailability(data.daily),
   };
 }
 
@@ -267,20 +323,20 @@ function isTransitionToAlarm(summary: string | undefined): boolean {
 }
 
 /**
- * Count state-transition-to-ALARM history items for `alarmName` in
- * [startDate, endDate]. `sps-app-unavailable-<env>` is a COMPOSITE alarm, and
- * DescribeAlarmHistory only returns composite-alarm history when
- * `AlarmTypes` explicitly includes "CompositeAlarm" (by default it returns
- * metric alarms only) — see the matching IAM-grant comment in app-stack.ts
- * for the companion `*`-resource-scope requirement.
+ * ISO timestamps of the state-transition-to-ALARM history items for
+ * `alarmName` in [startDate, endDate]. `sps-app-unavailable-<env>` is a
+ * COMPOSITE alarm, and DescribeAlarmHistory only returns composite-alarm
+ * history when `AlarmTypes` explicitly includes "CompositeAlarm" (by default
+ * it returns metric alarms only) — see the matching IAM-grant comment in
+ * app-stack.ts for the companion `*`-resource-scope requirement.
  */
-export async function fetchAlarmFirings(
+export async function fetchAlarmFiringTimes(
   client: CloudWatchLikeClient,
   alarmName: string,
   startDate: Date,
   endDate: Date,
-): Promise<number> {
-  let count = 0;
+): Promise<string[]> {
+  const times: string[] = [];
   let nextToken: string | undefined;
   do {
     const res = await client.send(
@@ -294,11 +350,13 @@ export async function fetchAlarmFirings(
       }),
     );
     for (const item of res.AlarmHistoryItems ?? []) {
-      if (isTransitionToAlarm(item.HistorySummary)) count++;
+      if (isTransitionToAlarm(item.HistorySummary) && item.Timestamp) {
+        times.push(new Date(item.Timestamp).toISOString());
+      }
     }
     nextToken = res.NextToken;
   } while (nextToken);
-  return count;
+  return times;
 }
 
 /** UTC calendar-month start N months before `d`, clamped no earlier than `floor`. */
@@ -308,15 +366,16 @@ function monthsBackClamped(d: Date, months: number, floor: Date): Date {
 }
 
 /**
- * Uncached loader. Exported (unlike usage-summary.ts's private counterpart)
- * specifically so tests can inject a fake CloudWatch client and `now` and
- * assert a send() rejection propagates rather than resolving to an empty
- * summary — see tests/unit/service-health.test.ts.
+ * Uncached loader: the raw reads every range is summarized from. Exported
+ * (unlike usage-summary.ts's private counterpart) specifically so tests can
+ * inject a fake CloudWatch client and `now` and assert a send() rejection
+ * propagates rather than resolving to an empty result — see
+ * tests/unit/service-health.test.ts.
  */
 export async function loadServiceHealthUncached(deps?: {
   client?: CloudWatchLikeClient;
   now?: Date;
-}): Promise<ServiceHealthSummary> {
+}): Promise<ServiceHealthData> {
   const albFullName = requiredEnv("SPS_PUBLIC_ALB_FULL_NAME");
   const alarmName = requiredEnv("SPS_APP_UNAVAILABLE_ALARM");
   const client = deps?.client ?? cloudWatchClient();
@@ -326,25 +385,30 @@ export async function loadServiceHealthUncached(deps?: {
   const launchStart = new Date(`${LAUNCH_MONTH_START}T00:00:00.000Z`);
   const rangeStart = monthsBackClamped(todayMidnightUtc, MAX_TREND_MONTHS, launchStart);
 
-  const [daily, alarmFirings] = await Promise.all([
+  const alarmHistoryFrom = new Date(
+    now.getTime() - ALARM_HISTORY_RETENTION_DAYS * DAILY_PERIOD_SECONDS * 1000,
+  );
+
+  const [daily, alarmFiringTimes] = await Promise.all([
     fetchDailyAlbPoints(client, albFullName, rangeStart, todayMidnightUtc),
-    fetchAlarmFirings(
-      client,
-      alarmName,
-      new Date(now.getTime() - SERVICE_HEALTH_WINDOW_DAYS * DAILY_PERIOD_SECONDS * 1000),
-      now,
-    ),
+    fetchAlarmFiringTimes(client, alarmName, alarmHistoryFrom, now),
   ]);
 
-  return shapeServiceHealth(daily, alarmFirings);
+  return { daily, alarmFiringTimes, alarmHistoryFrom: alarmHistoryFrom.toISOString() };
 }
 
 /**
- * Cached loader for the page. 12h revalidate; a thrown CloudWatch error
- * propagates (never cached) so the page can fail this section soft — see the
- * module docblock.
+ * Cached loader for the page: ONE entry shared by every range (the reads do
+ * not depend on the range; summarizeServiceHealth windows them per request).
+ * 12h revalidate; a thrown CloudWatch error propagates (never cached) so the
+ * page can fail this section soft — see the module docblock. "v2": the cached
+ * value's shape changed from the old fixed-30-day summary.
  */
-export const loadServiceHealth = unstable_cache(loadServiceHealthUncached, ["service-health"], {
-  revalidate: SERVICE_HEALTH_CACHE_TTL_SECONDS,
-  tags: ["service-health"],
-});
+export const loadServiceHealth = unstable_cache(
+  loadServiceHealthUncached,
+  ["service-health", "v2"],
+  {
+    revalidate: SERVICE_HEALTH_CACHE_TTL_SECONDS,
+    tags: ["service-health"],
+  },
+);

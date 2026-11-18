@@ -110,7 +110,7 @@ export default async function CoPubsPage({
           Scholars
         </Link>
         <span className="mx-1.5">/</span>
-        <Link href={profilePath(mentor.slug)} className="hover:underline">
+        <Link href={profilePath(mentor.slug)} prefetch={false} className="hover:underline">
           {pair.mentorName}
         </Link>
         <span className="mx-1.5">/</span>
@@ -149,6 +149,7 @@ export default async function CoPubsPage({
           <p className="mt-2">
             <Link
               href={profilePath(mentor.slug)}
+              prefetch={false}
               className="text-foreground underline-offset-2 hover:underline"
             >
               ← Back to {pair.mentorName}

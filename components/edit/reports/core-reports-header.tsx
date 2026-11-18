@@ -21,6 +21,11 @@
  * queue" (there is no all-cores queue). The page hands only reports 11–13 as
  * tabs.
  *
+ * View-only (`viewOnly`: a core leader who reached the reports only through
+ * `LEADER_REPORT_ACCESS`): the review queue is gated by `authorizeCoreClaim`,
+ * which a leader does not pass, so the link is "← All reports" for this core
+ * (`/edit/reports?center=<id>&kind=core`) instead of a link that 403s.
+ *
  * Server-safe and synchronous; the picker is the only client island.
  */
 import Link from "next/link";
@@ -38,6 +43,7 @@ export function CoreReportsHeader({
   tabs,
   current,
   allCount,
+  viewOnly = false,
 }: {
   coreId: string;
   coreName: string;
@@ -49,6 +55,8 @@ export function CoreReportsHeader({
   current: string;
   /** Set for the all-cores roll-up: how many cores it covers. */
   allCount?: number;
+  /** The viewer can read but not curate this core (`ReportsContext.viewOnly`). */
+  viewOnly?: boolean;
 }) {
   const all = allCount !== undefined;
   const here = tabs.find((t) => t.n === current);
@@ -61,7 +69,16 @@ export function CoreReportsHeader({
           all ? "justify-end" : "justify-between",
         )}
       >
-        {!all && (
+        {!all && viewOnly && (
+          <Link
+            href={`/edit/reports?${scope}`}
+            className="text-apollo-slate text-sm hover:underline"
+            data-testid="core-reports-back-link"
+          >
+            &larr; All reports
+          </Link>
+        )}
+        {!all && !viewOnly && (
           <Link
             href={`/edit/core/${encodeURIComponent(coreId)}/review`}
             className="text-apollo-slate text-sm hover:underline"

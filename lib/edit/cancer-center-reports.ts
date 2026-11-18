@@ -37,6 +37,11 @@ import {
   loadAllUnitsForFinder,
   loadManageableUnits,
 } from "@/lib/edit/manageable-units";
+import {
+  isLeaderReportAccessEnabled,
+  isUnitLeader,
+  loadLedUnitRefs,
+} from "@/lib/edit/unit-leader-access";
 
 /**
  * The unit kinds the `/edit/reports/*` suite can report on — the three classic
@@ -79,7 +84,16 @@ function isUnitEntityType(kind: ReportableUnitKind): kind is UnitEntityType {
  * on the center editor's context is what lets both resolve through one
  * function without a fake core "unit context".
  */
-export type ReportsContext = { unit: { name: string } };
+export type ReportsContext = {
+  unit: { name: string };
+  /**
+   * `true` when the actor reached this unit's reports ONLY as one of its
+   * leaders (`LEADER_REPORT_ACCESS`, `lib/edit/unit-leader-access.ts`): they
+   * may read every report but write nothing through it, so a body hides its
+   * edit controls (the routes still refuse). Absent for an editor of the unit.
+   */
+  viewOnly?: boolean;
+};
 
 /**
  * Resolve "the" Cancer Center's unit `code` server-side instead of hardcoding
@@ -150,12 +164,19 @@ export async function resolveReportsCenterCode(
 export async function loadReportsContext(
   code: string,
   session: EditSession,
-  db: UnitEditContextClient & Pick<PrismaClient, "core">,
+  db: UnitEditContextClient & Pick<PrismaClient, "core" | "coreLeader">,
   kind: ReportableUnitKind = "center",
 ): Promise<ReportsContext | null> {
-  const ctx = isUnitEntityType(kind)
+  let ctx: ReportsContext | null = isUnitEntityType(kind)
     ? await loadUnitEditContext(kind, code, session, db)
     : await loadCoreReportsContext(code, session, db);
+  // Leadership report access: a leader of THIS unit (no cascade) views its
+  // reports read-only. Only consulted after the editor gate refused, and only
+  // with the flag on, so an editor's context and the flag-off path are
+  // unchanged.
+  if (ctx === null && isLeaderReportAccessEnabled()) {
+    ctx = await loadLeaderReportsContext(code, session, db, kind);
+  }
   if (ctx === null) {
     logEditDenial({
       actorCwid: session.cwid,
@@ -167,6 +188,41 @@ export async function loadReportsContext(
     });
   }
   return ctx;
+}
+
+/**
+ * The leader half of `loadReportsContext`: the unit's name for an actor who
+ * leads it, else null. A retired (suppressed) unit stays hidden, the same rule
+ * `loadUnitEditContext` applies to every non-superuser; a core is never
+ * suppressed. An unknown code is null, like the editor path.
+ */
+async function loadLeaderReportsContext(
+  code: string,
+  session: EditSession,
+  db: UnitEditContextClient & Pick<PrismaClient, "core" | "coreLeader">,
+  kind: ReportableUnitKind,
+): Promise<ReportsContext | null> {
+  if (!(await isUnitLeader(session, kind, code, db))) return null;
+  let name: string | null;
+  if (kind === "core") {
+    name = (await db.core.findUnique({ where: { id: code }, select: { name: true } }))?.name ?? null;
+  } else {
+    const row =
+      kind === "department"
+        ? await db.department.findUnique({ where: { code }, select: { name: true } })
+        : kind === "division"
+          ? await db.division.findUnique({ where: { code }, select: { name: true } })
+          : await db.center.findUnique({ where: { code }, select: { name: true } });
+    name = row?.name ?? null;
+    if (name !== null && !session.isSuperuser) {
+      const retired = await db.suppression.findFirst({
+        where: { entityType: kind, entityId: code, revokedAt: null },
+        select: { id: true },
+      });
+      if (retired) return null;
+    }
+  }
+  return name === null ? null : { unit: { name }, viewOnly: true };
 }
 
 /**
@@ -249,6 +305,10 @@ export type ReportsDirectoryClient = Pick<
   | "publicationCore"
   | "coreClaim"
   | "orgUnitRoleAssignment"
+  // Leadership report access: the led-units read (`loadLedUnitRefs`).
+  | "fieldOverride"
+  | "coreLeader"
+  | "orgUnitRole"
 >;
 
 /** One unit in scope for the Reports index/nav. A `center` must carry a
@@ -266,6 +326,9 @@ export type ReportableUnit = {
   centerType: "center" | "institute" | null;
   /** A division's parent department, when the source carries it (global viewers). */
   parentName?: string | null;
+  /** The actor reaches this unit only as one of its leaders (leadership report
+   *  access): it may view the reports but not edit the unit. */
+  viewOnly?: true;
 };
 
 /**
@@ -328,6 +391,7 @@ export async function loadReportableUnitsForActor(
     name: string;
     centerType: "center" | "institute" | null;
     parentName?: string | null;
+    viewOnly?: true;
   };
   let candidates: Candidate[];
   if (isGlobal) {
@@ -372,6 +436,12 @@ export async function loadReportableUnitsForActor(
         ? manageable.cores.map((u) => ({ code: u.code, kind: "core" as const, name: u.name, centerType: null }))
         : []),
     ];
+    // Leadership report access: the units this actor LEADS join the units it
+    // administers (deduped), then ride the same CenterProgram and retirement
+    // filters below. Flag off: no read, the list is unchanged.
+    if (isLeaderReportAccessEnabled()) {
+      candidates = [...candidates, ...(await loadLedCandidates(session, db, candidates, wantsKind))];
+    }
   }
 
   if (candidates.length === 0) return [];
@@ -433,7 +503,49 @@ export async function loadReportableUnitsForActor(
       centerType:
         c.kind !== "center" ? null : centerTypeByCode ? (centerTypeByCode.get(c.code) ?? "center") : (c.centerType ?? "center"),
       ...(c.parentName ? { parentName: c.parentName } : {}),
+      ...(c.viewOnly ? { viewOnly: true as const } : {}),
     }));
+}
+
+/** The units the actor leads that are not already `have`, named, of a wanted
+ *  kind. An org unit or core whose row is gone is dropped, like
+ *  `loadManageableUnits` drops a grant on a deleted unit. */
+async function loadLedCandidates(
+  session: EditSession,
+  db: ReportsDirectoryClient,
+  have: ReadonlyArray<{ code: string; kind: ReportableUnitKind }>,
+  wantsKind: (k: ReportableUnitKind) => boolean,
+): Promise<Array<{ code: string; kind: ReportableUnitKind; name: string; centerType: null; viewOnly: true }>> {
+  const seen = new Set(have.map((c) => `${c.kind}|${c.code}`));
+  const led = (await loadLedUnitRefs(session.cwid, db)).filter(
+    (r) => wantsKind(r.kind) && !seen.has(`${r.kind}|${r.code}`),
+  );
+  if (led.length === 0) return [];
+  const codesOf = (k: ReportableUnitKind) => led.filter((r) => r.kind === k).map((r) => r.code);
+  const [depts, divs, centers, cores] = await Promise.all([
+    codesOf("department").length
+      ? db.department.findMany({ where: { code: { in: codesOf("department") } }, select: { code: true, name: true } })
+      : Promise.resolve([]),
+    codesOf("division").length
+      ? db.division.findMany({ where: { code: { in: codesOf("division") } }, select: { code: true, name: true } })
+      : Promise.resolve([]),
+    codesOf("center").length
+      ? db.center.findMany({ where: { code: { in: codesOf("center") } }, select: { code: true, name: true } })
+      : Promise.resolve([]),
+    codesOf("core").length
+      ? db.core.findMany({ where: { id: { in: codesOf("core") } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+  ]);
+  const names = new Map<string, string>([
+    ...depts.map((d) => [`department|${d.code}`, d.name] as const),
+    ...divs.map((d) => [`division|${d.code}`, d.name] as const),
+    ...centers.map((c) => [`center|${c.code}`, c.name] as const),
+    ...cores.map((c) => [`core|${c.id}`, c.name] as const),
+  ]);
+  return led.flatMap((r) => {
+    const name = names.get(`${r.kind}|${r.code}`);
+    return name === undefined ? [] : [{ code: r.code, kind: r.kind, name, centerType: null, viewOnly: true as const }];
+  });
 }
 
 export type ReportNumber = 1 | 2 | 3 | 4 | 5 | 6 | 11 | 12 | 13 | 17 | 18 | 19 | 20 | 21;

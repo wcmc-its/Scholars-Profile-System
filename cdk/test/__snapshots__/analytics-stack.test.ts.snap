@@ -151,6 +151,18 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:table/sps_usage_prod/daily_traffic",
+                    ],
+                  ],
+                },
               ],
               "Sid": "GlueUsageTableRead",
             },
@@ -171,20 +183,36 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
             {
               "Action": "s3:GetObject",
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Fn::GetAtt": [
-                        "AnalyticsBucket39EAAEEA",
-                        "Arn",
-                      ],
-                    },
-                    "/rollup/daily-usage/*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-usage/*",
+                    ],
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-traffic/*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "S3UsageRollupRead",
             },
             {
@@ -426,7 +454,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "176dbab2f48885f4e137e30fcee3f1bbf5eda5a4c5946136ad470f1abedd4cd4.zip",
+          "S3Key": "10b691528c181e82c9624555e9c84bd8dc08fab9df7548a0853cccb39197960b.zip",
         },
         "Environment": {
           "Variables": {
@@ -452,6 +480,8 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
             },
             "ROLLUP_PREFIX": "rollup/daily-usage",
             "ROLLUP_TABLE": "daily_usage",
+            "TRAFFIC_PREFIX": "rollup/daily-traffic",
+            "TRAFFIC_TABLE": "daily_traffic",
           },
         },
         "FunctionName": "sps-cf-usage-rollup-prod",
@@ -639,6 +669,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                 "StringLike": {
                   "s3:prefix": [
                     "rollup/daily-usage/*",
+                    "rollup/daily-traffic/*",
                     "athena-results/*",
                   ],
                 },
@@ -686,6 +717,20 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                         ],
                       },
                       "/rollup/daily-usage/*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-traffic/*",
                     ],
                   ],
                 },
@@ -769,6 +814,86 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Events::Rule",
     },
+    "DailyTrafficTable": {
+      "DependsOn": [
+        "UsageDatabase",
+      ],
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseName": {
+          "Ref": "UsageDatabase",
+        },
+        "TableInput": {
+          "Description": "Pre-aggregated daily CloudFront site traffic (prod): totals, referrer/landing/top pages, AI agents. TSV, partition-projected on dt. Aggregates only -- no client IPs.",
+          "Name": "daily_traffic",
+          "Parameters": {
+            "classification": "csv",
+            "projection.dt.format": "yyyy-MM-dd",
+            "projection.dt.range": "2026-05-22,NOW",
+            "projection.dt.type": "date",
+            "projection.enabled": "true",
+            "storage.location.template": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-traffic/dt=\${dt}/",
+                ],
+              ],
+            },
+          },
+          "PartitionKeys": [
+            {
+              "Name": "dt",
+              "Type": "string",
+            },
+          ],
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "metric",
+                "Type": "string",
+              },
+              {
+                "Name": "dimension",
+                "Type": "string",
+              },
+              {
+                "Name": "cnt",
+                "Type": "bigint",
+              },
+            ],
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-traffic",
+                ],
+              ],
+            },
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+              "Parameters": {
+                "field.delim": "	",
+              },
+              "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            },
+          },
+          "TableType": "EXTERNAL_TABLE",
+        },
+      },
+      "Type": "AWS::Glue::Table",
+    },
     "DailyUsageTable": {
       "DependsOn": [
         "UsageDatabase",
@@ -849,6 +974,26 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Glue::Table",
     },
+    "QueryAiAgents": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Requests by declared AI agent (dimension = class|vendor; fetch or crawler).",
+        "Name": "sps-traffic-ai-agents-prod",
+        "QueryString": "SELECT dimension AS agent, SUM(cnt) AS requests
+FROM daily_traffic
+WHERE metric = 'ai_agent'
+GROUP BY dimension
+ORDER BY requests DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
     "QueryDailyPageviews": {
       "DependsOn": [
         "UsageDatabase",
@@ -863,6 +1008,29 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
         "QueryString": "SELECT dt, SUM(cnt) AS pageviews
 FROM daily_usage
 WHERE metric = 'pageviews'
+GROUP BY dt
+ORDER BY dt DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryDailyTraffic": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Daily hits, human pageviews, and estimated visitors (daily_traffic).",
+        "Name": "sps-traffic-daily-totals-prod",
+        "QueryString": "SELECT dt,
+  SUM(CASE WHEN dimension = 'hits' THEN cnt ELSE 0 END) AS hits,
+  SUM(CASE WHEN dimension = 'pageviews' THEN cnt ELSE 0 END) AS pageviews,
+  SUM(CASE WHEN dimension = 'visitors' THEN cnt ELSE 0 END) AS visitors
+FROM daily_traffic
+WHERE metric = 'traffic'
 GROUP BY dt
 ORDER BY dt DESC",
         "WorkGroup": "sps-usage-prod",
@@ -987,6 +1155,27 @@ LIMIT 50",
       },
       "Type": "AWS::Athena::NamedQuery",
     },
+    "QueryReferrerPages": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Top 100 external referring pages (host + path, no query string).",
+        "Name": "sps-traffic-referrer-pages-prod",
+        "QueryString": "SELECT dimension AS referrer_page, SUM(cnt) AS pageviews
+FROM daily_traffic
+WHERE metric = 'referrer_page' AND dimension <> '(other)'
+GROUP BY dimension
+ORDER BY pageviews DESC
+LIMIT 100",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
     "QueryReferrers": {
       "DependsOn": [
         "UsageDatabase",
@@ -1016,7 +1205,7 @@ ORDER BY hits DESC",
         "Database": {
           "Ref": "UsageDatabase",
         },
-        "Description": "Top 100 search terms (dimension = decoded q=).",
+        "Description": "Top 100 typed search terms (dimension = decoded q=; suggestion clicks are metric search_term_suggested).",
         "Name": "sps-usage-search-terms-prod",
         "QueryString": "SELECT dimension AS term, SUM(cnt) AS searches
 FROM daily_usage
@@ -1304,6 +1493,18 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:table/sps_usage_staging/daily_traffic",
+                    ],
+                  ],
+                },
               ],
               "Sid": "GlueUsageTableRead",
             },
@@ -1324,20 +1525,36 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
             {
               "Action": "s3:GetObject",
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Fn::GetAtt": [
-                        "AnalyticsBucket39EAAEEA",
-                        "Arn",
-                      ],
-                    },
-                    "/rollup/daily-usage/*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-usage/*",
+                    ],
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-traffic/*",
+                    ],
+                  ],
+                },
+              ],
               "Sid": "S3UsageRollupRead",
             },
             {
@@ -1579,7 +1796,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "176dbab2f48885f4e137e30fcee3f1bbf5eda5a4c5946136ad470f1abedd4cd4.zip",
+          "S3Key": "10b691528c181e82c9624555e9c84bd8dc08fab9df7548a0853cccb39197960b.zip",
         },
         "Environment": {
           "Variables": {
@@ -1605,6 +1822,8 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
             },
             "ROLLUP_PREFIX": "rollup/daily-usage",
             "ROLLUP_TABLE": "daily_usage",
+            "TRAFFIC_PREFIX": "rollup/daily-traffic",
+            "TRAFFIC_TABLE": "daily_traffic",
           },
         },
         "FunctionName": "sps-cf-usage-rollup-staging",
@@ -1792,6 +2011,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                 "StringLike": {
                   "s3:prefix": [
                     "rollup/daily-usage/*",
+                    "rollup/daily-traffic/*",
                     "athena-results/*",
                   ],
                 },
@@ -1839,6 +2059,20 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                         ],
                       },
                       "/rollup/daily-usage/*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-traffic/*",
                     ],
                   ],
                 },
@@ -1922,6 +2156,86 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Events::Rule",
     },
+    "DailyTrafficTable": {
+      "DependsOn": [
+        "UsageDatabase",
+      ],
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseName": {
+          "Ref": "UsageDatabase",
+        },
+        "TableInput": {
+          "Description": "Pre-aggregated daily CloudFront site traffic (staging): totals, referrer/landing/top pages, AI agents. TSV, partition-projected on dt. Aggregates only -- no client IPs.",
+          "Name": "daily_traffic",
+          "Parameters": {
+            "classification": "csv",
+            "projection.dt.format": "yyyy-MM-dd",
+            "projection.dt.range": "2026-05-22,NOW",
+            "projection.dt.type": "date",
+            "projection.enabled": "true",
+            "storage.location.template": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-traffic/dt=\${dt}/",
+                ],
+              ],
+            },
+          },
+          "PartitionKeys": [
+            {
+              "Name": "dt",
+              "Type": "string",
+            },
+          ],
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "metric",
+                "Type": "string",
+              },
+              {
+                "Name": "dimension",
+                "Type": "string",
+              },
+              {
+                "Name": "cnt",
+                "Type": "bigint",
+              },
+            ],
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-traffic",
+                ],
+              ],
+            },
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+              "Parameters": {
+                "field.delim": "	",
+              },
+              "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            },
+          },
+          "TableType": "EXTERNAL_TABLE",
+        },
+      },
+      "Type": "AWS::Glue::Table",
+    },
     "DailyUsageTable": {
       "DependsOn": [
         "UsageDatabase",
@@ -2002,6 +2316,26 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Glue::Table",
     },
+    "QueryAiAgents": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Requests by declared AI agent (dimension = class|vendor; fetch or crawler).",
+        "Name": "sps-traffic-ai-agents-staging",
+        "QueryString": "SELECT dimension AS agent, SUM(cnt) AS requests
+FROM daily_traffic
+WHERE metric = 'ai_agent'
+GROUP BY dimension
+ORDER BY requests DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
     "QueryDailyPageviews": {
       "DependsOn": [
         "UsageDatabase",
@@ -2016,6 +2350,29 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
         "QueryString": "SELECT dt, SUM(cnt) AS pageviews
 FROM daily_usage
 WHERE metric = 'pageviews'
+GROUP BY dt
+ORDER BY dt DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryDailyTraffic": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Daily hits, human pageviews, and estimated visitors (daily_traffic).",
+        "Name": "sps-traffic-daily-totals-staging",
+        "QueryString": "SELECT dt,
+  SUM(CASE WHEN dimension = 'hits' THEN cnt ELSE 0 END) AS hits,
+  SUM(CASE WHEN dimension = 'pageviews' THEN cnt ELSE 0 END) AS pageviews,
+  SUM(CASE WHEN dimension = 'visitors' THEN cnt ELSE 0 END) AS visitors
+FROM daily_traffic
+WHERE metric = 'traffic'
 GROUP BY dt
 ORDER BY dt DESC",
         "WorkGroup": "sps-usage-staging",
@@ -2140,6 +2497,27 @@ LIMIT 50",
       },
       "Type": "AWS::Athena::NamedQuery",
     },
+    "QueryReferrerPages": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Top 100 external referring pages (host + path, no query string).",
+        "Name": "sps-traffic-referrer-pages-staging",
+        "QueryString": "SELECT dimension AS referrer_page, SUM(cnt) AS pageviews
+FROM daily_traffic
+WHERE metric = 'referrer_page' AND dimension <> '(other)'
+GROUP BY dimension
+ORDER BY pageviews DESC
+LIMIT 100",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
     "QueryReferrers": {
       "DependsOn": [
         "UsageDatabase",
@@ -2169,7 +2547,7 @@ ORDER BY hits DESC",
         "Database": {
           "Ref": "UsageDatabase",
         },
-        "Description": "Top 100 search terms (dimension = decoded q=).",
+        "Description": "Top 100 typed search terms (dimension = decoded q=; suggestion clicks are metric search_term_suggested).",
         "Name": "sps-usage-search-terms-staging",
         "QueryString": "SELECT dimension AS term, SUM(cnt) AS searches
 FROM daily_usage

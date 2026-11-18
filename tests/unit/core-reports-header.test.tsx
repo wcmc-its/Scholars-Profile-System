@@ -56,6 +56,22 @@ describe("CoreReportsHeader", () => {
     expect(back.textContent).toContain("Review queue");
   });
 
+  it("view-only (leader access): '← All reports' for this core, never the 403ing review queue", () => {
+    const q = renderHeader({ viewOnly: true });
+    expect(q.queryByTestId("core-reports-queue-link")).toBeNull();
+    expect(q.queryByText(/Review queue/)).toBeNull();
+    const back = q.getByTestId("core-reports-back-link");
+    expect(back.getAttribute("href")).toBe("/edit/reports?center=14&kind=core");
+    expect(back.textContent).toContain("All reports");
+    // The tabs still render for a view-only leader.
+    expect(q.getByTestId("core-reports-tab-11")).toBeTruthy();
+  });
+
+  it("an editor (viewOnly unset) gets no '← All reports' back link", () => {
+    const q = renderHeader();
+    expect(q.queryByTestId("core-reports-back-link")).toBeNull();
+  });
+
   it("one tab per core report, the current one selected, each carrying only center + kind", () => {
     const q = renderHeader();
     const tabs = within(q.getByTestId("core-reports-tabs")).getAllByRole("link");

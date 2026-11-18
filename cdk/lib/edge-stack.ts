@@ -34,7 +34,8 @@ const EDGE_IP_PATH = "/edge-ip";
  * Viewer-request CloudFront Function source for the legacy-host redirect
  * (#945). On an alias host it 301s to the canonical host: a legacy VIVO
  * profile path (same shapes as `VIVO_PATH_RE` in proxy.ts) goes straight to
- * `/scholars/by-cwid/{cwid}`, anything else to the home page. Any other host
+ * `/scholars/by-cwid/{cwid}`, a publication path (`/display/pubid{PMID}`) to
+ * `/scholars/by-pmid/{pmid}`, anything else to the home page. Any other host
  * passes through untouched. Answering at the POP means the alias never reaches
  * the origin, so it can't serve Scholars pages under the VIVO name or share a
  * cache entry with the canonical host (the default cache key omits Host).
@@ -46,16 +47,18 @@ export function legacyHostRedirectCode(
   return `var ALIASES = ${JSON.stringify(aliasHosts)};
 var CANONICAL = ${JSON.stringify(`https://${canonicalHost}`)};
 var VIVO_PROFILE = /^\\/(?:display|individual|profile)\\/cwid-([A-Za-z0-9._\\-]+)\\/?$/;
+var VIVO_PUB = /^\\/(?:display|individual)\\/pubid(\\d{1,9})\\/?$/;
 function handler(event) {
   var request = event.request;
   var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
   if (ALIASES.indexOf(host) === -1) return request;
   var m = request.uri.match(VIVO_PROFILE);
+  var p = m ? null : request.uri.match(VIVO_PUB);
   return {
     statusCode: 301,
     statusDescription: "Moved Permanently",
     headers: {
-      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : "/") },
+      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : p ? "/scholars/by-pmid/" + p[1] : "/") },
       "cache-control": { value: "max-age=86400" },
     },
   };
@@ -222,6 +225,28 @@ export interface EdgeStackProps extends StackProps {
    * mutated cross-stack.
    */
   readonly deployRoleArn: string;
+}
+
+/**
+ * CfnWebACL plus `AssociationConfig.ChallengeJavascriptSdkInjection`.
+ *
+ * aws-cdk-lib 2.275 does not type the property, and `addPropertyOverride`
+ * cannot express it: CDK's override merge deletes empty objects, and the
+ * value CloudFormation wants is `{ CLOUDFRONT: {} }`. Adding it in
+ * `renderProperties` bypasses that merge.
+ * ponytail: delete this class and pass `associationConfig` once CDK types it.
+ */
+class SdkInjectingWebAcl extends wafv2.CfnWebACL {
+  protected renderProperties(props: {
+    [key: string]: unknown;
+  }): { [key: string]: unknown } {
+    return {
+      ...super.renderProperties(props),
+      AssociationConfig: {
+        ChallengeJavascriptSdkInjection: { CLOUDFRONT: {} },
+      },
+    };
+  }
 }
 
 /**
@@ -1272,9 +1297,84 @@ export class EdgeStack extends Stack {
           textTransformations: [{ priority: 0, type: "LOWERCASE" }],
         },
       };
-      const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
+      // No usable WAF token: none sent, or one sent that token management
+      // rejected (expired, invalid, wrong domain; each also carries the bare
+      // `rejected` label). Matching `absent` alone let a harvested token be
+      // replayed past the /search challenges once it expired.
+      const noValidToken = {
+        orStatement: {
+          statements: ["absent", "rejected"].map((state) => ({
+            labelMatchStatement: {
+              scope: "LABEL",
+              key: `awswaf:managed:token:${state}`,
+            },
+          })),
+        },
+      };
+      // Campus (the WCM allowlist) skips the /search bot defenses below, as it
+      // already skips search-rate-limit. One token session behind a campus
+      // NAT looked like a volume anomaly: prod 11-17, TGT_VolumetricSession
+      // served a visible CAPTCHA to two campus IPs, one mid-demo.
+      // ponytail: a scraper on a campus IP is not challenged; the app-level
+      // limits still apply. Revisit if one shows up in the WAF logs.
+      const notWcm = {
+        notStatement: {
+          statement: { ipSetReferenceStatement: { arn: ipAllowSet.attrArn } },
+        },
+      };
+      // TARGETED Bot Control runs on off-campus /search; COMMON takes exactly
+      // the rest (campus /search included), so every request still gets one
+      // Bot Control pass for its labels and none is billed twice.
+      const targetedScope = {
+        andStatement: { statements: [searchPathMatch, notWcm] },
+      };
+      const commonScope = { notStatement: { statement: targetedScope } };
+      // #3368 option 4: the Bot Control rules that every TARGETED instance
+      // also carries at the common level. Kept in Count on /search* so the
+      // targeted instance changes nothing about how self-identifying bots are
+      // handled there: `search-block-bots` still blocks every `bot:` label
+      // with a 403, exactly as under COMMON. (CategoryAI defaults to Block even
+      // for verified bots; Count keeps that decision with search-block-bots.)
+      const botControlCommonRules = [
+        "CategoryAdvertising",
+        "CategoryArchiver",
+        "CategoryContentFetcher",
+        "CategoryEmailClient",
+        "CategoryHttpLibrary",
+        "CategoryLinkChecker",
+        "CategoryMiscellaneous",
+        "CategoryMonitoring",
+        "CategoryPagePreview",
+        "CategoryScrapingFramework",
+        "CategorySearchEngine",
+        "CategorySecurity",
+        "CategorySeo",
+        "CategorySocialMedia",
+        "CategoryWebhooks",
+        "CategoryAI",
+        "SignalAutomatedBrowser",
+        "SignalKnownBotDataCenter",
+        "SignalNonBrowserUserAgent",
+      ];
+      const webAcl = new SdkInjectingWebAcl(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
         scope: "CLOUDFRONT",
+        // #3368 option 4: how long a solved challenge keeps a client out of
+        // the next one. The default is 300s, and a re-challenge mid-session
+        // is not silent here: a facet click is a Next.js `_rsc` fetch, and a
+        // 202 to that fetch makes the router fall back to a full page load
+        // (which then shows the interstitial). Four hours covers a working
+        // session. Cross-IP token reuse is caught by the TGT_TokenReuse* rules
+        // regardless of this value.
+        challengeConfig: {
+          immunityTimeProperty: { immunityTime: 14400 },
+        },
+        // A solved CAPTCHA lasts as long as a solved challenge. Unset, it is
+        // 300s, and the signal that raised the puzzle usually outlives that:
+        // prod 11-17, one person solved it and was asked again within a minute.
+        captchaConfig: {
+          immunityTimeProperty: { immunityTime: 14400 },
+        },
         // Default ALLOW: only WCM traffic ever reaches the default action --
         // the priority-0 block-non-wcm rule drops everything else. (Was
         // default-BLOCK + a terminating allow-wcm rule, which short-circuited
@@ -1409,6 +1509,15 @@ export class EdgeStack extends Stack {
           // is deleted (#432) and this exemption becomes load-bearing for
           // SEO + AI-answer visibility (#594 measured both pinned at zero).
           // Cost: Bot Control bills per WebACL/month + per request inspected.
+          //
+          // #3368 option 4: this COMMON instance now covers everything EXCEPT
+          // /search*, which the TARGETED instance below inspects instead. The
+          // two scope-downs are mutually exclusive (AWS's documented "two
+          // statements" pattern), so no request is billed twice, and every
+          // request still gets exactly one Bot Control pass -- the `bot:`
+          // labels that search-block-bots and the rate-limit exemption read
+          // keep arriving site-wide. TARGETED includes the common-level rules,
+          // so /search* is labeled the same way it was under COMMON.
           {
             name: "AWSManagedRulesBotControlRuleSet",
             priority: managedGroups.length + 1,
@@ -1424,11 +1533,83 @@ export class EdgeStack extends Stack {
                     },
                   },
                 ],
+                scopeDownStatement: commonScope,
               },
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
               metricName: `sps-edge-${env}-AWSManagedRulesBotControlRuleSet`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // #3368 option 4: Bot Control TARGETED + Challenge on /search*.
+          // Scrapers that don't self-identify never get a COMMON label; only
+          // token-based checks can tell them from a person.
+          //
+          // - TGT_TokenAbsent -> Challenge (AWS default: Count). Distributed
+          //   scrapers stay under TGT_VolumetricIpTokenAbsent's
+          //   5-per-5-min threshold, so every tokenless /search request has to
+          //   be challenged. A real browser solves the silent JS challenge
+          //   once and is immune for `challengeConfig` above; an HTTP client
+          //   never gets past the 202, which costs no OpenSearch query.
+          // - TGT_SignalBrowserAutomationExtension -> Count. AWS documents it
+          //   as matching any user who merely has an automation extension
+          //   (e.g. Selenium IDE) installed.
+          // - Every other TGT_ rule keeps its AWS default: Challenge for the
+          //   volumetric/ML-low rules, CAPTCHA for automated-browser, browser-
+          //   inconsistency, session-volume and token-reuse signals, Block for
+          //   the max-confidence ones. Those are what catch a headless browser
+          //   that DID solve the challenge.
+          // - Common-level rules stay Count (see botControlCommonRules).
+          //
+          // Next.js: a challenged `_rsc` fetch gets a 202 whose content-type is
+          // not text/x-component, so the app router falls back to a hard
+          // navigation (fetch-server-response.js: `!isFlightResponse` ->
+          // doMpaNavigation), the document GET carries Accept: text/html, and
+          // WAF serves the interstitial, which solves and reloads.
+          //
+          // Cost: TARGETED bills $10/M requests (1M/month free) for the
+          // /search* requests in scope only.
+          {
+            name: "AWSManagedRulesBotControlRuleSet-Targeted",
+            priority: managedGroups.length + 2,
+            overrideAction: { none: {} },
+            statement: {
+              managedRuleGroupStatement: {
+                vendorName: "AWS",
+                name: "AWSManagedRulesBotControlRuleSet",
+                managedRuleGroupConfigs: [
+                  {
+                    awsManagedRulesBotControlRuleSet: {
+                      inspectionLevel: "TARGETED",
+                      enableMachineLearning: true,
+                    },
+                  },
+                ],
+                ruleActionOverrides: [
+                  ...botControlCommonRules.map((name) => ({
+                    name,
+                    actionToUse: { count: {} },
+                  })),
+                  { name: "TGT_TokenAbsent", actionToUse: { challenge: {} } },
+                  {
+                    name: "TGT_SignalBrowserAutomationExtension",
+                    actionToUse: { count: {} },
+                  },
+                  // AWS default: CAPTCHA. It scores one session's request
+                  // rate against a learned baseline, and ordinary facet
+                  // clicking (each click is an `_rsc` fetch) reached "high" in
+                  // under 20 seconds. Prod, 72h to 11-17: 2,425 CAPTCHAs to
+                  // 557 IPs, people among them. TGT_VolumetricSessionMaximum
+                  // (Block) still stops the extreme case.
+                  { name: "TGT_VolumetricSession", actionToUse: { count: {} } },
+                ],
+                scopeDownStatement: targetedScope,
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-AWSManagedRulesBotControlRuleSet-Targeted`,
               sampledRequestsEnabled: true,
             },
           },
@@ -1442,7 +1623,7 @@ export class EdgeStack extends Stack {
           // the sitemap.
           {
             name: "search-block-bots",
-            priority: managedGroups.length + 2,
+            priority: managedGroups.length + 3,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1472,7 +1653,7 @@ export class EdgeStack extends Stack {
           // ponytail: one hardcoded UA; promote to a list if a second shows up.
           {
             name: "search-block-scraper-ua",
-            priority: managedGroups.length + 3,
+            priority: managedGroups.length + 4,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1502,7 +1683,7 @@ export class EdgeStack extends Stack {
           // pools legitimately peak ~470/5min on /search alone.
           {
             name: "search-rate-limit",
-            priority: managedGroups.length + 4,
+            priority: managedGroups.length + 5,
             action: {
               block: {
                 customResponse: {
@@ -1540,7 +1721,7 @@ export class EdgeStack extends Stack {
           },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 5,
+            priority: managedGroups.length + 6,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
@@ -1585,6 +1766,112 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // Tokenless /search, split by how the request arrives.
+          //
+          // Staging 11-13: the TGT_TokenAbsent -> Challenge override did not
+          // fire (tokenless Chrome-UA /search got 200, labelled
+          // TGT_TokenAbsent_RC_COUNT), so these rules challenge on the token
+          // label instead, the documented "block missing tokens" pattern.
+          // They run after the Bot Control instances, which apply
+          // awswaf:managed:token:absent / :rejected (see noValidToken).
+          //
+          // 1. Always challenged:
+          //    a. Client navigations (`_rsc` query or `RSC` header). A browser
+          //       can only make one from a page it has already loaded, and
+          //       every page carries the challenge SDK (SdkInjectingWebAcl),
+          //       so a real visitor holds a token by then. Prod 11-13..14:
+          //       88% of tokenless /search (65k of 74k a day).
+          //    b. Page loads whose URL carries four or more parameters (three
+          //       or more `&`). Within an hour of rule 2 going live a scraper
+          //       walked facet combinations as plain page loads, one request
+          //       per IP, under the surge limit. Prod, 24h to 11-14, tokenless
+          //       page loads: 22.9k with 4+ parameters (none from old VIVO
+          //       links, and the Google-referred ones came at one request per
+          //       IP) against 3.2k with fewer (VIVO 1.8k, no referrer 0.9k,
+          //       Google 0.4k). A real first visit is `?q=...`; a facet walk
+          //       is not. Cost: someone opening a shared deep-filter link as
+          //       their first page sees the challenge once.
+          {
+            name: "search-challenge-tokenless",
+            priority: managedGroups.length + 7,
+            action: { challenge: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  searchPathMatch,
+                  notWcm,
+                  noValidToken,
+                  {
+                    orStatement: {
+                      statements: [
+                        {
+                          byteMatchStatement: {
+                            searchString: "_rsc=",
+                            fieldToMatch: { queryString: {} },
+                            positionalConstraint: "CONTAINS",
+                            textTransformations: [{ priority: 0, type: "NONE" }],
+                          },
+                        },
+                        {
+                          sizeConstraintStatement: {
+                            fieldToMatch: { singleHeader: { Name: "rsc" } },
+                            comparisonOperator: "GT",
+                            size: 0,
+                            textTransformations: [{ priority: 0, type: "NONE" }],
+                          },
+                        },
+                        {
+                          regexMatchStatement: {
+                            regexString: "(&[^&]*){3}",
+                            fieldToMatch: { queryString: {} },
+                            textTransformations: [{ priority: 0, type: "NONE" }],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-challenge-tokenless`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // 2. Other page loads: a first-time visitor arriving on a /search
+          //    link (Google, an old VIVO link, a bookmark) has had no chance
+          //    to get a token, so these pass unchallenged until tokenless
+          //    /search page loads, counted across ALL clients, exceed the
+          //    limit. Counting in aggregate is the point: the 11-12 scraper
+          //    sent ~2 requests per IP, so no per-IP limit sees it. Past the
+          //    limit this is the blanket challenge again.
+          //    Limit: prod 11-13..14 saw median 29, p99 129, max 240 per
+          //    5 min, scraper baseline included. 300 is ~1 OpenSearch query a
+          //    second; the 11-12 outage ran at several times that.
+          // ponytail: one fixed limit; revisit if the baseline drifts up.
+          {
+            name: "search-challenge-tokenless-surge",
+            priority: managedGroups.length + 8,
+            action: { challenge: {} },
+            statement: {
+              rateBasedStatement: {
+                limit: 300,
+                evaluationWindowSec: 300,
+                aggregateKeyType: "CONSTANT",
+                scopeDownStatement: {
+                  andStatement: {
+                    statements: [searchPathMatch, notWcm, noValidToken],
+                  },
+                },
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-challenge-tokenless-surge`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // #432: public launch drops the gate; everything after it stays.
           // The IPSet also backs the search-rate-limit WCM exemption, so it
           // stays even after block-non-wcm is gone.
@@ -1596,6 +1883,15 @@ export class EdgeStack extends Stack {
         },
         description: `SPS front end ${env} - ${envConfig.edgePublic ? "public" : "WCM-only IP allow"}, AWS managed rule groups enforced, bot-aware rate limit`,
       });
+      // Automatic SDK integration: CloudFront inserts the WAF challenge SDK
+      // into every 200 text/html response, so a real browser picks up the
+      // aws-waf-token in the background on its first page (home, a profile)
+      // and keeps it refreshed. By the time it reaches /search it holds a
+      // token, so the search-challenge-tokenless rules never touch it. Requires the TARGETED Bot
+      // Control instance above; AWS rejects an update that drops TARGETED
+      // while this is set. The app CSP must allow https://*.awswaf.com
+      // (lib/security-headers.ts) or the inserted script is blocked.
+      // Set by SdkInjectingWebAcl (top of file).
       webAclArn = webAcl.attrArn;
 
       // #1939: WAF logging. Without it the only record of WHICH rule fired

@@ -24,7 +24,9 @@ const {
   mockView,
   mockRedirect,
   mockNotFound,
+  mockResolveNames,
 } = vi.hoisted(() => ({
+  mockResolveNames: vi.fn(async () => new Map<string, string>()),
   mockGetSession: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockIsGrantedProxy: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock("@/lib/api/scholar-audit", async (importOriginal) => {
 vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: mockFindUnique } }, write: {} },
 }));
+vi.mock("@/lib/edit/person-names", () => ({ resolvePersonNames: mockResolveNames }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
 vi.mock("@/components/edit/scholar-history-view", () => ({ ScholarHistoryView: mockView }));
 
@@ -110,6 +113,18 @@ describe("/edit/scholar/[cwid]/history — authorization", () => {
     expect(result.type).toBe(mockView);
     expect(mockLoadHistory).toHaveBeenCalledWith(TARGET, expect.anything());
     expect(result.props.unavailable).toBe(false);
+  });
+
+  it("resolves actor / impersonated / proxy CWIDs to names, skipping system actors", async () => {
+    signedInAs(TARGET);
+    mockLoadHistory.mockResolvedValue([
+      { id: "1", actorCwid: "sup0001", impersonatedCwid: "own0002", detailCwid: "prx0003" },
+      { id: "2", actorCwid: "system-autolock", impersonatedCwid: null, detailCwid: null },
+    ]);
+    mockResolveNames.mockResolvedValueOnce(new Map([["sup0001", "Sue Super"]]));
+    const result = asEl(await EditScholarHistoryPage({ params: params(TARGET) }));
+    expect(mockResolveNames).toHaveBeenCalledWith(["sup0001", "own0002", "prx0003"]);
+    expect(result.props.names).toEqual({ sup0001: "Sue Super" });
   });
 
   it("audit read failure → renders the view as unavailable, does not 500", async () => {

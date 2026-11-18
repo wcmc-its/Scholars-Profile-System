@@ -64,6 +64,8 @@ type OpportunityListItem = {
   /** Matcha-admin Phase 1b manual suppression — set means hidden from every non-admin surface. */
   suppressedAt?: string | null;
   suppressedBy?: string | null;
+  /** Resolved display name for `suppressedBy` (server-side); absent ⇒ fall back to the CWID. */
+  suppressedByName?: string | null;
   suppressReason?: string | null;
   /** Browse data-wiring 2026-08 — top-3 `topicVector` entries, resolved to labels and
    *  floor-dropped SERVER-SIDE (the raw vector never reaches the wire). Empty ⇒ no Concepts
@@ -1365,7 +1367,7 @@ function OpportunityCard({
         {suppressed && o.suppressedAt ? (
           <span className="text-muted-foreground mt-1 block text-xs" data-testid="suppressed-note">
             suppressed {formatSuppressedDate(o.suppressedAt)}
-            {o.suppressedBy ? ` by ${o.suppressedBy}` : ""}
+            {o.suppressedBy ? ` by ${o.suppressedByName ?? o.suppressedBy}` : ""}
             {o.suppressReason ? ` — “${o.suppressReason}”` : ""}
           </span>
         ) : null}

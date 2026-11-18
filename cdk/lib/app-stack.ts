@@ -22,7 +22,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
-import { SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
+import { SCHOLARS_MAIL_CONFIG_SET, SCHOLARS_MAIL_FROM, type SpsEnvConfig } from "./config";
 import {
   importSharedVpc,
   resolveSharedSg,
@@ -919,7 +919,10 @@ export class AppStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["ses:SendEmail"],
-          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          resources: [
+            `arn:aws:ses:${this.region}:${this.account}:identity/*`,
+            `arn:aws:ses:${this.region}:${this.account}:configuration-set/${SCHOLARS_MAIL_CONFIG_SET}`,
+          ],
           conditions: {
             StringEquals: { "ses:FromAddress": SCHOLARS_MAIL_FROM },
           },
@@ -1515,6 +1518,13 @@ export class AppStack extends Stack {
         // isDataSharingDashboardEnabled() (=== "on"); when off the route 404s and
         // the sub-nav tab is hidden — ships dark. App-only, no reindex, no writes.
         EDIT_DATA_SHARING_DASHBOARD: "on", // Prod flipped 2026-08-12 (#2383, staging-soaked same day, render-only).
+        // Research security dashboard (`/edit/research-security`): co-publications
+        // where a co-author lists a watch-list entity, from the tables
+        // etl:research-security fills. SENSITIVE, per-person. Read via
+        // isResearchSecurityDashboardEnabled() (=== "on"); when off the route and
+        // its export 404 and the sub-nav tab is hidden. App-only, no reindex, no
+        // writes. STAGING-FIRST: on in staging, off in prod until sign-off.
+        EDIT_RESEARCH_SECURITY_DASHBOARD: envConfig.envName === "staging" ? "on" : "off",
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"
@@ -1617,6 +1627,14 @@ export class AppStack extends Stack {
         // today). App-only, no reindex, no migration. Prod-on 2026-09-30 after
         // the staging soak was signed off.
         CENTER_DISEASE_FACET: "on",
+        // UNIT_LEADERSHIP_ROLES — department Vice Chair roles (`unit_leadership_role`,
+        // lib/edit/unit-leadership-flags.ts): the Vice Chairs card on
+        // /edit/department/[code] and POST /api/edit/unit-leadership. Read via
+        // isUnitLeadershipEnabled() (=== "on"); when off the card is absent and
+        // the route 404s. Also gates the public department-page list, the
+        // profile title lines and report 23. Prod-on 2026-11-17 after the
+        // staging soak; prod rows seeded from the November 2026 audit.
+        UNIT_LEADERSHIP_ROLES: "on",
         // ORG_UNIT_ROLE_CONSOLE (#2542 Phase 3) — the steward-owned `OrgUnitRole`
         // vocabulary console (`/edit/roles`, `lib/edit/org-unit-role-flags.ts`).
         // Read via isOrgUnitRoleConsoleEnabled() (=== "on"); when off the route
@@ -1817,6 +1835,13 @@ export class AppStack extends Stack {
         // the ORCID sandbox client (scholars/staging/orcid-api). OFF in prod: no
         // prod client until ORCID's demo review, and no prod secret is wired.
         ORCID_CONNECT: envConfig.envName === "staging" ? "on" : "off",
+        // LEADER_REPORT_ACCESS — leaders of a department, division, center or
+        // core (OrgUnitRoleAssignment in the unit's leadership group, a core's
+        // CoreLeader director) VIEW that unit's /edit/reports, and a cancer
+        // center's program leaders also edit NCI Table 2A
+        // (`lib/edit/unit-leader-access.ts`). No other write is widened. ON in
+        // both envs (prod 2026-11-14, after the staging View-as walkthrough).
+        LEADER_REPORT_ACCESS: "on",
         ORCID_CONNECT_BASE:
           envConfig.envName === "prod" ? "https://orcid.org" : "https://sandbox.orcid.org",
         // SELF_EDIT_PROFILE_LINKS (#2699) — faculty-entered external profile links
@@ -1997,6 +2022,18 @@ export class AppStack extends Stack {
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         DATA_SHARING_VIEWER_ENABLED: "on",
         SCHOLARS_DATA_SHARING_VIEWER_GROUP_CN: "ITS:Library:Scholars/data-sharing-viewer-role",
+        // `research_security_viewer` role. Unlocks ONLY /edit/research-security
+        // for the export-controls / research-security office; superusers already
+        // pass. Same shape as data_sharing_viewer above.
+        //   RESEARCH_SECURITY_VIEWER_ENABLED -- master kill switch. On since the
+        //     ED group below was created (2026-11-17). Inert in prod while
+        //     EDIT_RESEARCH_SECURITY_DASHBOARD is off there.
+        //   SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN -- the ED group whose
+        //     membership confers the role.
+        // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        RESEARCH_SECURITY_VIEWER_ENABLED: "on",
+        SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN:
+          "ITS:Library:Scholars/research-security-viewer-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
         // who need to understand the app and guide users through changes.
@@ -2173,7 +2210,8 @@ export class AppStack extends Stack {
         // Retire at full launch by setting this to "off" and `cdk deploy
         // Sps-App-<env>` -- no code revert (CD re-rolls the image only, so an
         // env-flag change requires an explicit cdk deploy).
-        SHOW_BETA_BADGE: "on",
+        // Retired at public launch (2026-11-14); set back to "on" + cdk deploy to restore.
+        SHOW_BETA_BADGE: "off",
         // #713 / #707 -- "Why this match" explanation lines. Brought to
         // local-dev parity (these were on in .env.local but never wired here, so
         // the features worked locally and were silently off in staging+prod):
@@ -2367,6 +2405,18 @@ export class AppStack extends Stack {
         // Prod ON 2026-11-02 after staging verified (1,631 people tagged; q=Obesity
         // facet Clinical 320 / Laboratory 103, filter count matches its bucket).
         SEARCH_PEOPLE_RESEARCH_TYPE_FACET: "on",
+        // Nested Research type children (Physician-scientist / non-physician under
+        // each kind), split on the people doc's boolean `isPhysician`. Filter only.
+        // Children stay hidden until the nightly people-alias rebuild writes the
+        // field. Prod ON 2026-11-13 after staging verified (q=Palliative care: Lab
+        // Physician-scientist 14 / Basic scientist 2, filter narrows to its count).
+        SEARCH_PEOPLE_RESEARCH_TYPE_NESTED: "on",
+        // Publications-tab "Translational stage" facet (pub doc `translationalStage`
+        // from Publication.translationalStage, lib/translational-stage.ts). DARK in
+        // both envs at merge. Flip only AFTER the DynamoDB ETL has filled the
+        // columns and the nightly publications alias rebuild carries the keyword
+        // mapping. Staging first.
+        SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET: envConfig.envName === "staging" ? "on" : "on",
         // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET, SEARCH_RESULT_EVIDENCE,
         // SEARCH_EVIDENCE_ROWS and SEARCH_EVIDENCE_REASON_COUNTS (the #1464
         // evidence bundle) were retired in #1440 -- always on in code, no env key.

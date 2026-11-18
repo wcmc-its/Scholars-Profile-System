@@ -25,6 +25,7 @@ import {
   type EtlSourceRow,
   type EtlSourceState,
   type EtlStatusSummary,
+  UNREGISTERED_WINDOW_DAYS,
   loadEtlStatus,
   needsAttention,
 } from "@/lib/api/etl-status";
@@ -54,7 +55,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "ETL status — Scholars Console",
+  title: "Data sync — Scholars Console",
   robots: { index: false, follow: false },
 };
 
@@ -169,6 +170,8 @@ const CADENCE_LABEL: Record<Cadence, string> = {
   // That is a policy detail, not something to make somebody decode in a column.
   "nightly-mirrored": "Every night",
   weekly: "Every week",
+  // Same reasoning as "nightly-mirrored" above.
+  "weekly-mirrored": "Every week",
   monthly: "Every month",
   annual: "Once a year",
 };
@@ -178,6 +181,7 @@ const CADENCE_GROUP: Record<Cadence, NormalGroupKey> = {
   nightly: "nightly",
   "nightly-mirrored": "nightly",
   weekly: "weekly",
+  "weekly-mirrored": "weekly",
   monthly: "monthly",
   annual: "annual",
 };
@@ -651,6 +655,32 @@ function StatusBody({
           )}
         </section>
 
+        {summary.unregistered.length === 0 ? null : (
+          <section
+            className="flex flex-col gap-2.5"
+            data-testid="etl-status-unregistered"
+            aria-label={`Not registered, ${summary.unregistered.length} imports`}
+          >
+            <h2 className="m-0 text-lg font-semibold">Not registered</h2>
+            <p className="text-muted-foreground m-0 max-w-[86ch] text-sm">
+              These imports ran in the last {UNREGISTERED_WINDOW_DAYS} days but are not on this
+              page&rsquo;s list, so nothing checks whether they are up to date. Contact ITS Support
+              with the name so they can be added.
+            </p>
+            <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+              {summary.unregistered.map((u) => (
+                <li key={u.source} data-testid={`etl-status-unregistered-${u.source}`}>
+                  <span className="font-mono">{u.source}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · last ran {formatShort(u.lastStartedAt, now)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <RunningNormally
           rows={ordered.map((row) => toNormalRow(row, now))}
           summaryLine={summaryLine}
@@ -736,7 +766,7 @@ export default async function EtlStatusPage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">ETL status</h1>
+      <h1 className="m-0 text-[30px] leading-tight font-semibold tracking-[-0.01em]">Data sync</h1>
       {unavailable ? (
         <p className="text-muted-foreground mt-8" data-testid="etl-status-unavailable">
           Import status is temporarily unavailable. Please try again later or contact ITS Support if

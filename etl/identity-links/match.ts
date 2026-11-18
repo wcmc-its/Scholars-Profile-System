@@ -3,14 +3,16 @@
  * Cornell (Ithaca) person under a different identifier. No IO; index.ts feeds it.
  *
  * Signals, strongest first:
- *   ed     — ED lists the NetID on the scholar (`scholar.netid`). An assertion.
+ *   ed      — ED lists the NetID on the scholar (`scholar.netid`). An assertion.
+ *   cornell — Cornell's directory lists the scholar's CWID on the NetID
+ *             (cornellEduCWID, via reciterdb identity_cornell_directory). Also one.
  *   orcid  — the same ORCID iD on the CWID and the NetID (reciterdb
  *            pubsource_orcid_person, plus the scholar's confirmed iD).
  *   email  — the Cornell record carries the scholar's @med.cornell.edu address,
  *            or one whose local part is the CWID.
  *   name   — the same first + last name, and that name is held by exactly one
  *            person on each campus.
- * Band: ed → known; orcid or email → strong; name alone → possible.
+ * Band: ed or cornell → known; orcid or email → strong; name alone → possible.
  *
  * ponytail: no shared-publication signal. The Cornell Scopus link table
  * (cornell_pub_researcher_publication) points at an emptied researcher table and
@@ -32,12 +34,20 @@ export type CornellPerson = {
   lastName: string;
   emails: string[];
   orcids: string[];
+  /** The WCM CWID Cornell's directory records for this NetID, lowercased. */
+  cwid: string | null;
   name: string | null;
   department: string | null;
   title: string | null;
 };
 
-export type LinkSignals = { ed?: true; orcid?: string; email?: string; name?: true };
+export type LinkSignals = {
+  ed?: true;
+  cornell?: true;
+  orcid?: string;
+  email?: string;
+  name?: true;
+};
 export type LinkBand = "known" | "strong" | "possible";
 export type IdentityLink = { cwid: string; netid: string; band: LinkBand; signals: LinkSignals };
 
@@ -73,7 +83,7 @@ export function wcmNameKey(fullName: string): string | null {
 const BAND_RANK: Record<LinkBand, number> = { known: 0, strong: 1, possible: 2 };
 
 export function bandOf(s: LinkSignals): LinkBand {
-  if (s.ed) return "known";
+  if (s.ed || s.cornell) return "known";
   if (s.orcid || s.email) return "strong";
   return "possible";
 }
@@ -90,6 +100,13 @@ export function matchIdentities(wcm: WcmPerson[], cornell: CornellPerson[]): Ide
   // ed
   for (const w of wcm) {
     if (w.netid && cornellByNetid.has(w.netid)) add(w.cwid, w.netid, { ed: true });
+  }
+
+  // cornell
+  const wcmCwid = new Map(wcm.map((w) => [w.cwid.toLowerCase(), w.cwid]));
+  for (const c of cornell) {
+    const cwid = c.cwid && wcmCwid.get(c.cwid);
+    if (cwid) add(cwid, c.netid, { cornell: true });
   }
 
   // orcid

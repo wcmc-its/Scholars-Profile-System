@@ -95,6 +95,7 @@ import type {
   CulledConcept,
   MatchaCandidate,
   MatchaConcept,
+  MatchaEmergingWork,
 } from "@/lib/api/matcha-contract";
 import {
   askTitleFrom,
@@ -109,6 +110,11 @@ import {
   rankResearchersForDescription,
   type MatchaRankedScholar,
 } from "@/lib/api/matcha";
+import {
+  buildEmergingWork,
+  EMERGING_WINDOW_DAYS,
+  type EmergingWorkRow,
+} from "@/lib/api/matcha-emerging";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/matcha-spine-run";
 import {
   rankGrantsForDescriptionSpine,
@@ -116,11 +122,11 @@ import {
 } from "@/lib/api/matcha-grants-spine";
 import { extractMatchaPreferences } from "@/lib/api/matcha-preferences";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { isObserver } from "@/lib/auth/observer";
 import type { EditSession } from "@/lib/auth/superuser";
 import { loadStoredResult, matchaSubmissionScope } from "@/lib/api/matcha-brief";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { canUseMatchaForWrite } from "@/lib/edit/matcha-access";
 import { isGrantMatchaEnabled } from "@/lib/edit/grant-recs";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { identityImageEndpoint } from "@/lib/headshot";
@@ -297,14 +303,6 @@ function bespokeToCandidate(r: MatchaRankedScholar): MatchaCandidate {
       })),
     },
   };
-}
-
-/** The write-side gate. `readEditRequest` strips the observer's synthetic read view, so
- *  `session.isObserver` is always false here; ask the directory for the EFFECTIVE cwid (a
- *  superuser viewing as an observer sees what the observer sees). An observer's own View-as
- *  overlay never reaches this: `readEditRequest` refuses writes under it. */
-async function canUseMatchaForWrite(session: EditSession): Promise<boolean> {
-  return session.isSuperuser || session.isDeveloper === true || (await isObserver(session.cwid));
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -541,9 +539,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(`${PATH}#retain`, err);
     }
 
+    // Emerging work: computed per response (not cached or stored with the run), so a replayed
+    // run shows this week's abstracts. Display only. Fail-soft: a read blip costs the panel's
+    // emerging lines, never the ranking.
+    const emergingWork = await loadEmergingWork(concepts, candidates);
+
     return editOk({
       concepts,
       candidates,
+      emergingWork,
       preferences,
       ask,
       titleSummary,
@@ -952,5 +956,35 @@ async function patchRequester(
   } catch (err) {
     logEditFailure(`${PATH}#requester`, err);
     return editError(500, "submissions_unavailable");
+  }
+}
+
+/** Last-two-years `fundable_work` rows matched to the ask (`buildEmergingWork`).
+ *  ponytail: reads the whole window (about 1,600 rows) and matches in memory; move the match to
+ *  SQL full-text if the table grows past a few tens of thousands. */
+async function loadEmergingWork(
+  concepts: MatchaConcept[],
+  candidates: MatchaCandidate[],
+): Promise<MatchaEmergingWork | undefined> {
+  if (concepts.length === 0) return undefined;
+  try {
+    const works: EmergingWorkRow[] = await db.read.fundableWork.findMany({
+      where: { publicationDate: { gte: new Date(Date.now() - EMERGING_WINDOW_DAYS * 86_400_000) } },
+      select: {
+        id: true,
+        type: true,
+        doi: true,
+        title: true,
+        abstract: true,
+        venue: true,
+        publicationDate: true,
+        score: true,
+        authors: { select: { cwid: true, scholar: { select: { preferredName: true, slug: true } } } },
+      },
+    });
+    return buildEmergingWork(works, concepts, new Set(candidates.map((c) => c.cwid)));
+  } catch (err) {
+    logEditFailure(`${PATH}#emerging`, err);
+    return undefined;
   }
 }

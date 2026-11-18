@@ -6,8 +6,11 @@
  *   - `pubsource_orcid_person` where `confidence_type = 'inferred'` and the key
  *     is a CWID → `source = 'rpm_inferred'`, with `articles_accepted` /
  *     `articles_rejected` (how many of the person's accepted / rejected RPM
- *     articles carry that ORCID on their PubMed author record). The NetID rows
- *     (`source_provided`, a Cornell-Ithaca CSV) are not ours and are skipped.
+ *     articles carry that ORCID on their PubMed author record).
+ *   - The NetID rows (`source_provided`, the Cornell library's Affiliation Manager
+ *     map) → `source = 'cornell_affiliation_manager'` on Cornell Ithaca rows only,
+ *     when ITHACA_ORCID_CURATION is "on" (Ithaca ORCID plan, step 2). Off, the
+ *     source reads empty and the delete pass removes its rows.
  *   - `admin_orcid` → `source = 'rpm_admin'` (hand-entered by an RPM admin;
  *     frozen since RPM stopped writing it 2026-04-05, and SPS never writes it).
  *     A row SPS's Remove deleted comes back here every morning; readers drop
@@ -36,16 +39,19 @@
 import { db } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { withEtlRun } from "@/lib/etl-run";
+import { assertSourceVolume } from "@/lib/etl-guard";
 
 const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 const BATCH = 500;
 /** The source values this mirror owns; the delete pass never touches any other. */
-const RPM_SOURCES = ["rpm_inferred", "rpm_admin"];
+const RPM_SOURCES = ["rpm_inferred", "rpm_admin", "cornell_affiliation_manager"];
+/** 6,620 NetID rows on 2026-11-16; a short read would silently drop Ithaca seeds. */
+const AFFILIATION_MANAGER_FLOOR = 5_000;
 
 export type SourceRow = {
   cwid: string;
   orcid: string;
-  source: "rpm_inferred" | "rpm_admin";
+  source: "rpm_inferred" | "rpm_admin" | "cornell_affiliation_manager";
   articlesAccepted: number;
   articlesRejected: number;
   sourceUpdatedAt: Date | null;
@@ -59,11 +65,13 @@ export type InferredRow = {
   updated_at: Date | string | null;
 };
 export type AdminRow = { personIdentifier: string; orcid: string | null };
+export type NetidRow = { personIdentifier: string; orcid: string | null; updated_at: Date | string | null };
 
 /** Source rows → candidate rows: trims, lowercases the cwid, drops malformed ORCIDs. Pure. */
 export function toCandidates(
   inferred: InferredRow[],
   admin: AdminRow[],
+  affiliationManager: NetidRow[] = [],
 ): { rows: SourceRow[]; invalid: number } {
   const rows: SourceRow[] = [];
   let invalid = 0;
@@ -97,6 +105,21 @@ export function toCandidates(
       sourceUpdatedAt: null,
     });
   }
+  for (const r of affiliationManager) {
+    const orcid = String(r.orcid ?? "").trim();
+    if (!ORCID_PATTERN.test(orcid)) {
+      invalid++;
+      continue;
+    }
+    rows.push({
+      cwid: String(r.personIdentifier).trim().toLowerCase(),
+      orcid,
+      source: "cornell_affiliation_manager",
+      articlesAccepted: 0,
+      articlesRejected: 0,
+      sourceUpdatedAt: r.updated_at ? new Date(r.updated_at) : null,
+    });
+  }
   return { rows, invalid };
 }
 
@@ -105,11 +128,14 @@ export function toCandidates(
 export function mergeForScholars(
   rows: SourceRow[],
   scholars: Set<string>,
+  ithaca: Set<string> = new Set(),
 ): { keep: SourceRow[]; noScholar: number } {
   const byKey = new Map<string, SourceRow>();
   let noScholar = 0;
   for (const r of rows) {
-    if (!scholars.has(r.cwid)) {
+    // Each source matches its own campus: a NetID that equals some WCM CWID must
+    // never land on the WCM row.
+    if (!(r.source === "cornell_affiliation_manager" ? ithaca : scholars).has(r.cwid)) {
       noScholar++;
       continue;
     }
@@ -120,6 +146,7 @@ export function mergeForScholars(
 }
 
 async function main(): Promise<number> {
+  const ithacaOn = process.env.ITHACA_ORCID_CURATION === "on";
   let read: { rows: SourceRow[]; invalid: number } = { rows: [], invalid: 0 };
   await withReciterConnection(async (conn) => {
     const inferred = (await conn.query(
@@ -130,7 +157,19 @@ async function main(): Promise<number> {
     const admin = (await conn.query(
       `SELECT personIdentifier, orcid FROM admin_orcid`,
     )) as AdminRow[];
-    read = toCandidates(inferred, admin);
+    const netid = ithacaOn
+      ? ((await conn.query(
+          `SELECT personIdentifier, orcid, updated_at FROM pubsource_orcid_person
+           WHERE personIdentifierType = 'NetID' AND confidence_type = 'source_provided'`,
+        )) as NetidRow[])
+      : [];
+    if (ithacaOn) {
+      assertSourceVolume("orcid-candidates-affiliation-manager", {
+        incoming: netid.length,
+        floor: AFFILIATION_MANAGER_FLOOR,
+      });
+    }
+    read = toCandidates(inferred, admin, netid);
   });
   console.log(
     `ReciterDB: ${read.rows.length} candidate rows (${read.invalid} skipped: malformed ORCID).`,
@@ -140,10 +179,17 @@ async function main(): Promise<number> {
     throw new Error("0 candidate rows read from ReciterDB — refusing to mirror an empty source");
   }
 
-  const scholars = new Set(
-    (await db.write.scholar.findMany({ select: { cwid: true } })).map((s) => s.cwid.toLowerCase()),
+  const rowsOn = async (campus: string) =>
+    new Set(
+      (await db.write.scholar.findMany({ where: { campus }, select: { cwid: true } })).map((s) =>
+        s.cwid.toLowerCase(),
+      ),
+    );
+  const { keep, noScholar } = mergeForScholars(
+    read.rows,
+    await rowsOn("wcm"),
+    ithacaOn ? await rowsOn("ithaca") : new Set(),
   );
-  const { keep, noScholar } = mergeForScholars(read.rows, scholars);
   console.log(
     `${keep.length} rows for known scholars (${noScholar} rows for cwids not in scholar).`,
   );

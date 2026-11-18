@@ -82,6 +82,7 @@ export function PublicationTakedownCard({
         id: data.suppressionId,
         reason: reasonValue,
         actorCwid: "(you)", // local approximation; router.refresh re-loads with the real value
+        actorName: "you",
         createdAt: new Date(),
       });
       setConfirmOpen(false);
@@ -129,7 +130,8 @@ export function PublicationTakedownCard({
               <AlertDescription>
                 <strong>Removed from the site.</strong> Reason:{" "}
                 <em>{takedown.reason || "(no reason on file)"}</em>. By{" "}
-                <code>{takedown.actorCwid}</code> on{" "}
+                <span title={takedown.actorCwid}>{takedown.actorName || takedown.actorCwid}</span>{" "}
+                on{" "}
                 <time dateTime={takedown.createdAt.toISOString()}>
                   {takedown.createdAt.toLocaleDateString()}
                 </time>

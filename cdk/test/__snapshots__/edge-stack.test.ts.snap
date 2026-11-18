@@ -145,6 +145,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           "Aliases": [
             "scholars.weill.cornell.edu",
             "vivo.weill.cornell.edu",
+            "vivo.med.cornell.edu",
           ],
           "CacheBehaviors": [
             {
@@ -1345,7 +1346,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           ],
           "PriceClass": "PriceClass_100",
           "ViewerCertificate": {
-            "AcmCertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/04baf746-7287-41ad-af1c-707a93691fda",
+            "AcmCertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/80637162-668f-4742-8bef-c8c0588e5077",
             "MinimumProtocolVersion": "TLSv1.2_2021",
             "SslSupportMethod": "sni-only",
           },
@@ -1416,19 +1417,21 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
     "EdgeLegacyHostRedirect8D93D330": {
       "Properties": {
         "AutoPublish": true,
-        "FunctionCode": "var ALIASES = ["vivo.weill.cornell.edu"];
+        "FunctionCode": "var ALIASES = ["vivo.weill.cornell.edu","vivo.med.cornell.edu"];
 var CANONICAL = "https://scholars.weill.cornell.edu";
 var VIVO_PROFILE = /^\\/(?:display|individual|profile)\\/cwid-([A-Za-z0-9._\\-]+)\\/?$/;
+var VIVO_PUB = /^\\/(?:display|individual)\\/pubid(\\d{1,9})\\/?$/;
 function handler(event) {
   var request = event.request;
   var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
   if (ALIASES.indexOf(host) === -1) return request;
   var m = request.uri.match(VIVO_PROFILE);
+  var p = m ? null : request.uri.match(VIVO_PUB);
   return {
     statusCode: 301,
     statusDescription: "Moved Permanently",
     headers: {
-      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : "/") },
+      location: { value: CANONICAL + (m ? "/scholars/by-cwid/" + m[1] : p ? "/scholars/by-pmid/" + p[1] : "/") },
       "cache-control": { value: "max-age=86400" },
     },
   };
@@ -1492,6 +1495,21 @@ function handler(event) {
     },
     "EdgeWebAcl": {
       "Properties": {
+        "AssociationConfig": {
+          "ChallengeJavascriptSdkInjection": {
+            "CLOUDFRONT": {},
+          },
+        },
+        "CaptchaConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
+        "ChallengeConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
         "CustomResponseBodies": {
           "offNetwork": {
             "Content": "<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Coming soon - Scholars @ Weill Cornell Medicine</title><style>
@@ -1640,6 +1658,45 @@ a{color:var(--slate)}
                   },
                 ],
                 "Name": "AWSManagedRulesBotControlRuleSet",
+                "ScopeDownStatement": {
+                  "NotStatement": {
+                    "Statement": {
+                      "AndStatement": {
+                        "Statements": [
+                          {
+                            "ByteMatchStatement": {
+                              "FieldToMatch": {
+                                "UriPath": {},
+                              },
+                              "PositionalConstraint": "STARTS_WITH",
+                              "SearchString": "/search",
+                              "TextTransformations": [
+                                {
+                                  "Priority": 0,
+                                  "Type": "LOWERCASE",
+                                },
+                              ],
+                            },
+                          },
+                          {
+                            "NotStatement": {
+                              "Statement": {
+                                "IPSetReferenceStatement": {
+                                  "Arn": {
+                                    "Fn::GetAtt": [
+                                      "WcmIpAllowSet",
+                                      "Arn",
+                                    ],
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
                 "VendorName": "AWS",
               },
             },
@@ -1650,11 +1707,206 @@ a{color:var(--slate)}
             },
           },
           {
+            "Name": "AWSManagedRulesBotControlRuleSet-Targeted",
+            "OverrideAction": {
+              "None": {},
+            },
+            "Priority": 5,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "ManagedRuleGroupConfigs": [
+                  {
+                    "AWSManagedRulesBotControlRuleSet": {
+                      "EnableMachineLearning": true,
+                      "InspectionLevel": "TARGETED",
+                    },
+                  },
+                ],
+                "Name": "AWSManagedRulesBotControlRuleSet",
+                "RuleActionOverrides": [
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAdvertising",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryArchiver",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryContentFetcher",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryEmailClient",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryHttpLibrary",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryLinkChecker",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMiscellaneous",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMonitoring",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryPagePreview",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryScrapingFramework",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySearchEngine",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySecurity",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySeo",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySocialMedia",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryWebhooks",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAI",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalAutomatedBrowser",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalKnownBotDataCenter",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalNonBrowserUserAgent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Challenge": {},
+                    },
+                    "Name": "TGT_TokenAbsent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_SignalBrowserAutomationExtension",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_VolumetricSession",
+                  },
+                ],
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-AWSManagedRulesBotControlRuleSet-Targeted",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
             "Action": {
               "Block": {},
             },
             "Name": "search-block-bots",
-            "Priority": 5,
+            "Priority": 6,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -1693,7 +1945,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-scraper-ua",
-            "Priority": 6,
+            "Priority": 7,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -1748,7 +2000,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -1807,7 +2059,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 8,
+            "Priority": 9,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -1827,6 +2079,195 @@ a{color:var(--slate)}
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
               "MetricName": "sps-edge-prod-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless",
+            "Priority": 10,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:absent",
+                            "Scope": "LABEL",
+                          },
+                        },
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:rejected",
+                            "Scope": "LABEL",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "ByteMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "PositionalConstraint": "CONTAINS",
+                            "SearchString": "_rsc=",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "SizeConstraintStatement": {
+                            "ComparisonOperator": "GT",
+                            "FieldToMatch": {
+                              "SingleHeader": {
+                                "Name": "rsc",
+                              },
+                            },
+                            "Size": 0,
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "RegexMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "RegexString": "(&[^&]*){3}",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-challenge-tokenless",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless-surge",
+            "Priority": 11,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "CONSTANT",
+                "EvaluationWindowSec": 300,
+                "Limit": 300,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                      {
+                        "OrStatement": {
+                          "Statements": [
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:absent",
+                                "Scope": "LABEL",
+                              },
+                            },
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:rejected",
+                                "Scope": "LABEL",
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-challenge-tokenless-surge",
               "SampledRequestsEnabled": true,
             },
           },
@@ -3443,6 +3884,21 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     },
     "EdgeWebAcl": {
       "Properties": {
+        "AssociationConfig": {
+          "ChallengeJavascriptSdkInjection": {
+            "CLOUDFRONT": {},
+          },
+        },
+        "CaptchaConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
+        "ChallengeConfig": {
+          "ImmunityTimeProperty": {
+            "ImmunityTime": 14400,
+          },
+        },
         "CustomResponseBodies": {
           "offNetwork": {
             "Content": "<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Coming soon - Scholars @ Weill Cornell Medicine</title><style>
@@ -3647,6 +4103,45 @@ a{color:var(--slate)}
                   },
                 ],
                 "Name": "AWSManagedRulesBotControlRuleSet",
+                "ScopeDownStatement": {
+                  "NotStatement": {
+                    "Statement": {
+                      "AndStatement": {
+                        "Statements": [
+                          {
+                            "ByteMatchStatement": {
+                              "FieldToMatch": {
+                                "UriPath": {},
+                              },
+                              "PositionalConstraint": "STARTS_WITH",
+                              "SearchString": "/search",
+                              "TextTransformations": [
+                                {
+                                  "Priority": 0,
+                                  "Type": "LOWERCASE",
+                                },
+                              ],
+                            },
+                          },
+                          {
+                            "NotStatement": {
+                              "Statement": {
+                                "IPSetReferenceStatement": {
+                                  "Arn": {
+                                    "Fn::GetAtt": [
+                                      "WcmIpAllowSet",
+                                      "Arn",
+                                    ],
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
                 "VendorName": "AWS",
               },
             },
@@ -3657,11 +4152,206 @@ a{color:var(--slate)}
             },
           },
           {
+            "Name": "AWSManagedRulesBotControlRuleSet-Targeted",
+            "OverrideAction": {
+              "None": {},
+            },
+            "Priority": 5,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "ManagedRuleGroupConfigs": [
+                  {
+                    "AWSManagedRulesBotControlRuleSet": {
+                      "EnableMachineLearning": true,
+                      "InspectionLevel": "TARGETED",
+                    },
+                  },
+                ],
+                "Name": "AWSManagedRulesBotControlRuleSet",
+                "RuleActionOverrides": [
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAdvertising",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryArchiver",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryContentFetcher",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryEmailClient",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryHttpLibrary",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryLinkChecker",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMiscellaneous",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryMonitoring",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryPagePreview",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryScrapingFramework",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySearchEngine",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySecurity",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySeo",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategorySocialMedia",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryWebhooks",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "CategoryAI",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalAutomatedBrowser",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalKnownBotDataCenter",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SignalNonBrowserUserAgent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Challenge": {},
+                    },
+                    "Name": "TGT_TokenAbsent",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_SignalBrowserAutomationExtension",
+                  },
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "TGT_VolumetricSession",
+                  },
+                ],
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-AWSManagedRulesBotControlRuleSet-Targeted",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
             "Action": {
               "Block": {},
             },
             "Name": "search-block-bots",
-            "Priority": 5,
+            "Priority": 6,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -3700,7 +4390,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-scraper-ua",
-            "Priority": 6,
+            "Priority": 7,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -3755,7 +4445,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3814,7 +4504,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 8,
+            "Priority": 9,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -3834,6 +4524,195 @@ a{color:var(--slate)}
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
               "MetricName": "sps-edge-staging-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless",
+            "Priority": 10,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "UriPath": {},
+                      },
+                      "PositionalConstraint": "STARTS_WITH",
+                      "SearchString": "/search",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "LOWERCASE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:absent",
+                            "Scope": "LABEL",
+                          },
+                        },
+                        {
+                          "LabelMatchStatement": {
+                            "Key": "awswaf:managed:token:rejected",
+                            "Scope": "LABEL",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "OrStatement": {
+                      "Statements": [
+                        {
+                          "ByteMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "PositionalConstraint": "CONTAINS",
+                            "SearchString": "_rsc=",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "SizeConstraintStatement": {
+                            "ComparisonOperator": "GT",
+                            "FieldToMatch": {
+                              "SingleHeader": {
+                                "Name": "rsc",
+                              },
+                            },
+                            "Size": 0,
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          "RegexMatchStatement": {
+                            "FieldToMatch": {
+                              "QueryString": {},
+                            },
+                            "RegexString": "(&[^&]*){3}",
+                            "TextTransformations": [
+                              {
+                                "Priority": 0,
+                                "Type": "NONE",
+                              },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-challenge-tokenless",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Challenge": {},
+            },
+            "Name": "search-challenge-tokenless-surge",
+            "Priority": 11,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "CONSTANT",
+                "EvaluationWindowSec": 300,
+                "Limit": 300,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                      {
+                        "OrStatement": {
+                          "Statements": [
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:absent",
+                                "Scope": "LABEL",
+                              },
+                            },
+                            {
+                              "LabelMatchStatement": {
+                                "Key": "awswaf:managed:token:rejected",
+                                "Scope": "LABEL",
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-challenge-tokenless-surge",
               "SampledRequestsEnabled": true,
             },
           },

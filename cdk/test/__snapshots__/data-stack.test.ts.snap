@@ -619,7 +619,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "f8b7112ff78fd0b6fab4c6b048fc1da9945198135db9a1e6b1d5cb4599d5a3d2.zip",
+          "S3Key": "72ae571d685f17a6d58dd21ffdf2f0f2fcc45102bdc4916e15129abb2525b48f.zip",
         },
         "Handler": "__entrypoint__.handler",
         "MemorySize": 128,
@@ -939,7 +939,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e16ffb3b34af185b8b30c88fdb19faa13b6c42bb38580485c4e84b384ee48b63.zip",
+          "S3Key": "5c9fd00ba20b9f0f8161f2bd2ccae0f9c29df2b76d34155b8bf281abc354adc8.zip",
         },
         "Description": "AWS CDK resource provider framework - onEvent (Sps-Data-prod/DbBootstrapSeederProvider)",
         "Environment": {

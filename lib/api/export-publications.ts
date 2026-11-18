@@ -182,6 +182,12 @@ async function fetchExportPmids(req: ExportRequest): Promise<string[]> {
   if (filters.institution && filters.institution.length > 0) {
     filter.push({ terms: { wcmAuthorInstitutions: filters.institution } });
   }
+  // Translational stage facet — same contract: the page and the export route
+  // only pass `translationalStage` when SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET
+  // is on; mirror the live clause exactly.
+  if (filters.translationalStage && filters.translationalStage.length > 0) {
+    filter.push({ terms: { translationalStage: filters.translationalStage } });
+  }
   // Issue #1025 — Mentoring-activity facet. Resolve the selected program
   // buckets to a pmid union exactly as `searchPublications` does; an empty
   // union collapses to `match_none` so the export returns zero rows rather

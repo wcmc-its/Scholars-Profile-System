@@ -65,7 +65,7 @@ export function ScopeControl({
         return (
           <span key={opt.value}>
             {i > 0 ? <span className="text-muted-foreground"> · </span> : null}
-            <Link
+            <Link prefetch={false}
               href={hrefs[opt.value]}
               role="radio"
               aria-checked={isActive}

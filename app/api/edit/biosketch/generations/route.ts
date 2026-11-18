@@ -17,6 +17,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
+import { nameOr, resolvePersonNames } from "@/lib/edit/person-names";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { coerceEntries, listBiosketchGenerations } from "@/lib/edit/biosketch-provenance";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -59,6 +60,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     const generations = await listBiosketchGenerations(targetCwid);
+    const names = await resolvePersonNames(
+      generations.flatMap((g) => [g.createdByCwid, g.impersonatedCwid]),
+    );
     return editOk({
       generations: generations.map((g) => ({
         id: g.id,
@@ -74,6 +78,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         // Audit "who ran it": the accountable human, plus the impersonation overlay (if any).
         createdByCwid: g.createdByCwid,
         impersonatedCwid: g.impersonatedCwid,
+        // Display names for the two CWIDs above (the CWID itself when unresolvable).
+        createdByName: nameOr(names, g.createdByCwid),
+        impersonatedName: g.impersonatedCwid ? nameOr(names, g.impersonatedCwid) : null,
         // #2654 — the drafts-list affordances: the application-name label, and the staleness
         // nudge's count of confirmed publications added since the draft.
         label: g.label,

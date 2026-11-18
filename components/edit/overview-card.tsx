@@ -1798,6 +1798,7 @@ function OverviewEditorBody({
               {previewHref && (
                 <Link
                   href={previewHref}
+                  prefetch={false}
                   className="text-apollo-maroon font-medium underline underline-offset-2"
                 >
                   View it →

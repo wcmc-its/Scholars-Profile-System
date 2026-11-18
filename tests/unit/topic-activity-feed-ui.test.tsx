@@ -70,10 +70,12 @@ function stubServer(counts: Counts) {
       const q = url.searchParams;
       let body: unknown;
       if (url.pathname.endsWith("/activity") && q.get("kind") === "scholars") {
+        // A stage narrows the publication counts (server-side).
+        const pubs = q.get("stage") ? { strongly: 7, also: 0 } : PUBS;
         body = {
-          totals: { pubs: PUBS, ...counts },
+          totals: { pubs, ...counts },
           scholars: [
-            { cwid: "aaa1001", name: "Ann Able", slug: "ann-able", headshot: "", pubs: PUBS, ...counts },
+            { cwid: "aaa1001", name: "Ann Able", slug: "ann-able", headshot: "", pubs, ...counts },
             {
               cwid: "bbb2002",
               name: "Bob Baker",
@@ -192,6 +194,23 @@ describe("flag on: TopicActivityFeed", () => {
     // Publications view keeps the research-articles toggle; no related switch (no also tier).
     expect(screen.getByText(/Show all publication types/)).toBeTruthy();
     expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("a picked stage refetches the counts: Publications tab and chips follow; All stages restores", async () => {
+    const calls = stubServer({ grant: { strongly: 3, also: 1 }, trial: { strongly: 0, also: 0 } });
+    render(<TopicActivityFeed topicSlug="cardio" activeSubtopic={null} stageFilter />);
+    await waitFor(() => expect(tabCount(/Grants/)).toBe("3"));
+    expect(tabCount(/Publications/)).toBe("1");
+    fireEvent.change(select("Translational stage")!, { target: { value: "T1" } });
+    await waitFor(() => expect(tabCount(/Publications/)).toBe("7"));
+    expect(tabCount(/Grants/)).toBe("3");
+    expect(
+      calls.some((u) => u.searchParams.get("kind") === "scholars" && u.searchParams.get("stage") === "T1"),
+    ).toBe(true);
+    const chips = screen.getByTestId("activities-scholars").querySelectorAll("button[aria-pressed]");
+    expect(Array.from(chips).map((c) => c.textContent)).toContain("AAAnn Able10");
+    fireEvent.change(select("Translational stage")!, { target: { value: "all" } });
+    await waitFor(() => expect(tabCount(/Publications/)).toBe("1"));
   });
 
   it("switching to Grants fetches the activity route; Sort and the related switch reach it", async () => {

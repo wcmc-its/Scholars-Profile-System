@@ -55,6 +55,7 @@ import {
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
+import type { TranslationalStage } from "@/lib/translational-stage";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -913,6 +914,10 @@ export async function getTopicPublications(
      *  number of 20-row chunks, at most 200). `page` stays 0-indexed in units
      *  of this size. Default 20. */
     pageSize?: number;
+    /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — keep only papers shown at this
+     *  stage (`displayStage`: the stage matches and confidence is not "low").
+     *  Part of the scope, like `cwid`: it narrows every row and every count. */
+    stage?: TranslationalStage;
   },
   now: Date = new Date(),
 ): Promise<TopicPublicationsResult | null> {
@@ -953,6 +958,14 @@ export async function getTopicPublications(
   if (filter === "research_articles_only") {
     baseWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
   }
+  if (opts.stage) {
+    // Explicit null branch: Prisma's `not` never matches a NULL confidence.
+    baseWhere.publication = {
+      ...(baseWhere.publication as object | undefined),
+      translationalStage: opts.stage,
+      OR: [{ translationalStageConfidence: null }, { translationalStageConfidence: { not: "low" } }],
+    };
+  }
   // Tier filter applies to the visible row set (page query + `total`) only.
   // The tierTotals counts below intentionally ignore opts.tier so the
   // client always knows how many also-relevant rows exist regardless of
@@ -978,7 +991,10 @@ export async function getTopicPublications(
   //     papers (the #651 contract).
   // The scholar filter is part of the SCOPE (like the topic itself), so it is
   // folded into `parentCond` and reaches every count, parent-tier ones included.
-  const topicCond = Prisma.sql`pt.parent_topic_id = ${topicSlug}`;
+  const scopeCond = opts.stage
+    ? Prisma.sql`pt.parent_topic_id = ${topicSlug} AND pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.translational_stage = ${opts.stage} AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low'))`
+    : null;
+  const topicCond = scopeCond ?? Prisma.sql`pt.parent_topic_id = ${topicSlug}`;
   const parentCond = scholarCwid
     ? hiddenForScholar.length > 0
       ? Prisma.sql`${topicCond} AND pt.cwid = ${scholarCwid} AND pt.pmid NOT IN (${Prisma.join(hiddenForScholar)})`

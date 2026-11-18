@@ -72,6 +72,7 @@ export const CONSOLE_TAB_IDS = [
   "reports",
   "coi",
   "dataSharing",
+  "researchSecurity",
   "activity",
   "usage",
   "orcidCoverage",
@@ -117,6 +118,10 @@ export interface ConsoleGrants {
    *  `institution`), either role. Already
    *  ORs in `isSuperuser`. Feeds `usage`. */
   viewerCanViewUsage: boolean;
+  /** Holds a department / division / center grant, either role (from
+   *  `loadManageableUnits`; the page gate's twin is `adminsScopedUnit`).
+   *  Feeds `activity` (the unit-scoped view). */
+  viewerAdminsScopedUnit: boolean;
   /** 1 when this cwid holds any `report_access` row (reports 7–9), else 0
    *  — the non-unit report grants. A holder with a Scholar
    *  row lands on their own profile editor, so without this the Reports tab
@@ -195,6 +200,9 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
   // isn't cited to a spec doc yet, see Part B).
   dataSharing: (s, g) => dashboardVisible(s, "data-sharing", g),
 
+  // Superuser or research_security_viewer only (plus an explicit ad hoc grant).
+  researchSecurity: (s, g) => dashboardVisible(s, "research-security", g),
+
   // Gap 4 (usage half): any org-unit UnitAdmin grant (never `institution` —
   // WCM-wide aggregates stay internal), from any page. `canViewUsage`
   // already ORs in `isSuperuser`.
@@ -267,6 +275,8 @@ export const loadConsoleGrants = cache(
       manageableUnitCount: units.total,
       reportableUnitCount: reportable.length,
       viewerCanViewUsage: usage,
+      viewerAdminsScopedUnit:
+        units.departments.length + units.divisions.length + units.centers.length > 0,
       reportAccessCount: reportAccess ? 1 : 0,
       dashboards,
     };

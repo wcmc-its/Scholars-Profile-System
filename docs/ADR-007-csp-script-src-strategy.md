@@ -177,3 +177,9 @@ The `'unsafe-inline'` deviation from OWASP strict-CSP is accepted for launch on 
 7. **Report-only observation window still available.** The policy value is identical in report-only and enforce mode (`SECURITY_CSP_MODE`), so any residual violation is observable via the `/api/csp-report` collector and the flag is reversible by a single env flip.
 
 **Net Gate-B posture:** Finding 7 stays an accepted risk, not a launch blocker. Its severity was always conditional on Finding 1, and #1450 removed that condition; the CSP directive set is unchanged and correct for a static-first public directory; the nonce obstacle has not moved; and a static-compatible hardening path (build-time SRI / Trusted Types) is tracked for post-launch rather than forced pre-launch.
+
+## Amendment (2026-11-14): AWS WAF challenge SDK origin
+
+`script-src` and `connect-src` now also allow `https://*.awswaf.com`. CloudFront inserts the AWS WAF challenge SDK into every HTML page so a browser holds a WAF token before it reaches `/search` and is not shown the challenge interstitial (#3368). AWS documents the apex wildcard as the required allowlist and does not commit to stable hostnames, so a narrower entry is not available.
+
+This narrows two compensating controls in (c) rather than removing them. Control 3 still blocks external scripts from every origin except `awswaf.com`. Control 4 still confines beacons to the origin plus `awswaf.com`, a domain AWS operates and where an attacker cannot stand up an arbitrary endpoint. The `'unsafe-inline'` decision and every other directive are unchanged.

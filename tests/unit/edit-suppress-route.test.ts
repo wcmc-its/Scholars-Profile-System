@@ -174,7 +174,7 @@ describe("POST /api/edit/suppress", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, suppressionId: "sup-1" });
     expect(mockScholarUpdateMany).toHaveBeenCalledWith({
-      where: { cwid: "self01" },
+      where: { cwid: "self01", campus: "wcm" },
       data: { status: "suppressed" },
     });
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1);

@@ -40,6 +40,7 @@ export type ProbeImpersonating = {
     | "comms_steward"
     | "honors_curator"
     | "data_sharing_viewer"
+    | "research_security_viewer"
     | "development";
   /** The administered unit's kind, or `null` for a plain scholar / any global role. */
   unitKind: "department" | "division" | "center" | "core" | "institution" | null;

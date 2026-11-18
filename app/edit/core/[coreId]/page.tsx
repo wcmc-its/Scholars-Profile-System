@@ -159,7 +159,14 @@ export default async function EditCorePage({
   // cached, time-boxed, never throws). Fail-soft: if ED is down the page
   // renders as before — a leader with no name, an access row showing its CWID
   // (which UnitAccessCard then retries client-side via /api/directory/people).
-  const nameCwids = [...new Set([...leaderRows.map((l) => l.cwid), ...accessRows.map((a) => a.cwid)])];
+  // Granters too, so "Granted by" reads as a name; `ED-ETL` is the ED import's
+  // non-person actor (rendered "Web Directory" by the card).
+  const granterCwids = accessRows
+    .map((a) => a.grantedBy)
+    .filter((g): g is string => !!g && g !== "ED-ETL");
+  const nameCwids = [
+    ...new Set([...leaderRows.map((l) => l.cwid), ...accessRows.map((a) => a.cwid), ...granterCwids]),
+  ];
   const scholars = nameCwids.length
     ? await db.read.scholar.findMany({
         where: { cwid: { in: nameCwids } },
@@ -201,6 +208,10 @@ export default async function EditCorePage({
         role: a.role,
         source: a.source,
         grantedBy: a.grantedBy,
+        grantedByName:
+          a.grantedBy && a.grantedBy !== "ED-ETL"
+            ? (nameMap.get(a.grantedBy)?.name ?? fallbackName(a.grantedBy))
+            : null,
         grantedAt: a.createdAt,
       }))
     : null;

@@ -109,6 +109,8 @@ export function composeBody(opts: {
   sourceSystem?: string;
   detail?: string;
   actorCwid: string;
+  /** Actor's display name, resolved server-side; the bare CWID only when unknown. */
+  actorName?: string | null;
 }): string {
   const scholarLine = opts.targetName
     ? `${oneLine(opts.targetName)} (${oneLine(opts.targetCwid)})`
@@ -124,11 +126,11 @@ export function composeBody(opts: {
   const detail = (opts.detail ?? "").trim();
   lines.push("", detail.length > 0 ? detail : "(no additional detail provided)", "");
 
-  const actor = oneLine(opts.actorCwid);
+  const actor = opts.actorName
+    ? `${oneLine(opts.actorName)} (${oneLine(opts.actorCwid)})`
+    : oneLine(opts.actorCwid);
   const onBehalf =
-    opts.targetCwid && opts.targetCwid !== opts.actorCwid
-      ? ` on behalf of ${oneLine(opts.targetCwid)}`
-      : "";
+    opts.targetCwid && opts.targetCwid !== opts.actorCwid ? ` on behalf of ${scholarLine}` : "";
   lines.push(`Sent from the WCM Scholars profile editor by ${actor}${onBehalf}.`);
 
   return lines.join("\n");

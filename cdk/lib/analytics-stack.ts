@@ -49,8 +49,9 @@ export interface AnalyticsStackProps extends StackProps {
  *   (`sps-cf-logs-expire-${env}`, no prefix filter) that would delete rollups
  *   we intend to keep.
  * - Glue catalog: database `sps_usage_${env}`, external table `cf_access_logs`
- *   over the raw CF logs, and `daily_usage` (TSV, partition-projected on dt so
- *   no MSCK REPAIR / partition catalog management is ever needed).
+ *   over the raw CF logs, and the `daily_usage` + `daily_traffic` rollups
+ *   (TSV, partition-projected on dt so no MSCK REPAIR / partition catalog
+ *   management is ever needed).
  * - Athena workgroup `sps-usage-${env}` (enforced config, SSE-S3 results, a
  *   bytes-scanned cost cap) + saved CfnNamedQuery marketing queries.
  * - A nightly rollup Lambda (`sps-cf-usage-rollup-${env}`) fired by an
@@ -93,6 +94,7 @@ export class AnalyticsStack extends Stack {
     // between any two of them silently breaks the rollup at runtime).
     const athenaResultsPrefix = "athena-results";
     const rollupPrefix = "rollup/daily-usage";
+    const trafficPrefix = "rollup/daily-traffic";
 
     // ------------------------------------------------------------------
     // Durable analytics bucket (RETAIN, no expiry).
@@ -254,6 +256,50 @@ export class AnalyticsStack extends Stack {
     rawTable.addDependency(usageDatabase);
 
     // ------------------------------------------------------------------
+    // Rollup table `daily_traffic`: site-traffic aggregates (hits / pageviews /
+    // visitors, referrer + landing + top pages, declared AI agents). Same shape
+    // and partition projection as daily_usage, under its own prefix. A SEPARATE
+    // table so it can be backfilled (rollup Lambda event `tables: ["traffic"]`)
+    // without re-rolling daily_usage history. Aggregates only -- no client IPs.
+    // ------------------------------------------------------------------
+    const trafficLocation = this.analyticsBucket.s3UrlForObject(trafficPrefix);
+    const dailyTrafficTable = new glue.CfnTable(this, "DailyTrafficTable", {
+      catalogId: Aws.ACCOUNT_ID,
+      databaseName: usageDatabase.ref,
+      tableInput: {
+        name: "daily_traffic",
+        description: `Pre-aggregated daily CloudFront site traffic (${env}): totals, referrer/landing/top pages, AI agents. TSV, partition-projected on dt. Aggregates only -- no client IPs.`,
+        tableType: "EXTERNAL_TABLE",
+        partitionKeys: [{ name: "dt", type: "string" }],
+        parameters: {
+          classification: "csv",
+          "projection.enabled": "true",
+          "projection.dt.type": "date",
+          "projection.dt.range": "2026-05-22,NOW",
+          "projection.dt.format": "yyyy-MM-dd",
+          "storage.location.template": `${trafficLocation}/dt=` + "${dt}/",
+        },
+        storageDescriptor: {
+          columns: [
+            { name: "metric", type: "string" },
+            { name: "dimension", type: "string" },
+            { name: "cnt", type: "bigint" },
+          ],
+          location: trafficLocation,
+          inputFormat: "org.apache.hadoop.mapred.TextInputFormat",
+          outputFormat:
+            "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+          serdeInfo: {
+            serializationLibrary:
+              "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            parameters: { "field.delim": "\t" },
+          },
+        },
+      },
+    });
+    dailyTrafficTable.addDependency(usageDatabase);
+
+    // ------------------------------------------------------------------
     // Operator (interactive) Athena workgroup. Hosts the saved marketing
     // queries below and is where a human runs ad-hoc analytics. enforce=true
     // makes the result location + SSE-S3 mandatory regardless of caller input.
@@ -385,7 +431,10 @@ export class AnalyticsStack extends Stack {
       {
         constructId: "QuerySearchTerms",
         name: `sps-usage-search-terms-${env}`,
-        description: "Top 100 search terms (dimension = decoded q=).",
+        // Typed searches only since the src= split; suggestion clicks
+        // (home chips, typeahead concept picks) are metric search_term_suggested.
+        description:
+          "Top 100 typed search terms (dimension = decoded q=; suggestion clicks are metric search_term_suggested).",
         sql: [
           "SELECT dimension AS term, SUM(cnt) AS searches",
           "FROM daily_usage",
@@ -430,6 +479,50 @@ export class AnalyticsStack extends Stack {
           "WHERE metric = 'device'",
           "GROUP BY dimension",
           "ORDER BY hits DESC",
+        ].join("\n"),
+      },
+      // --- Site traffic (read the daily_traffic rollup).
+      {
+        constructId: "QueryDailyTraffic",
+        name: `sps-traffic-daily-totals-${env}`,
+        description:
+          "Daily hits, human pageviews, and estimated visitors (daily_traffic).",
+        sql: [
+          "SELECT dt,",
+          "  SUM(CASE WHEN dimension = 'hits' THEN cnt ELSE 0 END) AS hits,",
+          "  SUM(CASE WHEN dimension = 'pageviews' THEN cnt ELSE 0 END) AS pageviews,",
+          "  SUM(CASE WHEN dimension = 'visitors' THEN cnt ELSE 0 END) AS visitors",
+          "FROM daily_traffic",
+          "WHERE metric = 'traffic'",
+          "GROUP BY dt",
+          "ORDER BY dt DESC",
+        ].join("\n"),
+      },
+      {
+        constructId: "QueryReferrerPages",
+        name: `sps-traffic-referrer-pages-${env}`,
+        description:
+          "Top 100 external referring pages (host + path, no query string).",
+        sql: [
+          "SELECT dimension AS referrer_page, SUM(cnt) AS pageviews",
+          "FROM daily_traffic",
+          "WHERE metric = 'referrer_page' AND dimension <> '(other)'",
+          "GROUP BY dimension",
+          "ORDER BY pageviews DESC",
+          "LIMIT 100",
+        ].join("\n"),
+      },
+      {
+        constructId: "QueryAiAgents",
+        name: `sps-traffic-ai-agents-${env}`,
+        description:
+          "Requests by declared AI agent (dimension = class|vendor; fetch or crawler).",
+        sql: [
+          "SELECT dimension AS agent, SUM(cnt) AS requests",
+          "FROM daily_traffic",
+          "WHERE metric = 'ai_agent'",
+          "GROUP BY dimension",
+          "ORDER BY requests DESC",
         ].join("\n"),
       },
       // --- Per-URL performance (read the RAW cf_access_logs table, not the
@@ -520,8 +613,9 @@ export class AnalyticsStack extends Stack {
     // dependency runs Analytics->App and every ARN below is local to this stack.
     //
     // LEAST PRIVILEGE: query on the capped `sps-usage-${env}` workgroup only;
-    // Glue read on the `daily_usage` table only (NOT `cf_access_logs`); S3 read
-    // on the rollup-source prefix + read/write on the athena-results prefix
+    // Glue read on the `daily_usage` + `daily_traffic` rollup tables only (NOT
+    // `cf_access_logs`); S3 read on their two rollup prefixes + read/write on
+    // the athena-results prefix
     // only. No S3 access to the raw `cf/` log prefix, so the app can never read
     // client IPs / unredacted paths — the usage aggregates carry no PII.
     // ------------------------------------------------------------------
@@ -568,6 +662,11 @@ export class AnalyticsStack extends Stack {
               resource: "table",
               resourceName: `sps_usage_${env}/daily_usage`,
             }),
+            this.formatArn({
+              service: "glue",
+              resource: "table",
+              resourceName: `sps_usage_${env}/daily_traffic`,
+            }),
           ],
         }),
         new iam.PolicyStatement({
@@ -578,7 +677,10 @@ export class AnalyticsStack extends Stack {
         new iam.PolicyStatement({
           sid: "S3UsageRollupRead",
           actions: ["s3:GetObject"],
-          resources: [this.analyticsBucket.arnForObjects(`${rollupPrefix}/*`)],
+          resources: [
+            this.analyticsBucket.arnForObjects(`${rollupPrefix}/*`),
+            this.analyticsBucket.arnForObjects(`${trafficPrefix}/*`),
+          ],
         }),
         new iam.PolicyStatement({
           sid: "S3AthenaResultsReadWrite",
@@ -624,6 +726,8 @@ export class AnalyticsStack extends Stack {
         ROLLUP_TABLE: "daily_usage",
         ANALYTICS_BUCKET: this.analyticsBucket.bucketName,
         ROLLUP_PREFIX: rollupPrefix,
+        TRAFFIC_TABLE: "daily_traffic",
+        TRAFFIC_PREFIX: trafficPrefix,
         RESULT_OUTPUT:
           this.analyticsBucket.s3UrlForObject(athenaResultsPrefix),
       },
@@ -717,7 +821,11 @@ export class AnalyticsStack extends Stack {
         resources: [analyticsBucketArn],
         conditions: {
           StringLike: {
-            "s3:prefix": [`${rollupPrefix}/*`, `${athenaResultsPrefix}/*`],
+            "s3:prefix": [
+              `${rollupPrefix}/*`,
+              `${trafficPrefix}/*`,
+              `${athenaResultsPrefix}/*`,
+            ],
           },
         },
       }),
@@ -735,6 +843,7 @@ export class AnalyticsStack extends Stack {
         actions: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
         resources: [
           `${analyticsBucketArn}/${rollupPrefix}/*`,
+          `${analyticsBucketArn}/${trafficPrefix}/*`,
           `${analyticsBucketArn}/${athenaResultsPrefix}/*`,
         ],
       }),

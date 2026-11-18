@@ -66,6 +66,7 @@ export async function renderOptimizeMembershipReport({
           basePath={basePath}
           keepQuery={center ? `center=${encodeURIComponent(center)}` : ""}
           cap={SCHOLAR_EXPORT_CAP}
+          canEditRoster={ctx.viewOnly !== true}
         />
       </div>
     ),

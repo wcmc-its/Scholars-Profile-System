@@ -36,6 +36,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/edit/person-names", () => ({
+  resolvePersonNames: async (cwids: Array<string | null | undefined>) =>
+    new Map(cwids.filter((c) => c === "flm4001").map((c) => [c as string, "Fran Matcha"])),
+  nameOr: (m: Map<string, string>, c: string) => m.get(c.toLowerCase()) ?? c,
+}));
+
 import { GET as forwardGET } from "@/app/api/scholars/[cwid]/opportunities/route";
 import { GET as detailGET } from "@/app/api/opportunities/[opportunityId]/route";
 import { GET as listGET } from "@/app/api/opportunities/route";
@@ -295,6 +301,7 @@ describe("GET /api/opportunities (browse list, admin-gated, curated-first)", () 
     expect(body.opportunities[0]).toMatchObject({
       suppressedAt: "2026-08-01T00:00:00.000Z",
       suppressedBy: "flm4001",
+      suppressedByName: "Fran Matcha",
       suppressReason: "dup",
     });
   });

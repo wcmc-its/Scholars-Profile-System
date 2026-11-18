@@ -32,7 +32,8 @@ const NEEDS_QUOTING = /[",\r\n]/;
 // negative numbers / signed values in existing exports intact.
 const FORMULA_LEAD = /^[=+\-@\t\r]/;
 
-function guardFormula(s: string): string {
+/** Exported for the `.xlsx` writers, which keep the same guard (`lib/edit/matcha-xlsx.ts`). */
+export function guardFormula(s: string): string {
   if (!FORMULA_LEAD.test(s)) return s;
   if (s.trim() !== "" && !Number.isNaN(Number(s))) return s; // a numeric string
   return `'${s}`;

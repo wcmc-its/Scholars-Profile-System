@@ -1,9 +1,12 @@
 /**
  * `/edit/usage` — the in-app Usage dashboard. Site-wide CloudFront usage over a
  * chosen range (the header's Range dropdown: last 7 / 30 / 90 days, since
- * launch, or custom; default last 30) — pageviews trend, top profiles, search
- * terms, referrers, geo, device — read from the durable `daily_usage` Athena
- * rollup via a daily-cached loader keyed per range.
+ * launch, or custom; default last 30) — pageviews trend, top profiles, typed
+ * and suggested search terms (+ a searches tile), geo, device — read from the durable `daily_usage` Athena
+ * rollup via a daily-cached loader keyed per range. The traffic sections (hits,
+ * pageviews, visitors, where visits come from, referring sites and pages, top
+ * and landing pages, AI) read the `daily_traffic` rollup (lib/api/usage-traffic)
+ * with their own fail-soft; their client island is ./traffic-widgets.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
  * and stay operator-restricted).
@@ -11,15 +14,26 @@
  * Also carries service health (uptime + alarm-firing KPI tiles and a monthly
  * "Uptime since launch" card), read from CloudWatch via
  * lib/api/service-health.ts — independent of the Athena data above, with its
- * own fail-soft.
+ * own fail-soft. The hourly card's profile-edits line reads the audit log
+ * (lib/api/usage-edits.ts) and fails soft on its own too: a DB error drops the
+ * line and says so, leaving the traffic bars.
  *
  * Layout (2026-09 page revision): header, a four-tile KPI row, the pageviews
- * chart card, Top profiles + Top search terms side by side, three Traffic
- * sources cards, then the uptime card. The interactive bits (chart hover, Show
+ * chart card, the "Traffic by hour" card (served / bot or challenged / error,
+ * Eastern time, plus a profile-edits line),
+ * Top profiles + Top typed search terms side by side (Suggested
+ * searches wraps below), the traffic sections (./traffic-widgets), the
+ * Geography and Device cards, then the uptime card. The interactive bits (chart hover, Show
  * all, client-side CSV, the uptime ⓘ) are client islands in ./usage-widgets.
  *
  * Audience: a **superuser** or **any unit administrator** (owner/curator) —
- * `canViewUsage`. Global view for everyone (no per-unit scoping). Re-checked on
+ * `canViewUsage`. A department / division / center admin sees the profile
+ * sections (pageviews tile and chart, busiest day, top profiles, top pages,
+ * the edits line) for their own people, and every other section unchanged
+ * under a "Site-wide" heading; everyone else sees the whole page site-wide
+ * (`loadDashboardScope`, decision 2026-11-17). The scope comes from the
+ * session; the unit's numbers are small Athena reads over its own slugs,
+ * cached per slug set, apart from the site-wide entries. Re-checked on
  * every GET; the DATA is cached (daily / 12h) but the AUTH is not. Fails soft
  * to an "unavailable" notice per section if its own data source errors
  * (mirrors the /edit/activity pattern).
@@ -32,19 +46,39 @@ import {
   type MonthlyAvailability,
   type ServiceHealthSummary,
   loadServiceHealth,
+  summarizeServiceHealth,
 } from "@/lib/api/service-health";
-import { addDays, resolveUsageRange } from "@/lib/api/usage-range";
-import { type NamedCount, type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
+import { SEARCH_STATS_START } from "@/lib/analytics/usage-queries";
+import { loadEditsByHour, loadEditsByHourUncached } from "@/lib/api/usage-edits";
+import type { EditHour } from "@/lib/api/usage-hourly";
+import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
+import type { TrafficOverview } from "@/lib/analytics/traffic-view";
+import { loadTrafficOverview } from "@/lib/api/usage-traffic";
+import {
+  type NamedCount,
+  type SearchVolume,
+  type UsageSummary,
+  loadScopedProfileViews,
+  loadUsageSummary,
+  scopeUsageSummary,
+} from "@/lib/api/usage-summary";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { canViewDashboard } from "@/lib/edit/dashboard-access";
+import {
+  activityScopeSql,
+  canViewDashboard,
+  loadDashboardScope,
+  loadScopeSlugs,
+} from "@/lib/edit/dashboard-access";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { cn } from "@/lib/utils";
 
+import { TopPages, TrafficSection } from "./traffic-widgets";
 import { fillDayGaps, monthLabel, pctLabel, shortDay } from "./usage-format";
 import {
+  HourlyTrafficChart,
   PageviewsChart,
   RankTable,
   UptimeInfoButton,
@@ -86,14 +120,51 @@ function KpiTile({
   );
 }
 
-/** Headline row: pageviews + busiest day (Athena rollup), uptime + alarm
- *  firings (CloudWatch). Each pair fails soft on its own source. */
+/** The selected range as a tile sub-line phrase: "last 7 days", "since
+ *  launch", or a custom range's "Oct 1 – Oct 15". */
+function rangePhrase(range: UsageRange): string {
+  if (range.key === "launch") return "since launch";
+  if (range.key === "custom") return `${shortDay(range.since)} – ${shortDay(range.until)}`;
+  return `last ${range.days} days`;
+}
+
+/** The alarm tile's sub-line. CloudWatch keeps only 30 days of alarm history,
+ *  so a longer or older range says what the count actually covers. */
+function alarmSub(health: ServiceHealthSummary, range: UsageRange): string {
+  if (health.alarmCoverage === "none") return "CloudWatch keeps only 30 days of alarm history";
+  if (health.alarmCoverage === "partial") {
+    return `fired since ${shortDay(health.alarmSince)} (CloudWatch keeps 30 days)`;
+  }
+  return range.key === "launch" || range.key === "custom"
+    ? `fired ${rangePhrase(range)}`
+    : `fired in ${rangePhrase(range)}`;
+}
+
+/** Search counts start at SEARCH_STATS_START; say so wherever they show. */
+const SEARCH_START_NOTE = `Counted from ${shortDay(SEARCH_STATS_START)}: earlier days were inflated by link prefetching and can't be corrected.`;
+
+/** The searches tile's sub-line: typed vs suggestion clicks. */
+function searchSplitSub({ typed, suggested }: SearchVolume): string {
+  return typed + suggested === 0
+    ? "no searches recorded"
+    : `${typed.toLocaleString()} typed · ${suggested.toLocaleString()} from suggestions`;
+}
+
+/** Headline row: pageviews + busiest day + searches (Athena rollup), uptime + alarm
+ *  firings (CloudWatch). Every tile follows the header's Range. Each pair
+ *  fails soft on its own source. A unit-scoped page draws the row twice:
+ *  `part="unit"` is the two profile tiles (the viewer's people), `part="site"`
+ *  the rest. */
 function KpiRow({
   summary,
   health,
+  range,
+  part,
 }: {
   summary: UsageSummary | null;
   health: ServiceHealthSummary | null;
+  range: UsageRange;
+  part?: "unit" | "site";
 }) {
   const days = summary?.pageviewsByDay ?? [];
   const peak = days.reduce<(typeof days)[number] | null>(
@@ -103,7 +174,7 @@ function KpiRow({
   const perDay = summary ? Math.round(summary.totalPageviews / Math.max(1, days.length)) : 0;
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3.5">
-      {summary ? (
+      {summary && part !== "site" ? (
         <>
           <KpiTile
             label="Profile pageviews"
@@ -119,18 +190,30 @@ function KpiRow({
           />
         </>
       ) : null}
-      {health ? (
+      {summary && part !== "unit" ? (
+        <KpiTile
+          label="Searches"
+          value={(summary.searchVolume.typed + summary.searchVolume.suggested).toLocaleString()}
+          sub={searchSplitSub(summary.searchVolume)}
+          testId="usage-searches"
+        />
+      ) : null}
+      {part === "unit" ? null : health ? (
         <>
           <KpiTile
             label="Uptime"
-            value={`${health.uptimePercent.toFixed(2)}%`}
-            sub={`last ${health.windowDays} days`}
+            value={health.uptimePercent === null ? "—" : `${health.uptimePercent.toFixed(2)}%`}
+            sub={
+              health.uptimePercent === null
+                ? `no load balancer data ${rangePhrase(range)}`
+                : rangePhrase(range)
+            }
             testId="service-health-uptime"
           />
           <KpiTile
             label="Availability alarms"
-            value={health.alarmFirings.toLocaleString()}
-            sub={`fired in last ${health.windowDays} days`}
+            value={health.alarmFirings === null ? "—" : health.alarmFirings.toLocaleString()}
+            sub={alarmSub(health, range)}
             testId="service-health-alarm-firings"
           />
         </>
@@ -233,7 +316,6 @@ function TrafficSources({ summary }: { summary: UsageSummary }) {
         </span>
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] items-start gap-5">
-        <SplitCard title="Referrers" rows={summary.referrers} emptyLabel="No referrer data." />
         <SplitCard title="Geography" rows={summary.geo} emptyLabel="No geo data." />
         <SplitCard
           title="Device"
@@ -337,10 +419,19 @@ async function resolveProfileNames(
 function UsageBody({
   summary,
   names,
+  edits,
+  part,
 }: {
   summary: UsageSummary;
   names: Map<string, { cwid: string; name: string }>;
+  /** Profile edits by hour; null when the audit-log read failed. */
+  edits: EditHour[] | null;
+  /** A unit-scoped page draws the body twice: `"unit"` is the pageviews chart
+   *  and Top profiles (the viewer's people), `"site"` the rest. */
+  part?: "unit" | "site";
 }) {
+  const unit = part !== "site";
+  const site = part !== "unit";
   const profileRows: RankRow[] = summary.topProfiles.map((p) => {
     const hit = names.get(p.slug);
     return {
@@ -352,14 +443,12 @@ function UsageBody({
       csvExtra: p.slug,
     };
   });
-  const termRows: RankRow[] = summary.searchTerms.map((t) => ({
-    label: t.term,
-    count: t.searches,
-  }));
+  const toTermRows = (terms: UsageSummary["searchTerms"]): RankRow[] =>
+    terms.map((t) => ({ label: t.term, count: t.searches }));
 
   return (
     <>
-      {summary.pageviewsByDay.length === 0 ? (
+      {!unit ? null : summary.pageviewsByDay.length === 0 ? (
         <section className={cn(cardClass, "px-[22px] py-5")}>
           <h2 className="text-[17px] font-semibold">Profile pageviews by day</h2>
           <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-pageviews-empty">
@@ -370,29 +459,62 @@ function UsageBody({
         <PageviewsChart data={fillDayGaps(summary.pageviewsByDay, summary.since, summary.until)} />
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">
-        <RankTable
-          testId="usage-top-profiles"
-          title="Top profiles"
-          unit="Views"
-          labelHeader="Profile"
-          extraHeader="Slug"
-          csvName="usage-top-profiles"
-          rows={profileRows}
-          emptyLabel="No profile views in the window."
+      {!site ? null : summary.hourly.buckets.length === 0 ? (
+        <section className={cn(cardClass, "px-[22px] py-5")}>
+          <h2 className="text-[17px] font-semibold">Traffic by hour</h2>
+          <p className="text-muted-foreground mt-2 text-sm" data-testid="usage-hourly-empty">
+            No hourly data in this range yet. Hourly traffic (served, bot or challenged, and error
+            requests by hour) is recorded from the first nightly rollup after it shipped in November
+            2026; earlier days have none.
+          </p>
+        </section>
+      ) : (
+        <HourlyTrafficChart
+          traffic={summary.hourly}
+          since={summary.since}
+          edits={edits}
+          editsLabel={part === "site" ? "Profile edits, your units" : undefined}
         />
-        <RankTable
-          testId="usage-top-search-terms"
-          title="Top search terms"
-          unit="Searches"
-          labelHeader="Term"
-          csvName="usage-top-search-terms"
-          rows={termRows}
-          emptyLabel="No searches in the window."
-        />
-      </div>
+      )}
 
-      <TrafficSources summary={summary} />
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(380px,100%),1fr))] items-start gap-5">
+        {unit ? (
+          <RankTable
+            testId="usage-top-profiles"
+            title="Top profiles"
+            unit="Views"
+            labelHeader="Profile"
+            extraHeader="Slug"
+            csvName="usage-top-profiles"
+            rows={profileRows}
+            emptyLabel="No profile views in the window."
+          />
+        ) : null}
+        {site ? (
+          <>
+            <RankTable
+              testId="usage-top-search-terms"
+              title="Top typed search terms"
+              unit="Searches"
+              labelHeader="Term"
+              csvName="usage-top-search-terms"
+              rows={toTermRows(summary.searchTerms)}
+              emptyLabel="No searches in the window."
+              note={`Searches typed into the search box, including paging and filtering. Untagged searches for exactly a Try chip term are left out as automated. Can still include automated traffic that passed the firewall. ${SEARCH_START_NOTE}`}
+            />
+            <RankTable
+              testId="usage-suggested-search-terms"
+              title="Suggested searches"
+              unit="Clicks"
+              labelHeader="Term"
+              csvName="usage-suggested-search-terms"
+              rows={toTermRows(summary.suggestedSearchTerms)}
+              emptyLabel="No suggestion clicks in the window."
+              note={`Home-page Try chips and concepts picked from the search box suggestions. ${SEARCH_START_NOTE}`}
+            />
+          </>
+        ) : null}
+      </div>
     </>
   );
 }
@@ -414,7 +536,12 @@ export default async function EditUsagePage({
       reason: "not_superuser_or_unit_admin",
     });
     return (
-      <ConsoleShell active="usage" session={session} pendingSlugRequests={null} pendingHonors={null}>
+      <ConsoleShell
+        active="usage"
+        session={session}
+        pendingSlugRequests={null}
+        pendingHonors={null}
+      >
         <ForbiddenEditPage session={session} />
       </ConsoleShell>
     );
@@ -427,9 +554,7 @@ export default async function EditUsagePage({
     session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   // #1762 — drives the "Honors" tab + its pending badge. `null` hides the tab:
   // flag off, or this viewer is neither superuser nor honors_curator.
-  const pendingHonors = isHonorsQueueTabVisible(session)
-    ? await countPendingHonors(db.read)
-    : null;
+  const pendingHonors = isHonorsQueueTabVisible(session) ? await countPendingHonors(db.read) : null;
 
   // The header's Range dropdown (`?range=`, `?from=`/`?to=`); a bad or missing
   // param falls back to the last 30 days.
@@ -451,12 +576,40 @@ export default async function EditUsagePage({
     );
   }
 
+  // A department / division / center admin sees the profile sections for
+  // their own people; everyone else, the whole page site-wide. Resolved from
+  // the session, never from the request.
+  const scope = await loadDashboardScope(session, "usage");
+  // The viewer's own profile numbers: Athena reads over their people's slugs
+  // (from our DB, never the request), cached per slug set. Their own reads,
+  // so their own fail-soft.
+  let unitSummary: UsageSummary | null = null;
+  if (!scope.all && summary) {
+    try {
+      const slugs = await loadScopeSlugs(scope.memberCwids);
+      unitSummary = scopeUsageSummary(
+        summary,
+        await loadScopedProfileViews(range, slugs.keys()),
+        slugs,
+      );
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: "usage_unit_scope_read_failed",
+          path: "/edit/usage",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
   // Independent data source (CloudWatch, not the Athena rollup above) with
   // its own fail-soft: a CloudWatch error only blanks the service-health
   // tiles + uptime card, never the rest of the page.
   let serviceHealth: ServiceHealthSummary | null = null;
   try {
-    serviceHealth = await loadServiceHealth();
+    // One cached read for every range, windowed to the selected one here.
+    serviceHealth = summarizeServiceHealth(await loadServiceHealth(), range);
   } catch (err) {
     console.error(
       JSON.stringify({
@@ -467,8 +620,50 @@ export default async function EditUsagePage({
     );
   }
 
-  const names = summary
-    ? await resolveProfileNames(summary.topProfiles.map((p) => p.slug))
+  // The traffic sections read their own rollup (daily_traffic) and fail soft
+  // on their own: an error there blanks only those sections.
+  let traffic: TrafficOverview | null = null;
+  try {
+    traffic = await loadTrafficOverview({ since: range.since, until: range.until });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "usage_traffic_read_failed",
+        path: "/edit/usage",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+  const rangeQuery =
+    range.key === "custom"
+      ? `range=custom&from=${range.since}&to=${range.until}`
+      : `range=${range.key}`;
+  // Profile edits by hour for the hourly card, from the audit log: its own
+  // source, so its own fail-soft (a DB error drops the line, never the card).
+  // Read only when the card will draw.
+  let edits: EditHour[] | null = [];
+  if (summary && summary.hourly.buckets.length > 0) {
+    try {
+      // A scoped viewer's line counts edits to their own people and units: a
+      // per-viewer read, so it skips the shared cache.
+      edits = scope.all
+        ? await loadEditsByHour(db.read, range)
+        : await loadEditsByHourUncached(db.read, range.since, range.until, activityScopeSql(scope));
+    } catch (err) {
+      edits = null;
+      console.error(
+        JSON.stringify({
+          event: "usage_edits_by_hour_failed",
+          path: "/edit/usage",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
+
+  const profiles = scope.all ? summary : unitSummary;
+  const names = profiles
+    ? await resolveProfileNames(profiles.topProfiles.map((p) => p.slug))
     : new Map<string, { cwid: string; name: string }>();
   const days = summary?.pageviewsByDay ?? [];
   // The span the data actually covers; the requested window when it's empty.
@@ -491,10 +686,12 @@ export default async function EditUsagePage({
       <div className="flex flex-col gap-7">
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-1.5">
-            <h1 className="text-[30px] leading-tight font-semibold tracking-[-.01em]">Usage</h1>
+            <h1 className="text-[30px] leading-tight font-semibold tracking-[-.01em]">
+              {scope.all ? "Usage" : `Usage: ${scope.unitNames.join(", ")}`}
+            </h1>
             <p className="text-muted-foreground text-[14.5px] leading-normal">
-              Site-wide usage, {rangeSpan}. From the nightly CloudFront rollup; refreshes about once
-              a day.
+              {scope.all ? "Site-wide usage" : "Profile usage for your units, then site-wide usage"}
+              , {rangeSpan}. From the nightly CloudFront rollup; refreshes about once a day.
             </p>
           </div>
           <UsageRangePicker
@@ -505,7 +702,41 @@ export default async function EditUsagePage({
           />
         </div>
 
-        <KpiRow summary={summary} health={serviceHealth} />
+        {scope.all ? (
+          <KpiRow summary={summary} health={serviceHealth} range={range} />
+        ) : (
+          <>
+            {unitSummary ? (
+              <>
+                <KpiRow summary={unitSummary} health={null} range={range} part="unit" />
+                <UsageBody summary={unitSummary} names={names} edits={edits} part="unit" />
+              </>
+            ) : (
+              <p className="text-muted-foreground" data-testid="usage-unit-unavailable">
+                Usage for your units is temporarily unavailable. Please try again later or contact
+                ITS Support if this persists.
+              </p>
+            )}
+            {traffic && traffic.firstDt !== null && traffic.firstDt <= range.until ? (
+              <TopPages
+                rangeQuery={rangeQuery}
+                exportHref={`/api/edit/usage/traffic/export?${rangeQuery}&grain=week`}
+                scoped
+              />
+            ) : null}
+            <div
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1"
+              data-testid="usage-site-wide"
+            >
+              <h2 className="text-[17px] font-semibold">Site-wide</h2>
+              <span className="text-muted-foreground text-[13px]">
+                The sections below cover all of Scholars, except the profile edits line, which
+                counts your units.
+              </span>
+            </div>
+            <KpiRow summary={summary} health={serviceHealth} range={range} part="site" />
+          </>
+        )}
 
         {unavailable ? (
           <p className="text-muted-foreground" data-testid="edit-usage-unavailable">
@@ -513,8 +744,23 @@ export default async function EditUsagePage({
             this persists.
           </p>
         ) : (
-          <UsageBody summary={summary!} names={names} />
+          <UsageBody
+            summary={summary!}
+            names={names}
+            edits={edits}
+            part={scope.all ? undefined : "site"}
+          />
         )}
+
+        {traffic ? (
+          <TrafficSection overview={traffic} rangeQuery={rangeQuery} scoped={!scope.all} />
+        ) : (
+          <p className="text-muted-foreground" data-testid="usage-traffic-unavailable">
+            Traffic and referrer detail is temporarily unavailable.
+          </p>
+        )}
+
+        {summary ? <TrafficSources summary={summary} /> : null}
 
         {serviceHealth ? <UptimeCard monthly={serviceHealth.monthly} /> : null}
       </div>

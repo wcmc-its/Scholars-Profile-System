@@ -163,7 +163,7 @@ user who has no OS handler can still copy it. This directly resolves the current
 ## 5. Phase 2 delta (documented now, built later)
 
 - **Mailer:** SES in the SPS account. Decision deferred to a Phase-2 infra
-  ticket: verified sender identity `no-reply-scholars@weill.cornell.edu`
+  ticket: verified sender identity `no-reply@scholars-mail.weill.cornell.edu`
   (decision 2026-05-26), sandbox exit, ECS task IAM `ses:SendEmail`, CDK wiring. (Alternative: WCM SMTP
   relay — currently blocked by the VPC↔WCM connectivity gap; not pursued.)
 - **Endpoint:** `POST /api/edit/request-change`, mirroring `app/api/edit/suppress/route.ts`
@@ -262,7 +262,7 @@ ORDER BY created_at DESC;
 1. **Trigger granularity** — per-row on entity panels (item-scoped),
    section-level on the read-only Name/Photo panels.
 2. **Icon** — keep `Flag`.
-3. **Phase 2 sender identity** — SES From = `no-reply-scholars@weill.cornell.edu`.
+3. **Phase 2 sender identity** — SES From = `no-reply@scholars-mail.weill.cornell.edu`.
 
 ## 12. Router refinement (2026-05-26, post-review)
 

@@ -95,7 +95,7 @@ describe("buildConsoleLinks", () => {
   it("developer (not a superuser) → 'Matcha', alongside any other role's rows", () => {
     expect(
       buildConsoleLinks({ isSuperuser: false, isCommsSteward: false, managesUnits: false, isDeveloper: true }),
-    ).toEqual([{ id: "matcha", label: "Matcha", href: "/edit/matcha" }]);
+    ).toEqual([{ id: "matcha", label: "Matcha: Open search", href: "/edit/matcha" }]);
     expect(
       buildConsoleLinks({ isSuperuser: false, isCommsSteward: true, managesUnits: false, isDeveloper: true }).map(
         (l) => l.id,
@@ -109,5 +109,32 @@ describe("buildConsoleLinks", () => {
         (l) => l.id,
       ),
     ).toEqual(["manage-profiles"]);
+  });
+
+  it("proxy for one scholar → direct link to that scholar's editor", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      isCommsSteward: false,
+      managesUnits: false,
+      isDeveloper: false,
+      proxyFor: [{ cwid: "abc1234", name: "Jane Doe" }],
+    });
+    expect(links).toEqual([
+      { id: "proxy", label: "Edit Jane Doe's profile", href: "/edit/scholar/abc1234" },
+    ]);
+  });
+
+  it("proxy for several scholars → /edit chooser", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      isCommsSteward: false,
+      managesUnits: false,
+      isDeveloper: false,
+      proxyFor: [
+        { cwid: "a", name: "A" },
+        { cwid: "b", name: "B" },
+      ],
+    });
+    expect(links).toEqual([{ id: "proxy", label: "Profiles I edit", href: "/edit" }]);
   });
 });

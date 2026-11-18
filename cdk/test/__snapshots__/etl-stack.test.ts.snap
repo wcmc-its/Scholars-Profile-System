@@ -106,6 +106,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       "Default": "/sps/prod/etl/feedback-digest-recipient",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/etl/openalex-mailto",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AnnualScheduleRuleF1823588": {
@@ -2171,7 +2175,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -2181,6 +2185,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -2242,6 +2252,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -2868,7 +2890,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -2878,6 +2900,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -2939,6 +2967,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -3502,7 +3542,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -3512,6 +3552,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -3573,6 +3619,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -4067,7 +4125,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -4077,6 +4135,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -4138,6 +4202,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -5071,7 +5147,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -5081,6 +5157,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsprodetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsprodetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -5142,6 +5224,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "off",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -5848,6 +5942,30 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EtlTaskRoleMentoringBridgeExportPolicyD76F793C": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/prod/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/citations/prod/*",
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlTaskRoleMentoringBridgeExportPolicyD76F793C",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EtlTaskRoleReciterAiPolicy94DB4024": {
       "Properties": {
         "PolicyDocument": {
@@ -5895,11 +6013,14 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               "Action": "ses:SendEmail",
               "Condition": {
                 "StringEquals": {
-                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                  "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu",
                 },
               },
               "Effect": "Allow",
-              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+              "Resource": [
+                "arn:aws:ses:us-east-1:123456789012:identity/*",
+                "arn:aws:ses:us-east-1:123456789012:configuration-set/scholars-mail-default",
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -8468,6 +8589,32 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Description": "SPS prod: Inspector found a fixable CRITICAL or HIGH vulnerability in a running image",
         "EventPattern": {
           "detail": {
+            "$or": [
+              {
+                "packageVulnerabilityDetails": {
+                  "vulnerablePackages": {
+                    "filePath": [
+                      {
+                        "anything-but": {
+                          "prefix": "/usr/local/lib/node_modules/npm/",
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                "packageVulnerabilityDetails": {
+                  "vulnerablePackages": {
+                    "filePath": [
+                      {
+                        "exists": false,
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
             "fixAvailable": [
               "YES",
             ],
@@ -8661,7 +8808,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CtscRoster"}],"Next":"TaskCtscRoster"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputs"}],"Next":"TaskAreaSignalInputs"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ScholarActiveExport"}],"Next":"TaskScholarActiveExport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClipsNightly"}],"Next":"TaskClipsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NewsNightly"}],"Next":"TaskNewsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RosterProminenceNightly"}],"Next":"TaskRosterProminenceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CenterPubRelevanceNightly"}],"Next":"TaskCenterPubRelevanceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotMissingNightly"}],"Next":"TaskHeadshotMissingNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CtscRoster"}],"Next":"TaskCtscRoster"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IthacaRoster"}],"Next":"TaskIthacaRoster"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ResearchSecurity"}],"Next":"TaskResearchSecurity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputs"}],"Next":"TaskAreaSignalInputs"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ScholarActiveExport"}],"Next":"TaskScholarActiveExport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClipsNightly"}],"Next":"TaskClipsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NewsNightly"}],"Next":"TaskNewsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RosterProminenceNightly"}],"Next":"TaskRosterProminenceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CenterPubRelevanceNightly"}],"Next":"TaskCenterPubRelevanceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotMissingNightly"}],"Next":"TaskHeadshotMissingNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8677,7 +8824,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-ldap-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:admins"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCtscRoster":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCtscRoster"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:admins"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCtscRoster":{"Next":"TaskIthacaRoster","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCtscRoster"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8693,7 +8840,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"EdAdmins","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- EdAdmins failed"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"EdAdmins","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- EdAdmins failed"}},"TaskIthacaRoster":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyIthacaRoster"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8701,7 +8848,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCtscRoster":{"Next":"TaskReciter","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ithaca-roster"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCtscRoster":{"Next":"TaskIthacaRoster","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8709,7 +8856,23 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"CtscRoster","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- CtscRoster failed"}},"TaskReciterCoiStatements":{"Next":"TaskOrcidCandidates","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"CtscRoster","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- CtscRoster failed"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyIthacaRoster":{"Next":"TaskReciter","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"IthacaRoster","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- IthacaRoster failed"}},"TaskReciterCoiStatements":{"Next":"TaskResearchSecurity","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8725,7 +8888,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Reciter failed"}},"TaskOrcidCandidates":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyOrcidCandidates"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Reciter failed"}},"TaskResearchSecurity":{"Next":"TaskOrcidCandidates","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyResearchSecurity"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8733,7 +8896,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-candidates"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskOrcidCandidates","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:research-security"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskResearchSecurity","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8741,7 +8904,23 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"ReciterCoiStatements","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- ReciterCoiStatements failed"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"ReciterCoiStatements","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- ReciterCoiStatements failed"}},"TaskOrcidCandidates":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyOrcidCandidates"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-candidates"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyResearchSecurity":{"Next":"TaskOrcidCandidates","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"ResearchSecurity","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- ResearchSecurity failed"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10643,7 +10822,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterCollabReport"}],"Next":"TaskCancerCenterCollabReport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterDiseaseAssignmentsWeekly"}],"Next":"TaskCancerCenterDiseaseAssignmentsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGapWeekly"}],"Next":"TaskCoiGapWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FrtWeekly"}],"Next":"TaskFrtWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidRegistryWeekly"}],"Next":"TaskOrcidRegistryWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"InfoedBiosketchWeekly"}],"Next":"TaskInfoedBiosketchWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MyncbiWeekly"}],"Next":"TaskMyncbiWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidEvidenceWeekly"}],"Next":"TaskOrcidEvidenceWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IdentityLinksWeekly"}],"Next":"TaskIdentityLinksWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PopsWeekly"}],"Next":"TaskPopsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterGrantsWeekly"}],"Next":"TaskReporterGrantsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClinicalTrialsWeekly"}],"Next":"TaskClinicalTrialsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputsWeekly"}],"Next":"TaskAreaSignalInputsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"DataSharingWeekly"}],"Next":"TaskDataSharingWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JournalImpactFactorWeekly"}],"Next":"TaskJournalImpactFactorWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"TechnologyWeekly"}],"Next":"TaskTechnologyWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundingDigestWeekly"}],"Next":"TaskFundingDigestWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundableWorkWeekly"}],"Next":"TaskFundableWorkWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityWeekly"}],"Next":"TaskIntegrityWeekly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"WeeklyStateMachineUnknownStartFrom"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterCollabReport"}],"Next":"TaskCancerCenterCollabReport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterDiseaseAssignmentsWeekly"}],"Next":"TaskCancerCenterDiseaseAssignmentsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGapWeekly"}],"Next":"TaskCoiGapWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FrtWeekly"}],"Next":"TaskFrtWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidRegistryWeekly"}],"Next":"TaskOrcidRegistryWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"InfoedBiosketchWeekly"}],"Next":"TaskInfoedBiosketchWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MyncbiWeekly"}],"Next":"TaskMyncbiWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidEvidenceWeekly"}],"Next":"TaskOrcidEvidenceWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IdentityLinksWeekly"}],"Next":"TaskIdentityLinksWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PopsWeekly"}],"Next":"TaskPopsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterGrantsWeekly"}],"Next":"TaskReporterGrantsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClinicalTrialsWeekly"}],"Next":"TaskClinicalTrialsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputsWeekly"}],"Next":"TaskAreaSignalInputsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"DataSharingWeekly"}],"Next":"TaskDataSharingWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MentoringBridgeWeekly"}],"Next":"TaskMentoringBridgeWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JournalImpactFactorWeekly"}],"Next":"TaskJournalImpactFactorWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"TechnologyWeekly"}],"Next":"TaskTechnologyWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundingDigestWeekly"}],"Next":"TaskFundingDigestWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundableWorkWeekly"}],"Next":"TaskFundableWorkWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityWeekly"}],"Next":"TaskIntegrityWeekly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"WeeklyStateMachineUnknownStartFrom"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10955,7 +11134,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"ClinicalTrialsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- ClinicalTrialsWeekly failed"}},"TaskDataSharingWeekly":{"Next":"TaskJournalImpactFactorWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDataSharingWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"ClinicalTrialsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- ClinicalTrialsWeekly failed"}},"TaskDataSharingWeekly":{"Next":"TaskMentoringBridgeWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDataSharingWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10971,7 +11150,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"AreaSignalInputsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- AreaSignalInputsWeekly failed"}},"TaskJournalImpactFactorWeekly":{"Next":"TaskTechnologyWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJournalImpactFactorWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"AreaSignalInputsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- AreaSignalInputsWeekly failed"}},"TaskMentoringBridgeWeekly":{"Next":"TaskJournalImpactFactorWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyMentoringBridgeWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10979,7 +11158,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:journal-impact-factor"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyDataSharingWeekly":{"Next":"TaskJournalImpactFactorWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:mentoring:refresh"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyDataSharingWeekly":{"Next":"TaskMentoringBridgeWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10987,7 +11166,23 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"DataSharingWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- DataSharingWeekly failed"}},"TaskTechnologyWeekly":{"Next":"TaskFundingDigestWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyTechnologyWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"prod","step":"DataSharingWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- DataSharingWeekly failed"}},"TaskJournalImpactFactorWeekly":{"Next":"TaskTechnologyWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJournalImpactFactorWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:journal-impact-factor"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyMentoringBridgeWeekly":{"Next":"TaskJournalImpactFactorWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"MentoringBridgeWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- MentoringBridgeWeekly failed"}},"TaskTechnologyWeekly":{"Next":"TaskFundingDigestWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyTechnologyWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -11785,6 +11980,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
     },
     "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter": {
       "Default": "/sps/staging/etl/feedback-digest-recipient",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/etl/openalex-mailto",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
   },
@@ -14496,7 +14695,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -14506,6 +14705,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -14567,6 +14772,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -15193,7 +15410,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -15203,6 +15420,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -15264,6 +15487,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -15827,7 +16062,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -15837,6 +16072,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -15898,6 +16139,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -16392,7 +16645,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -16402,6 +16655,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -16463,6 +16722,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -17396,7 +17667,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_MAIL_FROM",
-                "Value": "no-reply-scholars@weill.cornell.edu",
+                "Value": "no-reply@scholars-mail.weill.cornell.edu",
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
@@ -17406,6 +17677,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "FEEDBACK_DIGEST_RECIPIENT",
                 "Value": {
                   "Ref": "SsmParameterValuespsstagingetlfeedbackdigestrecipientC96584B6F00A464EAD1953AFF4B05118Parameter",
+                },
+              },
+              {
+                "Name": "OPENALEX_MAILTO",
+                "Value": {
+                  "Ref": "SsmParameterValuespsstagingetlopenalexmailtoC96584B6F00A464EAD1953AFF4B05118Parameter",
                 },
               },
               {
@@ -17467,6 +17744,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "ORCID_HISTORY_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "RESEARCH_SECURITY_ETL",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -18178,6 +18467,30 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EtlTaskRoleMentoringBridgeExportPolicyD76F793C": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/staging/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/citations/staging/*",
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlTaskRoleMentoringBridgeExportPolicyD76F793C",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EtlTaskRoleReciterAiPolicy94DB4024": {
       "Properties": {
         "PolicyDocument": {
@@ -18225,11 +18538,14 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               "Action": "ses:SendEmail",
               "Condition": {
                 "StringEquals": {
-                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                  "ses:FromAddress": "no-reply@scholars-mail.weill.cornell.edu",
                 },
               },
               "Effect": "Allow",
-              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+              "Resource": [
+                "arn:aws:ses:us-east-1:123456789012:identity/*",
+                "arn:aws:ses:us-east-1:123456789012:configuration-set/scholars-mail-default",
+              ],
             },
           ],
           "Version": "2012-10-17",
@@ -20937,7 +21253,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CtscRoster"}],"Next":"TaskCtscRoster"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputs"}],"Next":"TaskAreaSignalInputs"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ScholarActiveExport"}],"Next":"TaskScholarActiveExport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClipsNightly"}],"Next":"TaskClipsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NewsNightly"}],"Next":"TaskNewsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RosterProminenceNightly"}],"Next":"TaskRosterProminenceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CenterPubRelevanceNightly"}],"Next":"TaskCenterPubRelevanceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotMissingNightly"}],"Next":"TaskHeadshotMissingNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CtscRoster"}],"Next":"TaskCtscRoster"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IthacaRoster"}],"Next":"TaskIthacaRoster"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ResearchSecurity"}],"Next":"TaskResearchSecurity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidCandidates"}],"Next":"TaskOrcidCandidates"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputs"}],"Next":"TaskAreaSignalInputs"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidPush"}],"Next":"TaskOrcidPush"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ScholarActiveExport"}],"Next":"TaskScholarActiveExport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySensitivityNightly"}],"Next":"TaskFamilySensitivityNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FamilySuppressionNightly"}],"Next":"TaskFamilySuppressionNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAliasNightly"}],"Next":"TaskMeshAliasNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClipsNightly"}],"Next":"TaskClipsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NewsNightly"}],"Next":"TaskNewsNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RosterProminenceNightly"}],"Next":"TaskRosterProminenceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CenterPubRelevanceNightly"}],"Next":"TaskCenterPubRelevanceNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotMissingNightly"}],"Next":"TaskHeadshotMissingNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -20953,7 +21269,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:admins"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCtscRoster":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCtscRoster"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:admins"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCtscRoster":{"Next":"TaskIthacaRoster","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCtscRoster"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -20969,7 +21285,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"EdAdmins","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- EdAdmins failed"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"EdAdmins","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- EdAdmins failed"}},"TaskIthacaRoster":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyIthacaRoster"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -20977,7 +21293,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCtscRoster":{"Next":"TaskReciter","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ithaca-roster"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCtscRoster":{"Next":"TaskIthacaRoster","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -20985,7 +21301,23 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"CtscRoster","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- CtscRoster failed"}},"TaskReciterCoiStatements":{"Next":"TaskOrcidCandidates","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"CtscRoster","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- CtscRoster failed"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyIthacaRoster":{"Next":"TaskReciter","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"IthacaRoster","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- IthacaRoster failed"}},"TaskReciterCoiStatements":{"Next":"TaskResearchSecurity","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -21001,7 +21333,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Reciter failed"}},"TaskOrcidCandidates":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyOrcidCandidates"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"Reciter","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Reciter failed"}},"TaskResearchSecurity":{"Next":"TaskOrcidCandidates","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyResearchSecurity"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -21009,7 +21341,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-candidates"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskOrcidCandidates","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:research-security"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskResearchSecurity","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -21017,7 +21349,23 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"ReciterCoiStatements","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- ReciterCoiStatements failed"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"ReciterCoiStatements","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- ReciterCoiStatements failed"}},"TaskOrcidCandidates":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyOrcidCandidates"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:orcid-candidates"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyResearchSecurity":{"Next":"TaskOrcidCandidates","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"ResearchSecurity","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- ResearchSecurity failed"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -22919,7 +23267,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterCollabReport"}],"Next":"TaskCancerCenterCollabReport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterDiseaseAssignmentsWeekly"}],"Next":"TaskCancerCenterDiseaseAssignmentsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGapWeekly"}],"Next":"TaskCoiGapWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FrtWeekly"}],"Next":"TaskFrtWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidRegistryWeekly"}],"Next":"TaskOrcidRegistryWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"InfoedBiosketchWeekly"}],"Next":"TaskInfoedBiosketchWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MyncbiWeekly"}],"Next":"TaskMyncbiWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidEvidenceWeekly"}],"Next":"TaskOrcidEvidenceWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IdentityLinksWeekly"}],"Next":"TaskIdentityLinksWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PopsWeekly"}],"Next":"TaskPopsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterGrantsWeekly"}],"Next":"TaskReporterGrantsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClinicalTrialsWeekly"}],"Next":"TaskClinicalTrialsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputsWeekly"}],"Next":"TaskAreaSignalInputsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"DataSharingWeekly"}],"Next":"TaskDataSharingWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JournalImpactFactorWeekly"}],"Next":"TaskJournalImpactFactorWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"TechnologyWeekly"}],"Next":"TaskTechnologyWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundingDigestWeekly"}],"Next":"TaskFundingDigestWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundableWorkWeekly"}],"Next":"TaskFundableWorkWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityWeekly"}],"Next":"TaskIntegrityWeekly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"WeeklyStateMachineUnknownStartFrom"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterCollabReport"}],"Next":"TaskCancerCenterCollabReport"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CancerCenterDiseaseAssignmentsWeekly"}],"Next":"TaskCancerCenterDiseaseAssignmentsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGapWeekly"}],"Next":"TaskCoiGapWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FrtWeekly"}],"Next":"TaskFrtWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidRegistryWeekly"}],"Next":"TaskOrcidRegistryWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"InfoedBiosketchWeekly"}],"Next":"TaskInfoedBiosketchWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MyncbiWeekly"}],"Next":"TaskMyncbiWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"OrcidEvidenceWeekly"}],"Next":"TaskOrcidEvidenceWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IdentityLinksWeekly"}],"Next":"TaskIdentityLinksWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PopsWeekly"}],"Next":"TaskPopsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterGrantsWeekly"}],"Next":"TaskReporterGrantsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ClinicalTrialsWeekly"}],"Next":"TaskClinicalTrialsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"AreaSignalInputsWeekly"}],"Next":"TaskAreaSignalInputsWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"DataSharingWeekly"}],"Next":"TaskDataSharingWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MentoringBridgeWeekly"}],"Next":"TaskMentoringBridgeWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JournalImpactFactorWeekly"}],"Next":"TaskJournalImpactFactorWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"TechnologyWeekly"}],"Next":"TaskTechnologyWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundingDigestWeekly"}],"Next":"TaskFundingDigestWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"FundableWorkWeekly"}],"Next":"TaskFundableWorkWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityWeekly"}],"Next":"TaskIntegrityWeekly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"WeeklyStateMachineUnknownStartFrom"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -23231,7 +23579,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"ClinicalTrialsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- ClinicalTrialsWeekly failed"}},"TaskDataSharingWeekly":{"Next":"TaskJournalImpactFactorWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDataSharingWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"ClinicalTrialsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- ClinicalTrialsWeekly failed"}},"TaskDataSharingWeekly":{"Next":"TaskMentoringBridgeWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDataSharingWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -23247,7 +23595,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"AreaSignalInputsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- AreaSignalInputsWeekly failed"}},"TaskJournalImpactFactorWeekly":{"Next":"TaskTechnologyWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJournalImpactFactorWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"AreaSignalInputsWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- AreaSignalInputsWeekly failed"}},"TaskMentoringBridgeWeekly":{"Next":"TaskJournalImpactFactorWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyMentoringBridgeWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -23255,7 +23603,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:journal-impact-factor"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyDataSharingWeekly":{"Next":"TaskJournalImpactFactorWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:mentoring:refresh"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyDataSharingWeekly":{"Next":"TaskMentoringBridgeWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -23263,7 +23611,23 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"DataSharingWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- DataSharingWeekly failed"}},"TaskTechnologyWeekly":{"Next":"TaskFundingDigestWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyTechnologyWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              "","Message":{"env":"staging","step":"DataSharingWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- DataSharingWeekly failed"}},"TaskJournalImpactFactorWeekly":{"Next":"TaskTechnologyWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJournalImpactFactorWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:journal-impact-factor"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyMentoringBridgeWeekly":{"Next":"TaskJournalImpactFactorWeekly","Type":"Task","ResultPath":null,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"MentoringBridgeWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- MentoringBridgeWeekly failed"}},"TaskTechnologyWeekly":{"Next":"TaskFundingDigestWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyTechnologyWeekly"}],"Type":"Task","TimeoutSeconds":14400,"ResultPath":null,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },

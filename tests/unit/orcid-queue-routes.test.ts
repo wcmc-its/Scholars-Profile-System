@@ -77,6 +77,8 @@ const h = vi.hoisted(() => {
         ),
       ),
     },
+    // assertOrcidFree: no cross-campus links in these fixtures.
+    scholarIdentityLink: { count: vi.fn(async () => 0) },
     scholar: {
       findUnique: vi.fn(async ({ where }: { where: { cwid: string } }) => {
         const s = h.state.scholars.get(where.cwid);
@@ -87,12 +89,19 @@ const h = vi.hoisted(() => {
           where,
         }: {
           where: {
-            cwid: { in: string[] };
+            cwid: { in?: string[]; not?: string };
+            orcid?: string;
             roleCategory?: { in: string[] };
             AND?: Array<{ OR?: Array<Record<string, { in: string[] }>> }>;
           };
         }) =>
-          where.cwid.in
+          // No `cwid.in`: assertOrcidFree's lookup of OTHER rows holding the iD.
+          (
+            where.cwid.in ??
+            [...h.state.scholars.keys()].filter(
+              (c) => h.state.scholars.get(c)!.orcid === where.orcid && c !== where.cwid.not,
+            )
+          )
             .filter((c) => h.state.scholars.has(c))
             .filter(
               (c) =>
