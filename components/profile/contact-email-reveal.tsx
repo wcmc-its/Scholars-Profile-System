@@ -1,10 +1,6 @@
 "use client";
 
-import { Mail } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { SidebarCard } from "./sidebar-card";
 
@@ -21,11 +17,9 @@ import { SidebarCard } from "./sidebar-card";
  * external viewer gets `null` and this renders nothing — so external and `none`
  * cases are indistinguishable and the address never leaks via the shared cache.
  *
- * Crawler hardening (2026-11-09 institution-email-reveal spec): only a SESSION
- * viewer gets the address on mount. An anonymous on-campus ("network") viewer
- * gets `{ revealable }` and sees a "Show email" button; the address is fetched
- * with `?reveal=1` only on click, so a JS-rendering indexer on the WCM network
- * (which renders but never clicks) never sees it.
+ * Session and on-campus ("network") viewers both get the address on mount. The
+ * 2026-11-09 "Show email" button for network viewers was dropped 2026-11-18: no
+ * indexer crawls from WCM ranges (see the route's crawler note).
  *
  * `mode`:
  *   - "li"   → renders just the `<li>` (inserted into an existing Contact card,
@@ -34,11 +28,8 @@ import { SidebarCard } from "./sidebar-card";
  *              resolves), used when there is no server-baked contact content so an
  *              external viewer never sees an empty card.
  */
-type RevealResponse = { email?: string | null; revealable?: boolean };
-
-function fetchContactEmail(cwid: string, reveal: boolean): Promise<RevealResponse> {
-  const qs = reveal ? "?reveal=1" : "";
-  return fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email${qs}`, {
+function fetchContactEmail(cwid: string): Promise<{ email?: string | null }> {
+  return fetch(`/api/profile/${encodeURIComponent(cwid)}/contact-email`, {
     cache: "no-store",
     credentials: "same-origin",
   }).then((r) => (r.ok ? r.json() : {}));
@@ -52,15 +43,12 @@ export function ContactEmailReveal({
   mode?: "li" | "card";
 }) {
   const [email, setEmail] = useState<string | null>(null);
-  const [revealable, setRevealable] = useState(false);
 
   useEffect(() => {
     let active = true;
-    fetchContactEmail(cwid, false)
+    fetchContactEmail(cwid)
       .then((d) => {
-        if (!active) return;
-        if (typeof d?.email === "string" && d.email) setEmail(d.email);
-        else if (d?.revealable === true) setRevealable(true);
+        if (active && typeof d?.email === "string" && d.email) setEmail(d.email);
       })
       .catch(() => {
         /* leave hidden — fail-closed */
@@ -70,42 +58,15 @@ export function ContactEmailReveal({
     };
   }, [cwid]);
 
-  const onReveal = () => {
-    fetchContactEmail(cwid, true)
-      .then((d) => {
-        if (typeof d?.email === "string" && d.email) setEmail(d.email);
-        else setRevealable(false);
-      })
-      .catch(() => setRevealable(false));
-  };
-
-  let content: ReactNode;
-  if (email) {
-    content = (
-      <a
-        href={`mailto:${email}`}
-        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-      >
-        {email}
-      </a>
-    );
-  } else if (revealable) {
-    content = (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button type="button" variant="outline" size="sm" onClick={onReveal}>
-              <Mail aria-hidden="true" />
-              Show email
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">Shown only to on-campus and signed-in visitors</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  } else {
-    return null;
-  }
+  if (!email) return null;
+  const content: ReactNode = (
+    <a
+      href={`mailto:${email}`}
+      className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+    >
+      {email}
+    </a>
+  );
 
   if (mode === "card") {
     return (
