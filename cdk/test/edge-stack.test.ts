@@ -90,7 +90,7 @@ const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
 
 // The exact query-string allow-list on the custom cache policy: the union of
 // params the Group B pages read (/scholars/* -> mentees-sort; dept/center/
-// division -> page/tab/sort; topics/*/scholars -> q/role/sub/letter;
+// division -> page/tab/sort/stage; topics/*/scholars -> q/role/sub/letter;
 // methods/*/*/scholars -> q/role/page), plus Next 16's `_rsc` cache-busting
 // param, which the origin validates on every Flight request (dropping it
 // 307-loops every prefetch to the browser redirect cap).
@@ -103,6 +103,7 @@ const QUERY_KEYED_ALLOWLIST = [
   "role",
   "sub",
   "letter",
+  "stage",
   "_rsc",
 ] as const;
 

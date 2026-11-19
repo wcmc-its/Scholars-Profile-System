@@ -15,6 +15,8 @@ import { getSpotlightCardsForCenter } from "@/lib/api/spotlight";
 import { applyAreaPreviewCounts, getUnitAreaPreviews } from "@/lib/api/unit-area-previews";
 import { CenterMembersClient } from "@/components/center/center-members-client";
 import { parseRosterSort } from "@/lib/roster-sort";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { isTranslationalStage } from "@/lib/translational-stage";
 import { CenterCollaborationTab } from "@/components/center/center-collaboration-tab";
 import { isCenterProgramPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { isCenterCollaborationNetworkEnabled } from "@/lib/center-collaboration/flags";
@@ -49,12 +51,15 @@ export async function CenterPage({
   page,
   tab = "scholars",
   sort = null,
+  stage = null,
   area = null,
 }: {
   centerSlug: string;
   page: number;
   tab?: Tab;
   sort?: string | null;
+  /** Raw `?stage=` (Publications tab). */
+  stage?: string | null;
   /** Research-area filter for the Publications tab (the `/areas/{topic}` route). */
   area?: { id: string; label: string } | null;
 }) {
@@ -63,6 +68,10 @@ export async function CenterPage({
 
   const basePath = `/centers/${detail.slug}`;
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the Publications tab's Stage select.
+  // Off, or an unknown value, means no stage filter.
+  const stageFilter = resolveSearchPubsTranslationalStageFacet();
+  const pubStage = stageFilter && isTranslationalStage(stage) ? stage : null;
   const grantSort: GrantSort = sort === "end_date" ? "end_date" : "most_recent";
   // Unit Page v2 roster toolbar — the Scholars tab's own `?sort=` values.
   const rosterSort = parseRosterSort(sort);
@@ -113,6 +122,7 @@ export async function CenterPage({
           page: Math.max(0, page - 1),
           sort: pubSort,
           area: area?.id ?? null,
+          stage: pubStage,
         })
       : Promise.resolve(null),
     getCenterGrantCount(detail.code),
@@ -354,6 +364,8 @@ export async function CenterPage({
               page={pubsList.page + 1}
               pageSize={pubsList.pageSize}
               sort={pubSort}
+              stageFilter={stageFilter}
+              stage={pubStage}
               basePath={basePath}
               listBasePath={area ? `${basePath}/areas/${encodeURIComponent(area.id)}` : undefined}
               activeArea={

@@ -20,6 +20,8 @@ import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import { parseRosterSort } from "@/lib/roster-sort";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { isTranslationalStage } from "@/lib/translational-stage";
 import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
 import { EditUnitLink } from "@/components/shared/edit-unit-link";
@@ -44,6 +46,7 @@ export async function DivisionPage({
   page,
   tab = "scholars",
   sort = null,
+  stage = null,
   area = null,
 }: {
   deptSlug: string;
@@ -51,6 +54,8 @@ export async function DivisionPage({
   page: number;
   tab?: Tab;
   sort?: string | null;
+  /** Raw `?stage=` (Publications tab). */
+  stage?: string | null;
   /** Research-area filter for the Publications tab (the `/areas/{topic}` route). */
   area?: { id: string; label: string } | null;
 }) {
@@ -62,6 +67,10 @@ export async function DivisionPage({
   // batch (all cached via lib/api/swr-cache) so cold-miss scans overlap.
   const pageIdx = Math.max(0, page - 1);
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the Publications tab's Stage select.
+  // Off, or an unknown value, means no stage filter.
+  const stageFilter = resolveSearchPubsTranslationalStageFacet();
+  const pubStage = stageFilter && isTranslationalStage(stage) ? stage : null;
   const grantSort = (sort === "end_date" ? "end_date" : "most_recent") as GrantSort;
   // Unit Page v2 roster toolbar — the Scholars tab's own `?sort=` values.
   const rosterSort = parseRosterSort(sort);
@@ -81,6 +90,7 @@ export async function DivisionPage({
           page: pageIdx,
           sort: pubSort,
           area: area?.id ?? null,
+          stage: pubStage,
         })
       : Promise.resolve(null),
     tab === "grants"
@@ -280,6 +290,8 @@ export async function DivisionPage({
             page={pubsList.page + 1}
             pageSize={pubsList.pageSize}
             sort={(sort === "most_cited" ? "most_cited" : "newest") as PubSort}
+            stageFilter={stageFilter}
+            stage={pubStage}
             basePath={basePath}
             listBasePath={area ? `${basePath}/areas/${encodeURIComponent(area.id)}` : undefined}
             activeArea={

@@ -33,12 +33,19 @@ import {
   resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 import { unitPublicationWhere } from "@/lib/api/unit-publication-where";
+import type { TranslationalStage } from "@/lib/translational-stage";
 
 const PAGE_SIZE = 20;
 
 export type PubSort = "newest" | "most_cited";
 /** Publications-tab list options. `area` is a parent topic id (`Topic.id`). */
-export type PubListOpts = { page?: number; sort?: PubSort; area?: string | null };
+export type PubListOpts = {
+  page?: number;
+  sort?: PubSort;
+  area?: string | null;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the Stage select (`?stage=`). */
+  stage?: TranslationalStage | null;
+};
 /** Re-exported (type-only, so nothing is pulled into the client bundle) because
  *  the department/division page components already import it from here. */
 export type { GrantSort };
@@ -77,6 +84,7 @@ async function getDeptPublicationsListUncached(
     membership,
     darkPmids: unitDarkPmids,
     area: opts.area,
+    stage: opts.stage,
   });
   const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
@@ -214,7 +222,7 @@ async function getDeptGrantsListUncached(
 //     mirrors the center-page caching in lib/api/centers.ts). ---
 export const getDeptPublicationsList = (deptCode: string, opts: PubListOpts = {}) =>
   cachedRead(
-    `department:pubs:${deptCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}:${opts.area ?? "-"}`,
+    `department:pubs:${deptCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}:${opts.area ?? "-"}:${opts.stage ?? "-"}`,
     () => getDeptPublicationsListUncached(deptCode, opts),
   );
 

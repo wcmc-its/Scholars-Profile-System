@@ -33,4 +33,23 @@ describe("unitPublicationWhere", () => {
       notIn: ["900001"],
     });
   });
+
+  it("stage narrows to papers shown at that stage: match, and confidence null or not low", () => {
+    const where = unitPublicationWhere({
+      membership: { cwid: { in: ["aaa1001"] } },
+      darkPmids: [],
+      stage: "T2",
+    });
+    expect(where.translationalStage).toBe("T2");
+    expect(where.OR).toEqual([
+      { translationalStageConfidence: null },
+      { translationalStageConfidence: { not: "low" } },
+    ]);
+  });
+
+  it("no stage adds no stage clause", () => {
+    const where = unitPublicationWhere({ membership: { cwid: { in: ["aaa1001"] } }, darkPmids: [] });
+    expect(where).not.toHaveProperty("translationalStage");
+    expect(where).not.toHaveProperty("OR");
+  });
 });

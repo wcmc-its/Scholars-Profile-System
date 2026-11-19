@@ -322,6 +322,7 @@ describe("CenterPage — Grants tab", () => {
       page: 1,
       sort: "most_cited",
       area: "topic_a",
+      stage: null,
     });
     expect(mockGetCenterPublicationCount).toHaveBeenCalledTimes(1);
   });

@@ -21,6 +21,11 @@ import {
 import { PublicationCard } from "@/components/department/publication-card";
 import type { DeptPublicationCard } from "@/lib/api/dept-highlights";
 import type { PubSort } from "@/lib/api/dept-lists";
+import {
+  TRANSLATIONAL_STAGES,
+  translationalStageDisplay,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 
 type DeptPublicationsListProps = {
   hits: DeptPublicationCard[];
@@ -28,6 +33,10 @@ type DeptPublicationsListProps = {
   page: number;
   pageSize: number;
   sort: PubSort;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — show the Stage select. */
+  stageFilter?: boolean;
+  /** The picked stage (`?stage=`); null for all stages. */
+  stage?: TranslationalStage | null;
   basePath: string;
   /**
    * Path that paging and sort links stay on. Defaults to `basePath`; the
@@ -55,6 +64,8 @@ function DeptPublicationsListInner({
   page,
   pageSize,
   sort,
+  stageFilter = false,
+  stage = null,
   basePath,
   listBasePath,
   activeArea = null,
@@ -67,6 +78,15 @@ function DeptPublicationsListInner({
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.set("tab", "publications");
     params.set("sort", next);
+    params.delete("page");
+    router.push(`${listPath}?${params.toString()}`);
+  }
+
+  function setStage(next: TranslationalStage | "all") {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.set("tab", "publications");
+    if (next === "all") params.delete("stage");
+    else params.set("stage", next);
     params.delete("page");
     router.push(`${listPath}?${params.toString()}`);
   }
@@ -98,12 +118,32 @@ function DeptPublicationsListInner({
     </div>
   );
 
+  const stageSelect = stageFilter ? (
+    <Select value={stage ?? "all"} onValueChange={(v) => setStage(v as TranslationalStage | "all")}>
+      <SelectTrigger aria-label="Translational stage" className="h-8 w-[240px] text-sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All stages</SelectItem>
+        {TRANSLATIONAL_STAGES.map((st) => (
+          <SelectItem key={st} value={st}>
+            {translationalStageDisplay(st)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  ) : null;
+
   if (total === 0) {
     return (
       <>
         {areaChip}
+        {/* A picked stage with no papers keeps the select, so it can be undone. */}
+        {stage && stageSelect ? <div className="mb-4 flex justify-end">{stageSelect}</div> : null}
         <div className="py-8 text-center">
-          <p className="text-sm text-muted-foreground">No publications listed.</p>
+          <p className="text-sm text-muted-foreground">
+            {stage ? "No publications at this stage." : "No publications listed."}
+          </p>
         </div>
       </>
     );
@@ -112,20 +152,23 @@ function DeptPublicationsListInner({
   return (
     <>
       {areaChip}
-      <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <span className="text-sm text-muted-foreground">
           Showing {start.toLocaleString()}&ndash;{end.toLocaleString()} of{" "}
           {total.toLocaleString()} publications
         </span>
-        <Select value={sort} onValueChange={(v) => setSort(v as PubSort)}>
-          <SelectTrigger aria-label="Sort by" className="h-8 w-[180px] text-sm">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="newest">Newest</SelectItem>
-            <SelectItem value="most_cited">Most cited</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          {stageSelect}
+          <Select value={sort} onValueChange={(v) => setSort(v as PubSort)}>
+            <SelectTrigger aria-label="Sort by" className="h-8 w-[180px] text-sm">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="most_cited">Most cited</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <ul className="flex flex-col divide-y divide-[var(--color-border)]">

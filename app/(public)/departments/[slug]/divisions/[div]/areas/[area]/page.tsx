@@ -42,6 +42,7 @@ export default async function DivisionAreaRoute({
   const pageRaw = (Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "1";
   const page = Math.max(1, parseInt(pageRaw, 10) || 1);
   const sortRaw = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
+  const stageRaw = Array.isArray(sp.stage) ? sp.stage[0] : sp.stage;
   return (
     <DivisionPage
       deptSlug={slug}
@@ -49,6 +50,7 @@ export default async function DivisionAreaRoute({
       page={page}
       tab="publications"
       sort={sortRaw ?? null}
+      stage={stageRaw ?? null}
       area={{ id: topic.id, label: topic.label }}
     />
   );

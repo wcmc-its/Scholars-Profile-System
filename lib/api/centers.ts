@@ -1528,6 +1528,7 @@ async function getCenterPublicationsListUncached(
     membership,
     darkPmids: unitDarkPmids,
     area: opts.area,
+    stage: opts.stage,
   });
   const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
@@ -1626,8 +1627,9 @@ export function getCenterPublicationsList(
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
   const area = opts.area ?? null;
-  return cachedRead(`center:pubs:${centerCode}:${page}:${sort}:${area ?? "-"}`, () =>
-    getCenterPublicationsListUncached(centerCode, { page, sort, area }),
+  const stage = opts.stage ?? null;
+  return cachedRead(`center:pubs:${centerCode}:${page}:${sort}:${area ?? "-"}:${stage ?? "-"}`, () =>
+    getCenterPublicationsListUncached(centerCode, { page, sort, area, stage }),
   );
 }
 

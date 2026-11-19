@@ -640,6 +640,7 @@ async function getDivisionPublicationsListUncached(
     membership,
     darkPmids: unitDarkPmids,
     area: opts.area,
+    stage: opts.stage,
   });
   const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
@@ -793,7 +794,7 @@ export const getDivisionFaculty = async (
 
 export const getDivisionPublicationsList = (divCode: string, opts: PubListOpts = {}) =>
   cachedRead(
-    `division:pubs:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}:${opts.area ?? "-"}`,
+    `division:pubs:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}:${opts.area ?? "-"}:${opts.stage ?? "-"}`,
     () => getDivisionPublicationsListUncached(divCode, opts),
   );
 

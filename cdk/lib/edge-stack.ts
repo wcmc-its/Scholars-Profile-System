@@ -1065,7 +1065,7 @@ export class EdgeStack extends Stack {
       cachePolicyName: `sps-query-keyed-${env}`,
       comment: `SPS query-keyed cache (${env}) -- per-query cache key, cookies stripped (#634).`,
       // Union of params read by the Group B pages: /scholars/* (mentees-sort),
-      // /departments/* + /centers/* + divisions (page/tab/sort),
+      // /departments/* + /centers/* + divisions (page/tab/sort/stage),
       // /topics/*/scholars (q/role/sub/letter), /methods/*/*/scholars (q/role/page),
       // plus Next 16's `_rsc` cache-busting param (see `rscCacheKeyHeaders`).
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.allowList(
@@ -1077,7 +1077,9 @@ export class EdgeStack extends Stack {
         "role",
         "sub",
         "letter",
-        // 9 of CloudFront's 10 query strings per cache policy quota.
+        "stage",
+        // 10 of CloudFront's 10 query strings per cache policy quota: FULL. The
+        // next param a Group B page needs cannot be added here.
         RSC_CACHE_BUST_PARAM,
       ),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),

@@ -346,16 +346,22 @@ describe("getUnitAreaPreviews — shape", () => {
 });
 
 describe("area filter changes the Publications-tab cache key", () => {
-  it("department, center and division keys carry the area (or '-')", async () => {
+  it("department, center and division keys carry the area and the stage (or '-')", async () => {
     await getDeptPublicationsList("DEPT1", { page: 0, sort: "most_cited" });
     await getDeptPublicationsList("DEPT1", { page: 0, sort: "most_cited", area: "topic_a" });
     await getCenterPublicationsList("CTR1", { page: 0, sort: "newest", area: "topic_a" });
     await getDivisionPublicationsList("DIV1", { page: 1, sort: "newest", area: "topic_a" });
+    await getDeptPublicationsList("DEPT1", { page: 0, sort: "newest", stage: "T2" });
+    await getCenterPublicationsList("CTR1", { page: 0, sort: "newest", stage: "T3-4" });
+    await getDivisionPublicationsList("DIV1", { page: 0, sort: "newest", stage: "T0" });
     expect(cacheKeys).toEqual([
-      "department:pubs:DEPT1:0:most_cited:-",
-      "department:pubs:DEPT1:0:most_cited:topic_a",
-      "center:pubs:CTR1:0:newest:topic_a",
-      "division:pubs:DIV1:1:newest:topic_a",
+      "department:pubs:DEPT1:0:most_cited:-:-",
+      "department:pubs:DEPT1:0:most_cited:topic_a:-",
+      "center:pubs:CTR1:0:newest:topic_a:-",
+      "division:pubs:DIV1:1:newest:topic_a:-",
+      "department:pubs:DEPT1:0:newest:-:T2",
+      "center:pubs:CTR1:0:newest:-:T3-4",
+      "division:pubs:DIV1:0:newest:-:T0",
     ]);
   });
 });
