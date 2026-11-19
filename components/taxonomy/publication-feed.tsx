@@ -937,7 +937,7 @@ export function PubRow({
       </div>
       {/* Kept as `journal || year` (not a boolean) for parity: a row with no
           journal and year 0 has always rendered a stray "0" here. */}
-      {(areaLabel || hit.translationalStage ? true : hit.journal || hit.year) && (
+      {(areaLabel ? true : hit.journal || hit.year) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           {hit.journal && (
             <span
@@ -951,14 +951,6 @@ export function PubRow({
             <>
               {hit.journal || hit.year ? <span aria-hidden="true">·</span> : null}
               <span data-testid="pub-area-label">{areaLabel}</span>
-            </>
-          ) : null}
-          {hit.translationalStage ? (
-            <>
-              {hit.journal || hit.year || areaLabel ? <span aria-hidden="true">·</span> : null}
-              <span data-testid="pub-row-stage">
-                {translationalStageDisplay(hit.translationalStage)}
-              </span>
             </>
           ) : null}
         </div>
@@ -993,6 +985,7 @@ export function PubRow({
         pmcid={hit.pmcid}
         doi={hit.doi}
         lazyAbstract={hit.hasAbstract === true}
+        translationalStage={hit.translationalStage}
       />
       {/* #1166/#1166-B — per-(pub × entity) usage sentences on an entity-filtered
           family feed, the entity term <mark>-highlighted (offset-aware, term

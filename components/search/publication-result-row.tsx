@@ -8,7 +8,6 @@ import { MatchReason } from "@/components/search/match-reason";
 import type { PublicationHit } from "@/lib/api/search";
 import { descendantSummary } from "@/lib/search/descendant-summary";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
-import { translationalStageDisplay } from "@/lib/translational-stage";
 import { sanitizePubTitle } from "@/lib/utils";
 
 /**
@@ -41,12 +40,6 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         <PubJournal value={hit.journal} className="not-italic" />
         {hit.journal && hit.year ? ". " : null}
         {hit.year ?? null}.
-        {hit.translationalStage ? (
-          <span data-testid="pub-row-stage">
-            {" "}
-            {translationalStageDisplay(hit.translationalStage)}
-          </span>
-        ) : null}
       </div>
       {/* #718 — chips when there's a displayable WCM author; otherwise fall back
           to the unstructured byline (suppression-safe, hydrated server-side) so a
@@ -93,6 +86,7 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         pmcid={hit.pmcid}
         doi={hit.doi}
         lazyAbstract={hit.hasAbstract}
+        translationalStage={hit.translationalStage}
         className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
       />
     </li>

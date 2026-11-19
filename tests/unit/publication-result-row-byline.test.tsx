@@ -91,35 +91,16 @@ describe("PublicationResultRow — #718 author fallback", () => {
 });
 
 describe("PublicationResultRow — translational stage", () => {
-  it("shows the stage on the journal/year line when the hit carries one", () => {
+  it("hands the stage to the meta row (the badge after Abstract), not the journal line", () => {
+    metaProps.length = 0;
     render(<PublicationResultRow hit={makeHit({ translationalStage: "T2" })} />);
-    const stage = screen.getByTestId("pub-row-stage");
-    expect(stage.textContent).toBe(" T2 · Clinical trials and efficacy");
-    expect(stage.parentElement?.textContent).toBe(
-      "Nature. 2024. T2 · Clinical trials and efficacy",
-    );
+    expect(metaProps.at(-1)).toMatchObject({ translationalStage: "T2" });
+    expect(screen.queryByText(/Clinical trials and efficacy/)).toBeNull();
   });
 
-  it("renders nothing when the hit has no stage (none, or flag off)", () => {
+  it("passes no stage when the hit has none (none, or flag off)", () => {
+    metaProps.length = 0;
     render(<PublicationResultRow hit={makeHit({})} />);
-    expect(screen.queryByTestId("pub-row-stage")).toBeNull();
-    expect(screen.queryByText(/Clinical trials|Unclassified/)).toBeNull();
-  });
-});
-
-// #1995 — the abstract text is no longer on the hit (it was ~11% of the
-// results-page flight payload); the row asks PublicationMeta to lazy-fetch it.
-describe("PublicationResultRow — lazy abstract wiring (#1995)", () => {
-  it("passes lazyAbstract from hasAbstract and never an eager abstract", () => {
-    metaProps.length = 0;
-    render(<PublicationResultRow hit={makeHit({ hasAbstract: true })} />);
-    expect(metaProps.at(-1)).toMatchObject({ lazyAbstract: true, pmid: "39406234" });
-    expect(metaProps.at(-1)).not.toHaveProperty("abstract");
-  });
-
-  it("leaves lazyAbstract false when the publication has no abstract", () => {
-    metaProps.length = 0;
-    render(<PublicationResultRow hit={makeHit({ hasAbstract: false })} />);
-    expect(metaProps.at(-1)).toMatchObject({ lazyAbstract: false });
+    expect(metaProps.at(-1)?.translationalStage).toBeUndefined();
   });
 });
