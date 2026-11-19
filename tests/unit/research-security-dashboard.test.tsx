@@ -59,6 +59,7 @@ const profile: PersonProfile = {
   fundingFlagPapers: 0,
   entities: [{ entity: "China", confirmed: 12, open: 3 }],
   coAuthors: [{ cwid: "xyz1", name: "Lin Zeng", papers: 4 }],
+  confirmedArticleIds: [],
 };
 
 function props(over: Partial<ResearchSecurityDashboardProps> = {}): ResearchSecurityDashboardProps {
@@ -275,6 +276,25 @@ describe("ResearchSecurityDashboard", () => {
             confirmedArticleIds: [],
           },
           entityAffiliations: [{ affiliation: "First Affiliated Hospital of Soochow University", papers: 14 }],
+          entityMethods: {
+            papers: 41,
+            pubmedPapers: 36,
+            papersCovered: 29,
+            peopleCapped: false,
+            familyCount: 20,
+            toolCount: 1,
+            families: [
+              {
+                supercategory: "animal_cell_models",
+                label: "organoid models",
+                definition: "Three-dimensional cultures.",
+                sensitive: true,
+                papers: 11,
+                people: 4,
+              },
+            ],
+            tools: [{ name: "CRISPR-Cas9", category: "genome editing", papers: 7, people: 3 }],
+          },
         })}
       />,
     );
@@ -292,7 +312,26 @@ describe("ResearchSecurityDashboard", () => {
     );
     expect(card.getByText("Wei Li").closest("li")!.getAttribute("title")).toMatch(/verify/);
     expect(card.getByText("First Affiliated Hospital of Soochow University")).toBeTruthy();
+    // Inferred methods and tools: counted, capped, and never without their caveat.
+    expect(card.getByText("Method families · top 1 of 20")).toBeTruthy();
+    const family = card.getByText("organoid models").closest("li")!;
+    expect(family.textContent).toContain("11");
+    expect(family.textContent).toContain("sensitive");
+    expect(family.getAttribute("title")).toMatch(/Three-dimensional cultures\. \(AI-generated definition\)/);
+    expect(card.getByText("CRISPR-Cas9").closest("li")!.getAttribute("title")).toMatch(/genome editing/);
+    expect(card.getByText(/Read from 29 of 41 confirmed papers\. Inferred by ReciterAI/)).toBeTruthy();
+    expect(card.getByText(/not what any co-author contributed or received/)).toBeTruthy();
     expect(card.getByRole("link", { name: "Close" }).getAttribute("href")).toBe("/edit/research-security?view=paper");
+  });
+
+  it("the person card says so when nothing was inferred, and shows no section when the data is off", () => {
+    const ui = parseResearchSecurityParams({ person: "abc2001" });
+    const none = { papers: 12, pubmedPapers: 3, papersCovered: 0, peopleCapped: false, familyCount: 0, toolCount: 0, families: [], tools: [] };
+    const { unmount } = render(<ResearchSecurityDashboard {...props({ ui, profile, personMethods: none })} />);
+    expect(screen.getByText(/None inferred for these papers \(3 of 12 are in\s+PubMed\)/)).toBeTruthy();
+    unmount();
+    render(<ResearchSecurityDashboard {...props({ ui, profile, personMethods: null })} />);
+    expect(screen.queryByText(/Methods and tools on these papers/)).toBeNull();
   });
 
   it("says so when the selected person is on nothing in scope", () => {

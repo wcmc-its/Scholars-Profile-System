@@ -40,10 +40,12 @@ import {
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
+  paperScope,
   searchUnattributedRows,
   sortUnattributedGroups,
   topAffiliations,
 } from "@/lib/api/research-security-report";
+import { loadInferredMethods } from "@/lib/api/research-security-methods";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
@@ -153,6 +155,17 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
         )
       : undefined;
 
+  // What ReciterAI inferred the cards' confirmed papers used: the person's own
+  // rows for the person card, every confirmed author's for the entity card.
+  const [personMethods, entityMethods] = await Promise.all([
+    profile
+      ? loadInferredMethods(db.read, paperScope(facts, profile.confirmedArticleIds, profile.cwid))
+      : null,
+    entityProfile
+      ? loadInferredMethods(db.read, paperScope(facts, entityProfile.confirmedArticleIds))
+      : null,
+  ]);
+
   // Search and sort belong to the selected view's table alone: the tiles and
   // the tab counts are never narrowed by them.
   let current: ResearchSecurityViewRows;
@@ -231,6 +244,8 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
       }
       entityProfile={entityProfile}
       entityAffiliations={entityAffiliations}
+      personMethods={personMethods}
+      entityMethods={entityMethods}
       viewShown={paged.total}
       viewTotal={viewTotal}
       dataAsOf={facts.dataAsOf}

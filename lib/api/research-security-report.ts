@@ -769,6 +769,8 @@ export type PersonProfile = {
   entities: Array<{ entity: string; confirmed: number; open: number }>;
   /** Our other confirmed authors on this person's confirmed co-publications. */
   coAuthors: Array<{ cwid: string | null; name: string; papers: number }>;
+  /** The confirmed co-publications (newest first), for lookups about them. */
+  confirmedArticleIds: string[];
 };
 
 /** The person of the person filter, summarized under the other filters; null
@@ -841,6 +843,9 @@ export function buildPersonProfile(
     ),
     coAuthors: [...coAuthors.values()].sort(
       (a, b) => b.papers - a.papers || a.name.localeCompare(b.name),
+    ),
+    confirmedArticleIds: [...confirmedIds].sort((a, b) =>
+      byDateDesc(facts.articles.get(a)!, facts.articles.get(b)!),
     ),
   };
 }
@@ -1017,6 +1022,35 @@ export function topAffiliations(
     .map((e) => ({ affiliation: e.affiliation, papers: e.ids.size }))
     .sort((a, b) => b.papers - a.papers || a.affiliation.localeCompare(b.affiliation))
     .slice(0, limit);
+}
+
+/**
+ * A set of papers as the methods lookup needs it
+ * (`lib/api/research-security-methods.ts`): their PMIDs, and our confirmed
+ * authors on them (either campus: what a paper used is a fact about the paper),
+ * most papers first. `onlyCwid` reads one person's rows alone.
+ */
+export function paperScope(
+  facts: ResearchSecurityFacts,
+  articleIds: readonly string[],
+  onlyCwid?: string,
+): { cwids: string[]; pmids: number[]; papers: number } {
+  const ids = new Set(articleIds);
+  const counts = new Map<string, number>();
+  for (const p of facts.people) {
+    if (p.attribution !== "confirmed" || !p.cwid || !ids.has(p.articleId)) continue;
+    if (onlyCwid && !isPerson(p, onlyCwid)) continue;
+    counts.set(p.cwid, (counts.get(p.cwid) ?? 0) + 1);
+  }
+  return {
+    cwids: [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([cwid]) => cwid),
+    pmids: articleIds
+      .map((id) => facts.articles.get(id)?.pmid)
+      .filter((x): x is number => x != null),
+    papers: articleIds.length,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,10 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import {
+  METHODS_PEOPLE_CAP as METHODS_PEOPLE_LIMIT,
+  type InferredMethods,
+} from "@/lib/api/research-security-methods";
+import {
   articleLink,
   attributionReason,
   isoDay,
@@ -54,6 +58,7 @@ import {
   type ResearchSecurityView,
 } from "@/lib/edit/research-security-dashboard";
 import type { ResearchSecurityMethodsDoc } from "@/lib/edit/research-security-methods-doc";
+import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { cn } from "@/lib/utils";
 
 import { MethodsDisclosure } from "./research-security-methods";
@@ -98,6 +103,10 @@ export type ResearchSecurityDashboardProps = {
   entityProfile?: EntityProfile | null;
   /** Its most common matched affiliation strings (entity lists only). */
   entityAffiliations?: Array<{ affiliation: string; papers: number }>;
+  /** Methods and tools inferred from each card's confirmed papers; null when
+   *  the methods data is off or there is nothing to look in. */
+  personMethods?: InferredMethods | null;
+  entityMethods?: InferredMethods | null;
   /** Rows of the selected view after the search, and before it. */
   viewShown?: number;
   viewTotal?: number;
@@ -1178,10 +1187,12 @@ function Stat({
 function PersonCard({
   profile,
   links,
+  methods,
   ui,
 }: {
   profile: PersonProfile;
   links?: { console: string; publicProfile?: string };
+  methods?: InferredMethods | null;
   ui: ResearchSecurityUiParams;
 }) {
   const f = ui.filters;
@@ -1337,6 +1348,7 @@ function PersonCard({
           </p>
         </div>
       )}
+      {methods && <MethodsBlock methods={methods} />}
       <p className="text-muted-foreground text-[12.5px]">
         Screening results under the filters above, not a determination. Names match approximately:
         read the matched affiliation strings (By paper) before acting.
@@ -1347,15 +1359,97 @@ function PersonCard({
 
 const cardHeading = "text-muted-foreground text-[11.5px] font-medium tracking-[.06em] uppercase";
 
+/** Methods and tools ReciterAI inferred from a card's confirmed papers. */
+function MethodsBlock({ methods }: { methods: InferredMethods }) {
+  const n = (x: number) => x.toLocaleString("en-US");
+  const coverage = `Read from ${n(methods.papersCovered)} of ${n(methods.papers)} confirmed papers`;
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className={cardHeading}>Methods and tools on these papers · inferred</h3>
+      {methods.families.length === 0 && methods.tools.length === 0 ? (
+        <p className="text-apollo-ink-2 text-[13px]">
+          None inferred for these papers ({n(methods.pubmedPapers)} of {n(methods.papers)} are in
+          PubMed).
+        </p>
+      ) : (
+        <>
+          {methods.families.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-apollo-ink-2 text-[12.5px]">
+                Method families
+                {methods.familyCount > methods.families.length
+                  ? ` · top ${methods.families.length} of ${n(methods.familyCount)}`
+                  : ""}
+              </span>
+              <ul className="flex flex-wrap gap-1.5">
+                {methods.families.map((f) => (
+                  <li
+                    key={`${f.supercategory}|${f.label}`}
+                    title={[
+                      supercategoryLabel(f.supercategory),
+                      f.definition ? `${f.definition} (AI-generated definition)` : null,
+                      `${n(f.papers)} papers · ${n(f.people)} of our authors`,
+                      f.sensitive ? "Sensitive family: hidden on public profiles" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" — ")}
+                    className={cn(chipBase, CHIP_TONE.slate, "gap-1.5")}
+                  >
+                    {f.label}
+                    <span className="font-semibold tabular-nums">{n(f.papers)}</span>
+                    {f.sensitive && <span className="text-apollo-amber">sensitive</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {methods.tools.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-apollo-ink-2 text-[12.5px]">
+                Named tools
+                {methods.toolCount > methods.tools.length
+                  ? ` · top ${methods.tools.length} of ${n(methods.toolCount)}`
+                  : ""}
+              </span>
+              <ul className="flex flex-wrap gap-1.5">
+                {methods.tools.map((t) => (
+                  <li
+                    key={t.name}
+                    title={[t.category, `${n(t.papers)} papers · ${n(t.people)} of our authors`]
+                      .filter(Boolean)
+                      .join(" — ")}
+                    className={cn(chipBase, CHIP_TONE.neutral, "gap-1.5")}
+                  >
+                    {t.name}
+                    <span className="font-semibold tabular-nums">{n(t.papers)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+      <p className="text-muted-foreground text-[12.5px]">
+        {coverage}. Inferred by ReciterAI from each paper&apos;s text and not reviewed; PubMed papers
+        with an author who has methods data only
+        {methods.peopleCapped ? `; limited to the ${n(METHODS_PEOPLE_LIMIT)} authors on the most papers` : ""}
+        . It describes what a paper used, not what any co-author contributed or received.
+      </p>
+    </div>
+  );
+}
+
 /** Everything the screen holds about the selected entity (or country), under
  *  the other filters. Shown above the tabs whenever an entity filter is on. */
 function EntityCard({
   profile,
   affiliations,
+  methods,
   ui,
 }: {
   profile: EntityProfile;
   affiliations?: Array<{ affiliation: string; papers: number }>;
+  methods?: InferredMethods | null;
   ui: ResearchSecurityUiParams;
 }) {
   const to = linkBuilder(ui.filters);
@@ -1488,6 +1582,8 @@ function EntityCard({
         )}
       </div>
 
+      {methods && <MethodsBlock methods={methods} />}
+
       {profile.coAuthors.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <h3 className={cardHeading}>
@@ -1608,6 +1704,8 @@ export function ResearchSecurityDashboard({
   profileLinks,
   entityProfile,
   entityAffiliations,
+  personMethods,
+  entityMethods,
   viewShown,
   viewTotal,
   dataAsOf,
@@ -1686,9 +1784,14 @@ export function ResearchSecurityDashboard({
           </div>
 
           {entityProfile && (
-            <EntityCard profile={entityProfile} affiliations={entityAffiliations} ui={ui} />
+            <EntityCard
+              profile={entityProfile}
+              affiliations={entityAffiliations}
+              methods={entityMethods}
+              ui={ui}
+            />
           )}
-          {profile && <PersonCard profile={profile} links={profileLinks} ui={ui} />}
+          {profile && <PersonCard profile={profile} links={profileLinks} methods={personMethods} ui={ui} />}
           {f.person && !profile && (
             <p className={cn(cardClass, "text-apollo-ink-2 px-4 py-3 text-[13.5px]")}>
               Nothing is on file for <strong>{f.person}</strong> under these filters.{" "}

@@ -31,6 +31,7 @@ import {
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
+  paperScope,
   searchUnattributedRows,
   sortUnattributedGroups,
   topAffiliations,
@@ -751,6 +752,8 @@ describe("one person: everything on file", () => {
         { entity: "Zhejiang University", confirmed: 1, open: 0 },
       ],
       coAuthors: [{ cwid: "i1", name: "Name i1", papers: 1 }],
+      // Newest first: paper 2 (2025) before paper 1 (2022).
+      confirmedArticleIds: ["2", "1"],
     });
   });
 
@@ -855,6 +858,30 @@ describe("one entity: everything on file", () => {
       { affiliation: "Peking University Third Hospital, Beijing", papers: 2 },
       { affiliation: "School of Physics, Peking University", papers: 1 },
     ]);
+  });
+});
+
+describe("the paper set handed to the methods lookup", () => {
+  it("PMIDs of the papers and our confirmed authors on them, most papers first", () => {
+    const f = facts({
+      articles: [article("1"), article("2"), article("SCOPUS:9"), article("4")],
+      people: [
+        person("1", "w1"),
+        person("2", "w1"),
+        person("2", "i1", { campus: "ithaca" }),
+        person("SCOPUS:9", "w2"),
+        person("1", "w3", { attribution: "pending" }),
+        person("4", "w4"),
+      ],
+    });
+    expect(paperScope(f, ["1", "2", "SCOPUS:9"])).toEqual({
+      // The pending candidate and the author of a paper outside the set are not read.
+      cwids: ["w1", "i1", "w2"],
+      // A non-PubMed paper is in the set but has no PMID to look up.
+      pmids: [1, 2],
+      papers: 3,
+    });
+    expect(paperScope(f, ["1", "2"], "W1").cwids).toEqual(["w1"]);
   });
 });
 
