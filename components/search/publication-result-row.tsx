@@ -3,7 +3,6 @@
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
-import { StageBadge } from "@/components/publication/stage-badge";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { MatchReason } from "@/components/search/match-reason";
 import type { PublicationHit } from "@/lib/api/search";
@@ -41,9 +40,6 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         <PubJournal value={hit.journal} className="not-italic" />
         {hit.journal && hit.year ? ". " : null}
         {hit.year ?? null}.
-        {hit.translationalStage ? (
-          <StageBadge stage={hit.translationalStage} className="ml-2 align-[1px]" />
-        ) : null}
       </div>
       {/* #718 — chips when there's a displayable WCM author; otherwise fall back
           to the unstructured byline (suppression-safe, hydrated server-side) so a
@@ -90,6 +86,7 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         pmcid={hit.pmcid}
         doi={hit.doi}
         lazyAbstract={hit.hasAbstract}
+        translationalStage={hit.translationalStage}
         className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
       />
     </li>

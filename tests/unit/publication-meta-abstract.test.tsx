@@ -193,3 +193,30 @@ describe("PublicationMeta — lazy abstract (#1537)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("PublicationMeta — translational stage badge", () => {
+  it("closes the row right of Abstract, with no middot before it", () => {
+    render(<PublicationMeta pmid="12345" abstract="Some text." translationalStage="T3-4" />);
+    const badge = screen.getByTestId("pub-row-stage");
+    expect(badge.parentElement!.lastElementChild).toBe(badge);
+    expect(badge.previousElementSibling?.textContent).toBe("Abstract");
+  });
+
+  it("with no abstract, closes the row right of whatever ends it", () => {
+    render(<PublicationMeta pmid="12345" doi="10.1/x" translationalStage="T1" />);
+    const badge = screen.getByTestId("pub-row-stage");
+    expect(badge.parentElement!.lastElementChild).toBe(badge);
+    expect(badge.previousElementSibling?.textContent).toBe("DOI");
+    expect(screen.queryByRole("button", { name: "Abstract" })).toBeNull();
+  });
+
+  it("still renders when the row has nothing else", () => {
+    render(<PublicationMeta translationalStage="T0" />);
+    expect(screen.getByTestId("pub-row-stage").textContent).toBe("T0 Basic research");
+  });
+
+  it("no stage, no badge", () => {
+    render(<PublicationMeta pmid="12345" />);
+    expect(screen.queryByTestId("pub-row-stage")).toBeNull();
+  });
+});
