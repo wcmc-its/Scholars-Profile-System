@@ -177,9 +177,8 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
         href: "/departments/medicine/divisions/cardiology",
       },
     ]);
-    expect(screen.getByRole("link", { name: "1 division" }).getAttribute("href")).toBe(
-      "#subunits",
-    );
+    // The stats line no longer repeats the subunit count; the list heading carries it.
+    expect(screen.queryByRole("link", { name: "1 division" })).toBeNull();
   });
 
   // A division chip always links the division page, whether or not the roster

@@ -63,6 +63,7 @@ export function AreaPreviewPill({
   anchor = "people",
   className = DEFAULT_PILL_CLASS,
   countClassName = DEFAULT_COUNT_CLASS,
+  children,
 }: {
   area: AreaPreviewPillArea;
   /** Absent → the plain pill link (graceful fallback). */
@@ -77,6 +78,8 @@ export function AreaPreviewPill({
   anchor?: string;
   className?: string;
   countClassName?: string;
+  /** Replaces the default "label + count" pill content (e.g. a ranked row). */
+  children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLAnchorElement>(null);
@@ -112,7 +115,7 @@ export function AreaPreviewPill({
     return () => observer.disconnect();
   }, [open, contentEl]);
 
-  const pillContent = (
+  const pillContent = children ?? (
     <>
       {area.topicLabel}
       <span className={countClassName}>{area.pubCount.toLocaleString()}</span>

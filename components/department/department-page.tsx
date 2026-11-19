@@ -146,17 +146,11 @@ export async function DepartmentPage({
   });
 
   // Hero stats — each one links into the page (Unit Page v2): scholars to the
-  // roster, divisions to the subunit chips, publications / grants to their tab.
+  // roster, publications / grants to their tab. The division count is not
+  // repeated here: the "{N} divisions" list heading already carries it.
   const stats: UnitStat[] = [
     detail.stats.scholars > 0
       ? { value: detail.stats.scholars, label: "scholars", href: `${basePath}#people` }
-      : null,
-    detail.stats.divisions > 0
-      ? {
-          value: detail.stats.divisions,
-          label: detail.stats.divisions === 1 ? "division" : "divisions",
-          href: "#subunits",
-        }
       : null,
     detail.stats.publications > 0
       ? {
@@ -201,8 +195,8 @@ export async function DepartmentPage({
       </Breadcrumb>
 
       {/* Hero card (Unit Page v2) — eyebrow + website link, name, description,
-          the embedded chair card, divisions, top research areas, and the
-          dashed-divider stats line. */}
+          the stats line, the embedded chair card, divisions, and top research
+          areas. */}
       <section className="mt-4 rounded-[10px] border border-apollo-border bg-background px-7 pb-[26px] pt-7">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-cornell-red)]">
@@ -218,6 +212,7 @@ export async function DepartmentPage({
         <h1 className="page-title mt-2 text-[40px] leading-[1.15] text-balance">
           {deptDisplayName}
         </h1>
+        <UnitStatsLine stats={stats} variant="inline" />
         {detail.dept.description && (
           <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
             {detail.dept.description}
@@ -240,6 +235,7 @@ export async function DepartmentPage({
         <UnitSubunitChips
           noun={["division", "divisions"]}
           ariaLabel="Divisions"
+          countLabel="Scholars"
           chips={detail.divisions.map((d) => ({
             key: d.code,
             label: d.name,
@@ -263,7 +259,6 @@ export async function DepartmentPage({
           }
         />
 
-        <UnitStatsLine stats={stats} />
       </section>
 
       {/* §16 Spotlight — replaces the prior Recent publications + Active

@@ -253,3 +253,57 @@ describe("Spotlight (shared) — variant=\"unit\" vs default", () => {
     );
   });
 });
+
+describe("Unit hero lists (column + ranked layouts)", () => {
+  it("labels the subunit count's unit in a column header and keeps rank order down columns", () => {
+    const chips = Array.from({ length: 9 }, (_, i) => ({
+      key: `d${i}`,
+      label: `Division ${i + 1}`,
+      href: `/departments/medicine/divisions/d${i}`,
+      count: 100 - i,
+    }));
+    const { container } = render(
+      <UnitSubunitChips
+        noun={["division", "divisions"]}
+        ariaLabel="Divisions"
+        countLabel="Scholars"
+        chips={chips}
+      />,
+    );
+    expect(container.textContent).toContain("DivisionScholars");
+    const links = screen.getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(
+      chips.map((c) => `${c.label}${c.count}`),
+    );
+  });
+
+  it("numbers research areas by rank and sizes each bar against the top area", () => {
+    const { container } = render(
+      <UnitResearchAreas
+        areas={[
+          { topicId: "a", topicLabel: "Area A", topicSlug: "a", pubCount: 1000 },
+          { topicId: "b", topicLabel: "Area B", topicSlug: "b", pubCount: 500 },
+        ]}
+        basePath="/departments/example"
+        unitShort="Example"
+        membersNoun="faculty"
+      />,
+    );
+    expect(container.textContent).toContain("Research areaPublications");
+    const b = screen.getByRole("link", { name: /Area B/ });
+    expect(b.textContent).toContain("2");
+    expect(b.getAttribute("href")).toBe("/topics/b");
+    const bars = container.querySelectorAll<HTMLElement>("span[style]");
+    expect(Array.from(bars).map((el) => el.style.width)).toEqual(["100%", "50%"]);
+  });
+
+  it("drops the dashed rule in the inline stats variant", () => {
+    const { container } = render(
+      <UnitStatsLine
+        variant="inline"
+        stats={[{ value: 10, label: "scholars", href: "#people" }]}
+      />,
+    );
+    expect(container.firstElementChild?.className).not.toContain("border-dashed");
+  });
+});

@@ -171,13 +171,6 @@ export async function CenterPage({
           href: `${basePath}#people`,
         }
       : null,
-    programs.length > 0
-      ? {
-          value: programs.length,
-          label: programs.length === 1 ? "program" : "programs",
-          href: "#subunits",
-        }
-      : null,
     publicationsCount > 0
       ? {
           value: publicationsCount,
@@ -244,6 +237,15 @@ export async function CenterPage({
           />
         </div>
         <h1 className="page-title mt-2 text-[40px] leading-[1.15] text-balance">{detail.name}</h1>
+        <UnitStatsLine
+          stats={stats}
+          variant="inline"
+          fallback={
+            detail.scholarCount === 0 && publicationsCount === 0 ? (
+              <span>Membership data pending</span>
+            ) : null
+          }
+        />
         {detail.description && (
           <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
             {detail.description}
@@ -286,6 +288,7 @@ export async function CenterPage({
         <UnitSubunitChips
           noun={["program", "programs"]}
           ariaLabel="Programs"
+          countLabel="Members"
           chips={programs.map((p) => ({
             // A program chip links its program page; the roster's Program
             // facet does the in-place filtering.
@@ -311,14 +314,6 @@ export async function CenterPage({
           }
         />
 
-        <UnitStatsLine
-          stats={stats}
-          fallback={
-            detail.scholarCount === 0 && publicationsCount === 0 ? (
-              <span>Membership data pending</span>
-            ) : null
-          }
-        />
       </section>
 
       <Spotlight data={spotlightData} variant="unit" />

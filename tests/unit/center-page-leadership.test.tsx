@@ -234,9 +234,8 @@ describe("CenterPage — Unit Page v2 hero", () => {
     // A program chip links its program page (the roster's Program facet filters in place).
     expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center/programs/CB");
     expect(chip.textContent).toContain("2");
-    expect(screen.getByRole("link", { name: "2 programs" }).getAttribute("href")).toBe(
-      "#subunits",
-    );
+    // The stats line no longer repeats the subunit count; the list heading carries it.
+    expect(screen.queryByRole("link", { name: "2 programs" })).toBeNull();
     expect(screen.getByRole("link", { name: "42 scholars" }).getAttribute("href")).toBe(
       "/centers/meyer-cancer-center#people",
     );
