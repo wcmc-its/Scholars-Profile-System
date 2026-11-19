@@ -16,7 +16,14 @@ type Pair = { cwid: string; orcid: string };
 
 const h = vi.hoisted(() => {
   const state = {
-    evidence: [] as Array<{ cwid: string; orcid: string; band: string; computedAt?: Date }>,
+    evidence: [] as Array<{
+      cwid: string;
+      orcid: string;
+      band: string;
+      computedAt?: Date;
+      competitor?: boolean;
+      nameAgrees?: boolean;
+    }>,
     /** `orcid_candidate` rows with source `rpm_admin`. */
     admins: [] as Array<{ cwid: string; orcid: string }>,
     /** Other `orcid_candidate` rows (any source). */
@@ -27,8 +34,19 @@ const h = vi.hoisted(() => {
     units: new Map<string, Record<string, string>>(),
     /** Manual division code → its hand-added roster. */
     rosters: new Map<string, string[]>(),
-    scholars: new Map<string, { orcid: string | null; orcidConfirmMethod: string | null }>(),
+    scholars: new Map<
+      string,
+      {
+        orcid: string | null;
+        orcidConfirmMethod: string | null;
+        orcidConfirmedBy?: string | null;
+        orcidConfirmedAt?: Date | null;
+        campus?: string;
+      }
+    >(),
     dismissals: new Set<string>(),
+    /** Who wrote each dismissal, and when (`cwid|orcid`). */
+    dismissMeta: new Map<string, { dismissedBy: string | null; dismissedAt: Date }>(),
   };
   const k = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
   const scholarUpdateMany = vi.fn();
@@ -41,10 +59,18 @@ const h = vi.hoisted(() => {
         );
         return e ? { band: e.band } : null;
       }),
-      findMany: vi.fn(async (args?: { where?: { band?: string } }) =>
+      findMany: vi.fn(async (args?: { where?: { band?: string; cwid?: string } }) =>
         h.state.evidence
           .filter((r) => args?.where?.band === undefined || r.band === args.where.band)
-          .map(({ cwid, orcid, band }) => ({ cwid, orcid, band, shared: 5, nameAgrees: true })),
+          .filter((r) => args?.where?.cwid === undefined || r.cwid === args.where.cwid)
+          .map(({ cwid, orcid, band, competitor, nameAgrees }) => ({
+            cwid,
+            orcid,
+            band,
+            shared: 5,
+            nameAgrees: nameAgrees ?? true,
+            competitor: competitor ?? false,
+          })),
       ),
       findFirst: vi.fn(async ({ where }: { where: { band: string; computedAt: { gt: Date } } }) => {
         const e = h.state.evidence.find(
@@ -135,19 +161,64 @@ const h = vi.hoisted(() => {
           ? where.cwid_orcid
           : null,
       ),
-      findMany: vi.fn(async (args?: { where?: { cwid?: string | { in: string[] } } }) =>
-        [...h.state.dismissals]
-          .map((d) => ({ cwid: d.split("|")[0]!, orcid: d.split("|")[1]! }))
-          .filter((d) => {
-            const c = args?.where?.cwid;
-            return (
-              c === undefined || (typeof c === "string" ? d.cwid === c : c.in.includes(d.cwid))
-            );
-          }),
+      findMany: vi.fn(
+        async (args?: {
+          where?: {
+            cwid?: string | { in: string[] };
+            orcid?: { in: string[] };
+            dismissedBy?: string;
+          };
+        }) =>
+          [...h.state.dismissals]
+            .map((d) => ({
+              cwid: d.split("|")[0]!,
+              orcid: d.split("|")[1]!,
+              dismissedBy: h.state.dismissMeta.get(d)?.dismissedBy ?? null,
+              dismissedAt: h.state.dismissMeta.get(d)?.dismissedAt ?? new Date(0),
+            }))
+            .filter((d) => {
+              const w = args?.where;
+              const c = w?.cwid;
+              return (
+                (c === undefined ||
+                  (typeof c === "string" ? d.cwid === c : c.in.includes(d.cwid))) &&
+                (w?.orcid === undefined || w.orcid.in.includes(d.orcid)) &&
+                (w?.dismissedBy === undefined || d.dismissedBy === w.dismissedBy)
+              );
+            }),
       ),
-      deleteMany: vi.fn(async () => ({ count: 0 })),
-      upsert: vi.fn(async ({ create }: { create: Pair }) => {
-        h.state.dismissals.add(k(create.cwid, create.orcid));
+      deleteMany: vi.fn(
+        async ({
+          where,
+        }: {
+          where: { cwid: string; orcid: string | { in: string[] }; dismissedBy?: string };
+        }) => {
+          let count = 0;
+          for (const d of [...h.state.dismissals]) {
+            const [cwid, orcid] = d.split("|") as [string, string];
+            const o = where.orcid;
+            if (cwid !== where.cwid) continue;
+            if (typeof o === "string" ? orcid !== o : !o.in.includes(orcid)) continue;
+            if (
+              where.dismissedBy !== undefined &&
+              h.state.dismissMeta.get(d)?.dismissedBy !== where.dismissedBy
+            )
+              continue;
+            h.state.dismissals.delete(d);
+            h.state.dismissMeta.delete(d);
+            count += 1;
+          }
+          return { count };
+        },
+      ),
+      upsert: vi.fn(async ({ create }: { create: Pair & { dismissedBy?: string | null } }) => {
+        const key = k(create.cwid, create.orcid);
+        h.state.dismissals.add(key);
+        if (!h.state.dismissMeta.has(key))
+          h.state.dismissMeta.set(key, {
+            dismissedBy: create.dismissedBy ?? null,
+            dismissedAt: new Date(),
+          });
         return create;
       }),
     },
@@ -188,7 +259,9 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { POST as bulkConfirm } from "@/app/api/edit/orcid-queue/bulk-confirm/route";
 import { POST as decide } from "@/app/api/edit/orcid-queue/decide/route";
+import { POST as undo } from "@/app/api/edit/orcid-queue/undo/route";
 
 const SUPER = { cwid: "lib0001", isSuperuser: true };
 const STEWARD = { cwid: "cs00001", isSuperuser: false, isCommsSteward: true };
@@ -218,6 +291,7 @@ beforeEach(() => {
   h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong" }];
   h.state.scholars = new Map([["jd0001", { orcid: null, orcidConfirmMethod: null }]]);
   h.state.dismissals = new Set();
+  h.state.dismissMeta = new Map();
   h.state.admins = [];
   h.state.sources = [];
   h.state.roles = new Map();
@@ -233,8 +307,7 @@ beforeEach(() => {
     }) => {
       const s = h.state.scholars.get(where.cwid);
       if (!s || s.orcid !== where.orcid) return { count: 0 };
-      s.orcid = data.orcid;
-      s.orcidConfirmMethod = data.orcidConfirmMethod;
+      Object.assign(s, data);
       return { count: 1 };
     },
   );
@@ -243,6 +316,15 @@ beforeEach(() => {
 describe("authz", () => {
   const calls: Array<[string, (r: never) => Promise<Response>, Record<string, unknown>]> = [
     ["decide", decide, { cwid: "jd0001", orcid: ORCID, decision: "confirm" }],
+    [
+      "bulk-confirm",
+      bulkConfirm,
+      {
+        pairs: [{ cwid: "jd0001", orcid: ORCID }],
+        rule: { minShared: 5, maxOnlyOrcid: 1, minSources: 2 },
+      },
+    ],
+    ["undo", undo, { items: [{ cwid: "jd0001", confirmed: ORCID }] }],
   ];
 
   it.each(calls)("%s 404s with the flag off, before the preamble", async (_n, route, body) => {
@@ -622,5 +704,190 @@ describe("v2: confirm one iD, dismiss the scholar's others in the same action", 
       expect((await decide(req({ cwid: "jd0001", orcid: ORCID, ...body }))).status).toBe(400);
     }
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulk-confirm", () => {
+  const RULE = { minShared: 5, maxOnlyOrcid: 1, minSources: 2 };
+
+  it("confirms each pair with confirmPair's write, the rule on each audit row; refuses what no longer qualifies", async () => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "js0002", orcid: OTHER, band: "strong", competitor: true },
+      { cwid: "jt0003", orcid: "0000-0001-5109-3700", band: "moderate" },
+    ];
+    h.state.scholars = new Map([
+      ["jd0001", { orcid: null, orcidConfirmMethod: null }],
+      ["js0002", { orcid: null, orcidConfirmMethod: null }],
+      ["jt0003", { orcid: null, orcidConfirmMethod: null }],
+    ]);
+    const res = await bulkConfirm(
+      req({
+        pairs: [
+          { cwid: "jd0001", orcid: ORCID },
+          { cwid: "js0002", orcid: OTHER },
+          { cwid: "jt0003", orcid: "0000-0001-5109-3700" },
+        ],
+        rule: RULE,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { results } = (await res.json()) as {
+      results: Array<{ cwid: string; ok: boolean; code?: string }>;
+    };
+    expect(results).toEqual([
+      { cwid: "jd0001", orcid: ORCID, ok: true },
+      { cwid: "js0002", orcid: OTHER, ok: false, code: "not_bulk_eligible" },
+      { cwid: "jt0003", orcid: "0000-0001-5109-3700", ok: false, code: "not_bulk_eligible" },
+    ]);
+    expect(h.state.scholars.get("jd0001")).toMatchObject({
+      orcid: ORCID,
+      orcidConfirmMethod: "librarian",
+      orcidConfirmedBy: "lib0001",
+    });
+    expect(h.state.scholars.get("js0002")!.orcid).toBeNull();
+    expect(audits()).toHaveLength(1);
+    expect(audits()[0]).toMatchObject({
+      action: "orcid_librarian_confirm",
+      afterValues: { bulk: true, bulk_rule: RULE },
+    });
+  });
+
+  it("refuses a scholar with a second open iD, an Ithaca scholar, and one with an iD on file", async () => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "jd0001", orcid: OTHER, band: "weak" },
+      { cwid: "it0001", orcid: "0000-0001-5109-3700", band: "strong" },
+    ];
+    h.state.scholars = new Map([
+      ["jd0001", { orcid: null, orcidConfirmMethod: null }],
+      ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca" }],
+    ]);
+    const res = await bulkConfirm(
+      req({
+        pairs: [
+          { cwid: "jd0001", orcid: ORCID },
+          { cwid: "it0001", orcid: "0000-0001-5109-3700" },
+        ],
+        rule: RULE,
+      }),
+    );
+    const { results } = (await res.json()) as { results: Array<{ ok: boolean }> };
+    expect(results.map((r) => r.ok)).toEqual([false, false]);
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("400 on a bad body: no pairs, a repeated scholar, a bad iD, or a missing rule", async () => {
+    for (const body of [
+      { pairs: [], rule: RULE },
+      {
+        pairs: [
+          { cwid: "jd0001", orcid: ORCID },
+          { cwid: "jd0001", orcid: OTHER },
+        ],
+        rule: RULE,
+      },
+      { pairs: [{ cwid: "jd0001", orcid: "nope" }], rule: RULE },
+      { pairs: [{ cwid: "jd0001", orcid: ORCID }] },
+    ])
+      expect((await bulkConfirm(req(body))).status).toBe(400);
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("undo", () => {
+  it("undoes the actor's own confirm and the dismissals it made: back to undecided, one undo audit row", async () => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "jd0001", orcid: OTHER, band: "weak" },
+    ];
+    await decide(
+      req({ cwid: "jd0001", orcid: ORCID, decision: "confirm", dismissOthers: [OTHER] }),
+    );
+    expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
+    expect(h.state.dismissals.has(k("jd0001", OTHER))).toBe(true);
+    h.appendAuditRow.mockClear();
+
+    const res = await undo(
+      req({ items: [{ cwid: "jd0001", confirmed: ORCID, dismissed: [OTHER] }] }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toEqual([{ cwid: "jd0001", ok: true }]);
+    expect(h.state.scholars.get("jd0001")).toMatchObject({ orcid: null, orcidConfirmMethod: null });
+    expect(h.state.dismissals.size).toBe(0);
+    expect(audits()).toEqual([
+      expect.objectContaining({
+        action: "orcid_librarian_undo",
+        afterValues: { orcid: null, unconfirmed: ORCID, undismissed: [OTHER] },
+      }),
+    ]);
+  });
+
+  it("undoes a Not this person", async () => {
+    await decide(req({ cwid: "jd0001", orcid: ORCID, decision: "dismiss" }));
+    const res = await undo(req({ items: [{ cwid: "jd0001", dismissed: [ORCID] }] }));
+    expect((await res.json()).results).toEqual([{ cwid: "jd0001", ok: true }]);
+    expect(h.state.dismissals.size).toBe(0);
+  });
+
+  it("never undoes someone else's confirm or dismissal, or a confirm the scholar made", async () => {
+    h.state.scholars.set("jd0001", {
+      orcid: ORCID,
+      orcidConfirmMethod: "librarian",
+      orcidConfirmedBy: "other01",
+      orcidConfirmedAt: new Date(),
+    });
+    h.state.scholars.set("js0002", {
+      orcid: OTHER,
+      orcidConfirmMethod: "self",
+      orcidConfirmedBy: "lib0001",
+      orcidConfirmedAt: new Date(),
+    });
+    h.state.dismissals.add(k("jt0003", ORCID));
+    h.state.dismissMeta.set(k("jt0003", ORCID), {
+      dismissedBy: "other01",
+      dismissedAt: new Date(),
+    });
+    h.state.scholars.set("jt0003", { orcid: null, orcidConfirmMethod: null });
+    const res = await undo(
+      req({
+        items: [
+          { cwid: "jd0001", confirmed: ORCID },
+          { cwid: "js0002", confirmed: OTHER },
+          { cwid: "jt0003", dismissed: [ORCID] },
+        ],
+      }),
+    );
+    expect((await res.json()).results).toEqual([
+      { cwid: "jd0001", ok: false, code: "state_changed" },
+      { cwid: "js0002", ok: false, code: "state_changed" },
+      { cwid: "jt0003", ok: false, code: "state_changed" },
+    ]);
+    expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
+    expect(h.state.dismissals.has(k("jt0003", ORCID))).toBe(true);
+    expect(h.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("refuses past the 15-minute window", async () => {
+    h.state.scholars.set("jd0001", {
+      orcid: ORCID,
+      orcidConfirmMethod: "librarian",
+      orcidConfirmedBy: "lib0001",
+      orcidConfirmedAt: new Date(Date.now() - 16 * 60 * 1000),
+    });
+    const res = await undo(req({ items: [{ cwid: "jd0001", confirmed: ORCID }] }));
+    expect((await res.json()).results).toEqual([
+      { cwid: "jd0001", ok: false, code: "undo_expired" },
+    ]);
+    expect(h.state.scholars.get("jd0001")!.orcid).toBe(ORCID);
+  });
+
+  it("400 on an empty item or a bad iD", async () => {
+    for (const body of [
+      { items: [] },
+      { items: [{ cwid: "jd0001" }] },
+      { items: [{ cwid: "jd0001", confirmed: "nope" }] },
+    ])
+      expect((await undo(req(body))).status).toBe(400);
   });
 });

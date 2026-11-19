@@ -621,7 +621,12 @@ describe("loaders", () => {
 
   it("the filter narrows the list: person type, how discovered (a kept scholar keeps every candidate)", async () => {
     const { loadOrcidQueue } = await actual();
-    const byType = await loadOrcidQueue(client(), { types: ["postdoc"], units: [], sources: [], campuses: [] });
+    const byType = await loadOrcidQueue(client(), {
+      types: ["postdoc"],
+      units: [],
+      sources: [],
+      campuses: [],
+    });
     expect(cwidsOf(byType)).toEqual(["d00001"]);
     const bySource = await loadOrcidQueue(client(), {
       types: [],
@@ -636,7 +641,14 @@ describe("loaders", () => {
   it("the filter narrows the list: department, division (with its manual roster), institution", async () => {
     const { loadOrcidQueue } = await actual();
     expect(
-      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["dept:MED"], sources: [], campuses: [] })),
+      cwidsOf(
+        await loadOrcidQueue(client(), {
+          types: [],
+          units: ["dept:MED"],
+          sources: [],
+          campuses: [],
+        }),
+      ),
     ).toEqual(["a00001", "c00001"]);
     expect(
       cwidsOf(
@@ -649,7 +661,14 @@ describe("loaders", () => {
       ),
     ).toEqual(["a00001", "d00001"]);
     expect(
-      cwidsOf(await loadOrcidQueue(client(), { types: [], units: ["inst:HSS"], sources: [], campuses: [] })),
+      cwidsOf(
+        await loadOrcidQueue(client(), {
+          types: [],
+          units: ["inst:HSS"],
+          sources: [],
+          campuses: [],
+        }),
+      ),
     ).toEqual(["f00001"]);
   });
 
@@ -880,10 +899,12 @@ describe("v3 pure rules", () => {
 describe("filter and link helpers", () => {
   it("the filter key is canonical and empty for no filter; the href carries no tab", () => {
     expect(orcidQueueFilterKey(EMPTY_ORCID_QUEUE_FILTER)).toBe("");
-    expect(orcidQueueFilterKey({ types: ["b", "a"], units: [], sources: ["orcid_works"], campuses: [] })).toBe(
-      "type=a&type=b&source=orcid_works",
+    expect(
+      orcidQueueFilterKey({ types: ["b", "a"], units: [], sources: ["orcid_works"], campuses: [] }),
+    ).toBe("type=a&type=b&source=orcid_works");
+    expect(orcidQueueHref("/q", { types: ["a"], units: [], sources: [], campuses: [] })).toBe(
+      "/q?type=a",
     );
-    expect(orcidQueueHref("/q", { types: ["a"], units: [], sources: [], campuses: [] })).toBe("/q?type=a");
     expect(orcidQueueHref("/q", EMPTY_ORCID_QUEUE_FILTER)).toBe("/q");
     expect(parseOrcidQueueFilter({ type: "a", unit: "nope", source: "orcid_email" })).toEqual({
       types: ["a"],
@@ -913,7 +934,9 @@ describe("filter and link helpers", () => {
     expect(pmCurateHref(base, "jd0001", { pmid: "41032574" })).toBe(
       "https://pm.example.org/curate/jd0001?add=pubmed&pmid=41032574",
     );
-    expect(pmCurateHref(base, "jd0001", { pmid: "1&x=2" })).toBe("https://pm.example.org/curate/jd0001");
+    expect(pmCurateHref(base, "jd0001", { pmid: "1&x=2" })).toBe(
+      "https://pm.example.org/curate/jd0001",
+    );
     expect(pmCurateHref(base, "jd0001", { doi: "10.9/a", pmid: "5" })).toContain("add=external");
   });
 
@@ -999,7 +1022,9 @@ describe("client", () => {
     });
     expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
     fireEvent.change(screen.getByTestId("orcid-queue-search"), { target: { value: "" } });
-    expect(screen.getByTestId("orcid-queue-filter-errors").textContent).toBe("Possible errors · 1");
+    expect(screen.getByTestId("orcid-queue-filter-errors").textContent).toBe(
+      "Different iD on file · 1",
+    );
     fireEvent.click(screen.getByTestId("orcid-queue-filter-errors"));
     expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
     expect(screen.getByTestId("orcid-queue-item-cf0003")).toBeTruthy();
@@ -1108,7 +1133,7 @@ describe("client", () => {
     expect(names).toContain("Also known as Jane Doe; Jane Q. Doe");
     expect(names).toContain("Agree: same surname, full given name");
     expect(names).toContain(
-      "Example Medical College 1996–2001 ↔ ReCiter Identity: Example Medical College of Example University",
+      "Example Medical College 1996–2001↔ ReCiter Identity: Example Medical College of Example University",
     );
     expect(names).toContain("No verified email");
     expect(names).toContain("Found by: 2 sources agree");
@@ -1137,7 +1162,7 @@ describe("client", () => {
     ).toBe("true");
   });
 
-  it("Confirm also marks the others, unless the box is cleared; the scholar stays, decided", async () => {
+  it("Confirm also marks the others, unless the box is cleared; then moves to the next scholar", async () => {
     const { posts } = mount([CARD({}, [ROW, SECOND]), JOHN]);
     await screen.findByTestId("orcid-queue-card-jd0001");
     expect(screen.getByText("2 candidate iDs, best first")).toBeTruthy();
@@ -1149,15 +1174,12 @@ describe("client", () => {
       decision: "confirm",
       dismissOthers: [OTHER],
     });
-    // Decided, but still listed until you move on.
-    expect(await screen.findByTestId("orcid-queue-decision")).toBeTruthy();
-    expect(screen.getByTestId("orcid-queue-item-jd0001")).toBeTruthy();
-    expect(screen.getByTestId("orcid-queue-resolved").textContent).toBe(
-      `Confirmed ${ORCID}. Reaches WCM Identity overnight.`,
-    );
-    fireEvent.click(screen.getByText("Next scholar"));
+    // Decided: the queue moves on by itself, and the toast says what happened.
     expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
     expect(screen.queryByTestId("orcid-queue-item-jd0001")).toBeNull();
+    expect(screen.getByTestId("orcid-queue-status").textContent).toContain(
+      "Confirmed. The iD is on file and reaches WCM Identity overnight.",
+    );
   });
 
   it("with the box cleared, Confirm sends no dismissOthers", async () => {
@@ -1234,7 +1256,8 @@ describe("client", () => {
     });
     // Unassigned (the default) hides it: nothing is open.
     expect(screen.queryByTestId("orcid-queue-item-jd0001")).toBeNull();
-    fireEvent.click(screen.getByLabelText("Remove Decision: Unassigned"));
+    fireEvent.click(screen.getByTestId("orcid-queue-filter-dec"));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
     const shown = await screen.findByTestId("orcid-queue-card-jd0001");
     expect(within(shown).getByTestId("orcid-queue-ruled-out").textContent).toContain(
       "Belongs to another scholar (Zed Doe zz0009) by Lib Rarian lib0001",
@@ -1302,7 +1325,7 @@ describe("client", () => {
     expect(within(row).getByRole("link", { name: ROW.orcid }).getAttribute("href")).toContain(
       ROW.orcid,
     );
-    expect(screen.getByTestId("orcid-queue-confirm").textContent).toBe("Replace with this iD");
+    expect(screen.getByTestId("orcid-queue-confirm").textContent).toContain("Replace with this iD");
     fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
     await vi.waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]).toMatchObject({ decision: "confirm", replace: true });
@@ -1332,7 +1355,8 @@ describe("client", () => {
     );
     const { posts } = mount([auto]);
     expect(screen.getByTestId("orcid-queue-count").textContent).toBe("0 scholars");
-    fireEvent.click(screen.getByLabelText("Remove Decision: Unassigned"));
+    fireEvent.click(screen.getByTestId("orcid-queue-filter-dec"));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
     await screen.findByTestId("orcid-queue-card-jd0001");
     expect(screen.getByTestId("orcid-queue-decision").textContent).toContain(
       "Automatically, from a verified email",
@@ -1353,5 +1377,211 @@ describe("client", () => {
   it("a scholar who left the queue since the page loaded says so", async () => {
     mount([], { summaries: [summaryOf(CARD())] });
     expect(await screen.findByTestId("orcid-queue-gone")).toBeTruthy();
+  });
+});
+
+describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", () => {
+  const SECOND: OrcidQueueRow = {
+    ...ROW,
+    orcid: OTHER,
+    band: "weak",
+    shared: 0,
+    nameAgrees: false,
+    detail: null,
+    sources: ["orcid_name"],
+  };
+  const JOHN = CARD(
+    { cwid: "js0002", slug: "john-smith", name: "John Smith, PhD", department: "Surgery" },
+    [{ ...ROW, cwid: "js0002", band: "moderate", orcid: "0000-0001-5109-3700" }],
+  );
+
+  /** `mount`, with the per-item routes answering `{ results }`. */
+  function mountWith(
+    cards: OrcidQueueCard[],
+    summaries?: OrcidQueueSummary[],
+    bulkOk: (cwid: string) => boolean = () => true,
+  ) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        const body = JSON.parse(init.body as string) as {
+          items?: Array<{ cwid: string }>;
+          pairs?: Array<{ cwid: string; orcid: string }>;
+        };
+        if (url.endsWith("/undo"))
+          return Response.json({ results: body.items!.map((i) => ({ cwid: i.cwid, ok: true })) });
+        if (url.endsWith("/bulk-confirm"))
+          return Response.json({
+            results: body.pairs!.map((p) =>
+              bulkOk(p.cwid) ? { ...p, ok: true } : { ...p, ok: false, code: "not_bulk_eligible" },
+            ),
+          });
+        return Response.json({ ok: true });
+      }
+      const cwid = new URL(url, "http://x").searchParams.get("cwid");
+      const c = cards.find((x) => x.cwid === cwid);
+      return c ? Response.json(c) : new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <OrcidQueue
+        data={data(summaries ?? cards.map((c) => summaryOf(c)))}
+        basePath="/edit/orcid-queue"
+        readOnly={false}
+      />,
+    );
+    const posts = () =>
+      (fetchMock.mock.calls as unknown as FetchCall[])
+        .filter(([, i]) => i?.method === "POST")
+        .map(([u, i]) => ({
+          url: u,
+          body: JSON.parse(i!.body as string) as Record<string, unknown>,
+        }));
+    return { posts };
+  }
+
+  it("each list row shows its tier and a one-line evidence summary; Weak splits into Thin and Conflicting", () => {
+    const thin = CARD({ cwid: "tn0001", name: "Tia Thin" }, [
+      { ...ROW, cwid: "tn0001", band: "weak", shared: 1, worksTotal: 1 },
+    ]);
+    const conflicting = CARD({ cwid: "cf0001", name: "Cal Conflict" }, [
+      { ...ROW, cwid: "cf0001", band: "weak", shared: 0, worksTotal: 0, nameAgrees: false },
+    ]);
+    mountWith([CARD(), thin, conflicting]);
+    const item = (cwid: string) => screen.getByTestId(`orcid-queue-item-${cwid}`);
+    expect(within(item("jd0001")).getByTestId("orcid-queue-item-summary").textContent).toBe(
+      "7/12 shared · 1 iD",
+    );
+    expect(item("jd0001").textContent).toContain("Strong");
+    expect(item("tn0001").textContent).toContain("Thin evidence");
+    expect(within(item("cf0001")).getByTestId("orcid-queue-item-summary").textContent).toBe(
+      "No works on ORCID · 1 iD",
+    );
+    expect(item("cf0001").textContent).toContain("Conflicting");
+  });
+
+  it("C confirms the open iD and marks the others, the queue moves on, and Z undoes it", async () => {
+    const { posts } = mountWith([CARD({}, [ROW, SECOND]), JOHN]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.keyDown(window, { key: "c" });
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toMatchObject({
+      url: "/api/edit/orcid-queue/decide",
+      body: { cwid: "jd0001", orcid: ORCID, decision: "confirm", dismissOthers: [OTHER] },
+    });
+    expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-status-undo")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "z" });
+    await vi.waitFor(() => expect(posts()).toHaveLength(2));
+    expect(posts()[1]).toEqual({
+      url: "/api/edit/orcid-queue/undo",
+      body: { items: [{ cwid: "jd0001", confirmed: ORCID, dismissed: [OTHER] }] },
+    });
+    // Back on the scholar, undecided again.
+    expect(await screen.findByTestId("orcid-queue-card-jd0001")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-item-jd0001")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-status").textContent).toContain("Undone");
+    expect(screen.getByTestId("orcid-queue-confirm")).toBeTruthy();
+  });
+
+  it("X marks the open iD Not this person and stays while iDs are open; N rules out the rest", async () => {
+    const { posts } = mountWith([CARD({}, [ROW, SECOND]), JOHN]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    fireEvent.keyDown(window, { key: "x" });
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]!.body).toMatchObject({ cwid: "jd0001", orcid: ORCID, decision: "dismiss" });
+    // One iD still open: stays on Jane, with the first marked.
+    await vi.waitFor(() => expect(screen.getAllByTestId("orcid-queue-outcome")).toHaveLength(1));
+    expect(screen.getByTestId("orcid-queue-card-jd0001")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "n" });
+    await vi.waitFor(() => expect(posts()).toHaveLength(2));
+    expect(posts()[1]!.body).toMatchObject({
+      cwid: "jd0001",
+      orcid: OTHER,
+      decision: "dismiss",
+      noneOfThese: true,
+    });
+    expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
+  });
+
+  it("shortcuts do nothing while typing in a field", async () => {
+    const { posts } = mountWith([CARD()]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    const search = screen.getByRole("searchbox");
+    fireEvent.keyDown(search, { key: "c" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("no works on the ORCID record says so instead of 0 of 0", async () => {
+    mountWith([CARD({}, [{ ...ROW, shared: 0, worksTotal: 0, newWorks: 0 }])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-no-works").textContent).toBe("No works on ORCID");
+  });
+
+  it("Bulk review lists scholars under the rule, tints any with works only on ORCID, and confirms after asking", async () => {
+    const mk = (cwid: string, over: Partial<OrcidQueueRow>) =>
+      CARD({ cwid, name: `Scholar ${cwid}` }, [{ ...ROW, cwid, orcid: ORCID, ...over }]);
+    const clean = mk("aa0001", { shared: 7, worksTotal: 7, newWorks: 0 });
+    const oneExtra = mk("bb0002", { shared: 7, worksTotal: 8, newWorks: 1 });
+    const moderate = mk("cc0003", { band: "moderate", shared: 7, worksTotal: 7, newWorks: 0 });
+    const withNew = (c: OrcidQueueCard) =>
+      summaryOf(c, {
+        candidates: c.candidates.map((r) => ({
+          orcid: r.orcid,
+          band: r.band,
+          shared: r.shared,
+          worksTotal: r.worksTotal,
+          newWorks: r.newWorks,
+          nameAgrees: r.nameAgrees,
+          competitor: r.competitor,
+          sources: r.sources,
+        })),
+      });
+    const { posts } = mountWith(
+      [clean, oneExtra, moderate],
+      [clean, oneExtra, moderate].map(withNew),
+      (cwid) => cwid === "aa0001",
+    );
+    fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
+    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe(
+      "2 of 3 scholars in this view match",
+    );
+    expect(screen.queryByTestId("orcid-bulk-row-cc0003")).toBeNull();
+    expect(screen.getByTestId("orcid-bulk-row-bb0002").className).toContain("bg-apollo-coral-tint");
+    expect(screen.getByTestId("orcid-bulk-footer").textContent).toContain(
+      "1 tinted row still checked",
+    );
+
+    // Tighten the rule: nothing only on ORCID.
+    fireEvent.change(screen.getByTestId("orcid-bulk-rule-maxOnlyOrcid"), {
+      target: { value: "0" },
+    });
+    expect(screen.queryByTestId("orcid-bulk-row-bb0002")).toBeNull();
+    fireEvent.change(screen.getByTestId("orcid-bulk-rule-maxOnlyOrcid"), {
+      target: { value: "1" },
+    });
+
+    fireEvent.click(screen.getByTestId("orcid-bulk-confirm"));
+    expect(posts()).toHaveLength(0);
+    fireEvent.click(screen.getByTestId("orcid-bulk-confirm-yes"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]).toEqual({
+      url: "/api/edit/orcid-queue/bulk-confirm",
+      body: {
+        pairs: [
+          { cwid: "aa0001", orcid: ORCID },
+          { cwid: "bb0002", orcid: ORCID },
+        ],
+        rule: { minShared: 5, maxOnlyOrcid: 1, minSources: 2 },
+      },
+    });
+    expect((await screen.findByTestId("orcid-queue-status")).textContent).toContain(
+      "Confirmed 1 iD. They reach WCM Identity overnight. 1 scholar no longer qualified and stayed in the queue.",
+    );
+    // The confirmed scholar drops out; the skipped one stays.
+    expect(screen.queryByTestId("orcid-bulk-row-aa0001")).toBeNull();
+    expect(screen.getByTestId("orcid-bulk-row-bb0002")).toBeTruthy();
+    expect(screen.getByTestId("orcid-queue-status-undo")).toBeTruthy();
   });
 });
