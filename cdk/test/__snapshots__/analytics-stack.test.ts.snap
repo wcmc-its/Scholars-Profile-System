@@ -454,7 +454,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "bd7a05cf2c683061f57987732d2b971f96fb968893f52a50413a5bbd9e6e0632.zip",
+          "S3Key": "6342f7c524404d4c7924ab7700569e8d00db21cf012a862f90a5548fc973c531.zip",
         },
         "Environment": {
           "Variables": {
@@ -1796,7 +1796,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "bd7a05cf2c683061f57987732d2b971f96fb968893f52a50413a5bbd9e6e0632.zip",
+          "S3Key": "6342f7c524404d4c7924ab7700569e8d00db21cf012a862f90a5548fc973c531.zip",
         },
         "Environment": {
           "Variables": {

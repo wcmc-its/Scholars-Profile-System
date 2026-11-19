@@ -171,10 +171,9 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
     }
   });
 
-  it("gives Siteimprove its own device bucket ahead of the generic bot bucket", () => {
-    const si = device.indexOf("THEN 'siteimprove'");
-    expect(si).toBeGreaterThan(-1);
-    expect(si).toBeLessThan(device.indexOf("THEN 'bot'"));
+  it("counts Siteimprove in the generic bot device bucket, not one of its own", () => {
+    expect(device).toContain("googleother|siteimprove)");
+    expect(device).not.toContain("THEN 'siteimprove'");
   });
 
   it("keeps bots visible in the device breakdown and does not filter traffic arms by UA", () => {
