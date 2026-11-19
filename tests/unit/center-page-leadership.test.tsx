@@ -231,10 +231,8 @@ describe("CenterPage — Unit Page v2 hero", () => {
     const section = container.querySelector("section")!;
     const chip = screen.getByRole("link", { name: /Cancer Biology/ });
     expect(section.contains(chip)).toBe(true);
-    // Unit Page v2 — the chip filters the grouped roster in place; its href
-    // (other tabs / new-tab clicks) lands on the roster, which seeds the
-    // Program facet from `?program=` on its client mount.
-    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center?program=CB#people");
+    // A program chip links its program page (the roster's Program facet filters in place).
+    expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center/programs/CB");
     expect(chip.textContent).toContain("2");
     expect(screen.getByRole("link", { name: "2 programs" }).getAttribute("href")).toBe(
       "#subunits",
