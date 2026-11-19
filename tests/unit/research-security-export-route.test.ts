@@ -201,6 +201,18 @@ describe("allowed", () => {
     expect(h.loadFacts.mock.calls[1][1]).toMatchObject({ category: "Country" });
   });
 
+  it("the search text narrows the downloaded rows, as on the page", async () => {
+    const all = await get("?view=person");
+    const none = await get("?view=person&q=zzz-no-such-person");
+    const rows = async (res: Response) => {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await res.arrayBuffer());
+      return wb.worksheets[0].rowCount - 1;
+    };
+    expect(await rows(all)).toBeGreaterThan(0);
+    expect(await rows(none)).toBe(0);
+  });
+
   it("applies an entity the list has and a person, and drops an entity it does not have", async () => {
     h.loadEntities.mockResolvedValue(["China", "Russia"]);
     await get("?list=country-of-concern&entity=China&person=ABC2001");

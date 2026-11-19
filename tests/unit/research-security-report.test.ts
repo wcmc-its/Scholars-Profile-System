@@ -9,9 +9,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  arrangeEntityRows,
+  arrangeFundingRows,
+  arrangePaperRows,
+  arrangePersonRows,
   buildEntityRows,
   buildFundingRows,
   buildPaperRows,
+  buildPersonProfile,
   buildPersonRows,
   buildSummary,
   buildUnattributedRows,
@@ -19,11 +24,14 @@ import {
   candidateListsEntity,
   countUnattributedPapers,
   forConfirmedAuthors,
+  groupUnattributedRows,
   listedBy,
   loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
+  searchUnattributedRows,
+  sortUnattributedGroups,
   unattributedPriority,
   type MatchedString,
   type ArticleFact,
@@ -605,6 +613,148 @@ describe("drill-down filters: entity and person", () => {
 
   it("the campus filter still applies under a person filter", () => {
     expect(buildPaperRows({ ...base, person: "w1" }, "ithaca")).toEqual([]);
+  });
+});
+
+describe("Not yet attributed, grouped by candidate", () => {
+  const two = facts({
+    articles: [article("1"), article("2"), article("3"), article("4")],
+    people: [
+      person("1", "w1", { attribution: "pending", reciterScore: 60 }),
+      person("2", "w1", { attribution: "pending", reciterScore: 95 }),
+      person("3", "w1", { attribution: "pending", reciterScore: 40 }),
+      person("3", "i1", { campus: "ithaca" }),
+      person("4", "w2", { attribution: "pending", reciterScore: 70 }),
+    ],
+    matches: [
+      match("1", "Peking University"),
+      match("2", "Zhejiang University"),
+      match("3", "Peking University"),
+      match("4", "Peking University"),
+    ],
+  });
+  const groups = groupUnattributedRows(buildUnattributedRows(two, "both"));
+
+  it("one group per candidate, with the best priority, top score and counted papers", () => {
+    expect(groups.map((g) => [g.key, g.rows.length, g.papers, g.priority, g.maxScore])).toEqual([
+      // Paper 3 is already confirmed for i1: a row, but not a counted paper.
+      ["w1", 3, 2, 2, 95],
+      ["w2", 1, 1, 3, 70],
+    ]);
+    expect(groups[0].entities).toEqual(["Peking University", "Zhejiang University"]);
+    // Grouping never changes the tab's count of distinct papers.
+    expect(groups.reduce((n, g) => n + g.papers, 0)).toBe(
+      countUnattributedPapers(buildUnattributedRows(two, "both")),
+    );
+  });
+
+  it("rows with no proposed person are never merged into one candidate", () => {
+    const queue = facts({
+      articles: [article("1"), article("2")],
+      people: [
+        person("1", "x", { cwid: null, displayName: "Unassigned", attribution: "review_queue", campus: "unknown" }),
+        person("2", "x", { cwid: null, displayName: "Unassigned", attribution: "review_queue", campus: "unknown" }),
+      ],
+      matches: [match("1", "Peking University"), match("2", "Peking University")],
+    });
+    expect(groupUnattributedRows(buildUnattributedRows(queue, "both"))).toHaveLength(2);
+  });
+
+  it("groups sort by papers, score or name; search narrows the rows first", () => {
+    expect(sortUnattributedGroups(groups, { sort: "name", dir: "desc" }).map((g) => g.key)).toEqual(["w2", "w1"]);
+    expect(sortUnattributedGroups(groups, { sort: "papers" }).map((g) => g.key)).toEqual(["w1", "w2"]);
+    const found = searchUnattributedRows(buildUnattributedRows(two, "both"), "zhejiang");
+    expect(groupUnattributedRows(found).map((g) => [g.key, g.rows.length])).toEqual([["w1", 1]]);
+  });
+});
+
+describe("search and sort of a view's table", () => {
+  it("every word must appear; the default order is kept, and reversed on request", () => {
+    const people = buildPersonRows(base, "both");
+    expect(arrangePersonRows(people, {}).map((r) => r.cwid)).toEqual(people.map((r) => r.cwid));
+    expect(arrangePersonRows(people, { dir: "asc" }).map((r) => r.cwid)).toEqual(people.map((r) => r.cwid).reverse());
+    expect(arrangePersonRows(people, { q: "  NAME i1 " }).map((r) => r.cwid)).toEqual(["i1"]);
+    expect(arrangePersonRows(people, { q: "name nobody" })).toEqual([]);
+    expect(arrangePersonRows(people, { sort: "name", dir: "desc" }).map((r) => r.cwid)).toEqual(["w1", "i1"]);
+  });
+
+  it("entities and papers search and sort on their own columns", () => {
+    const entities = buildEntityRows(base, "both");
+    expect(arrangeEntityRows(entities, { sort: "entity" }).map((r) => r.entity)).toEqual([
+      "Peking University",
+      "Zhejiang University",
+    ]);
+    expect(arrangeEntityRows(entities, { q: "zhejiang" }).map((r) => r.entity)).toEqual(["Zhejiang University"]);
+    const papers = buildPaperRows(base, "both");
+    expect(arrangePaperRows(papers, { q: "Title 2" }).map((r) => r.article.articleId)).toEqual(["2"]);
+    expect(arrangePaperRows(papers, { q: "w1" }).map((r) => r.article.articleId)).toEqual(["1"]);
+    expect(arrangeFundingRows(buildFundingRows(base, "both"), { q: "scholarship" })).toHaveLength(1);
+  });
+});
+
+describe("one person: everything on file", () => {
+  const f = facts({
+    articles: [
+      article("1", { publicationDate: new Date("2022-05-01T00:00:00Z") }),
+      article("2", { publicationDate: new Date("2025-02-01T00:00:00Z"), totalAuthors: 80 }),
+      article("3"),
+      article("4"),
+      article("5"),
+    ],
+    people: [
+      person("1", "w1"),
+      person("1", "i1", { campus: "ithaca" }),
+      person("2", "w1"),
+      person("3", "w1", { attribution: "pending", reciterScore: 95 }),
+      person("4", "w1", { attribution: "pending", reciterScore: 50, inReviewQueue: true }),
+      person("4", "i1", { campus: "ithaca" }),
+      person("5", "w1"),
+    ],
+    matches: [
+      match("1", "Peking University", { ourAuthorCwids: "w1" }),
+      match("2", "Zhejiang University"),
+      match("3", "Peking University", { ourAuthorCwids: "W1" }),
+      match("4", "Peking University"),
+    ],
+    flags: [{ articleId: "5", program: "China Scholarship Council (CSC)", agency: "CSC", grantId: "1" }],
+  });
+
+  it("is null with no person filter, and for a person on nothing in scope", () => {
+    expect(buildPersonProfile(f, "both")).toBeNull();
+    expect(buildPersonProfile({ ...f, person: "nobody" }, "both")).toBeNull();
+  });
+
+  it("summarizes confirmed, open, funding, entities and our co-authors", () => {
+    expect(buildPersonProfile({ ...f, person: "w1" }, "both")).toEqual({
+      cwid: "w1",
+      name: "Name w1",
+      campus: "wcm",
+      department: "Medicine",
+      title: "Professor",
+      confirmedPapers: 2,
+      confirmedExcludingConsortia: 1,
+      firstYear: 2022,
+      lastYear: 2025,
+      listsEntityPapers: 1,
+      // Paper 3 counts; paper 4 is already confirmed for i1.
+      openPapers: 1,
+      openAlreadyConfirmed: 1,
+      openInReviewQueue: 0,
+      openListsEntity: 1,
+      scoreMin: 50,
+      scoreMax: 95,
+      fundingFlagPapers: 1,
+      entities: [
+        { entity: "Peking University", confirmed: 1, open: 1 },
+        { entity: "Zhejiang University", confirmed: 1, open: 0 },
+      ],
+      coAuthors: [{ cwid: "i1", name: "Name i1", papers: 1 }],
+    });
+  });
+
+  it("a person with only open suggestions still has a profile", () => {
+    const p = buildPersonProfile({ ...base, person: "w3" }, "both")!;
+    expect([p.name, p.confirmedPapers, p.openPapers, p.firstYear]).toEqual(["Name w3", 0, 1, null]);
   });
 });
 

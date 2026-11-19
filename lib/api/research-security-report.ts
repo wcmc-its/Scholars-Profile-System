@@ -24,7 +24,9 @@ import {
   CONSORTIUM_AUTHORS,
   LIST_COUNTRY,
   listCodesFor,
+  defaultSortDir,
   type CampusFilter,
+  type ResearchSecurityArrange,
   type ResearchSecurityFilters,
 } from "@/lib/edit/research-security-dashboard";
 
@@ -692,6 +694,266 @@ export function buildSummary(
     fundingFlagPapers: new Set(buildFundingRows(facts, f.campus).map((r) => r.article.articleId)).size,
     unattributedPapers: countUnattributedPapers(buildUnattributedRows(facts, f.campus)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Not yet attributed, one row per candidate
+// ---------------------------------------------------------------------------
+
+export type UnattributedGroup = {
+  key: string;
+  person: PersonFact;
+  /** The candidate's open rows, in the order of `buildUnattributedRows`. */
+  rows: UnattributedRow[];
+  /** Distinct papers that count as not yet attributed (not already confirmed). */
+  papers: number;
+  /** The best (lowest) priority among the rows. */
+  priority: 1 | 2 | 3 | 4;
+  maxScore: number | null;
+  entities: string[];
+  candidateListsEntity: boolean;
+};
+
+/**
+ * The not-yet-attributed rows grouped by candidate, so one person with forty
+ * suggestions is one row. A row with no proposed person (no cwid) is never
+ * merged with another: it stays a group of its own. Groups keep the order of
+ * their first row, so the default order is still priority, then score.
+ */
+export function groupUnattributedRows(rows: readonly UnattributedRow[]): UnattributedGroup[] {
+  const groups = group(rows, (r) =>
+    r.person.cwid ? r.person.cwid.toLowerCase() : `?${r.article.articleId}|${r.person.displayName}`,
+  );
+  return [...groups].map(([key, mine]) => {
+    const scores = mine.map((r) => r.person.reciterScore).filter((x): x is number => x != null);
+    return {
+      key,
+      person: mine[0].person,
+      rows: mine,
+      papers: countUnattributedPapers(mine),
+      priority: Math.min(...mine.map((r) => r.priority)) as 1 | 2 | 3 | 4,
+      maxScore: scores.length > 0 ? Math.max(...scores) : null,
+      entities: uniqSorted(mine.flatMap((r) => r.entities)),
+      candidateListsEntity: mine.some((r) => r.candidateListsEntity),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// One person: everything this screen holds about them
+// ---------------------------------------------------------------------------
+
+export type PersonProfile = {
+  cwid: string;
+  name: string;
+  campus: string;
+  department: string | null;
+  title: string | null;
+  /** Confirmed co-publications under the filters. */
+  confirmedPapers: number;
+  confirmedExcludingConsortia: number;
+  /** Publication years of the confirmed co-publications. */
+  firstYear: number | null;
+  lastYear: number | null;
+  /** Confirmed papers where the co-author at a listed entity has THIS person's name. */
+  listsEntityPapers: number;
+  /** Papers suggested for this person that nobody is confirmed on yet. */
+  openPapers: number;
+  /** Open rows on papers already confirmed for another author (not counted). */
+  openAlreadyConfirmed: number;
+  openInReviewQueue: number;
+  openListsEntity: number;
+  scoreMin: number | null;
+  scoreMax: number | null;
+  fundingFlagPapers: number;
+  entities: Array<{ entity: string; confirmed: number; open: number }>;
+  /** Our other confirmed authors on this person's confirmed co-publications. */
+  coAuthors: Array<{ cwid: string | null; name: string; papers: number }>;
+};
+
+/** The person of the person filter, summarized under the other filters; null
+ *  when there is no person filter or the person is on no paper in scope. */
+export function buildPersonProfile(
+  facts: ResearchSecurityFacts,
+  campus: CampusFilter,
+): PersonProfile | null {
+  const who = facts.person;
+  if (!who) return null;
+  const mine = facts.people.filter((p) => isPerson(p, who) && facts.articles.has(p.articleId));
+  const identity = mine.find((p) => p.attribution === "confirmed") ?? mine[0];
+  if (!identity) return null;
+  const ix = indexFacts(facts, campus);
+  const confirmedIds = [...ix.confirmed.keys()].filter((id) => ix.matches.has(id));
+  const open = buildUnattributedRows(facts, campus);
+  const counted = open.filter((r) => !r.alreadyConfirmed);
+  const years = confirmedIds
+    .map((id) => facts.articles.get(id)!.publicationDate?.getUTCFullYear())
+    .filter((y): y is number => y != null);
+  const scores = open.map((r) => r.person.reciterScore).filter((x): x is number => x != null);
+
+  const entities = new Map<string, { entity: string; confirmed: number; open: number }>();
+  const tally = (entity: string, k: "confirmed" | "open") => {
+    const e = entities.get(entity) ?? { entity, confirmed: 0, open: 0 };
+    e[k] += 1;
+    entities.set(entity, e);
+  };
+  for (const id of confirmedIds) {
+    for (const e of new Set(ix.matches.get(id)!.map((m) => m.entity))) tally(e, "confirmed");
+  }
+  for (const id of new Set(counted.map((r) => r.article.articleId))) {
+    for (const e of new Set(ix.matches.get(id)!.map((m) => m.entity))) tally(e, "open");
+  }
+
+  const coAuthors = new Map<string, { cwid: string | null; name: string; papers: number }>();
+  for (const id of confirmedIds) {
+    const others = (ix.confirmedAny.get(id) ?? []).filter((p) => !isPerson(p, who));
+    for (const [k, [p]] of group(others, personKey)) {
+      const c = coAuthors.get(k) ?? { cwid: p.cwid, name: p.displayName, papers: 0 };
+      c.papers += 1;
+      coAuthors.set(k, c);
+    }
+  }
+
+  return {
+    cwid: identity.cwid!,
+    name: identity.displayName,
+    campus: identity.campus,
+    department: identity.department,
+    title: identity.title,
+    confirmedPapers: confirmedIds.length,
+    confirmedExcludingConsortia: confirmedIds.filter(
+      (id) => !isConsortium(facts.articles.get(id)!.totalAuthors),
+    ).length,
+    firstYear: years.length > 0 ? Math.min(...years) : null,
+    lastYear: years.length > 0 ? Math.max(...years) : null,
+    listsEntityPapers: confirmedIds.filter((id) =>
+      ix.matches.get(id)!.some((m) => listedBy(m, [identity])),
+    ).length,
+    openPapers: countUnattributedPapers(open),
+    openAlreadyConfirmed: open.length - counted.length,
+    openInReviewQueue: counted.filter((r) => r.person.inReviewQueue).length,
+    openListsEntity: counted.filter((r) => r.candidateListsEntity).length,
+    scoreMin: scores.length > 0 ? Math.min(...scores) : null,
+    scoreMax: scores.length > 0 ? Math.max(...scores) : null,
+    fundingFlagPapers: new Set(buildFundingRows(facts, campus).map((r) => r.article.articleId)).size,
+    entities: [...entities.values()].sort(
+      (a, b) => b.confirmed + b.open - (a.confirmed + a.open) || a.entity.localeCompare(b.entity),
+    ),
+    coAuthors: [...coAuthors.values()].sort(
+      (a, b) => b.papers - a.papers || a.name.localeCompare(b.name),
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Search and sort of one view's table
+// ---------------------------------------------------------------------------
+
+type Text = string | number | null | undefined;
+
+/**
+ * Applies `q` (every word must appear somewhere in the row's text) and the
+ * sort. The input is in the view's default order and the sort is stable, so
+ * ties keep that order; the default key in its default direction is a no-op.
+ */
+function arrange<T>(
+  rows: readonly T[],
+  a: ResearchSecurityArrange,
+  defaultKey: string,
+  text: (r: T) => Text[],
+  values: Record<string, (r: T) => string | number | null>,
+): T[] {
+  const words = (a.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  let out =
+    words.length === 0
+      ? [...rows]
+      : rows.filter((r) => {
+          const hay = text(r).filter((t) => t != null).join("\n").toLowerCase();
+          return words.every((w) => hay.includes(w));
+        });
+  const key = a.sort ?? defaultKey;
+  const dir = a.dir ?? defaultSortDir(key);
+  if (key === defaultKey) {
+    if (dir !== defaultSortDir(key)) out = out.reverse();
+    return out;
+  }
+  const value = values[key];
+  if (!value) return out;
+  const sign = dir === "asc" ? 1 : -1;
+  return out.sort((x, y) => {
+    const vx = value(x);
+    const vy = value(y);
+    // A missing value sorts last in either direction.
+    if (vx == null || vy == null) return vx == null ? (vy == null ? 0 : 1) : -1;
+    return (
+      sign *
+      (typeof vx === "number" && typeof vy === "number"
+        ? vx - vy
+        : String(vx).localeCompare(String(vy)))
+    );
+  });
+}
+
+const articleText = (a: ArticleFact): Text[] => [a.title, a.journal, a.pmid, a.articleId, a.doi];
+const personText = (p: PersonFact): Text[] => [p.displayName, p.cwid, p.department];
+
+export function arrangeEntityRows(rows: readonly EntityRow[], a: ResearchSecurityArrange): EntityRow[] {
+  return arrange(rows, a, "papers", (r) => [r.entity, r.category], {
+    entity: (r) => r.entity,
+    people: (r) => r.people,
+    unattributed: (r) => r.unattributedPapers,
+  });
+}
+
+export function arrangePersonRows(rows: readonly PersonRow[], a: ResearchSecurityArrange): PersonRow[] {
+  return arrange(rows, a, "papers", (r) => [r.name, r.cwid, r.department, r.title], {
+    name: (r) => r.name,
+    department: (r) => r.department,
+  });
+}
+
+export function arrangePaperRows(rows: readonly PaperRow[], a: ResearchSecurityArrange): PaperRow[] {
+  return arrange(
+    rows,
+    a,
+    "date",
+    (r) => [...articleText(r.article), ...r.wcmAuthors, ...r.ithacaAuthors, ...r.entities],
+    { title: (r) => r.article.title, authors: (r) => r.article.totalAuthors },
+  );
+}
+
+export function arrangeFundingRows(rows: readonly FundingRow[], a: ResearchSecurityArrange): FundingRow[] {
+  return arrange(
+    rows,
+    a,
+    "date",
+    (r) => [...articleText(r.article), r.program, r.agency, r.grantId, ...r.wcmAuthors, ...r.ithacaAuthors],
+    { program: (r) => r.program },
+  );
+}
+
+/** Search only: the flat rows keep the order of `buildUnattributedRows`. */
+export function searchUnattributedRows(
+  rows: readonly UnattributedRow[],
+  q: string | undefined,
+): UnattributedRow[] {
+  return arrange(rows, { q }, "priority", (r) => [
+    ...personText(r.person),
+    ...articleText(r.article),
+    ...r.entities,
+  ], {});
+}
+
+/** Sort only: search is applied to the rows before they are grouped. */
+export function sortUnattributedGroups(
+  groups: readonly UnattributedGroup[],
+  a: ResearchSecurityArrange,
+): UnattributedGroup[] {
+  return arrange(groups, { sort: a.sort, dir: a.dir }, "priority", () => [], {
+    papers: (g) => g.papers,
+    score: (g) => g.maxScore,
+    name: (g) => g.person.displayName,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -20,19 +20,27 @@ import {
 } from "@/components/edit/research-security-dashboard";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  arrangeEntityRows,
+  arrangeFundingRows,
+  arrangePaperRows,
+  arrangePersonRows,
   buildEntityRows,
   buildFundingRows,
   buildPaperRows,
+  buildPersonProfile,
   buildPersonRows,
   buildSummary,
   buildUnattributedRows,
   countUnattributedPapers,
   forConfirmedAuthors,
+  groupUnattributedRows,
   loadCategories,
   loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
+  searchUnattributedRows,
+  sortUnattributedGroups,
 } from "@/lib/api/research-security-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -113,19 +121,28 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
   const funding = buildFundingRows(facts, f.campus);
   const unattributed = buildUnattributedRows(facts, f.campus);
 
-  const who = f.person
-    ? facts.people.find((p) => p.cwid?.toLowerCase() === f.person)
-    : undefined;
-  const personLabel = who ? `${who.displayName} (${who.cwid})` : undefined;
+  // One person: the summary card, and links to the records the console and
+  // the public site hold for them (a Cornell person may have neither).
+  const profile = buildPersonProfile(facts, f.campus);
+  const scholar = profile
+    ? await db.read.scholar.findFirst({
+        where: { cwid: profile.cwid, deletedAt: null },
+        select: { cwid: true, slug: true, status: true },
+      })
+    : null;
 
+  // Search and sort belong to the selected view's table alone: the tiles and
+  // the tab counts are never narrowed by them.
   let current: ResearchSecurityViewRows;
-  let paged: { page: number; totalPages: number };
+  let paged: { page: number; totalPages: number; total: number };
+  let viewTotal: number;
   if (ui.view === "person") {
-    const p = paginate(person, ui.page, PAGE_SIZE);
+    const p = paginate(arrangePersonRows(person, ui), ui.page, PAGE_SIZE);
     current = { view: "person", rows: p.rows };
     paged = p;
+    viewTotal = person.length;
   } else if (ui.view === "paper") {
-    const p = paginate(paper, ui.page, PAGE_SIZE);
+    const p = paginate(arrangePaperRows(paper, ui), ui.page, PAGE_SIZE);
     // The affiliation text is read for this page's papers only.
     const matchedStrings = forConfirmedAuthors(
       await loadMatchedStrings(
@@ -138,18 +155,31 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
     );
     current = { view: "paper", rows: p.rows, matchedStrings };
     paged = p;
+    viewTotal = paper.length;
   } else if (ui.view === "funding") {
-    const p = paginate(funding, ui.page, PAGE_SIZE);
+    const p = paginate(arrangeFundingRows(funding, ui), ui.page, PAGE_SIZE);
     current = { view: "funding", rows: p.rows };
     paged = p;
+    viewTotal = funding.length;
   } else if (ui.view === "unattributed") {
-    const p = paginate(unattributed, ui.page, PAGE_SIZE);
-    current = { view: "unattributed", rows: p.rows };
-    paged = p;
+    const found = searchUnattributedRows(unattributed, ui.q);
+    if (f.person) {
+      // One candidate: their rows, one per paper.
+      const p = paginate(found, ui.page, PAGE_SIZE);
+      current = { view: "unattributed", rows: p.rows };
+      paged = p;
+      viewTotal = unattributed.length;
+    } else {
+      const p = paginate(sortUnattributedGroups(groupUnattributedRows(found), ui), ui.page, PAGE_SIZE);
+      current = { view: "unattributed", rows: [], groups: p.rows };
+      paged = p;
+      viewTotal = groupUnattributedRows(unattributed).length;
+    }
   } else {
-    const p = paginate(entity, ui.page, PAGE_SIZE);
+    const p = paginate(arrangeEntityRows(entity, ui), ui.page, PAGE_SIZE);
     current = { view: "entity", rows: p.rows };
     paged = p;
+    viewTotal = entity.length;
   }
 
   return (
@@ -168,7 +198,17 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
       totalPages={paged.totalPages}
       categories={categories}
       entities={entities}
-      personLabel={personLabel}
+      profile={profile}
+      profileLinks={
+        scholar
+          ? {
+              console: `/edit/scholar/${scholar.cwid}`,
+              publicProfile: scholar.status === "active" ? `/${scholar.slug}` : undefined,
+            }
+          : undefined
+      }
+      viewShown={paged.total}
+      viewTotal={viewTotal}
       dataAsOf={facts.dataAsOf}
       methods={buildResearchSecurityMethodsDoc()}
     />

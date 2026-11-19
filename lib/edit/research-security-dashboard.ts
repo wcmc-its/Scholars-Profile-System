@@ -100,7 +100,36 @@ export type ResearchSecurityFilters = {
   excludeConsortia: boolean;
 };
 
-export type ResearchSecurityUiParams = {
+/**
+ * The columns each view can be sorted by; the first is its default order.
+ * Search (`q`) and sort belong to ONE view's table: they never change a
+ * headline tile or a tab count, and a link to another view drops them.
+ */
+export const SORT_KEYS: Record<ResearchSecurityView, readonly string[]> = {
+  entity: ["papers", "entity", "people", "unattributed"],
+  person: ["papers", "name", "department"],
+  paper: ["date", "title", "authors"],
+  funding: ["date", "program"],
+  unattributed: ["priority", "papers", "score", "name"],
+};
+export type SortDir = "asc" | "desc";
+const ASCENDING_FIRST = new Set(["entity", "name", "department", "title", "program", "priority"]);
+/** The direction a column sorts in when first selected. */
+export function defaultSortDir(key: string): SortDir {
+  return ASCENDING_FIRST.has(key) ? "asc" : "desc";
+}
+
+/** Search and sort of the selected view's table. */
+export type ResearchSecurityArrange = {
+  /** Free text; every word must appear in a row. */
+  q?: string;
+  /** A key of `SORT_KEYS[view]`; undefined = the view's default. */
+  sort?: string;
+  /** undefined = the key's default direction. */
+  dir?: SortDir;
+};
+
+export type ResearchSecurityUiParams = ResearchSecurityArrange & {
   view: ResearchSecurityView;
   /** 1-indexed. */
   page: number;
@@ -129,8 +158,20 @@ export function parseResearchSecurityParams(sp: RawParams): ResearchSecurityUiPa
   const category = first(sp.category)?.trim();
   const entity = first(sp.entity)?.trim();
   const person = first(sp.person)?.trim().toLowerCase();
+  const v = RESEARCH_SECURITY_VIEWS.includes(view) ? view : "entity";
+  const sortKey = first(sp.sort);
+  const sort = sortKey && SORT_KEYS[v].indexOf(sortKey) > 0 ? sortKey : undefined;
+  const dirParam = first(sp.dir);
+  const dir =
+    (dirParam === "asc" || dirParam === "desc") && dirParam !== defaultSortDir(sort ?? SORT_KEYS[v][0])
+      ? dirParam
+      : undefined;
+  const q = first(sp.q)?.trim().replace(/\s+/g, " ").slice(0, 80);
   return {
-    view: RESEARCH_SECURITY_VIEWS.includes(view) ? view : "entity",
+    view: v,
+    q: q || undefined,
+    sort,
+    dir,
     page: Number.isInteger(page) && page >= 1 ? page : 1,
     filters: {
       campus: CAMPUS_FILTERS.includes(campus) ? campus : "both",
@@ -221,6 +262,9 @@ export function researchSecurityQuery(p: {
   view?: ResearchSecurityView;
   page?: number;
   filters: ResearchSecurityFilters;
+  q?: string;
+  sort?: string;
+  dir?: SortDir;
 }): string {
   const q = new URLSearchParams();
   if (p.view && p.view !== "entity") q.set("view", p.view);
@@ -233,6 +277,9 @@ export function researchSecurityQuery(p: {
   if (f.dateFrom !== DEFAULT_DATE_FROM) q.set("from", f.dateFrom);
   if (f.dateTo) q.set("to", f.dateTo);
   if (f.excludeConsortia) q.set("consortia", "exclude");
+  if (p.q) q.set("q", p.q);
+  if (p.sort) q.set("sort", p.sort);
+  if (p.dir) q.set("dir", p.dir);
   if (p.page && p.page > 1) q.set("page", String(p.page));
   const s = q.toString();
   return s ? `?${s}` : "";

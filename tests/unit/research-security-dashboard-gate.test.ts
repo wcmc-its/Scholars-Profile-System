@@ -256,6 +256,22 @@ describe("a category that the selected list does not have", () => {
     expect(parseResearchSecurityParams({ person: "a b; drop" }).filters.person).toBeUndefined();
   });
 
+  it("search and sort are read per view; defaults and unknown keys leave the URL clean", () => {
+    const p = parseResearchSecurityParams({ view: "person", q: "  hsiao   dong ", sort: "name", dir: "desc" });
+    expect(p).toMatchObject({ q: "hsiao dong", sort: "name", dir: "desc" });
+    const q = researchSecurityQuery(p);
+    expect(q).toBe("?view=person&q=hsiao+dong&sort=name&dir=desc");
+    expect(parseResearchSecurityParams(Object.fromEntries(new URLSearchParams(q)))).toEqual(p);
+    // The default column, a key's default direction and a key of another view are dropped.
+    expect(parseResearchSecurityParams({ view: "person", sort: "papers", dir: "desc" })).toMatchObject({
+      sort: undefined,
+      dir: undefined,
+    });
+    expect(parseResearchSecurityParams({ view: "person", sort: "name", dir: "asc" }).dir).toBeUndefined();
+    expect(parseResearchSecurityParams({ view: "entity", sort: "score" }).sort).toBeUndefined();
+    expect(parseResearchSecurityParams({ view: "person", dir: "asc" }).dir).toBe("asc");
+  });
+
   it("the chips name every filter that changes a count; only a non-default one can be removed", () => {
     expect(filterChips(parseResearchSecurityParams({}).filters)).toEqual([
       { text: "WCM and Cornell University", without: undefined },

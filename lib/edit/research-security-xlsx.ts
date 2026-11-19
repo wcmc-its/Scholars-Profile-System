@@ -260,6 +260,8 @@ function addSheet(wb: ExcelJS.Workbook, name: string, sheet: Sheet): void {
 export async function buildResearchSecurityWorkbook(input: {
   view: ResearchSecurityView;
   filters: ResearchSecurityFilters;
+  /** The search text the rows were narrowed by, if any. */
+  search?: string;
   sheet: Sheet;
   /** By paper only: the exact matched strings behind the rows. */
   matchedStrings?: Sheet;
@@ -272,6 +274,7 @@ export async function buildResearchSecurityWorkbook(input: {
   if (input.matchedStrings) addSheet(wb, "Matched affiliations", input.matchedStrings);
   addCriteriaSheet(wb, [
     ...researchSecurityCriteria(input.view, input.filters),
+    ["Search", input.search ?? "None"],
     ["Rows", input.sheet.rows.length.toLocaleString("en-US")],
     ["Data as of", input.dataAsOf ? input.dataAsOf.toISOString().slice(0, 10) : "unknown"],
     ["Generated", input.generatedAt.toISOString()],

@@ -26,8 +26,10 @@ import {
   type FundingRow,
   type MatchedString,
   type PaperRow,
+  type PersonProfile,
   type PersonRow,
   type ResearchSecuritySummary,
+  type UnattributedGroup,
   type UnattributedRow,
 } from "@/lib/api/research-security-report";
 import {
@@ -39,8 +41,10 @@ import {
   LIST_FILTER_DESCRIPTION,
   LIST_FILTER_LABEL,
   RESEARCH_SECURITY_VIEWS,
+  SORT_KEYS,
   VIEW_LABEL,
   campusName,
+  defaultSortDir,
   filterChips,
   researchSecurityQuery,
   type ResearchSecurityFilters,
@@ -49,6 +53,8 @@ import {
 } from "@/lib/edit/research-security-dashboard";
 import type { ResearchSecurityMethodsDoc } from "@/lib/edit/research-security-methods-doc";
 import { cn } from "@/lib/utils";
+
+import { MethodsDisclosure } from "./research-security-methods";
 
 const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
 const tableWrapClass = `${cardClass} overflow-x-auto`;
@@ -66,7 +72,9 @@ export type ResearchSecurityViewRows =
   | { view: "person"; rows: PersonRow[] }
   | { view: "paper"; rows: PaperRow[]; matchedStrings: MatchedString[] }
   | { view: "funding"; rows: FundingRow[] }
-  | { view: "unattributed"; rows: UnattributedRow[] };
+  /** `groups` (one row per candidate) is shown when present; `rows` (one per
+   *  candidate and paper) when a single person is selected. */
+  | { view: "unattributed"; rows: UnattributedRow[]; groups?: UnattributedGroup[] };
 
 export type ResearchSecurityDashboardProps = {
   ui: ResearchSecurityUiParams;
@@ -80,8 +88,13 @@ export type ResearchSecurityDashboardProps = {
   categories: string[];
   /** The entities (countries, in the country tier) the entity filter offers. */
   entities: string[];
-  /** "Name (cwid)" of the person filter, when that person is in the data. */
-  personLabel?: string;
+  /** The person of the person filter, when they are on a paper in scope. */
+  profile?: PersonProfile | null;
+  /** Where else this person has a record; absent when they have none. */
+  profileLinks?: { console: string; publicProfile?: string };
+  /** Rows of the selected view after the search, and before it. */
+  viewShown?: number;
+  viewTotal?: number;
   dataAsOf: Date | null;
   methods: ResearchSecurityMethodsDoc;
 };
@@ -301,6 +314,43 @@ function Authors({
   );
 }
 
+/** A column header that sorts the view; a second click reverses it. */
+function SortLink({ ui, k, children }: { ui: ResearchSecurityUiParams; k: string; children: ReactNode }) {
+  const defaultKey = SORT_KEYS[ui.view][0];
+  const currentKey = ui.sort ?? defaultKey;
+  const active = currentKey === k;
+  const currentDir = ui.dir ?? defaultSortDir(currentKey);
+  const nextDir = active ? (currentDir === "asc" ? "desc" : "asc") : defaultSortDir(k);
+  const href = `${BASE}${researchSecurityQuery({
+    view: ui.view,
+    filters: ui.filters,
+    q: ui.q,
+    sort: k === defaultKey ? undefined : k,
+    dir: nextDir === defaultSortDir(k) ? undefined : nextDir,
+  })}`;
+  return (
+    <Link
+      href={href}
+      title={active ? "Reverse the order" : "Sort by this column"}
+      aria-label={`Sort by ${typeof children === "string" ? children : k}${active ? `, currently ${currentDir === "asc" ? "ascending" : "descending"}` : ""}`}
+      className={cn("hover:text-apollo-slate whitespace-nowrap hover:underline", active && "text-apollo-slate")}
+    >
+      {children}
+      <span aria-hidden className={cn("ml-1", !active && "opacity-40")}>
+        {active ? (currentDir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </Link>
+  );
+}
+
+const SEARCH_HINT: Record<ResearchSecurityView, string> = {
+  entity: "Entity or category",
+  person: "Name, CWID or department",
+  paper: "Title, journal, PMID or author",
+  funding: "Title, program or grant ID",
+  unattributed: "Candidate, title or PMID",
+};
+
 function FilterBar({
   ui,
   categories,
@@ -320,6 +370,8 @@ function FilterBar({
     >
       <input type="hidden" name="view" value={ui.view} />
       {f.person && <input type="hidden" name="person" value={f.person} />}
+      {ui.sort && <input type="hidden" name="sort" value={ui.sort} />}
+      {ui.dir && <input type="hidden" name="dir" value={ui.dir} />}
       <label className="flex flex-col gap-1 text-[12.5px]">
         <span className="text-muted-foreground">Campus</span>
         <select name="campus" defaultValue={f.campus} className={inputClass}>
@@ -372,6 +424,16 @@ function FilterBar({
       <label className="flex flex-col gap-1 text-[12.5px]">
         <span className="text-muted-foreground">to</span>
         <input type="date" name="to" defaultValue={f.dateTo ?? ""} className={inputClass} />
+      </label>
+      <label className="flex flex-col gap-1 text-[12.5px]">
+        <span className="text-muted-foreground">Search {VIEW_LABEL[ui.view].toLowerCase()}</span>
+        <input
+          type="search"
+          name="q"
+          defaultValue={ui.q ?? ""}
+          placeholder={SEARCH_HINT[ui.view]}
+          className={cn(inputClass, "w-[26ch]")}
+        />
       </label>
       <label className="flex h-8 items-center gap-2 text-[13px]">
         <input
@@ -482,7 +544,7 @@ function Pager({
   totalPages: number;
 }) {
   const href = (p: number) =>
-    `${BASE}${researchSecurityQuery({ view: ui.view, filters: ui.filters, page: p })}`;
+    `${BASE}${researchSecurityQuery({ view: ui.view, filters: ui.filters, q: ui.q, sort: ui.sort, dir: ui.dir, page: p })}`;
   return (
     <div className="text-muted-foreground flex items-center justify-between gap-3 px-1 text-[13px]">
       <span>
@@ -526,9 +588,13 @@ function EntityTable({ rows, ui }: { rows: EntityRow[]; ui: ResearchSecurityUiPa
     <table className="w-full min-w-[980px] text-sm">
       <thead className={theadClass}>
         <tr>
-          <th className={thClass}>{noun}</th>
+          <th className={thClass}>
+            <SortLink ui={ui} k="entity">{noun}</SortLink>
+          </th>
           <th className={thClass}>Category</th>
-          <th className={cn(thClass, "text-right")}>Co-publications</th>
+          <th className={cn(thClass, "text-right")}>
+            <SortLink ui={ui} k="papers">Co-publications</SortLink>
+          </th>
           <th className={cn(thClass, "text-right")}>WCM</th>
           <th className={cn(thClass, "text-right")}>Cornell</th>
           <th
@@ -537,7 +603,9 @@ function EntityTable({ rows, ui }: { rows: EntityRow[]; ui: ResearchSecurityUiPa
           >
             Excl. consortia
           </th>
-          <th className={cn(thClass, "text-right")}>Our authors</th>
+          <th className={cn(thClass, "text-right")}>
+            <SortLink ui={ui} k="people">Our authors</SortLink>
+          </th>
           <th
             className={cn(thClass, "text-right")}
             title="Confirmed papers where the co-author at this entity has the name of one of our confirmed authors"
@@ -545,7 +613,7 @@ function EntityTable({ rows, ui }: { rows: EntityRow[]; ui: ResearchSecurityUiPa
             Our author lists it
           </th>
           <th className={cn(thClass, pendingCell, "text-apollo-amber text-right")}>
-            Not yet attributed
+            <SortLink ui={ui} k="unattributed">Not yet attributed</SortLink>
           </th>
           <th
             className={cn(thClass, pendingCell, "text-apollo-amber text-right")}
@@ -624,10 +692,16 @@ function PersonTable({ rows, ui }: { rows: PersonRow[]; ui: ResearchSecurityUiPa
     <table className="w-full min-w-[900px] text-sm">
       <thead className={theadClass}>
         <tr>
-          <th className={thClass}>Person</th>
+          <th className={thClass}>
+            <SortLink ui={ui} k="name">Person</SortLink>
+          </th>
           <th className={thClass}>Campus</th>
-          <th className={thClass}>Department</th>
-          <th className={cn(thClass, "text-right")}>Co-publications</th>
+          <th className={thClass}>
+            <SortLink ui={ui} k="department">Department</SortLink>
+          </th>
+          <th className={cn(thClass, "text-right")}>
+            <SortLink ui={ui} k="papers">Co-publications</SortLink>
+          </th>
           <th
             className={cn(thClass, "text-right")}
             title={`Co-publications with fewer than ${CONSORTIUM_AUTHORS} authors`}
@@ -703,7 +777,14 @@ function PaperTable({
     <table className="w-full min-w-[980px] text-sm">
       <thead className={theadClass}>
         <tr>
-          <th className={thClass}>Paper</th>
+          <th className={thClass}>
+            Paper
+            <span className="ml-3 inline-flex gap-3 font-normal tracking-normal normal-case">
+              <SortLink ui={ui} k="date">Date</SortLink>
+              <SortLink ui={ui} k="title">Title</SortLink>
+              <SortLink ui={ui} k="authors">Author count</SortLink>
+            </span>
+          </th>
           <th className={thClass}>Our authors (confirmed)</th>
           <th className={thClass}>Listed entities and matched strings</th>
           <th className={thClass}>Flags</th>
@@ -782,8 +863,15 @@ function FundingTable({ rows, ui }: { rows: FundingRow[]; ui: ResearchSecurityUi
     <table className="w-full min-w-[900px] text-sm">
       <thead className={theadClass}>
         <tr>
-          <th className={thClass}>Paper</th>
-          <th className={thClass}>Program flagged</th>
+          <th className={thClass}>
+            Paper
+            <span className="ml-3 font-normal tracking-normal normal-case">
+              <SortLink ui={ui} k="date">Date</SortLink>
+            </span>
+          </th>
+          <th className={thClass}>
+            <SortLink ui={ui} k="program">Program flagged</SortLink>
+          </th>
           <th className={thClass}>Grant agency</th>
           <th className={thClass}>Grant ID</th>
           <th className={thClass}>Our authors (confirmed)</th>
@@ -903,6 +991,354 @@ function UnattributedTable({ rows, ui }: { rows: UnattributedRow[]; ui: Research
   );
 }
 
+/** Papers listed under a candidate before "All N rows" takes over. */
+const GROUP_PREVIEW = 5;
+const GROUP_ENTITIES = 6;
+
+/** Not yet attributed, one row per candidate. The name opens everything the
+ *  screen holds about that person. */
+function UnattributedGroupTable({
+  groups,
+  ui,
+}: {
+  groups: UnattributedGroup[];
+  ui: ResearchSecurityUiParams;
+}) {
+  const to = linkBuilder(ui.filters);
+  return (
+    <table className="w-full min-w-[980px] text-sm">
+      <thead className={theadClass}>
+        <tr>
+          <th className={thClass}>
+            <SortLink ui={ui} k="priority">Priority</SortLink>
+          </th>
+          <th className={thClass}>
+            <SortLink ui={ui} k="name">Candidate</SortLink>
+          </th>
+          <th className={cn(thClass, "text-right")}>
+            <SortLink ui={ui} k="papers">Open papers</SortLink>
+          </th>
+          <th className={cn(thClass, "text-right")}>
+            <SortLink ui={ui} k="score">Top ReCiter score</SortLink>
+          </th>
+          <th className={thClass}>Listed entities</th>
+          <th className={thClass}>Papers</th>
+        </tr>
+      </thead>
+      <tbody>
+        {groups.length === 0 && <Empty cols={6} />}
+        {groups.map((g) => {
+          const mine = g.person.cwid
+            ? to("unattributed", { person: g.person.cwid.toLowerCase() })
+            : undefined;
+          const notCounted = g.rows.filter((r) => r.alreadyConfirmed).length;
+          return (
+            <tr key={g.key} className={rowClass}>
+              <td className={tdClass}>
+                <Chip tone={PRIORITY_TONE[g.priority]} title={PRIORITY_MEANING[g.priority]}>
+                  <span className="font-semibold tabular-nums">{g.priority}</span>
+                  <span className="mx-1">·</span>
+                  {PRIORITY_LABEL[g.priority]}
+                </Chip>
+              </td>
+              <td className={tdClass}>
+                {mine ? (
+                  <Link
+                    href={mine}
+                    title={`Everything on file for ${g.person.displayName}`}
+                    className={cn(linkClass, "font-medium")}
+                  >
+                    {g.person.displayName}
+                  </Link>
+                ) : (
+                  <span className="font-medium">{g.person.displayName}</span>
+                )}
+                {g.person.cwid && <span className="text-muted-foreground"> ({g.person.cwid})</span>}
+                <div className="text-apollo-ink-2 mt-0.5 flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                  <CampusChip campus={g.person.campus} />
+                  {g.person.department}
+                </div>
+                {g.candidateListsEntity && (
+                  <div className="text-apollo-amber mt-0.5 text-[12.5px]">Candidate also lists the entity</div>
+                )}
+              </td>
+              <td className={cn(tdClass, numClass)}>
+                <span className="font-semibold">
+                  <Count value={g.papers} href={mine} />
+                </span>
+                {notCounted > 0 && (
+                  <div className="text-muted-foreground text-[12px]">
+                    +{notCounted} already confirmed
+                  </div>
+                )}
+              </td>
+              <td className={cn(tdClass, numClass)}>
+                {g.maxScore == null ? "—" : g.maxScore.toFixed(1)}
+              </td>
+              <td className={cn(tdClass, "max-w-[34ch]")}>
+                <EntityChips
+                  entities={g.entities.slice(0, GROUP_ENTITIES)}
+                  view="unattributed"
+                  to={to}
+                />
+                {g.entities.length > GROUP_ENTITIES && (
+                  <div className="text-muted-foreground mt-1 text-[12px]">
+                    +{g.entities.length - GROUP_ENTITIES} more
+                  </div>
+                )}
+              </td>
+              <td className={cn(tdClass, "max-w-[48ch] text-[13px]")}>
+                <details>
+                  <summary className="text-apollo-slate cursor-pointer">
+                    {g.rows.length.toLocaleString("en-US")} {g.rows.length === 1 ? "row" : "rows"}
+                  </summary>
+                  <ul className="mt-1.5 flex flex-col gap-2">
+                    {g.rows.slice(0, GROUP_PREVIEW).map((r) => {
+                      const href = articleLink(r.article);
+                      const title = r.article.title ?? r.article.articleId;
+                      return (
+                        <li key={r.article.articleId} className="border-apollo-amber-tint-border border-l-2 pl-2">
+                          {href ? (
+                            <a href={href} target="_blank" rel="noreferrer noopener" className="font-medium hover:underline">
+                              {title}
+                            </a>
+                          ) : (
+                            <span className="font-medium">{title}</span>
+                          )}
+                          <div className="text-muted-foreground text-[12.5px]">
+                            {[
+                              isoDay(r.article.publicationDate),
+                              r.person.reciterScore == null ? null : `score ${r.person.reciterScore.toFixed(1)}`,
+                              attributionReason(r.person),
+                              r.alreadyConfirmed ? "already confirmed for another author; not counted" : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {mine && g.rows.length > GROUP_PREVIEW && (
+                    <Link href={mine} className={cn(linkClass, "mt-2 inline-block")}>
+                      All {g.rows.length.toLocaleString("en-US")} rows →
+                    </Link>
+                  )}
+                </details>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  href,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: number;
+  href?: string;
+  sub?: ReactNode;
+  tone?: "pending";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-[150px] flex-1 flex-col gap-0.5 rounded-lg border px-3 py-2",
+        tone === "pending" && value > 0
+          ? "bg-apollo-amber-tint border-apollo-amber-tint-border"
+          : "border-apollo-border bg-apollo-page",
+      )}
+    >
+      <span className="text-muted-foreground text-[11.5px] font-medium tracking-[.06em] uppercase">
+        {label}
+      </span>
+      <span className="text-xl font-semibold tabular-nums">
+        <Count value={value} href={href} />
+      </span>
+      {sub && <span className="text-apollo-ink-2 text-[12.5px] leading-snug">{sub}</span>}
+    </div>
+  );
+}
+
+/** Everything the screen holds about the selected person, under the other
+ *  filters. Shown above the tabs whenever a person filter is on. */
+function PersonCard({
+  profile,
+  links,
+  ui,
+}: {
+  profile: PersonProfile;
+  links?: { console: string; publicProfile?: string };
+  ui: ResearchSecurityUiParams;
+}) {
+  const f = ui.filters;
+  const to = linkBuilder(f);
+  const country = f.list === LIST_COUNTRY;
+  const years =
+    profile.firstYear == null
+      ? null
+      : profile.firstYear === profile.lastYear
+        ? String(profile.firstYear)
+        : `${profile.firstYear}–${profile.lastYear}`;
+  const scores =
+    profile.scoreMax == null
+      ? null
+      : profile.scoreMin === profile.scoreMax
+        ? `ReCiter score ${profile.scoreMax.toFixed(1)}`
+        : `ReCiter scores ${profile.scoreMin!.toFixed(1)}–${profile.scoreMax.toFixed(1)}`;
+  return (
+    <section
+      aria-label={`On file for ${profile.name}`}
+      className={cn(cardClass, "border-l-apollo-slate flex flex-col gap-3.5 border-l-4 px-4 py-4 sm:px-5")}
+    >
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-lg leading-tight font-semibold">
+            {profile.name} <span className="text-muted-foreground font-normal">({profile.cwid})</span>
+          </h2>
+          <div className="text-apollo-ink-2 flex flex-wrap items-center gap-1.5 text-[13px]">
+            <CampusChip campus={profile.campus} />
+            {[profile.title, profile.department].filter(Boolean).join(" · ")}
+          </div>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
+          {links && (
+            <Link href={links.console} className={linkClass}>
+              Console record
+            </Link>
+          )}
+          {links?.publicProfile && (
+            <Link href={links.publicProfile} className={linkClass}>
+              Public profile
+            </Link>
+          )}
+          <Link
+            href={to(ui.view, { list: country ? "entities" : LIST_COUNTRY, category: undefined, entity: undefined })}
+            className={linkClass}
+          >
+            {country ? "See listed entities" : "See country-of-concern tier"}
+          </Link>
+          <Link href={to(ui.view, { person: undefined })} className={linkClass}>
+            Close
+          </Link>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2.5">
+        <Stat
+          label="Confirmed co-publications"
+          value={profile.confirmedPapers}
+          href={to("paper")}
+          sub={
+            [
+              years,
+              profile.confirmedPapers > 0
+                ? `${profile.confirmedExcludingConsortia.toLocaleString("en-US")} excluding consortia`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "None under these filters"
+          }
+        />
+        <Stat
+          label="Name matches a listed co-author"
+          value={profile.listsEntityPapers}
+          tone="pending"
+          sub="Confirmed papers where the co-author at the entity has this person's name: verify"
+        />
+        <Stat
+          label="Not yet attributed"
+          value={profile.openPapers}
+          href={to("unattributed")}
+          tone="pending"
+          sub={
+            [
+              scores,
+              profile.openListsEntity > 0 ? `${profile.openListsEntity} also list the entity` : null,
+              profile.openInReviewQueue > 0 ? `${profile.openInReviewQueue} in the review queue` : null,
+              profile.openAlreadyConfirmed > 0
+                ? `${profile.openAlreadyConfirmed} more already confirmed for another author`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "No open suggestions"
+          }
+        />
+        <Stat
+          label="Funding-flag papers"
+          value={profile.fundingFlagPapers}
+          href={to("funding")}
+          sub="CSC or a talent program in grant metadata"
+        />
+      </div>
+      {profile.entities.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h3 className="text-muted-foreground text-[11.5px] font-medium tracking-[.06em] uppercase">
+            {country ? "Countries" : "Listed entities"} · confirmed, and open in amber
+          </h3>
+          <ul className="flex flex-wrap gap-1.5">
+            {profile.entities.map((e) => (
+              <li key={e.entity} className={cn(chipBase, CHIP_TONE.slate, "gap-1.5")}>
+                <Link
+                  href={to(e.confirmed > 0 ? "paper" : "unattributed", { entity: e.entity })}
+                  className="hover:underline"
+                >
+                  {e.entity}
+                </Link>
+                <span className="font-semibold tabular-nums">{e.confirmed}</span>
+                {e.open > 0 && (
+                  <Link
+                    href={to("unattributed", { entity: e.entity })}
+                    title="Not yet attributed"
+                    className="text-apollo-amber font-semibold tabular-nums hover:underline"
+                  >
+                    +{e.open}
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {profile.coAuthors.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h3 className="text-muted-foreground text-[11.5px] font-medium tracking-[.06em] uppercase">
+            Our other confirmed authors on these papers
+          </h3>
+          <p className="text-[13px] leading-relaxed">
+            {profile.coAuthors.slice(0, 12).map((c, i, shown) => (
+              <span key={c.cwid ?? c.name}>
+                {c.cwid ? (
+                  <Link href={to(ui.view, { person: c.cwid.toLowerCase() })} className={linkClass}>
+                    {c.name}
+                  </Link>
+                ) : (
+                  c.name
+                )}
+                <span className="text-muted-foreground"> {c.papers}</span>
+                {i < shown.length - 1 ? "; " : ""}
+              </span>
+            ))}
+            {profile.coAuthors.length > 12 && (
+              <span className="text-muted-foreground"> and {profile.coAuthors.length - 12} more</span>
+            )}
+          </p>
+        </div>
+      )}
+      <p className="text-muted-foreground text-[12.5px]">
+        Screening results under the filters above, not a determination. Names match approximately:
+        read the matched affiliation strings (By paper) before acting.
+      </p>
+    </section>
+  );
+}
+
 const VIEW_NOTE: Record<ResearchSecurityView, string> = {
   entity:
     "Confirmed co-publications per listed entity. Select a name or a count to see the rows behind it. The two shaded columns are the not-yet-attributed tier and are not part of any confirmed count.",
@@ -913,39 +1349,52 @@ const VIEW_NOTE: Record<ResearchSecurityView, string> = {
   funding:
     "Papers with a confirmed author whose grant metadata names the China Scholarship Council or a talent program. Paper-level: it does not say which author held the award. The list, category and entity filters do not apply.",
   unattributed:
-    "Suggestions nobody has reviewed and open review-queue rows. Never part of a confirmed count. A paper already confirmed for another of our authors is marked and not counted.",
+    "Suggestions nobody has reviewed and open review-queue rows, one row per candidate. Never part of a confirmed count. Select a name to see everything on file for that person. A paper already confirmed for another of our authors is marked and not counted.",
 };
 
 function MethodsSection({ doc }: { doc: ResearchSecurityMethodsDoc }) {
   return (
-    <section id="methods" className="flex scroll-mt-32 flex-col gap-3.5">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-xl font-semibold">Methods &amp; assumptions</h2>
-        {/* Plain <a>: the target is a download route handler. */}
-        <a
-          href={`${BASE}/export?section=methods`}
-          className="text-apollo-slate ml-auto text-[13px] hover:underline"
-        >
-          Download methods
-        </a>
-      </div>
-      <div
-        className={cn(
-          cardClass,
-          "grid grid-cols-[repeat(auto-fit,minmax(min(300px,100%),1fr))] gap-x-8 gap-y-4 px-4 py-[18px] sm:px-[22px]",
-        )}
+    <section className="flex flex-col gap-3.5">
+      <MethodsDisclosure
+        id="methods"
+        className="group scroll-mt-32"
+        summary={
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span aria-hidden className="text-apollo-slate text-sm group-open:rotate-90">
+              ▶
+            </span>
+            <h2 className="text-xl font-semibold">Methods &amp; assumptions</h2>
+            <span className="text-muted-foreground text-[13px]">
+              {doc.sections.length} sections: lists, matching, known limits
+            </span>
+          </span>
+        }
       >
-        {doc.sections.map((s) => (
-          <div key={s.heading} className="flex flex-col gap-1">
-            <h3 className="text-sm font-semibold">{s.heading}</h3>
-            {s.body.split("\n").map((line, i) => (
-              <p key={i} className="text-apollo-ink-2 text-[13.5px] leading-relaxed">
-                {line}
-              </p>
-            ))}
-          </div>
-        ))}
-      </div>
+        <div
+          className={cn(
+            cardClass,
+            "mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(min(300px,100%),1fr))] gap-x-8 gap-y-4 px-4 py-[18px] sm:px-[22px]",
+          )}
+        >
+          {doc.sections.map((s) => (
+            <div key={s.heading} className="flex flex-col gap-1">
+              <h3 className="text-sm font-semibold">{s.heading}</h3>
+              {s.body.split("\n").map((line, i) => (
+                <p key={i} className="text-apollo-ink-2 text-[13.5px] leading-relaxed">
+                  {line}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+      </MethodsDisclosure>
+      {/* Plain <a>: the target is a download route handler. */}
+      <a
+        href={`${BASE}/export?section=methods`}
+        className="text-apollo-slate self-start text-[13px] hover:underline"
+      >
+        Download methods
+      </a>
     </section>
   );
 }
@@ -959,14 +1408,20 @@ export function ResearchSecurityDashboard({
   totalPages,
   categories,
   entities,
-  personLabel,
+  profile,
+  profileLinks,
+  viewShown,
+  viewTotal,
   dataAsOf,
   methods,
 }: ResearchSecurityDashboardProps) {
   const f = ui.filters;
   const noun = summary.tier === "country" ? "Country-of-concern" : "Listed-entity";
   const to = linkBuilder(f);
-  const exportHref = `${BASE}/export${researchSecurityQuery({ view: ui.view, filters: f })}`;
+  const exportHref = `${BASE}/export${researchSecurityQuery({ view: ui.view, filters: f, q: ui.q, sort: ui.sort, dir: ui.dir })}`;
+  const personLabel = profile ? `${profile.name} (${profile.cwid})` : undefined;
+  const unit =
+    current.view === "unattributed" ? (current.groups ? "candidates" : "rows") : "rows";
   return (
     <div className="flex flex-col gap-6">
       <p
@@ -1032,15 +1487,43 @@ export function ResearchSecurityDashboard({
             </p>
           </div>
 
+          {profile && <PersonCard profile={profile} links={profileLinks} ui={ui} />}
+          {f.person && !profile && (
+            <p className={cn(cardClass, "text-apollo-ink-2 px-4 py-3 text-[13.5px]")}>
+              Nothing is on file for <strong>{f.person}</strong> under these filters.{" "}
+              <Link href={to(ui.view, { person: undefined })} className={linkClass}>
+                Remove the person filter
+              </Link>
+            </p>
+          )}
+
           <section className="flex flex-col gap-3">
             <Tabs ui={ui} tabCounts={tabCounts} />
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <p className="text-muted-foreground max-w-[90ch] text-[13px]">{VIEW_NOTE[ui.view]}</p>
+              <p className="text-muted-foreground max-w-[90ch] text-[13px]">
+                {ui.view === "unattributed" && f.person
+                  ? "This person's open suggestions and review-queue rows, one per paper. Never part of a confirmed count."
+                  : VIEW_NOTE[ui.view]}
+              </p>
               {/* Plain <a>: the target is a download route handler. */}
               <a href={exportHref} className="text-apollo-slate ml-auto text-[13px] hover:underline">
                 Download this view (.xlsx)
               </a>
             </div>
+            {ui.q && viewShown != null && viewTotal != null && (
+              <p className="text-[13px]">
+                <strong>
+                  {viewShown.toLocaleString("en-US")} of {viewTotal.toLocaleString("en-US")} {unit}
+                </strong>{" "}
+                match “{ui.q}”. The tiles and tab counts above are not narrowed by the search.{" "}
+                <Link
+                  href={`${BASE}${researchSecurityQuery({ view: ui.view, filters: f, sort: ui.sort, dir: ui.dir })}`}
+                  className={linkClass}
+                >
+                  Clear search
+                </Link>
+              </p>
+            )}
             <div className={tableWrapClass}>
               {current.view === "entity" && <EntityTable rows={current.rows} ui={ui} />}
               {current.view === "person" && <PersonTable rows={current.rows} ui={ui} />}
@@ -1048,7 +1531,12 @@ export function ResearchSecurityDashboard({
                 <PaperTable rows={current.rows} matchedStrings={current.matchedStrings} ui={ui} />
               )}
               {current.view === "funding" && <FundingTable rows={current.rows} ui={ui} />}
-              {current.view === "unattributed" && <UnattributedTable rows={current.rows} ui={ui} />}
+              {current.view === "unattributed" &&
+                (current.groups ? (
+                  <UnattributedGroupTable groups={current.groups} ui={ui} />
+                ) : (
+                  <UnattributedTable rows={current.rows} ui={ui} />
+                ))}
             </div>
             <Pager ui={ui} page={page} totalPages={totalPages} />
           </section>

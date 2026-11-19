@@ -10,7 +10,7 @@ import {
   ResearchSecurityDashboard,
   type ResearchSecurityDashboardProps,
 } from "@/components/edit/research-security-dashboard";
-import type { ArticleFact, PersonFact } from "@/lib/api/research-security-report";
+import type { ArticleFact, PersonFact, PersonProfile } from "@/lib/api/research-security-report";
 import { parseResearchSecurityParams } from "@/lib/edit/research-security-dashboard";
 import { buildResearchSecurityMethodsDoc } from "@/lib/edit/research-security-methods-doc";
 
@@ -37,6 +37,28 @@ const candidate: PersonFact = {
   attribution: "pending",
   inReviewQueue: false,
   reciterScore: 100,
+};
+
+const profile: PersonProfile = {
+  cwid: "abc2001",
+  name: "Ann Chen",
+  campus: "wcm",
+  department: "Medicine",
+  title: "Professor",
+  confirmedPapers: 12,
+  confirmedExcludingConsortia: 11,
+  firstYear: 2019,
+  lastYear: 2025,
+  listsEntityPapers: 2,
+  openPapers: 3,
+  openAlreadyConfirmed: 1,
+  openInReviewQueue: 0,
+  openListsEntity: 1,
+  scoreMin: 53.8,
+  scoreMax: 96.5,
+  fundingFlagPapers: 0,
+  entities: [{ entity: "China", confirmed: 12, open: 3 }],
+  coAuthors: [{ cwid: "xyz1", name: "Lin Zeng", papers: 4 }],
 };
 
 function props(over: Partial<ResearchSecurityDashboardProps> = {}): ResearchSecurityDashboardProps {
@@ -195,7 +217,8 @@ describe("ResearchSecurityDashboard", () => {
           ui: parseResearchSecurityParams({ list: "country-of-concern", entity: "China", person: "abc2001" }),
           summary: { ...props().summary, tier: "country" },
           entities: ["China", "Russia"],
-          personLabel: "Ann Chen (abc2001)",
+          profile,
+          profileLinks: { console: "/edit/scholar/abc2001", publicProfile: "/ann-chen" },
         })}
       />,
     );
@@ -206,6 +229,109 @@ describe("ResearchSecurityDashboard", () => {
     expect((form.querySelector('input[name="person"]') as HTMLInputElement).value).toBe("abc2001");
     expect(screen.getByText("Person: Ann Chen (abc2001)")).toBeTruthy();
     expect(screen.getByText(/every count covers this person's papers only/)).toBeTruthy();
+
+    // The person card: everything on file, each figure linked to its rows.
+    const card = within(screen.getByRole("region", { name: "On file for Ann Chen" }));
+    const q = "list=country-of-concern&entity=China&person=abc2001";
+    expect(card.getByRole("link", { name: "12" }).getAttribute("href")).toBe(`/edit/research-security?view=paper&${q}`);
+    expect(card.getByRole("link", { name: "3" }).getAttribute("href")).toBe(`/edit/research-security?view=unattributed&${q}`);
+    expect(card.getByText(/2019–2025 · 11 excluding consortia/)).toBeTruthy();
+    expect(card.getByText(/ReCiter scores 53.8–96.5 · 1 also list the entity/)).toBeTruthy();
+    expect(card.getByRole("link", { name: "Console record" }).getAttribute("href")).toBe("/edit/scholar/abc2001");
+    expect(card.getByRole("link", { name: "Public profile" }).getAttribute("href")).toBe("/ann-chen");
+    // The other tier is one click away, with the person kept.
+    expect(card.getByRole("link", { name: "See listed entities" }).getAttribute("href")).toBe(
+      "/edit/research-security?person=abc2001",
+    );
+    expect(card.getByRole("link", { name: "Lin Zeng" }).getAttribute("href")).toBe(
+      "/edit/research-security?list=country-of-concern&entity=China&person=xyz1",
+    );
+  });
+
+  it("says so when the selected person is on nothing in scope", () => {
+    render(<ResearchSecurityDashboard {...props({ ui: parseResearchSecurityParams({ person: "zzz9" }), profile: null })} />);
+    expect(screen.getByText(/Nothing is on file for/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Remove the person filter" }).getAttribute("href")).toBe("/edit/research-security");
+  });
+
+  it("Not yet attributed is one row per candidate, and the name opens that person", () => {
+    const row = {
+      priority: 1 as const,
+      alreadyConfirmed: false,
+      person: candidate,
+      article,
+      entities: ["Soochow University"],
+      categories: ["SASTIND university"],
+      candidateListsEntity: true,
+    };
+    const rows = Array.from({ length: 7 }, (_, i) => ({
+      ...row,
+      article: { ...article, articleId: String(i), pmid: i + 1, title: `Paper ${i}` },
+    }));
+    render(
+      <ResearchSecurityDashboard
+        {...props({
+          ui: parseResearchSecurityParams({ view: "unattributed" }),
+          current: {
+            view: "unattributed",
+            rows: [],
+            groups: [
+              {
+                key: "gux2002",
+                person: candidate,
+                rows,
+                papers: 7,
+                priority: 1,
+                maxScore: 100,
+                entities: ["Soochow University"],
+                candidateListsEntity: true,
+              },
+            ],
+          },
+        })}
+      />,
+    );
+    const mine = "/edit/research-security?view=unattributed&person=gux2002";
+    expect(screen.getByRole("link", { name: "Guoqiang Xu" }).getAttribute("href")).toBe(mine);
+    expect(screen.getByText("7 rows")).toBeTruthy();
+    // Five papers are previewed; the rest are behind the person.
+    expect(screen.getByText("Paper 4")).toBeTruthy();
+    expect(screen.queryByText("Paper 5")).toBeNull();
+    expect(screen.getByRole("link", { name: "All 7 rows →" }).getAttribute("href")).toBe(mine);
+  });
+
+  it("column headers sort the view, a second click reverses, and search is kept", () => {
+    const ui = parseResearchSecurityParams({ view: "person", q: "chiang", sort: "name" });
+    render(
+      <ResearchSecurityDashboard
+        {...props({ ui, current: { view: "person", rows: [] }, viewShown: 2, viewTotal: 583 })}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /Sort by Person, currently ascending/ }).getAttribute("href")).toBe(
+      "/edit/research-security?view=person&q=chiang&sort=name&dir=desc",
+    );
+    // The default column needs no sort parameter.
+    expect(screen.getByRole("link", { name: "Sort by Co-publications" }).getAttribute("href")).toBe(
+      "/edit/research-security?view=person&q=chiang",
+    );
+    expect(screen.getByText("2 of 583 rows")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Clear search" }).getAttribute("href")).toBe(
+      "/edit/research-security?view=person&sort=name",
+    );
+    // The export downloads what is on screen; another view starts clean.
+    expect(screen.getByRole("link", { name: "Download this view (.xlsx)" }).getAttribute("href")).toBe(
+      "/edit/research-security/export?view=person&q=chiang&sort=name",
+    );
+    const tabs = within(screen.getByRole("navigation", { name: "Views" }));
+    expect(tabs.getByRole("link", { name: /By paper/ }).getAttribute("href")).toBe("/edit/research-security?view=paper");
+  });
+
+  it("Methods is collapsed until asked for, and stays in the page", () => {
+    const { container } = render(<ResearchSecurityDashboard {...props()} />);
+    const details = container.querySelector("details#methods") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    (screen.getByRole("note").querySelector('a[href="#methods"]') as HTMLAnchorElement).click();
+    expect(details.open).toBe(true);
   });
 
   it("tabs, pager and export are links that keep the filters", () => {

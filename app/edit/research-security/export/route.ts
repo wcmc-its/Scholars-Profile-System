@@ -1,10 +1,11 @@
 /**
- * GET /edit/research-security/export?view=&campus=&list=&category=&entity=&person=&from=&to=&consortia=
+ * GET /edit/research-security/export?view=&campus=&list=&category=&entity=&person=&from=&to=&consortia=&q=&sort=&dir=
  *
  * The current view of the research security dashboard as an `.xlsx`, under the
  * same filters the page reads (`parseResearchSecurityParams`): every row of
  * the view, then Criteria and Methods sheets. `view=paper` adds the exact
- * matched affiliation strings. `?section=methods` is the Methods text as
+ * matched affiliation strings. The view's search text and sort apply as on the
+ * page (Not yet attributed is always one row per candidate and paper). `?section=methods` is the Methods text as
  * markdown.
  *
  * Gate order, the same as `/edit/data-sharing/export`: flag off → 404 · no
@@ -16,6 +17,10 @@
 import { NextResponse } from "next/server";
 
 import {
+  arrangeEntityRows,
+  arrangeFundingRows,
+  arrangePaperRows,
+  arrangePersonRows,
   buildEntityRows,
   buildFundingRows,
   buildPaperRows,
@@ -26,6 +31,7 @@ import {
   loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
+  searchUnattributedRows,
 } from "@/lib/api/research-security-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { getSession } from "@/lib/auth/session-server";
@@ -109,12 +115,16 @@ export async function GET(request: Request) {
 
   let matchedStrings;
   let sheet;
-  if (view === "person") sheet = personSheet(buildPersonRows(facts, filters.campus));
-  else if (view === "funding") sheet = fundingSheet(buildFundingRows(facts, filters.campus));
+  if (view === "person")
+    sheet = personSheet(arrangePersonRows(buildPersonRows(facts, filters.campus), requested));
+  else if (view === "funding")
+    sheet = fundingSheet(arrangeFundingRows(buildFundingRows(facts, filters.campus), requested));
   else if (view === "unattributed")
-    sheet = unattributedSheet(buildUnattributedRows(facts, filters.campus));
+    sheet = unattributedSheet(
+      searchUnattributedRows(buildUnattributedRows(facts, filters.campus), requested.q),
+    );
   else if (view === "paper") {
-    const papers = buildPaperRows(facts, filters.campus);
+    const papers = arrangePaperRows(buildPaperRows(facts, filters.campus), requested);
     sheet = paperSheet(papers);
     const ids = papers.map((p) => p.article.articleId);
     const strings = [];
@@ -122,7 +132,7 @@ export async function GET(request: Request) {
       strings.push(...(await loadMatchedStrings(db.read, ids.slice(i, i + STRINGS_BATCH), filters)));
     }
     matchedStrings = matchedStringsSheet(forConfirmedAuthors(strings, facts, filters.campus));
-  } else sheet = entitySheet(buildEntityRows(facts, filters.campus));
+  } else sheet = entitySheet(arrangeEntityRows(buildEntityRows(facts, filters.campus), requested));
 
   console.log(
     JSON.stringify({
@@ -137,6 +147,7 @@ export async function GET(request: Request) {
   const buffer = await buildResearchSecurityWorkbook({
     view,
     filters,
+    search: requested.q,
     sheet,
     matchedStrings,
     methods,
