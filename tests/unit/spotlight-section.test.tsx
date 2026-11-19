@@ -181,3 +181,24 @@ describe("SpotlightSection — absent counts are not zero counts (#2218)", () =>
     ).toBeDefined();
   });
 });
+
+describe("SpotlightSection — paper meta line", () => {
+  it("renders the year alone, with no stray comma, when the journal is empty", () => {
+    const noJournal: SpotlightCard = {
+      ...card,
+      papers: [{ ...card.papers[0], journal: "" }],
+    };
+    const { container } = render(
+      <PublicationModalProvider>
+        <SpotlightSection items={[noJournal]} />
+      </PublicationModalProvider>,
+    );
+    expect(container.textContent).toContain("2024");
+    expect(container.textContent).not.toContain(", 2024");
+  });
+
+  it("keeps the 'Journal, year' form when a journal is present", () => {
+    const { container } = renderHome();
+    expect(container.textContent).toContain("Journal of Widgets, 2024");
+  });
+});

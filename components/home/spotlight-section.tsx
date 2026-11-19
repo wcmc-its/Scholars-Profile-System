@@ -5,8 +5,10 @@
  *   - Left pane: the active spotlight (kicker, name, lede, papers with WCM
  *     author chips, browse-all-publications link).
  *   - Right pane: 2-column grid of small button-cards (one per spotlight).
- *     Click swaps the active spotlight. Active card = maroon outline + "Showing" badge
- *     (home refinements mockup, 2026-09-24).
+ *     Click swaps the active spotlight. Inactive cards sit on the greige chip
+ *     fill; the active card is white with a dark outline and a corner
+ *     "Showing" badge (supersedes the maroon outline of the 2026-09-24 home
+ *     refinements mockup).
  *
  * Behavior:
  *   - On mount the active card is randomized (the SSR render starts at 0;
@@ -92,9 +94,9 @@ export function SpotlightSection({
         The most active WCM research subareas, one per research area, rotated weekly.
       </p>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
+      <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[1.6fr_1fr]">
         <SpotlightDetail card={active} />
-        <div className="grid auto-rows-fr grid-cols-1 content-start gap-2 sm:grid-cols-2">
+        <div className="grid auto-rows-fr grid-cols-1 content-start gap-3 sm:grid-cols-2">
           {display.map((card, i) => (
             <SpotlightCardButton
               key={card.subtopicId}
@@ -292,9 +294,17 @@ function PaperRow({
         {overflow > 0 ? <span className="text-zinc-500">+{overflow} more</span> : null}
         {senior ? <AuthorChip key={`senior-${senior.cwid}`} author={senior} /> : null}
       </div>
+      {/* An empty journal used to render as a bare ", 2026" line. Only join the
+          pieces that exist. */}
       <div className="text-muted-foreground text-[13px] leading-[18px]">
-        <em dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(journal) }} />
-        {`, ${year}`}
+        {journal.trim() ? (
+          <>
+            <em dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(journal) }} />
+            {year ? `, ${year}` : null}
+          </>
+        ) : (
+          year || null
+        )}
       </div>
     </div>
   );
@@ -351,25 +361,33 @@ function SpotlightCardButton({
       onClick={onSelect}
       aria-pressed={active}
       className={[
-        "flex h-full min-w-0 flex-col gap-1.5 rounded-[10px] border px-3.5 py-3 text-left transition-colors duration-[120ms] ease-out",
+        "relative flex h-full min-w-0 flex-col gap-1.5 rounded-[10px] border p-3.5 text-left transition-colors duration-[120ms] ease-out",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]",
-        // Active = a maroon outline + "Showing" badge, no fill; the detail pane earns the
-        // visual weight, these cards are navigation.
+        // Inactive tiles sit one level down on the greige chip fill (with the
+        // strong edge, since the hairline dies on greige) so they read as a
+        // picker, not as more content cards. The active tile lifts to the white
+        // card level, matching the detail pane it controls. Its edge is the
+        // near-black bar ink rather than maroon: maroon is brand chrome, not a
+        // selected signal.
         active
-          ? "border-apollo-maroon bg-apollo-surface shadow-[inset_0_0_0_1px_var(--apollo-maroon)]"
-          : "border-apollo-border bg-apollo-surface hover:border-apollo-border-strong focus-visible:border-apollo-border-strong shadow-[var(--apollo-shadow-card)]",
+          ? "border-apollo-bar bg-apollo-surface shadow-[inset_0_0_0_0.5px_var(--apollo-bar),var(--apollo-shadow-card)]"
+          : "border-apollo-border-strong bg-apollo-surface-2 hover:bg-apollo-surface focus-visible:bg-apollo-surface",
       ].join(" ")}
     >
-      {/* "Showing" gets its own reserved row so it never crowds the counts, and
-          every tile's eyebrow + title start at the same height. */}
-      <div className="flex h-4 justify-end">
-        {active ? (
-          <Badge variant="secondary" className="h-4 px-1.5 text-[10.5px]">
-            Showing
-          </Badge>
-        ) : null}
-      </div>
-      <div className="line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-apollo-maroon uppercase">
+      {/* "Showing" floats in the corner instead of reserving a row, so tiles
+          don't carry an empty band above the eyebrow. The eyebrow's two-line
+          min-height still keeps every title starting at the same height. */}
+      {active ? (
+        <Badge variant="secondary" className="absolute top-2 right-2 h-4 px-1.5 text-[10.5px]">
+          Showing
+        </Badge>
+      ) : null}
+      <div
+        className={[
+          "line-clamp-2 min-h-[30px] text-[10.5px] leading-[15px] font-semibold tracking-[0.1em] text-apollo-maroon uppercase",
+          active ? "pr-16" : "",
+        ].join(" ")}
+      >
         {card.parentTopicLabel}
       </div>
       <div className="text-foreground line-clamp-3 text-[14px] leading-[19px] font-medium text-pretty">
