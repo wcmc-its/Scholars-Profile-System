@@ -31,10 +31,23 @@ export const LIST_FILTERS = ["entities", LIST_HOUSE, LIST_USUAL, LIST_COUNTRY] a
 export type ListFilter = (typeof LIST_FILTERS)[number];
 
 export const LIST_FILTER_LABEL: Record<ListFilter, string> = {
-  entities: "Listed entities (House nominations and usual suspects)",
-  [LIST_HOUSE]: "House Section 1286 nominations",
-  [LIST_USUAL]: "Usual suspects",
-  [LIST_COUNTRY]: "Country of concern",
+  entities: "All listed entities",
+  [LIST_HOUSE]: "House Select Committee nominations (Oct 2026)",
+  [LIST_USUAL]: "Defense-affiliated institutions (curated)",
+  [LIST_COUNTRY]: "Country of concern (broader tier)",
+};
+
+/** One line under the filter bar saying what the selected list is, so nobody
+ *  has to scroll to Methods to read a count. */
+export const LIST_FILTER_DESCRIPTION: Record<ListFilter, string> = {
+  entities:
+    "Both entity lists together: the House Select Committee nominations and the curated defense-affiliated institutions.",
+  [LIST_HOUSE]:
+    "The 134 entities the House Select Committee on the CCP nominated for the Section 1286 List in its letter of 2026-10-01. Nominations, not designations.",
+  [LIST_USUAL]:
+    "A short curated list: the Seven Sons of National Defence, defence universities and research academies, PLA medical universities and hospitals.",
+  [LIST_COUNTRY]:
+    "Any co-author affiliation in China (including Hong Kong and Macau), Russia, Iran, North Korea, Cuba or Venezuela. A far wider net than the entity lists; never added to an entity total.",
 };
 
 /** The `list_code` values a list filter reads. */
@@ -77,13 +90,46 @@ export type ResearchSecurityFilters = {
   list: ListFilter;
   /** One category within the selected list(s); undefined = all. */
   category?: string;
+  /** One entity (a country, in the country tier) within the selected list(s). */
+  entity?: string;
+  /** One of our people, by cwid: only the papers this person is on. */
+  person?: string;
   /** Inclusive ISO dates on the publication date. */
   dateFrom: string;
   dateTo?: string;
   excludeConsortia: boolean;
 };
 
-export type ResearchSecurityUiParams = {
+/**
+ * The columns each view can be sorted by; the first is its default order.
+ * Search (`q`) and sort belong to ONE view's table: they never change a
+ * headline tile or a tab count, and a link to another view drops them.
+ */
+export const SORT_KEYS: Record<ResearchSecurityView, readonly string[]> = {
+  entity: ["papers", "entity", "people", "unattributed"],
+  person: ["papers", "name", "department"],
+  paper: ["date", "title", "authors"],
+  funding: ["date", "program"],
+  unattributed: ["priority", "papers", "score", "name"],
+};
+export type SortDir = "asc" | "desc";
+const ASCENDING_FIRST = new Set(["entity", "name", "department", "title", "program", "priority"]);
+/** The direction a column sorts in when first selected. */
+export function defaultSortDir(key: string): SortDir {
+  return ASCENDING_FIRST.has(key) ? "asc" : "desc";
+}
+
+/** Search and sort of the selected view's table. */
+export type ResearchSecurityArrange = {
+  /** Free text; every word must appear in a row. */
+  q?: string;
+  /** A key of `SORT_KEYS[view]`; undefined = the view's default. */
+  sort?: string;
+  /** undefined = the key's default direction. */
+  dir?: SortDir;
+};
+
+export type ResearchSecurityUiParams = ResearchSecurityArrange & {
   view: ResearchSecurityView;
   /** 1-indexed. */
   page: number;
@@ -110,13 +156,29 @@ export function parseResearchSecurityParams(sp: RawParams): ResearchSecurityUiPa
   const campus = first(sp.campus) as CampusFilter;
   const page = Number(first(sp.page));
   const category = first(sp.category)?.trim();
+  const entity = first(sp.entity)?.trim();
+  const person = first(sp.person)?.trim().toLowerCase();
+  const v = RESEARCH_SECURITY_VIEWS.includes(view) ? view : "entity";
+  const sortKey = first(sp.sort);
+  const sort = sortKey && SORT_KEYS[v].indexOf(sortKey) > 0 ? sortKey : undefined;
+  const dirParam = first(sp.dir);
+  const dir =
+    (dirParam === "asc" || dirParam === "desc") && dirParam !== defaultSortDir(sort ?? SORT_KEYS[v][0])
+      ? dirParam
+      : undefined;
+  const q = first(sp.q)?.trim().replace(/\s+/g, " ").slice(0, 80);
   return {
-    view: RESEARCH_SECURITY_VIEWS.includes(view) ? view : "entity",
+    view: v,
+    q: q || undefined,
+    sort,
+    dir,
     page: Number.isInteger(page) && page >= 1 ? page : 1,
     filters: {
       campus: CAMPUS_FILTERS.includes(campus) ? campus : "both",
       list: LIST_FILTERS.includes(list) ? list : "entities",
       category: category ? category.slice(0, 64) : undefined,
+      entity: entity ? entity.slice(0, 160) : undefined,
+      person: person && /^[a-z0-9_.-]{1,32}$/.test(person) ? person : undefined,
       dateFrom: isoDate(first(sp.from)) ?? DEFAULT_DATE_FROM,
       dateTo: isoDate(first(sp.to)),
       excludeConsortia: first(sp.consortia) === "exclude",
@@ -138,18 +200,61 @@ export function withKnownCategory(
   return f.category && !categories.includes(f.category) ? { ...f, category: undefined } : f;
 }
 
-/** The filters in words, for the line under the headline tiles: every filter
- *  that changes a count is named, so no figure is read under a hidden one. */
-export function filterSummary(f: ResearchSecurityFilters): string[] {
-  return [
-    f.campus === "both" ? "WCM and Cornell University" : CAMPUS_LABEL[f.campus],
-    LIST_FILTER_LABEL[f.list],
-    f.category ? `category: ${f.category}` : "all categories",
-    `published ${f.dateFrom}${f.dateFrom === DEFAULT_DATE_FROM ? " (default)" : ""} to ${f.dateTo ?? "present"}`,
-    f.excludeConsortia
-      ? `${CONSORTIUM_AUTHORS}+ author consortia excluded`
-      : `${CONSORTIUM_AUTHORS}+ author consortia included`,
+/** The same rule for the entity filter: an entity the selected list (and
+ *  category) does not have is dropped before anything is loaded. */
+export function withKnownEntity(
+  f: ResearchSecurityFilters,
+  entities: readonly string[],
+): ResearchSecurityFilters {
+  return f.entity && !entities.includes(f.entity) ? { ...f, entity: undefined } : f;
+}
+
+export type FilterChip = {
+  text: string;
+  /** The filters with this one back at its default; absent when it already is. */
+  without?: ResearchSecurityFilters;
+};
+
+/** The filters as chips under the headline tiles: every filter that changes a
+ *  count is named, so no figure is read under a hidden one, and each one that
+ *  is not at its default can be removed on its own. */
+export function filterChips(f: ResearchSecurityFilters, personLabel?: string): FilterChip[] {
+  const chips: FilterChip[] = [
+    {
+      text: f.campus === "both" ? "WCM and Cornell University" : CAMPUS_LABEL[f.campus],
+      without: f.campus === "both" ? undefined : { ...f, campus: "both" },
+    },
+    {
+      text: LIST_FILTER_LABEL[f.list],
+      // The category and entity belong to the list, so they go with it.
+      without:
+        f.list === "entities"
+          ? undefined
+          : { ...f, list: "entities", category: undefined, entity: undefined },
+    },
   ];
+  if (f.category) chips.push({ text: `Category: ${f.category}`, without: { ...f, category: undefined } });
+  if (f.entity)
+    chips.push({
+      text: `${f.list === LIST_COUNTRY ? "Country" : "Entity"}: ${f.entity}`,
+      without: { ...f, entity: undefined },
+    });
+  if (f.person)
+    chips.push({ text: `Person: ${personLabel ?? f.person}`, without: { ...f, person: undefined } });
+  const defaultDates = f.dateFrom === DEFAULT_DATE_FROM && !f.dateTo;
+  chips.push({
+    text: `Published ${f.dateFrom}${defaultDates ? " (default)" : ""} to ${f.dateTo ?? "present"}`,
+    without: defaultDates ? undefined : { ...f, dateFrom: DEFAULT_DATE_FROM, dateTo: undefined },
+  });
+  chips.push(
+    f.excludeConsortia
+      ? {
+          text: `${CONSORTIUM_AUTHORS}+ author consortia excluded`,
+          without: { ...f, excludeConsortia: false },
+        }
+      : { text: `${CONSORTIUM_AUTHORS}+ author consortia included` },
+  );
+  return chips;
 }
 
 /** The query string for a view + filters; defaults are left out. */
@@ -157,6 +262,9 @@ export function researchSecurityQuery(p: {
   view?: ResearchSecurityView;
   page?: number;
   filters: ResearchSecurityFilters;
+  q?: string;
+  sort?: string;
+  dir?: SortDir;
 }): string {
   const q = new URLSearchParams();
   if (p.view && p.view !== "entity") q.set("view", p.view);
@@ -164,9 +272,14 @@ export function researchSecurityQuery(p: {
   if (f.campus !== "both") q.set("campus", f.campus);
   if (f.list !== "entities") q.set("list", f.list);
   if (f.category) q.set("category", f.category);
+  if (f.entity) q.set("entity", f.entity);
+  if (f.person) q.set("person", f.person);
   if (f.dateFrom !== DEFAULT_DATE_FROM) q.set("from", f.dateFrom);
   if (f.dateTo) q.set("to", f.dateTo);
   if (f.excludeConsortia) q.set("consortia", "exclude");
+  if (p.q) q.set("q", p.q);
+  if (p.sort) q.set("sort", p.sort);
+  if (p.dir) q.set("dir", p.dir);
   if (p.page && p.page > 1) q.set("page", String(p.page));
   const s = q.toString();
   return s ? `?${s}` : "";

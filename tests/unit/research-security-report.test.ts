@@ -9,9 +9,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  arrangeEntityRows,
+  arrangeFundingRows,
+  arrangePaperRows,
+  arrangePersonRows,
+  buildEntityProfile,
   buildEntityRows,
   buildFundingRows,
   buildPaperRows,
+  buildPersonProfile,
   buildPersonRows,
   buildSummary,
   buildUnattributedRows,
@@ -19,10 +25,16 @@ import {
   candidateListsEntity,
   countUnattributedPapers,
   forConfirmedAuthors,
+  groupUnattributedRows,
   listedBy,
+  loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
+  paperScope,
+  searchUnattributedRows,
+  sortUnattributedGroups,
+  topAffiliations,
   unattributedPriority,
   type MatchedString,
   type ArticleFact,
@@ -553,6 +565,323 @@ describe("paginate", () => {
     expect(paginate(rows, 2, 50).rows[0]).toBe(50);
     expect(paginate(rows, 99, 50).page).toBe(3);
     expect(paginate([], 1, 50)).toMatchObject({ page: 1, totalPages: 1, rows: [] });
+  });
+});
+
+describe("drill-down filters: entity and person", () => {
+  it("the entity filter narrows the matches in SQL, and the entity list is read per list and category", async () => {
+    const client = fakeClient();
+    const f = parseResearchSecurityParams({ list: LIST_COUNTRY, entity: "China", person: "W1" }).filters;
+    const loaded = await loadResearchSecurityFacts(client, f);
+    expect(client.researchSecurityMatch.findMany.mock.calls[0][0].where).toMatchObject({
+      listCode: { in: [LIST_COUNTRY] },
+      entity: "China",
+    });
+    expect(loaded.person).toBe("w1");
+    await loadEntities(client, parseResearchSecurityParams({ list: LIST_HOUSE, category: "CAS institute", entity: "X" }).filters);
+    const call = client.researchSecurityMatch.findMany.mock.calls[1][0];
+    expect(call.where).toEqual({ listCode: { in: [LIST_HOUSE] }, category: "CAS institute" });
+    expect(call).toMatchObject({ distinct: ["entity"] });
+  });
+
+  it("a person filter keeps only the papers that person is a confirmed author of", () => {
+    const f = { ...base, person: "w1" };
+    expect(buildPaperRows(f, "both").map((r) => r.article.articleId)).toEqual(["1"]);
+    expect(buildPersonRows(f, "both").map((r) => r.cwid)).toEqual(["w1"]);
+    expect(buildEntityRows(f, "both").map((r) => [r.entity, r.papers, r.unattributedPapers])).toEqual([
+      ["Peking University", 1, 0],
+    ]);
+    expect(buildFundingRows(f, "both").map((r) => r.article.articleId)).toEqual(["5"]);
+    expect(buildUnattributedRows(f, "both")).toEqual([]);
+  });
+
+  it("a paper's other confirmed authors stay listed, but By person is that person's row alone", () => {
+    const shared = { ...base, people: [...base.people, person("1", "i9", { campus: "ithaca" })], person: "W1" };
+    const [paper] = buildPaperRows(shared, "both");
+    expect(paper.wcmAuthors).toEqual(["Name w1 (w1)"]);
+    expect(paper.ithacaAuthors).toEqual(["Name i9 (i9)"]);
+    expect(buildPersonRows(shared, "both").map((r) => r.cwid)).toEqual(["w1"]);
+  });
+
+  it("a candidate's open rows are theirs alone, and a paper confirmed for someone else is still not counted", () => {
+    const w2 = buildUnattributedRows({ ...base, person: "w2" }, "both");
+    expect(w2.map((r) => [r.article.articleId, r.person.cwid, r.alreadyConfirmed])).toEqual([["2", "w2", true]]);
+    expect(countUnattributedPapers(w2)).toBe(0);
+    // w2 is not a CONFIRMED author of paper 2, so it is not one of w2's confirmed papers.
+    expect(buildPaperRows({ ...base, person: "w2" }, "both")).toEqual([]);
+    const w3 = buildUnattributedRows({ ...base, person: "w3" }, "both");
+    expect(w3.map((r) => r.article.articleId)).toEqual(["3"]);
+    expect(countUnattributedPapers(w3)).toBe(1);
+  });
+
+  it("the campus filter still applies under a person filter", () => {
+    expect(buildPaperRows({ ...base, person: "w1" }, "ithaca")).toEqual([]);
+  });
+});
+
+describe("Not yet attributed, grouped by candidate", () => {
+  const two = facts({
+    articles: [article("1"), article("2"), article("3"), article("4")],
+    people: [
+      person("1", "w1", { attribution: "pending", reciterScore: 60 }),
+      person("2", "w1", { attribution: "pending", reciterScore: 95 }),
+      person("3", "w1", { attribution: "pending", reciterScore: 40 }),
+      person("3", "i1", { campus: "ithaca" }),
+      person("4", "w2", { attribution: "pending", reciterScore: 70 }),
+    ],
+    matches: [
+      match("1", "Peking University"),
+      match("2", "Zhejiang University"),
+      match("3", "Peking University"),
+      match("4", "Peking University"),
+    ],
+  });
+  const groups = groupUnattributedRows(buildUnattributedRows(two, "both"));
+
+  it("one group per candidate, with the best priority, top score and counted papers", () => {
+    expect(groups.map((g) => [g.key, g.rows.length, g.papers, g.priority, g.maxScore])).toEqual([
+      // Paper 3 is already confirmed for i1: a row, but not a counted paper.
+      ["w1", 3, 2, 2, 95],
+      ["w2", 1, 1, 3, 70],
+    ]);
+    expect(groups[0].entities).toEqual(["Peking University", "Zhejiang University"]);
+    // Grouping never changes the tab's count of distinct papers.
+    expect(groups.reduce((n, g) => n + g.papers, 0)).toBe(
+      countUnattributedPapers(buildUnattributedRows(two, "both")),
+    );
+  });
+
+  it("rows with no proposed person are never merged into one candidate", () => {
+    const queue = facts({
+      articles: [article("1"), article("2")],
+      people: [
+        person("1", "x", { cwid: null, displayName: "Unassigned", attribution: "review_queue", campus: "unknown" }),
+        person("2", "x", { cwid: null, displayName: "Unassigned", attribution: "review_queue", campus: "unknown" }),
+      ],
+      matches: [match("1", "Peking University"), match("2", "Peking University")],
+    });
+    expect(groupUnattributedRows(buildUnattributedRows(queue, "both"))).toHaveLength(2);
+  });
+
+  it("groups sort by papers, score or name; search narrows the rows first", () => {
+    expect(sortUnattributedGroups(groups, { sort: "name", dir: "desc" }).map((g) => g.key)).toEqual(["w2", "w1"]);
+    expect(sortUnattributedGroups(groups, { sort: "papers" }).map((g) => g.key)).toEqual(["w1", "w2"]);
+    const found = searchUnattributedRows(buildUnattributedRows(two, "both"), "zhejiang");
+    expect(groupUnattributedRows(found).map((g) => [g.key, g.rows.length])).toEqual([["w1", 1]]);
+  });
+});
+
+describe("search and sort of a view's table", () => {
+  it("every word must appear; the default order is kept, and reversed on request", () => {
+    const people = buildPersonRows(base, "both");
+    expect(arrangePersonRows(people, {}).map((r) => r.cwid)).toEqual(people.map((r) => r.cwid));
+    expect(arrangePersonRows(people, { dir: "asc" }).map((r) => r.cwid)).toEqual(people.map((r) => r.cwid).reverse());
+    expect(arrangePersonRows(people, { q: "  NAME i1 " }).map((r) => r.cwid)).toEqual(["i1"]);
+    expect(arrangePersonRows(people, { q: "name nobody" })).toEqual([]);
+    expect(arrangePersonRows(people, { sort: "name", dir: "desc" }).map((r) => r.cwid)).toEqual(["w1", "i1"]);
+  });
+
+  it("entities and papers search and sort on their own columns", () => {
+    const entities = buildEntityRows(base, "both");
+    expect(arrangeEntityRows(entities, { sort: "entity" }).map((r) => r.entity)).toEqual([
+      "Peking University",
+      "Zhejiang University",
+    ]);
+    expect(arrangeEntityRows(entities, { q: "zhejiang" }).map((r) => r.entity)).toEqual(["Zhejiang University"]);
+    const papers = buildPaperRows(base, "both");
+    expect(arrangePaperRows(papers, { q: "Title 2" }).map((r) => r.article.articleId)).toEqual(["2"]);
+    expect(arrangePaperRows(papers, { q: "w1" }).map((r) => r.article.articleId)).toEqual(["1"]);
+    expect(arrangeFundingRows(buildFundingRows(base, "both"), { q: "scholarship" })).toHaveLength(1);
+  });
+});
+
+describe("one person: everything on file", () => {
+  const f = facts({
+    articles: [
+      article("1", { publicationDate: new Date("2022-05-01T00:00:00Z") }),
+      article("2", { publicationDate: new Date("2025-02-01T00:00:00Z"), totalAuthors: 80 }),
+      article("3"),
+      article("4"),
+      article("5"),
+    ],
+    people: [
+      person("1", "w1"),
+      person("1", "i1", { campus: "ithaca" }),
+      person("2", "w1"),
+      person("3", "w1", { attribution: "pending", reciterScore: 95 }),
+      person("4", "w1", { attribution: "pending", reciterScore: 50, inReviewQueue: true }),
+      person("4", "i1", { campus: "ithaca" }),
+      person("5", "w1"),
+    ],
+    matches: [
+      match("1", "Peking University", { ourAuthorCwids: "w1" }),
+      match("2", "Zhejiang University"),
+      match("3", "Peking University", { ourAuthorCwids: "W1" }),
+      match("4", "Peking University"),
+    ],
+    flags: [{ articleId: "5", program: "China Scholarship Council (CSC)", agency: "CSC", grantId: "1" }],
+  });
+
+  it("is null with no person filter, and for a person on nothing in scope", () => {
+    expect(buildPersonProfile(f, "both")).toBeNull();
+    expect(buildPersonProfile({ ...f, person: "nobody" }, "both")).toBeNull();
+  });
+
+  it("summarizes confirmed, open, funding, entities and our co-authors", () => {
+    expect(buildPersonProfile({ ...f, person: "w1" }, "both")).toEqual({
+      cwid: "w1",
+      name: "Name w1",
+      campus: "wcm",
+      department: "Medicine",
+      title: "Professor",
+      confirmedPapers: 2,
+      confirmedExcludingConsortia: 1,
+      firstYear: 2022,
+      lastYear: 2025,
+      listsEntityPapers: 1,
+      // Paper 3 counts; paper 4 is already confirmed for i1.
+      openPapers: 1,
+      openAlreadyConfirmed: 1,
+      openInReviewQueue: 0,
+      openListsEntity: 1,
+      scoreMin: 50,
+      scoreMax: 95,
+      fundingFlagPapers: 1,
+      entities: [
+        { entity: "Peking University", confirmed: 1, open: 1 },
+        { entity: "Zhejiang University", confirmed: 1, open: 0 },
+      ],
+      coAuthors: [{ cwid: "i1", name: "Name i1", papers: 1 }],
+      // Newest first: paper 2 (2025) before paper 1 (2022).
+      confirmedArticleIds: ["2", "1"],
+    });
+  });
+
+  it("a person with only open suggestions still has a profile", () => {
+    const p = buildPersonProfile({ ...base, person: "w3" }, "both")!;
+    expect([p.name, p.confirmedPapers, p.openPapers, p.firstYear]).toEqual(["Name w3", 0, 1, null]);
+  });
+});
+
+describe("one entity: everything on file", () => {
+  const f = facts({
+    articles: [
+      article("1", { publicationDate: new Date("2022-05-01T00:00:00Z") }),
+      article("2", { publicationDate: new Date("2024-02-01T00:00:00Z"), totalAuthors: 80 }),
+      article("3", { publicationDate: new Date("2024-06-01T00:00:00Z") }),
+      article("4"),
+      article("5"),
+    ],
+    people: [
+      person("1", "w1"),
+      person("1", "w9"),
+      person("2", "w1"),
+      person("3", "i1", { campus: "ithaca", department: "Physics" }),
+      person("4", "w3", { attribution: "pending", reciterScore: 95 }),
+      person("5", "w1"),
+    ],
+    matches: [
+      match("1", "Peking University", { authorName: "Wei Li", ourAuthorCwids: "w1" }),
+      match("1", "Peking University", { authorName: "Bo Xu", authorRank: 2 }),
+      match("2", "Peking University", { authorName: "wei li" }),
+      match("3", "Peking University", { authorName: "Wei Li", listCode: LIST_USUAL, category: "Seven Sons", listNo: null }),
+      match("4", "Peking University"),
+      match("5", "Zhejiang University"),
+    ],
+    flags: [{ articleId: "2", program: "China Scholarship Council (CSC)", agency: "CSC", grantId: "1" }],
+  });
+
+  it("is null with no entity, and for an entity with no match in scope", () => {
+    expect(buildEntityProfile(f, "both", undefined)).toBeNull();
+    expect(buildEntityProfile(f, "both", "Nowhere University")).toBeNull();
+  });
+
+  it("summarizes volume, trend, our people and departments, and recurring co-authors", () => {
+    const p = buildEntityProfile(f, "both", "Peking University")!;
+    expect(p).toMatchObject({
+      entity: "Peking University",
+      listings: [
+        { listCode: LIST_HOUSE, category: "SASTIND university", listNo: 1 },
+        { listCode: LIST_USUAL, category: "Seven Sons", listNo: null },
+      ],
+      confirmedPapers: 3,
+      papersWcm: 2,
+      papersIthaca: 1,
+      confirmedExcludingConsortia: 2,
+      people: 3,
+      papersOurAuthorListsEntity: 1,
+      unattributedPapers: 1,
+      fundingFlagPapers: 1,
+      // Every year in the span, so a gap year reads as zero.
+      byYear: [
+        { year: 2022, papers: 1 },
+        { year: 2023, papers: 0 },
+        { year: 2024, papers: 2 },
+      ],
+      // Newest first; the open paper (4) and the other entity's paper (5) are not here.
+      confirmedArticleIds: ["3", "2", "1"],
+    });
+    expect(p.topPeople.map((x) => [x.cwid, x.papers])).toEqual([["w1", 2], ["i1", 1], ["w9", 1]]);
+    // Paper 1 has two Medicine people: it counts once for the department.
+    expect(p.departments).toEqual([
+      { department: "Medicine", campus: "wcm", papers: 2 },
+      { department: "Physics", campus: "ithaca", papers: 1 },
+    ]);
+    // Names are grouped ignoring case; a co-author on one paper is left out.
+    expect(p.coAuthors).toEqual([{ name: "Wei Li", papers: 3, ourName: true }]);
+  });
+
+  it("respects the campus filter", () => {
+    const p = buildEntityProfile(f, "ithaca", "Peking University")!;
+    expect([p.confirmedPapers, p.people, p.confirmedArticleIds]).toEqual([1, 1, ["3"]]);
+  });
+
+  it("the most common affiliation strings count a paper once, ignoring case and spacing", () => {
+    const s = (articleId: string, affiliation: string | null, entity = "Peking University") => ({
+      articleId,
+      entity,
+      affiliation,
+    });
+    expect(
+      topAffiliations(
+        [
+          s("1", "Peking University Third Hospital, Beijing"),
+          s("1", "peking university  third hospital, beijing"),
+          s("2", "Peking University Third Hospital, Beijing"),
+          s("2", "School of Physics, Peking University"),
+          s("3", null),
+          s("3", "Zhejiang University", "Zhejiang University"),
+        ],
+        "Peking University",
+      ),
+    ).toEqual([
+      { affiliation: "Peking University Third Hospital, Beijing", papers: 2 },
+      { affiliation: "School of Physics, Peking University", papers: 1 },
+    ]);
+  });
+});
+
+describe("the paper set handed to the methods lookup", () => {
+  it("PMIDs of the papers and our confirmed authors on them, most papers first", () => {
+    const f = facts({
+      articles: [article("1"), article("2"), article("SCOPUS:9"), article("4")],
+      people: [
+        person("1", "w1"),
+        person("2", "w1"),
+        person("2", "i1", { campus: "ithaca" }),
+        person("SCOPUS:9", "w2"),
+        person("1", "w3", { attribution: "pending" }),
+        person("4", "w4"),
+      ],
+    });
+    expect(paperScope(f, ["1", "2", "SCOPUS:9"])).toEqual({
+      // The pending candidate and the author of a paper outside the set are not read.
+      cwids: ["w1", "i1", "w2"],
+      // A non-PubMed paper is in the set but has no PMID to look up.
+      pmids: [1, 2],
+      papers: 3,
+    });
+    expect(paperScope(f, ["1", "2"], "W1").cwids).toEqual(["w1"]);
   });
 });
 

@@ -20,6 +20,7 @@ import {
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
 import {
   CAMPUS_LABEL,
+  LIST_COUNTRY,
   LIST_FILTER_LABEL,
   VIEW_LABEL,
   campusName,
@@ -238,6 +239,11 @@ export function researchSecurityCriteria(
     ["Campus", f.campus === "both" ? "WCM and Cornell University" : CAMPUS_LABEL[f.campus]],
     ["List", view === "funding" ? "Not applicable (funding flags)" : LIST_FILTER_LABEL[f.list]],
     ["Category", view === "funding" ? "Not applicable (funding flags)" : (f.category ?? "All")],
+    [
+      f.list === LIST_COUNTRY ? "Country" : "Entity",
+      view === "funding" ? "Not applicable (funding flags)" : (f.entity ?? "All"),
+    ],
+    ["Person (cwid)", f.person ?? "All"],
     ["Publication date", `${f.dateFrom} to ${f.dateTo ?? "present"}`],
     ["50+ author consortia", f.excludeConsortia ? "Excluded" : "Included"],
   ];
@@ -254,6 +260,8 @@ function addSheet(wb: ExcelJS.Workbook, name: string, sheet: Sheet): void {
 export async function buildResearchSecurityWorkbook(input: {
   view: ResearchSecurityView;
   filters: ResearchSecurityFilters;
+  /** The search text the rows were narrowed by, if any. */
+  search?: string;
   sheet: Sheet;
   /** By paper only: the exact matched strings behind the rows. */
   matchedStrings?: Sheet;
@@ -266,6 +274,7 @@ export async function buildResearchSecurityWorkbook(input: {
   if (input.matchedStrings) addSheet(wb, "Matched affiliations", input.matchedStrings);
   addCriteriaSheet(wb, [
     ...researchSecurityCriteria(input.view, input.filters),
+    ["Search", input.search ?? "None"],
     ["Rows", input.sheet.rows.length.toLocaleString("en-US")],
     ["Data as of", input.dataAsOf ? input.dataAsOf.toISOString().slice(0, 10) : "unknown"],
     ["Generated", input.generatedAt.toISOString()],

@@ -34,12 +34,13 @@ import {
   LIST_HOUSE,
   LIST_USUAL,
   campusName,
-  filterSummary,
+  filterChips,
   isResearchSecurityDashboardEnabled,
   listCodesFor,
   parseResearchSecurityParams,
   researchSecurityQuery,
   withKnownCategory,
+  withKnownEntity,
 } from "@/lib/edit/research-security-dashboard";
 
 const plain = { cwid: "ann", isSuperuser: false, isCommsSteward: false };
@@ -239,32 +240,70 @@ describe("a category that the selected list does not have", () => {
     expect(withKnownCategory(none, [])).toBe(none);
   });
 
-  it("the summary line names every filter that changes a count", () => {
-    expect(filterSummary(parseResearchSecurityParams({}).filters)).toEqual([
-      "WCM and Cornell University",
-      "Listed entities (House nominations and usual suspects)",
-      "all categories",
-      "published 2021-01-01 (default) to present",
-      "50+ author consortia included",
+  it("an entity the selected list does not have is dropped the same way", () => {
+    const f = parseResearchSecurityParams({ list: LIST_COUNTRY, entity: "Soochow University" }).filters;
+    expect(withKnownEntity(f, ["China", "Russia"]).entity).toBeUndefined();
+    const kept = parseResearchSecurityParams({ list: LIST_COUNTRY, entity: "China" }).filters;
+    expect(withKnownEntity(kept, ["China", "Russia"])).toBe(kept);
+  });
+
+  it("entity and person are read from the URL and round-trip; a malformed cwid is ignored", () => {
+    const p = parseResearchSecurityParams({ view: "paper", list: LIST_COUNTRY, entity: "China", person: "HC63" });
+    expect(p.filters).toMatchObject({ entity: "China", person: "hc63" });
+    const q = researchSecurityQuery(p);
+    expect(q).toBe("?view=paper&list=country-of-concern&entity=China&person=hc63");
+    expect(parseResearchSecurityParams(Object.fromEntries(new URLSearchParams(q)))).toEqual(p);
+    expect(parseResearchSecurityParams({ person: "a b; drop" }).filters.person).toBeUndefined();
+  });
+
+  it("search and sort are read per view; defaults and unknown keys leave the URL clean", () => {
+    const p = parseResearchSecurityParams({ view: "person", q: "  hsiao   dong ", sort: "name", dir: "desc" });
+    expect(p).toMatchObject({ q: "hsiao dong", sort: "name", dir: "desc" });
+    const q = researchSecurityQuery(p);
+    expect(q).toBe("?view=person&q=hsiao+dong&sort=name&dir=desc");
+    expect(parseResearchSecurityParams(Object.fromEntries(new URLSearchParams(q)))).toEqual(p);
+    // The default column, a key's default direction and a key of another view are dropped.
+    expect(parseResearchSecurityParams({ view: "person", sort: "papers", dir: "desc" })).toMatchObject({
+      sort: undefined,
+      dir: undefined,
+    });
+    expect(parseResearchSecurityParams({ view: "person", sort: "name", dir: "asc" }).dir).toBeUndefined();
+    expect(parseResearchSecurityParams({ view: "entity", sort: "score" }).sort).toBeUndefined();
+    expect(parseResearchSecurityParams({ view: "person", dir: "asc" }).dir).toBe("asc");
+  });
+
+  it("the chips name every filter that changes a count; only a non-default one can be removed", () => {
+    expect(filterChips(parseResearchSecurityParams({}).filters)).toEqual([
+      { text: "WCM and Cornell University", without: undefined },
+      { text: "All listed entities", without: undefined },
+      { text: "Published 2021-01-01 (default) to present", without: undefined },
+      { text: "50+ author consortia included" },
     ]);
-    expect(
-      filterSummary(
-        parseResearchSecurityParams({
-          campus: "ithaca",
-          list: LIST_HOUSE,
-          category: "CAS institute",
-          from: "2023-01-01",
-          to: "2023-12-31",
-          consortia: "exclude",
-        }).filters,
-      ),
-    ).toEqual([
+    const f = parseResearchSecurityParams({
+      campus: "ithaca",
+      list: LIST_COUNTRY,
+      entity: "China",
+      person: "hc63",
+      from: "2023-01-01",
+      to: "2023-12-31",
+      consortia: "exclude",
+    }).filters;
+    const chips = filterChips(f, "Hsiao-Dong Chiang (hc63)");
+    expect(chips.map((c) => c.text)).toEqual([
       "Cornell University",
-      "House Section 1286 nominations",
-      "category: CAS institute",
-      "published 2023-01-01 to 2023-12-31",
+      "Country of concern (broader tier)",
+      "Country: China",
+      "Person: Hsiao-Dong Chiang (hc63)",
+      "Published 2023-01-01 to 2023-12-31",
       "50+ author consortia excluded",
     ]);
+    expect(chips.every((c) => c.without)).toBe(true);
+    // Removing one filter leaves the others; removing the list takes its entity with it.
+    expect(chips[2].without).toEqual({ ...f, entity: undefined });
+    expect(chips[1].without).toMatchObject({ list: "entities", entity: undefined, person: "hc63" });
+    expect(filterChips({ ...f, list: LIST_HOUSE, category: "CAS institute" }).map((c) => c.text)).toContain(
+      "Category: CAS institute",
+    );
   });
 
   it("a person row with no campus says so", () => {

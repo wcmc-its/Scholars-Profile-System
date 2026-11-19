@@ -45,7 +45,7 @@ describe("research security methods doc", () => {
     const lists = section("Lists");
     expect(lists).toContain("134 entities");
     expect(lists).toContain("nominations, not designations");
-    expect(lists).toContain("Usual suspects");
+    expect(lists).toContain("Defense-affiliated institutions (curated)");
     expect(lists).toContain("China (including Hong Kong and Macau), Russia, Iran, North Korea, Cuba or Venezuela");
     expect(lists).toContain("never added to an entity total");
     expect(lists).toContain("China Scholarship Council");

@@ -24,7 +24,9 @@ import {
   CONSORTIUM_AUTHORS,
   LIST_COUNTRY,
   listCodesFor,
+  defaultSortDir,
   type CampusFilter,
+  type ResearchSecurityArrange,
   type ResearchSecurityFilters,
 } from "@/lib/edit/research-security-dashboard";
 
@@ -99,6 +101,9 @@ export type ResearchSecurityFacts = {
   flags: FlagFact[];
   /** When the nightly copy was last replaced; null before the first load. */
   dataAsOf: Date | null;
+  /** The person filter (a cwid): every view keeps only this person's papers.
+   *  Applied by `indexFacts`, so the rules below hold under it unchanged. */
+  person?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +124,7 @@ function matchWhere(f: ResearchSecurityFilters) {
   return {
     listCode: { in: listCodesFor(f.list) },
     ...(f.category ? { category: f.category } : {}),
+    ...(f.entity ? { entity: f.entity } : {}),
   };
 }
 
@@ -195,6 +201,7 @@ export async function loadResearchSecurityFacts(
     matches,
     flags,
     dataAsOf: asOf._max.lastRefreshedAt ?? null,
+    person: f.person,
   };
 }
 
@@ -210,6 +217,24 @@ export async function loadCategories(
     orderBy: { category: "asc" },
   });
   return rows.map((r) => r.category);
+}
+
+/** The entities (countries, in the country tier) the entity filter offers for
+ *  a list and category choice. */
+export async function loadEntities(
+  client: ResearchSecurityClient,
+  f: ResearchSecurityFilters,
+): Promise<string[]> {
+  const rows = await client.researchSecurityMatch.findMany({
+    where: {
+      listCode: { in: listCodesFor(f.list) },
+      ...(f.category ? { category: f.category } : {}),
+    },
+    distinct: ["entity"],
+    select: { entity: true },
+    orderBy: { entity: "asc" },
+  });
+  return rows.map((r) => r.entity);
 }
 
 export type MatchedString = {
@@ -321,17 +346,35 @@ type Index = {
   matches: Map<string, MatchFact[]>;
 };
 
+function isPerson(p: Pick<PersonFact, "cwid">, cwid: string): boolean {
+  return p.cwid != null && p.cwid.toLowerCase() === cwid.toLowerCase();
+}
+
 function indexFacts(facts: ResearchSecurityFacts, campus: CampusFilter): Index {
   const known = facts.people.filter((p) => facts.articles.has(p.articleId));
   const confirmedAny = known.filter((p) => p.attribution === "confirmed");
+  const who = facts.person;
+  // Under a person filter a paper is confirmed only when THAT person is a
+  // confirmed author of it in the campus filter (all of the paper's confirmed
+  // authors stay listed), and only that person's own open rows are kept.
+  // `confirmedAny` is not narrowed: whether a paper is already confirmed for
+  // someone is the same fact with or without the filter.
+  const confirmed = group(
+    confirmedAny.filter((p) => inCampus(p, campus)),
+    (p) => p.articleId,
+  );
+  if (who) {
+    for (const [id, people] of confirmed) {
+      if (!people.some((p) => isPerson(p, who))) confirmed.delete(id);
+    }
+  }
   return {
-    confirmed: group(
-      confirmedAny.filter((p) => inCampus(p, campus)),
-      (p) => p.articleId,
-    ),
+    confirmed,
     confirmedAny: group(confirmedAny, (p) => p.articleId),
     unattributed: group(
-      known.filter((p) => p.attribution !== "confirmed" && inCampus(p, campus)),
+      known.filter(
+        (p) => p.attribution !== "confirmed" && inCampus(p, campus) && (!who || isPerson(p, who)),
+      ),
       (p) => p.articleId,
     ),
     matches: group(
@@ -512,6 +555,8 @@ export function buildPersonRows(facts: ResearchSecurityFacts, campus: CampusFilt
   for (const [articleId, people] of ix.confirmed) {
     if (!ix.matches.has(articleId)) continue;
     for (const p of people) {
+      // Under a person filter this view is that person's row alone.
+      if (facts.person && !isPerson(p, facts.person)) continue;
       const k = personKey(p);
       const entry = byPerson.get(k) ?? { person: p, articleIds: new Set<string>() };
       entry.articleIds.add(articleId);
@@ -649,6 +694,474 @@ export function buildSummary(
     fundingFlagPapers: new Set(buildFundingRows(facts, f.campus).map((r) => r.article.articleId)).size,
     unattributedPapers: countUnattributedPapers(buildUnattributedRows(facts, f.campus)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Not yet attributed, one row per candidate
+// ---------------------------------------------------------------------------
+
+export type UnattributedGroup = {
+  key: string;
+  person: PersonFact;
+  /** The candidate's open rows, in the order of `buildUnattributedRows`. */
+  rows: UnattributedRow[];
+  /** Distinct papers that count as not yet attributed (not already confirmed). */
+  papers: number;
+  /** The best (lowest) priority among the rows. */
+  priority: 1 | 2 | 3 | 4;
+  maxScore: number | null;
+  entities: string[];
+  candidateListsEntity: boolean;
+};
+
+/**
+ * The not-yet-attributed rows grouped by candidate, so one person with forty
+ * suggestions is one row. A row with no proposed person (no cwid) is never
+ * merged with another: it stays a group of its own. Groups keep the order of
+ * their first row, so the default order is still priority, then score.
+ */
+export function groupUnattributedRows(rows: readonly UnattributedRow[]): UnattributedGroup[] {
+  const groups = group(rows, (r) =>
+    r.person.cwid ? r.person.cwid.toLowerCase() : `?${r.article.articleId}|${r.person.displayName}`,
+  );
+  return [...groups].map(([key, mine]) => {
+    const scores = mine.map((r) => r.person.reciterScore).filter((x): x is number => x != null);
+    return {
+      key,
+      person: mine[0].person,
+      rows: mine,
+      papers: countUnattributedPapers(mine),
+      priority: Math.min(...mine.map((r) => r.priority)) as 1 | 2 | 3 | 4,
+      maxScore: scores.length > 0 ? Math.max(...scores) : null,
+      entities: uniqSorted(mine.flatMap((r) => r.entities)),
+      candidateListsEntity: mine.some((r) => r.candidateListsEntity),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// One person: everything this screen holds about them
+// ---------------------------------------------------------------------------
+
+export type PersonProfile = {
+  cwid: string;
+  name: string;
+  campus: string;
+  department: string | null;
+  title: string | null;
+  /** Confirmed co-publications under the filters. */
+  confirmedPapers: number;
+  confirmedExcludingConsortia: number;
+  /** Publication years of the confirmed co-publications. */
+  firstYear: number | null;
+  lastYear: number | null;
+  /** Confirmed papers where the co-author at a listed entity has THIS person's name. */
+  listsEntityPapers: number;
+  /** Papers suggested for this person that nobody is confirmed on yet. */
+  openPapers: number;
+  /** Open rows on papers already confirmed for another author (not counted). */
+  openAlreadyConfirmed: number;
+  openInReviewQueue: number;
+  openListsEntity: number;
+  scoreMin: number | null;
+  scoreMax: number | null;
+  fundingFlagPapers: number;
+  entities: Array<{ entity: string; confirmed: number; open: number }>;
+  /** Our other confirmed authors on this person's confirmed co-publications. */
+  coAuthors: Array<{ cwid: string | null; name: string; papers: number }>;
+  /** The confirmed co-publications (newest first), for lookups about them. */
+  confirmedArticleIds: string[];
+};
+
+/** The person of the person filter, summarized under the other filters; null
+ *  when there is no person filter or the person is on no paper in scope. */
+export function buildPersonProfile(
+  facts: ResearchSecurityFacts,
+  campus: CampusFilter,
+): PersonProfile | null {
+  const who = facts.person;
+  if (!who) return null;
+  const mine = facts.people.filter((p) => isPerson(p, who) && facts.articles.has(p.articleId));
+  const identity = mine.find((p) => p.attribution === "confirmed") ?? mine[0];
+  if (!identity) return null;
+  const ix = indexFacts(facts, campus);
+  const confirmedIds = [...ix.confirmed.keys()].filter((id) => ix.matches.has(id));
+  const open = buildUnattributedRows(facts, campus);
+  const counted = open.filter((r) => !r.alreadyConfirmed);
+  const years = confirmedIds
+    .map((id) => facts.articles.get(id)!.publicationDate?.getUTCFullYear())
+    .filter((y): y is number => y != null);
+  const scores = open.map((r) => r.person.reciterScore).filter((x): x is number => x != null);
+
+  const entities = new Map<string, { entity: string; confirmed: number; open: number }>();
+  const tally = (entity: string, k: "confirmed" | "open") => {
+    const e = entities.get(entity) ?? { entity, confirmed: 0, open: 0 };
+    e[k] += 1;
+    entities.set(entity, e);
+  };
+  for (const id of confirmedIds) {
+    for (const e of new Set(ix.matches.get(id)!.map((m) => m.entity))) tally(e, "confirmed");
+  }
+  for (const id of new Set(counted.map((r) => r.article.articleId))) {
+    for (const e of new Set(ix.matches.get(id)!.map((m) => m.entity))) tally(e, "open");
+  }
+
+  const coAuthors = new Map<string, { cwid: string | null; name: string; papers: number }>();
+  for (const id of confirmedIds) {
+    const others = (ix.confirmedAny.get(id) ?? []).filter((p) => !isPerson(p, who));
+    for (const [k, [p]] of group(others, personKey)) {
+      const c = coAuthors.get(k) ?? { cwid: p.cwid, name: p.displayName, papers: 0 };
+      c.papers += 1;
+      coAuthors.set(k, c);
+    }
+  }
+
+  return {
+    cwid: identity.cwid!,
+    name: identity.displayName,
+    campus: identity.campus,
+    department: identity.department,
+    title: identity.title,
+    confirmedPapers: confirmedIds.length,
+    confirmedExcludingConsortia: confirmedIds.filter(
+      (id) => !isConsortium(facts.articles.get(id)!.totalAuthors),
+    ).length,
+    firstYear: years.length > 0 ? Math.min(...years) : null,
+    lastYear: years.length > 0 ? Math.max(...years) : null,
+    listsEntityPapers: confirmedIds.filter((id) =>
+      ix.matches.get(id)!.some((m) => listedBy(m, [identity])),
+    ).length,
+    openPapers: countUnattributedPapers(open),
+    openAlreadyConfirmed: open.length - counted.length,
+    openInReviewQueue: counted.filter((r) => r.person.inReviewQueue).length,
+    openListsEntity: counted.filter((r) => r.candidateListsEntity).length,
+    scoreMin: scores.length > 0 ? Math.min(...scores) : null,
+    scoreMax: scores.length > 0 ? Math.max(...scores) : null,
+    fundingFlagPapers: new Set(buildFundingRows(facts, campus).map((r) => r.article.articleId)).size,
+    entities: [...entities.values()].sort(
+      (a, b) => b.confirmed + b.open - (a.confirmed + a.open) || a.entity.localeCompare(b.entity),
+    ),
+    coAuthors: [...coAuthors.values()].sort(
+      (a, b) => b.papers - a.papers || a.name.localeCompare(b.name),
+    ),
+    confirmedArticleIds: [...confirmedIds].sort((a, b) =>
+      byDateDesc(facts.articles.get(a)!, facts.articles.get(b)!),
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// One entity (or country): everything this screen holds about it
+// ---------------------------------------------------------------------------
+
+export type EntityProfile = {
+  entity: string;
+  /** The list(s) it is on, with the category and number each gives it. */
+  listings: Array<{ listCode: string; category: string; listNo: number | null }>;
+  /** Confirmed co-publications under the filters. */
+  confirmedPapers: number;
+  papersWcm: number;
+  papersIthaca: number;
+  confirmedExcludingConsortia: number;
+  /** Distinct confirmed people of ours. */
+  people: number;
+  papersOurAuthorListsEntity: number;
+  /** Papers with a match here that nobody is confirmed on yet. */
+  unattributedPapers: number;
+  /** Confirmed co-publications that also carry a funding flag. */
+  fundingFlagPapers: number;
+  /** Confirmed co-publications per publication year, every year in the span. */
+  byYear: Array<{ year: number; papers: number }>;
+  topPeople: Array<{
+    cwid: string | null;
+    name: string;
+    campus: string;
+    department: string | null;
+    papers: number;
+  }>;
+  departments: Array<{ department: string; campus: string; papers: number }>;
+  /**
+   * Co-authors at the entity on two or more confirmed papers, by the name in
+   * the byline. APPROXIMATE: two people can share a name, and one person can
+   * be spelled two ways. `ourName` = the name is one of our confirmed authors'.
+   */
+  coAuthors: Array<{ name: string; papers: number; ourName: boolean }>;
+  /** The articles the affiliation strings are read for (confirmed, newest first). */
+  confirmedArticleIds: string[];
+};
+
+const PROFILE_PEOPLE = 10;
+const PROFILE_DEPARTMENTS = 8;
+const PROFILE_COAUTHORS = 10;
+
+/** The entity of the entity filter, summarized under the other filters; null
+ *  when it has no match in scope. `facts.matches` may hold other entities
+ *  (a caller without the SQL filter): only this entity's are read. */
+export function buildEntityProfile(
+  facts: ResearchSecurityFacts,
+  campus: CampusFilter,
+  entity: string | undefined,
+): EntityProfile | null {
+  if (!entity) return null;
+  const mine = facts.matches.filter((m) => m.entity === entity && facts.articles.has(m.articleId));
+  if (mine.length === 0) return null;
+  const ix = indexFacts(facts, campus);
+  const byArticle = group(mine, (m) => m.articleId);
+  const confirmedIds = [...byArticle.keys()]
+    .filter((id) => ix.confirmed.has(id))
+    .sort((a, b) => byDateDesc(facts.articles.get(a)!, facts.articles.get(b)!));
+  const open = new Set(
+    buildUnattributedRows(facts, campus)
+      .filter((r) => !r.alreadyConfirmed && byArticle.has(r.article.articleId))
+      .map((r) => r.article.articleId),
+  );
+  const flagged = new Set(facts.flags.map((f) => f.articleId));
+  const has = (id: string, c: Campus) => ix.confirmed.get(id)!.some((p) => p.campus === c);
+
+  const years = new Map<number, number>();
+  for (const id of confirmedIds) {
+    const y = facts.articles.get(id)!.publicationDate?.getUTCFullYear();
+    if (y != null) years.set(y, (years.get(y) ?? 0) + 1);
+  }
+  const span = [...years.keys()];
+  const byYear =
+    span.length === 0
+      ? []
+      : Array.from({ length: Math.max(...span) - Math.min(...span) + 1 }, (_, i) => {
+          const year = Math.min(...span) + i;
+          return { year, papers: years.get(year) ?? 0 };
+        });
+
+  const people = new Map<string, EntityProfile["topPeople"][number]>();
+  const departments = new Map<string, EntityProfile["departments"][number]>();
+  const coAuthors = new Map<string, { name: string; ids: Set<string>; ourName: boolean }>();
+  for (const id of confirmedIds) {
+    const ours = ix.confirmed.get(id)!;
+    for (const [k, [p]] of group(ours, personKey)) {
+      const e = people.get(k) ?? {
+        cwid: p.cwid,
+        name: p.displayName,
+        campus: p.campus,
+        department: p.department,
+        papers: 0,
+      };
+      e.papers += 1;
+      people.set(k, e);
+    }
+    // A paper counts once per department, however many of its people are on it.
+    for (const [k, [p]] of group(
+      ours.filter((p) => p.department),
+      (p) => `${p.campus}\u0000${p.department}`,
+    )) {
+      const d = departments.get(k) ?? { department: p.department!, campus: p.campus, papers: 0 };
+      d.papers += 1;
+      departments.set(k, d);
+    }
+    for (const m of byArticle.get(id)!) {
+      const name = m.authorName?.trim();
+      if (!name) continue;
+      const k = name.toLowerCase();
+      const c = coAuthors.get(k) ?? { name, ids: new Set<string>(), ourName: false };
+      c.ids.add(id);
+      c.ourName ||= listedBy(m, ours);
+      coAuthors.set(k, c);
+    }
+  }
+  const top = <T extends { papers: number }>(rows: T[], label: (r: T) => string, n: number) =>
+    rows.sort((a, b) => b.papers - a.papers || label(a).localeCompare(label(b))).slice(0, n);
+
+  return {
+    entity,
+    listings: [...group(mine, (m) => `${m.listCode}\u0000${m.category}`).values()]
+      .map(([m]) => ({ listCode: m.listCode, category: m.category, listNo: m.listNo }))
+      .sort((a, b) => a.listCode.localeCompare(b.listCode) || a.category.localeCompare(b.category)),
+    confirmedPapers: confirmedIds.length,
+    papersWcm: confirmedIds.filter((id) => has(id, "wcm")).length,
+    papersIthaca: confirmedIds.filter((id) => has(id, "ithaca")).length,
+    confirmedExcludingConsortia: confirmedIds.filter(
+      (id) => !isConsortium(facts.articles.get(id)!.totalAuthors),
+    ).length,
+    people: people.size,
+    papersOurAuthorListsEntity: confirmedIds.filter((id) =>
+      byArticle.get(id)!.some((m) => listedBy(m, ix.confirmed.get(id)!)),
+    ).length,
+    unattributedPapers: open.size,
+    fundingFlagPapers: confirmedIds.filter((id) => flagged.has(id)).length,
+    byYear,
+    topPeople: top([...people.values()], (p) => p.name, PROFILE_PEOPLE),
+    departments: top([...departments.values()], (d) => d.department, PROFILE_DEPARTMENTS),
+    coAuthors: top(
+      [...coAuthors.values()]
+        .map((c) => ({ name: c.name, papers: c.ids.size, ourName: c.ourName }))
+        .filter((c) => c.papers >= 2),
+      (c) => c.name,
+      PROFILE_COAUTHORS,
+    ),
+    confirmedArticleIds: confirmedIds,
+  };
+}
+
+/** The affiliation strings that recur most among an entity's matches: they
+ *  show which sub-units (a hospital, a school, a lab) are involved. Strings
+ *  are compared ignoring case and spacing; a paper counts once per string. */
+export function topAffiliations(
+  strings: readonly Pick<MatchedString, "articleId" | "entity" | "affiliation">[],
+  entity: string,
+  limit = 8,
+): Array<{ affiliation: string; papers: number }> {
+  const seen = new Map<string, { affiliation: string; ids: Set<string> }>();
+  for (const m of strings) {
+    const text = m.affiliation?.replace(/\s+/g, " ").trim();
+    if (!text || m.entity !== entity) continue;
+    const k = text.toLowerCase();
+    const e = seen.get(k) ?? { affiliation: text, ids: new Set<string>() };
+    e.ids.add(m.articleId);
+    seen.set(k, e);
+  }
+  return [...seen.values()]
+    .map((e) => ({ affiliation: e.affiliation, papers: e.ids.size }))
+    .sort((a, b) => b.papers - a.papers || a.affiliation.localeCompare(b.affiliation))
+    .slice(0, limit);
+}
+
+/**
+ * A set of papers as the methods lookup needs it
+ * (`lib/api/research-security-methods.ts`): their PMIDs, and our confirmed
+ * authors on them (either campus: what a paper used is a fact about the paper),
+ * most papers first. `onlyCwid` reads one person's rows alone.
+ */
+export function paperScope(
+  facts: ResearchSecurityFacts,
+  articleIds: readonly string[],
+  onlyCwid?: string,
+): { cwids: string[]; pmids: number[]; papers: number } {
+  const ids = new Set(articleIds);
+  const counts = new Map<string, number>();
+  for (const p of facts.people) {
+    if (p.attribution !== "confirmed" || !p.cwid || !ids.has(p.articleId)) continue;
+    if (onlyCwid && !isPerson(p, onlyCwid)) continue;
+    counts.set(p.cwid, (counts.get(p.cwid) ?? 0) + 1);
+  }
+  return {
+    cwids: [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([cwid]) => cwid),
+    pmids: articleIds
+      .map((id) => facts.articles.get(id)?.pmid)
+      .filter((x): x is number => x != null),
+    papers: articleIds.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Search and sort of one view's table
+// ---------------------------------------------------------------------------
+
+type Text = string | number | null | undefined;
+
+/**
+ * Applies `q` (every word must appear somewhere in the row's text) and the
+ * sort. The input is in the view's default order and the sort is stable, so
+ * ties keep that order; the default key in its default direction is a no-op.
+ */
+function arrange<T>(
+  rows: readonly T[],
+  a: ResearchSecurityArrange,
+  defaultKey: string,
+  text: (r: T) => Text[],
+  values: Record<string, (r: T) => string | number | null>,
+): T[] {
+  const words = (a.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  let out =
+    words.length === 0
+      ? [...rows]
+      : rows.filter((r) => {
+          const hay = text(r).filter((t) => t != null).join("\n").toLowerCase();
+          return words.every((w) => hay.includes(w));
+        });
+  const key = a.sort ?? defaultKey;
+  const dir = a.dir ?? defaultSortDir(key);
+  if (key === defaultKey) {
+    if (dir !== defaultSortDir(key)) out = out.reverse();
+    return out;
+  }
+  const value = values[key];
+  if (!value) return out;
+  const sign = dir === "asc" ? 1 : -1;
+  return out.sort((x, y) => {
+    const vx = value(x);
+    const vy = value(y);
+    // A missing value sorts last in either direction.
+    if (vx == null || vy == null) return vx == null ? (vy == null ? 0 : 1) : -1;
+    return (
+      sign *
+      (typeof vx === "number" && typeof vy === "number"
+        ? vx - vy
+        : String(vx).localeCompare(String(vy)))
+    );
+  });
+}
+
+const articleText = (a: ArticleFact): Text[] => [a.title, a.journal, a.pmid, a.articleId, a.doi];
+const personText = (p: PersonFact): Text[] => [p.displayName, p.cwid, p.department];
+
+export function arrangeEntityRows(rows: readonly EntityRow[], a: ResearchSecurityArrange): EntityRow[] {
+  return arrange(rows, a, "papers", (r) => [r.entity, r.category], {
+    entity: (r) => r.entity,
+    people: (r) => r.people,
+    unattributed: (r) => r.unattributedPapers,
+  });
+}
+
+export function arrangePersonRows(rows: readonly PersonRow[], a: ResearchSecurityArrange): PersonRow[] {
+  return arrange(rows, a, "papers", (r) => [r.name, r.cwid, r.department, r.title], {
+    name: (r) => r.name,
+    department: (r) => r.department,
+  });
+}
+
+export function arrangePaperRows(rows: readonly PaperRow[], a: ResearchSecurityArrange): PaperRow[] {
+  return arrange(
+    rows,
+    a,
+    "date",
+    (r) => [...articleText(r.article), ...r.wcmAuthors, ...r.ithacaAuthors, ...r.entities],
+    { title: (r) => r.article.title, authors: (r) => r.article.totalAuthors },
+  );
+}
+
+export function arrangeFundingRows(rows: readonly FundingRow[], a: ResearchSecurityArrange): FundingRow[] {
+  return arrange(
+    rows,
+    a,
+    "date",
+    (r) => [...articleText(r.article), r.program, r.agency, r.grantId, ...r.wcmAuthors, ...r.ithacaAuthors],
+    { program: (r) => r.program },
+  );
+}
+
+/** Search only: the flat rows keep the order of `buildUnattributedRows`. */
+export function searchUnattributedRows(
+  rows: readonly UnattributedRow[],
+  q: string | undefined,
+): UnattributedRow[] {
+  return arrange(rows, { q }, "priority", (r) => [
+    ...personText(r.person),
+    ...articleText(r.article),
+    ...r.entities,
+  ], {});
+}
+
+/** Sort only: search is applied to the rows before they are grouped. */
+export function sortUnattributedGroups(
+  groups: readonly UnattributedGroup[],
+  a: ResearchSecurityArrange,
+): UnattributedGroup[] {
+  return arrange(groups, { sort: a.sort, dir: a.dir }, "priority", () => [], {
+    papers: (g) => g.papers,
+    score: (g) => g.maxScore,
+    name: (g) => g.person.displayName,
+  });
 }
 
 // ---------------------------------------------------------------------------
