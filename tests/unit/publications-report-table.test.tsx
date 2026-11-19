@@ -34,6 +34,7 @@ function row(overrides: Partial<PublicationsReportRow> & { pmid: string }): Publ
     impactJustification: null,
     synopsis: null,
     authorRoleCategories: [],
+    translationalStage: null,
     ...overrides,
   };
 }
@@ -203,5 +204,48 @@ describe("PublicationsReportTable — Person type filter", () => {
     render(<PublicationsReportTable rows={[]} />);
     expect(screen.getByTestId("pubs-report-no-rows")).toBeTruthy();
     expect(screen.queryByTestId("pubs-report-table")).toBeTruthy(); // header still renders, just no body rows
+  });
+});
+
+describe("PublicationsReportTable — translational stage", () => {
+  const rows = [
+    row({ pmid: "1", translationalStage: "T2", authorRoleCategories: ["full_time_faculty"] }),
+    row({ pmid: "2", translationalStage: "T0", authorRoleCategories: ["postdoc"] }),
+    row({ pmid: "3", translationalStage: null, authorRoleCategories: ["full_time_faculty"] }),
+  ];
+
+  it("flag off: no Stage column and no stage facet", () => {
+    render(<PublicationsReportTable rows={rows} />);
+    expect(screen.queryByRole("columnheader", { name: "Stage" })).toBeNull();
+    expect(screen.queryByText("Translational stage")).toBeNull();
+  });
+
+  it("shows a Stage column: a badge, or a dash when the paper has none", () => {
+    render(<PublicationsReportTable rows={rows} stageEnabled />);
+    expect(screen.getByRole("columnheader", { name: "Stage" })).toBeTruthy();
+    expect(screen.getByTestId("pubs-report-stage-1").textContent).toBe("T2 Clinical trials and efficacy");
+    expect(screen.getByTestId("pubs-report-stage-3").textContent).toBe("\u2014");
+  });
+
+  it("the stage facet lists every stage in order plus No stage, with counts", () => {
+    render(<PublicationsReportTable rows={rows} stageEnabled />);
+    const text = screen.getByText("Translational stage").closest("div")!.parentElement!.textContent!;
+    const order = ["T0 \u00b7 Basic research", "T1 \u00b7 Early translation", "T2 \u00b7 Clinical", "T3\u20134", "No stage"].map((t) => text.indexOf(t));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("filters by stage, including No stage, and ANDs with Person type", () => {
+    render(<PublicationsReportTable rows={rows} stageEnabled />);
+    fireEvent.click(screen.getByRole("button", { name: /^T2 · Clinical trials and efficacy/ }));
+    expect(screen.queryByTestId("pubs-report-row-1")).toBeTruthy();
+    expect(screen.queryByTestId("pubs-report-row-2")).toBeNull();
+    expect(screen.queryByTestId("pubs-report-row-3")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^No stage/ }));
+    expect(screen.queryByTestId("pubs-report-row-3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Postdoc/ }));
+    expect(screen.queryByTestId("pubs-report-row-1")).toBeNull();
+    expect(screen.queryByTestId("pubs-report-row-3")).toBeNull();
+    expect(screen.getByTestId("pubs-report-no-rows")).toBeTruthy();
   });
 });

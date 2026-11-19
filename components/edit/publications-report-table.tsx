@@ -5,8 +5,10 @@ import * as React from "react";
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { PubAbstract, PubTitle } from "@/components/publication/pub-html";
+import { StageBadge } from "@/components/publication/stage-badge";
 import { byCareerStage, formatRoleCategory } from "@/lib/role-display";
 import type { PublicationsReportRow } from "@/lib/edit/cancer-center-publications-report";
+import { TRANSLATIONAL_STAGES, translationalStageDisplay } from "@/lib/translational-stage";
 
 /**
  * `/edit/reports/3` ("Publications") — the client-island table + Person-type
@@ -27,7 +29,15 @@ import type { PublicationsReportRow } from "@/lib/edit/cancer-center-publication
  * is filtered out; with nothing selected, every row shows. Options use the
  * shared label (`formatRoleCategory`) and career-stage order (`byCareerStage`)
  * the Profiles / report 8 facets use.
+ *
+ * Translational stage (`stageEnabled`, SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET):
+ * a second facet under Person type, in fixed T0..T3-4 order plus "No stage"
+ * (NA, low confidence, or not yet classified, which is most papers), and a
+ * Stage column. Facets AND together; values within one facet OR.
  */
+
+/** The "No stage" facet value. */
+const NO_STAGE = "none";
 
 const thClass = "px-3 py-2 font-medium";
 const tdClass = "px-3 py-2";
@@ -36,8 +46,15 @@ function fmtScore(n: number | null, digits = 1): string {
   return n === null ? "—" : n.toFixed(digits);
 }
 
-export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<PublicationsReportRow> }) {
+export function PublicationsReportTable({
+  rows,
+  stageEnabled = false,
+}: {
+  rows: ReadonlyArray<PublicationsReportRow>;
+  stageEnabled?: boolean;
+}) {
   const [selectedRoles, setSelectedRoles] = React.useState<ReadonlySet<string>>(new Set());
+  const [selectedStages, setSelectedStages] = React.useState<ReadonlySet<string>>(new Set());
 
   const roleOptions: FacetOption[] = React.useMemo(() => {
     const counts = new Map<string, number>();
@@ -51,6 +68,31 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
       .sort(byCareerStage);
   }, [rows]);
 
+  const stageOptions: FacetOption[] = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const key = r.translationalStage ?? NO_STAGE;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [
+      ...TRANSLATIONAL_STAGES.map((st) => ({
+        value: st,
+        label: translationalStageDisplay(st),
+        count: counts.get(st) ?? 0,
+      })),
+      { value: NO_STAGE, label: "No stage", count: counts.get(NO_STAGE) ?? 0 },
+    ];
+  }, [rows]);
+
+  const toggleStage = (value: string) => {
+    setSelectedStages((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
+
   const toggleRole = (value: string) => {
     setSelectedRoles((prev) => {
       const next = new Set(prev);
@@ -61,9 +103,13 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
   };
 
   const filteredRows = React.useMemo(() => {
-    if (selectedRoles.size === 0) return rows;
-    return rows.filter((r) => r.authorRoleCategories.some((rc) => selectedRoles.has(rc)));
-  }, [rows, selectedRoles]);
+    if (selectedRoles.size === 0 && selectedStages.size === 0) return rows;
+    return rows.filter(
+      (r) =>
+        (selectedRoles.size === 0 || r.authorRoleCategories.some((rc) => selectedRoles.has(rc))) &&
+        (selectedStages.size === 0 || selectedStages.has(r.translationalStage ?? NO_STAGE)),
+    );
+  }, [rows, selectedRoles, selectedStages]);
 
   return (
     <div className="mt-4 grid grid-cols-[220px_1fr] items-start gap-5" data-testid="pubs-report-body">
@@ -75,6 +121,14 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
           onToggle={toggleRole}
           collapseAfter={10}
         />
+        {stageEnabled ? (
+          <RosterFacet
+            title="Translational stage"
+            options={stageOptions}
+            selected={selectedStages}
+            onToggle={toggleStage}
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -87,6 +141,7 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
               <tr className="border-apollo-border border-b">
                 <th className={thClass}>Publication</th>
                 <th className={thClass}>Journal</th>
+                {stageEnabled ? <th className={thClass}>Stage</th> : null}
                 <th className={thClass}>Impact score</th>
                 <th className={thClass}>Journal IF</th>
                 <th className={thClass}>5-yr IF</th>
@@ -120,6 +175,11 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
                     />
                   </td>
                   <td className={tdClass}>{r.matchedJournalTitle}</td>
+                  {stageEnabled ? (
+                    <td className={`${tdClass} whitespace-nowrap`} data-testid={`pubs-report-stage-${r.pmid}`}>
+                      {r.translationalStage ? <StageBadge stage={r.translationalStage} /> : "—"}
+                    </td>
+                  ) : null}
                   <td className={`${tdClass} whitespace-nowrap`}>
                     {r.impactScore === null ? (
                       "—"
@@ -143,7 +203,7 @@ export function PublicationsReportTable({ rows }: { rows: ReadonlyArray<Publicat
         </div>
         {filteredRows.length === 0 ? (
           <p className="text-muted-foreground text-sm" data-testid="pubs-report-no-rows">
-            No matched publications for the selected person type.
+            No matched publications for the selected filters.
           </p>
         ) : null}
       </div>

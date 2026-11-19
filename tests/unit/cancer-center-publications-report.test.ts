@@ -504,3 +504,41 @@ describe("HIGH_IMPACT_THRESHOLD", () => {
     expect(HIGH_IMPACT_THRESHOLD).toBe(10);
   });
 });
+
+describe("loadUnitPublicationsReport — translational stage", () => {
+  const JIF = {
+    journalAbbrev: "NATURE",
+    journalTitle: "Nature",
+    impactScore1: 50.5,
+    impactScore2: 54.4,
+    category: "MULTIDISCIPLINARY SCIENCES|Q1|1/134",
+  };
+  const pub = (pmid: string, stage: string | null, confidence: string | null) => ({
+    pmid,
+    title: `Pub ${pmid}`,
+    journal: "Nature",
+    journalAbbrev: "Nature",
+    year: 2024,
+    authors: [],
+    translationalStage: stage,
+    translationalStageConfidence: confidence,
+  });
+
+  it("fills the shown stage only when asked (high and null confidence shown; low and NA hidden)", async () => {
+    hoisted.mockLoadCenterMembers.mockResolvedValue(["abc1234"]);
+    hoisted.mockPubFindMany.mockResolvedValue([
+      pub("1", "T2", "high"),
+      pub("2", "T0", null),
+      pub("3", "T1", "low"),
+      pub("4", "NA", "high"),
+    ]);
+    hoisted.mockJifFindMany.mockResolvedValue([JIF]);
+
+    const on = await loadUnitPublicationsReport("center", "MEYER", { stage: true });
+    const byPmid = new Map(on.rows.map((r) => [r.pmid, r.translationalStage]));
+    expect(Object.fromEntries(byPmid)).toEqual({ "1": "T2", "2": "T0", "3": null, "4": null });
+
+    const off = await loadUnitPublicationsReport("center", "MEYER");
+    expect(off.rows.every((r) => r.translationalStage === null)).toBe(true);
+  });
+});

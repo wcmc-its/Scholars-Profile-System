@@ -212,7 +212,7 @@ describe("/edit/reports/publications (3) — ?kind=core", () => {
       }),
     );
     expect(mockLoadReportsContext).toHaveBeenCalledWith("14", OWNER, expect.anything(), "core");
-    expect(mockLoadPubsReport).toHaveBeenCalledWith("core", "14");
+    expect(mockLoadPubsReport).toHaveBeenCalledWith("core", "14", { stage: false });
   });
 
   it("an unrecognized ?kind= is still ignored (falls back to the resolver's center default)", async () => {
@@ -275,7 +275,7 @@ describe("/edit/reports/publications (3) — ?kind=core", () => {
     mockResolveNumbered.mockResolvedValue({ code: "meyer", kind: "center" });
     mockLoadReportsContext.mockResolvedValue({ unit: { name: "Meyer Cancer Center" } });
     const result = await EditReportsPublicationsPage({ searchParams: Promise.resolve({}) });
-    expect(mockLoadPubsReport).toHaveBeenCalledWith("center", "meyer");
+    expect(mockLoadPubsReport).toHaveBeenCalledWith("center", "meyer", { stage: false });
     expect(renderText(result)).toContain("No publications with a confirmed member author were found.");
   });
 });
