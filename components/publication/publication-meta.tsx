@@ -3,6 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { StageBadge } from "@/components/publication/stage-badge";
+import type { TranslationalStage } from "@/lib/translational-stage";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { pubSource } from "@/lib/publication-source";
 
@@ -46,6 +48,12 @@ import { pubSource } from "@/lib/publication-source";
  * boolean; the text is fetched from `/api/publications/[pmid]` (the modal's
  * already-gated detail route) on first open. Requires `pmid`; ignored when an
  * eager `abstract` is provided.
+ *
+ * `translationalStage` — the paper's shown stage, as a badge closing the row:
+ * right of Abstract, or right of whatever ends the row when there is no
+ * abstract. The border sets it apart, so it takes no middot. Only the search
+ * and topic rows pass it; unit cards have no meta row and show it on their
+ * journal line instead.
  */
 export function PublicationMeta({
   citationCount,
@@ -60,6 +68,7 @@ export function PublicationMeta({
   abstract,
   lazyAbstract = false,
   defaultAbstractOpen = false,
+  translationalStage,
   className,
 }: {
   citationCount?: number | null;
@@ -74,6 +83,7 @@ export function PublicationMeta({
   abstract?: string | null;
   lazyAbstract?: boolean;
   defaultAbstractOpen?: boolean;
+  translationalStage?: TranslationalStage | null;
   className?: string;
 }) {
   const [abstractOpen, setAbstractOpen] = useState(defaultAbstractOpen);
@@ -237,7 +247,7 @@ export function PublicationMeta({
     );
   }
 
-  if (blocks.length === 0) return null;
+  if (blocks.length === 0 && !translationalStage) return null;
 
   const interleaved: ReactNode[] = [];
   blocks.forEach((b, i) => {
@@ -263,6 +273,7 @@ export function PublicationMeta({
       }
     >
       {interleaved}
+      {translationalStage ? <StageBadge stage={translationalStage} /> : null}
     </div>
   );
 

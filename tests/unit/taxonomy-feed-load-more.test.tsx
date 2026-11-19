@@ -22,7 +22,10 @@ vi.mock("@/components/publication/publication-modal", () => ({
   usePublicationModal: () => ({ open: vi.fn() }),
 }));
 vi.mock("@/components/publication/author-chip-row", () => ({ AuthorChipRow: () => null }));
-vi.mock("@/components/publication/publication-meta", () => ({ PublicationMeta: () => null }));
+vi.mock("@/components/publication/publication-meta", () => ({
+  PublicationMeta: ({ translationalStage }: { translationalStage?: string }) =>
+    translationalStage ? <span data-testid="pub-row-stage">{translationalStage}</span> : null,
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
 }));
@@ -398,12 +401,12 @@ describe("topic feed, Load more", () => {
     expect(screen.queryByTestId("pub-area-label")).toBeNull();
   });
 
-  it("a row ends its journal line with the stage badge, and has none without a stage", async () => {
+  it("a row hands its stage to the meta row (not the journal line), and none without a stage", async () => {
     stubServer({ strongly: 2, also: 0, stageOf: (i) => (i === 0 ? "T2" : undefined) });
     render(<TopicPublicationFeed topicSlug="cardio" activeSubtopic={null} loadMore />);
     await waitFor(() => expect(rows()).toHaveLength(2));
     const text = rows().map((li) => within(li).queryByTestId("pub-row-stage")?.textContent ?? null);
-    expect(text).toEqual(["T2 Clinical trials and efficacy", null]);
+    expect(text).toEqual(["T2", null]);
   });
 
   it("flag off: no label, numbered pages, stacked tiers (unchanged)", async () => {
