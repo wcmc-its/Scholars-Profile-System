@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { notFound } from "next/navigation";
 import { SidebarCard } from "@/components/profile/sidebar-card";
+import { trainingYearRange } from "@/lib/training-years";
 import { ProfileSectionNav } from "@/components/profile/profile-section-nav";
 import { ContactEmailReveal } from "@/components/profile/contact-email-reveal";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -557,22 +558,47 @@ export async function ProfileView({ slug }: { slug: string }) {
               </SidebarCard>
             ) : null}
 
-            {profile.educations.length > 0 ? (
+            {profile.educations.length > 0 || profile.trainings.length > 0 ? (
               <SidebarCard title="Education">
-                <ul className="flex flex-col gap-3">
-                  {profile.educations.map((e, i) => (
-                    <li key={i} className="leading-snug">
-                      <div className="font-semibold">
-                        {e.degree}
-                        {e.field ? `, ${e.field}` : ""}
-                      </div>
-                      <div className="text-muted-foreground mt-0.5 text-xs">
-                        {e.institution}
-                        {e.year ? `, ${e.year}` : ""}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                {profile.educations.length > 0 ? (
+                  <ul className="flex flex-col gap-3">
+                    {profile.educations.map((e, i) => (
+                      <li key={i} className="leading-snug">
+                        <div className="font-semibold">
+                          {e.degree}
+                          {e.field ? `, ${e.field}` : ""}
+                        </div>
+                        <div className="text-muted-foreground mt-0.5 text-xs">
+                          {e.institution}
+                          {e.year ? `, ${e.year}` : ""}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {profile.trainings.length > 0 ? (
+                  <>
+                    <h3
+                      className={`text-muted-foreground mb-2 text-xs font-semibold uppercase tracking-wider${profile.educations.length > 0 ? " mt-4" : ""}`}
+                    >
+                      Postgraduate training
+                    </h3>
+                    <ul className="flex flex-col gap-3">
+                      {profile.trainings.map((t, i) => (
+                        <li key={i} className="leading-snug">
+                          <div className="font-semibold">
+                            {t.type}
+                            {t.specialty ? `, ${t.specialty}` : ""}
+                          </div>
+                          <div className="text-muted-foreground mt-0.5 text-xs">
+                            {t.institution}
+                            {t.yearFrom || t.yearTo ? `, ${trainingYearRange(t.yearFrom, t.yearTo)}` : ""}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
               </SidebarCard>
             ) : null}
 

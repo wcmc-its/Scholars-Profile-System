@@ -1061,6 +1061,7 @@ describe("matchaMeasuresFrom: the researcher facts", () => {
     primaryTitle: "Professor",
     hasClinicalProfile: false,
     appointments: [],
+    trainings: [],
     educations: [{ year: 2001, degree: "M.D." }],
   };
 

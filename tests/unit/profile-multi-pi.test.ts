@@ -124,6 +124,7 @@ vi.mock("@/lib/db", () => ({
         appointments: [],
         profileAppointments: [],
         honors: [],
+        trainings: [],
         educations: [],
         grants: ownRows(),
         topicAssignments: [],

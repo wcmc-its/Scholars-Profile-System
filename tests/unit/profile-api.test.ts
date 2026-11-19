@@ -25,6 +25,7 @@ vi.mock("@/lib/db", () => ({
         // #1760 — the loader `include`s honors, so the emitted row always carries
         // the relation. Gated to published + shown in the query, hence [] here.
         honors: [],
+        trainings: [],
         educations: [],
         grants: [],
         topicAssignments: [],
@@ -45,6 +46,7 @@ vi.mock("@/lib/db", () => ({
         status: "active",
         appointments: [],
         profileAppointments: [],
+        trainings: [],
         educations: [],
         grants: [],
         topicAssignments: [],

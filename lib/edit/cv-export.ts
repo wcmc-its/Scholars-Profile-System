@@ -35,6 +35,7 @@ import {
 import type { PopsEnrichment } from "./pops";
 import type { CvSourceKey } from "./field-sources";
 import { lastNameKey } from "@/lib/last-name-key";
+import { trainingYearRange } from "@/lib/training-years";
 import { pubmedSegments } from "@/lib/pubmed-segments";
 import { htmlToPlainText } from "@/lib/utils";
 export type {
@@ -286,6 +287,16 @@ function educationRows(p: ProfilePayload, pops: PopsEnrichment | null): SourcedR
   return rows;
 }
 
+/** [Title incl. area of training, Institution, Dates] — the WCM template's
+ *  Postdoctoral Training columns. */
+function trainingRows(p: ProfilePayload): string[][] {
+  return p.trainings.map((tr) => [
+    tr.specialty ? `${tr.type} (${tr.specialty})` : tr.type,
+    tr.institution,
+    trainingYearRange(tr.yearFrom, tr.yearTo),
+  ]);
+}
+
 function appointmentRows(
   p: ProfilePayload,
   pops: PopsEnrichment | null,
@@ -446,11 +457,12 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
     educationRows(p, pops).map((r) => r.cells),
   );
 
-  // 4. Postdoctoral Training (POPS; dates unavailable → blank).
+  // 4. Postdoctoral Training — ASMS `fc_doctoral_training` (spec §6c). Replaces
+  // the POPS path, which was near-empty (1/70 clinicians) and undated.
   fillGrid(
     doc,
     findTable(t, (h) => (h[0] ?? "").startsWith("Title, include area of training")),
-    (pops?.training ?? []).map((tr) => [tr.type || NA, tr.institution || NA, ""]),
+    trainingRows(p),
   );
 
   // 5. Professional Positions — Academic vs Hospital (anchored by subheading, headers repeat).
@@ -746,10 +758,12 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
       code: "C",
       label: "Postdoctoral Training",
       entries: simple(
-        "pops",
+        "scholars",
         tag(
-          "pops",
-          (pops?.training ?? []).map((t) => [t.type, t.institution].filter(Boolean).join(" — ")),
+          "education",
+          trainingRows(p).map(([title, inst, years]) =>
+            [title, inst, years ? `(${years})` : ""].filter(Boolean).join(" — "),
+          ),
         ),
       ),
     },

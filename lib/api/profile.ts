@@ -613,6 +613,16 @@ export type ProfilePayload = {
     year: number | null;
     field: string | null;
   }>;
+  /** Postgraduate training (residency / fellowship / internship / postdoc) from
+   *  ASMS. Same section gates as `educations`: `hideEducation` drops it,
+   *  `hideEducationYears` drops its years on the public path. */
+  trainings: Array<{
+    type: string;
+    institution: string;
+    specialty: string | null;
+    yearFrom: number | null;
+    yearTo: number | null;
+  }>;
   grants: Array<{
     title: string;
     role: string;
@@ -1056,6 +1066,9 @@ export const getScholarFullProfileBySlug = cache(
         },
         educations: {
           orderBy: [{ year: "desc" }],
+        },
+        trainings: {
+          orderBy: [{ yearFrom: "desc" }, { yearTo: "desc" }],
         },
         grants: {
           orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
@@ -1896,6 +1909,19 @@ export const getScholarFullProfileBySlug = cache(
                   : e.year,
               field: e.field,
             })),
+      trainings: hiddenSections.has("hideEducation")
+        ? []
+        : scholar.trainings.map((t) => {
+            const hideYears =
+              hiddenSections.has("hideEducationYears") && !opts?.includeHiddenEducationYears;
+            return {
+              type: t.type,
+              institution: t.institution,
+              specialty: t.specialty,
+              yearFrom: hideYears ? null : t.yearFrom,
+              yearTo: hideYears ? null : t.yearTo,
+            };
+          }),
       // Issue #78 — runtime canonicalization fallback. When the stored
       // canonical short is null but the raw matches the current sponsor
       // lookup (e.g. due to alias / normalization additions made after the

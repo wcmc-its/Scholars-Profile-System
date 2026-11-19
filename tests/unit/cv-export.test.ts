@@ -93,6 +93,7 @@ function baseProfile(over: Partial<ProfilePayload>): ProfilePayload {
     orcid: null,
     overview: null,
     appointments: [],
+    trainings: [],
     educations: [],
     grants: [],
     clinicalTrials: [],
@@ -129,6 +130,7 @@ function mentee(over: Partial<MenteeChip>): MenteeChip {
 
 const researchInput: CvInput = {
   profile: baseProfile({
+    trainings: [],
     educations: [{ degree: "PhD", institution: "MIT", year: 2008, field: "Biology" }],
     appointments: [
       {
@@ -229,6 +231,15 @@ const clinicalInput: CvInput = {
     primaryDepartment: "Medicine",
     hasClinicalProfile: true,
     email: "rj9001@med.cornell.edu",
+    trainings: [
+      {
+        type: "Residency",
+        institution: "NewYork-Presbyterian Hospital",
+        specialty: "Internal Medicine",
+        yearFrom: 2005,
+        yearTo: 2008,
+      },
+    ],
     educations: [{ degree: "MD", institution: "Columbia University", year: 2005, field: null }],
     leadershipTitles: ["Chief, Division of General Internal Medicine"],
     grants: [
@@ -510,7 +521,14 @@ describe("cvOutline — document-ordered CV preview", () => {
 
   it("fills clinical entries from POPS, including Clinical Practice (L1)", () => {
     const o = cvOutline({ profile: clinicalInput.profile, mentees: [], pops: clinicalInput.pops });
-    expect(entryOf(o, "C")).toMatchObject({ status: "filled", source: "pops", count: 1 });
+    // C reads ASMS training off the payload (spec §6c), not POPS.
+    expect(entryOf(o, "C")).toMatchObject({ status: "filled", source: "scholars", count: 1 });
+    expect(entryOf(o, "C").items).toEqual([
+      {
+        text: "Residency (Internal Medicine) — NewYork-Presbyterian Hospital — (2005–2008)",
+        source: "education",
+      },
+    ]);
     expect(entryOf(o, "F", "F1").items.map((i) => i.text)).toContain("NPI 1234567890");
     expect(entryOf(o, "F", "F2").count).toBe(1); // board cert
     expect(entryOf(o, "H").count).toBe(2); // honor + Castle Connolly
@@ -549,6 +567,7 @@ describe("cvOutline — document-ordered CV preview", () => {
 
   it("tags merged Academic Degrees (B1) per-record — ED/ASMS vs POPS", () => {
     const profile = baseProfile({
+      trainings: [],
       educations: [{ degree: "PhD", institution: "MIT", year: 2008, field: "Biology" }],
     });
     const pops: PopsEnrichment = {
@@ -581,6 +600,7 @@ describe("cvOutline — document-ordered CV preview", () => {
     // not be gated either, or the CV prints half its years.
     const profile = baseProfile({
       hiddenSections: ["hideEducationYears"],
+      trainings: [],
       educations: [{ degree: "PhD", institution: "MIT", year: 2008, field: "Biology" }],
     });
     const b1 = entryOf(cvOutline({ profile, mentees: [], pops: clinicalInput.pops }), "B", "B1");
