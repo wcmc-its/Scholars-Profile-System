@@ -13,8 +13,18 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: mockGet }),
 }));
 vi.mock("@/components/taxonomy/publication-feed", () => ({
-  TopicPublicationFeed: ({ activeSubtopic }: { activeSubtopic: string | null }) => (
-    <div data-testid="feed">{activeSubtopic ?? "all"}</div>
+  TopicPublicationFeed: ({
+    activeSubtopic,
+    onStageChange,
+  }: {
+    activeSubtopic: string | null;
+    onStageChange?: (s: string | null) => void;
+  }) => (
+    <div>
+      <div data-testid="feed">{activeSubtopic ?? "all"}</div>
+      <button onClick={() => onStageChange?.("T2")}>pick T2</button>
+      <button onClick={() => onStageChange?.(null)}>all stages</button>
+    </div>
   ),
 }));
 vi.mock("@/components/topic/subtopic-scholars-row", () => ({
@@ -120,6 +130,41 @@ describe("RailLayout (topic)", () => {
     fireEvent.click(all);
     expect(screen.getByTestId("feed").textContent).toBe("all");
     expect(all.getAttribute("aria-current")).toBe("true");
+  });
+
+  it("rail counts follow the feed's Stage pick when stage counts are given", () => {
+    mockGet.mockReturnValue(null);
+    const staged = [
+      { ...subtopics[0], stagePubCounts: { T2: 12 } },
+      { ...subtopics[1], stagePubCounts: {} },
+    ];
+    render(
+      <TopicRailLayout
+        topicSlug="cardio"
+        subtopics={staged}
+        totalPubCount={270}
+        stageTotalPubCounts={{ T2: 15 }}
+      />,
+    );
+    const rail = within(desktopRail());
+    const row = (label: string) => rail.getByText(label).closest("button")!.textContent;
+    expect(row("Cardiac Surgery")).toContain("234");
+    fireEvent.click(screen.getByText("pick T2"));
+    expect(row("Cardiac Surgery")).toContain("12");
+    expect(row("Cardiac Surgery")).not.toContain("234");
+    expect(row("Oncology")).toContain("0");
+    expect(row("All subareas")).toContain("15");
+    fireEvent.click(screen.getByText("all stages"));
+    expect(row("Cardiac Surgery")).toContain("234");
+    expect(row("All subareas")).toContain("270");
+  });
+
+  it("without stage counts (flag off) a Stage pick leaves the rail counts alone", () => {
+    mockGet.mockReturnValue(null);
+    render(<TopicRailLayout topicSlug="cardio" subtopics={subtopics} totalPubCount={270} />);
+    fireEvent.click(screen.getByText("pick T2"));
+    const all = within(desktopRail()).getByText("All subareas").closest("button")!;
+    expect(all.textContent).toContain("270");
   });
 
   it("Clear × in the subhead clears the selection and the URL", () => {

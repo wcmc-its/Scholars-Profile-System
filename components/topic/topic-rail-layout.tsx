@@ -5,12 +5,13 @@
  * `RailLayout`. Selection lives in `?subtopic=` (read on load, written on
  * change); `?subtopic=…#publications` deep links keep working.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { RailLayout } from "@/components/taxonomy/rail-layout";
 import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { TopicPublicationFeed } from "@/components/taxonomy/publication-feed";
 import { TopicActivityFeed } from "@/components/taxonomy/activity-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
+import type { TranslationalStage } from "@/lib/translational-stage";
 
 export type SubtopicRailItem = {
   id: string;
@@ -19,6 +20,8 @@ export type SubtopicRailItem = {
   description: string | null;
   shortDescription: string | null;
   pubCount: number;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — `pubCount` per shown stage. */
+  stagePubCounts?: Partial<Record<TranslationalStage, number>>;
 };
 
 /** Subareas at or under this many pubs sit below the "Less common" divider. */
@@ -29,6 +32,7 @@ export function TopicRailLayout({
   topicLabel,
   subtopics,
   totalPubCount,
+  stageTotalPubCounts,
   scholarNames = false,
   loadMore = false,
   activityFeed = false,
@@ -41,6 +45,8 @@ export function TopicRailLayout({
   /** Distinct research-article pmids in the whole topic (`getSubtopicRail`):
    *  the "All subareas" count. Not the row sum. */
   totalPubCount: number;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — `totalPubCount` per shown stage. */
+  stageTotalPubCounts?: Partial<Record<TranslationalStage, number>>;
   /** TAXONOMY_SCHOLAR_CARDS — the selected subarea's scholars render as a
    *  "Scholars N" heading over avatar chips. */
   scholarNames?: boolean;
@@ -53,14 +59,18 @@ export function TopicRailLayout({
   /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the publications Stage select. */
   stageFilter?: boolean;
 }) {
+  // The feed's Stage pick; the rail counts follow it when the stage counts
+  // came with the page (flag on).
+  const [stage, setStage] = useState<TranslationalStage | null>(null);
+  const byStage = stage !== null && stageTotalPubCounts !== undefined;
   const items: TaxonomyRailItem[] = subtopics.map((s) => ({
     id: s.id,
     label: s.displayName,
-    count: s.pubCount,
+    count: byStage ? (s.stagePubCounts?.[stage] ?? 0) : s.pubCount,
   }));
   // Same total the page's Spotlight "View all" and the unfiltered feed
   // heading use.
-  const total = totalPubCount;
+  const total = byStage ? (stageTotalPubCounts[stage] ?? 0) : totalPubCount;
   const subtopicLabels = useMemo(
     () => Object.fromEntries(subtopics.map((s) => [s.id, s.displayName])),
     [subtopics],
@@ -121,6 +131,7 @@ export function TopicRailLayout({
                 loadMore={loadMore}
                 subtopicLabels={subtopicLabels}
                 stageFilter={stageFilter}
+                onStageChange={setStage}
               />
             ) : (
               <TopicPublicationFeed
@@ -129,6 +140,7 @@ export function TopicRailLayout({
                 loadMore={loadMore}
                 subtopicLabels={subtopicLabels}
                 stageFilter={stageFilter}
+                onStageChange={setStage}
               />
             )}
           </>

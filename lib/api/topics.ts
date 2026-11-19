@@ -58,7 +58,12 @@ import {
 } from "@/lib/api/search-flags";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
-import { displayStage, type TranslationalStage } from "@/lib/translational-stage";
+import {
+  displayStage,
+  isTranslationalStage,
+  TRANSLATIONAL_STAGES,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -615,6 +620,10 @@ export type SubtopicWithCount = {
   // EXISTING — kept; LLM-canonical per D-19 (no LLM use today, future-proofing).
   description: string | null;
   pubCount: number;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — `pubCount` restricted to papers
+   *  shown at each stage (`displayStage`), so the rail can follow the Stage
+   *  pick. Absent when the flag is off; a missing stage means 0. */
+  stagePubCounts?: Partial<Record<TranslationalStage, number>>;
 };
 
 export type SubtopicRail = {
@@ -627,6 +636,8 @@ export type SubtopicRail = {
    * "Publications N" heading. Not a sum of the rows (open question 10).
    */
   totalPubCount: number;
+  /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — `totalPubCount` per shown stage. */
+  stageTotalPubCounts?: Partial<Record<TranslationalStage, number>>;
 };
 
 /**
@@ -714,7 +725,42 @@ export async function getSubtopicRail(topicSlug: string): Promise<SubtopicRail |
     })
     .filter((s) => s.pubCount > 0)
     .sort((a, b) => b.pubCount - a.pubCount);
-  return { subtopics, totalPubCount: allPmids.size };
+  if (!resolveSearchPubsTranslationalStageFacet()) {
+    return { subtopics, totalPubCount: allPmids.size };
+  }
+
+  // The rail's count definition (every tier, research articles) narrowed to
+  // the papers shown at each stage. Per-stage totals are their own distinct
+  // count, not a row sum (same rule as `totalPubCount`).
+  const stageScope = Prisma.sql`FROM publication_topic pt JOIN publication p ON p.pmid = pt.pmid
+    WHERE pt.parent_topic_id = ${topicSlug}
+      AND p.publication_type NOT IN (${Prisma.join([...HARD_EXCLUDE_TYPES])})
+      AND p.translational_stage IN (${Prisma.join([...TRANSLATIONAL_STAGES])})
+      AND (p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')`;
+  const [bySub, byStage] = await Promise.all([
+    prisma.$queryRaw<{ sub: string | null; st: string; n: bigint | number }[]>`
+      SELECT pt.primary_subtopic_id AS sub, p.translational_stage AS st, COUNT(DISTINCT pt.pmid) AS n
+      ${stageScope} AND pt.primary_subtopic_id IS NOT NULL
+      GROUP BY pt.primary_subtopic_id, p.translational_stage`,
+    prisma.$queryRaw<{ st: string; n: bigint | number }[]>`
+      SELECT p.translational_stage AS st, COUNT(DISTINCT pt.pmid) AS n
+      ${stageScope}
+      GROUP BY p.translational_stage`,
+  ]);
+  const perSub = new Map<string, Partial<Record<TranslationalStage, number>>>();
+  for (const r of bySub) {
+    if (!r.sub || !isTranslationalStage(r.st)) continue;
+    const m = perSub.get(r.sub) ?? {};
+    m[r.st] = Number(r.n);
+    perSub.set(r.sub, m);
+  }
+  const stageTotalPubCounts: Partial<Record<TranslationalStage, number>> = {};
+  for (const r of byStage) if (isTranslationalStage(r.st)) stageTotalPubCounts[r.st] = Number(r.n);
+  return {
+    subtopics: subtopics.map((s) => ({ ...s, stagePubCounts: perSub.get(s.id) ?? {} })),
+    totalPubCount: allPmids.size,
+    stageTotalPubCounts,
+  };
 }
 
 /** The rail rows only (see `getSubtopicRail` for the count definition). */

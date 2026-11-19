@@ -191,6 +191,7 @@ export function TopicActivityFeed({
   loadMore = false,
   subtopicLabels,
   stageFilter = false,
+  onStageChange,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
@@ -199,6 +200,8 @@ export function TopicActivityFeed({
   subtopicLabels?: Record<string, string>;
   /** SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET (publications only). */
   stageFilter?: boolean;
+  /** The picked stage, for the subarea rail's counts. */
+  onStageChange?: (stage: TranslationalStage | null) => void;
 }) {
   const [requested, setRequested] = useState<FeedType>("publications");
   // Client-read only: the server render is always the publications view.
@@ -209,7 +212,14 @@ export function TopicActivityFeed({
   const scholar = useScholarFilter();
   // A picked stage narrows the publications feed; the chips' and tabs'
   // publication counts follow it (server-side, `?stage=`).
-  const [stage, setStage] = useState<TranslationalStage | null>(null);
+  const [stage, setStageState] = useState<TranslationalStage | null>(null);
+  const setStage = useCallback(
+    (st: TranslationalStage | null) => {
+      setStageState(st);
+      onStageChange?.(st);
+    },
+    [onStageChange],
+  );
   const data = useActivityScholars(topicSlug, activeSubtopic, stage);
 
   // Tab counts: the picked scholar's, else the area's.

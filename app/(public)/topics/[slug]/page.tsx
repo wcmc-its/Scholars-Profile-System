@@ -213,6 +213,7 @@ export default async function TopicPage({
           topicLabel={topic.label}
           subtopics={subtopicList}
           totalPubCount={totalPubsForStats}
+          stageTotalPubCounts={subtopicRail?.stageTotalPubCounts}
           scholarNames={scholarCards}
           loadMore={isTaxonomyFeedLoadMoreOn()}
           activityFeed={isTopicFeedGrantsTrialsOn()}
