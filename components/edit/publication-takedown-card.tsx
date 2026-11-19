@@ -130,7 +130,7 @@ export function PublicationTakedownCard({
               <AlertDescription>
                 <strong>Removed from the site.</strong> Reason:{" "}
                 <em>{takedown.reason || "(no reason on file)"}</em>. By{" "}
-                <span title={takedown.actorCwid}>{takedown.actorName || takedown.actorCwid}</span>{" "}
+                <span title={takedown.actorCwid} className={takedown.actorName ? undefined : "font-mono"}>{takedown.actorName || takedown.actorCwid}</span>{" "}
                 on{" "}
                 <time dateTime={takedown.createdAt.toISOString()}>
                   {takedown.createdAt.toLocaleDateString()}

@@ -5543,7 +5543,7 @@ function PersonHoverCard({
           <div className="min-w-0">
             <p className="text-foreground text-sm font-semibold">
               {displayName(scholar.name)}{" "}
-              <span className="text-muted-foreground font-normal">({scholar.cwid})</span>
+              <span className="text-muted-foreground font-mono font-normal">({scholar.cwid})</span>
             </p>
             {scholar.dept ? (
               <p className="text-muted-foreground mt-0.5 text-sm">{scholar.dept}</p>

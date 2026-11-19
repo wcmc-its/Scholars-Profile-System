@@ -410,7 +410,7 @@ function PersonAccessList({
               <span className="block text-sm">{r.name}</span>
               <span className={`${HELP} block`}>
                 {scoped ? `${labelFor.get(r.scopeKey) ?? r.scopeKey} · ` : ""}
-                {r.cwid}
+                <span className="font-mono">{r.cwid}</span>
               </span>
             </span>
             {canManage && (

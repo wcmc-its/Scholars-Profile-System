@@ -214,7 +214,13 @@ export function AccountMenu({
     <div className="flex flex-col gap-0.5 px-3 pt-2 pb-1.5" data-testid="account-menu-identity">
       <span className="text-sm font-medium">{realName}</span>
       <span className="text-xs text-muted-foreground">
-        {probe?.cwid ? `${probe.cwid} · ${adminRole}` : adminRole}
+        {probe?.cwid ? (
+          <>
+            <span className="font-mono">{probe.cwid}</span> · {adminRole}
+          </>
+        ) : (
+          adminRole
+        )}
       </span>
     </div>
   ) : null;

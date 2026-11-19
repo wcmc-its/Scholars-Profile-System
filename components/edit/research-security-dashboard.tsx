@@ -746,7 +746,7 @@ function PersonTable({ rows, ui }: { rows: PersonRow[]; ui: ResearchSecurityUiPa
                 ) : (
                   <span className="font-medium">{r.name}</span>
                 )}
-                {r.cwid && <span className="text-muted-foreground"> ({r.cwid})</span>}
+                {r.cwid && <span className="text-muted-foreground"> (<span className="font-mono">{r.cwid}</span>)</span>}
                 {r.title && <div className="text-muted-foreground text-[12.5px]">{r.title}</div>}
               </td>
               <td className={tdClass}>
@@ -978,7 +978,7 @@ function UnattributedTable({ rows, ui }: { rows: UnattributedRow[]; ui: Research
               ) : (
                 <span className="font-medium">{r.person.displayName}</span>
               )}
-              {r.person.cwid && <span className="text-muted-foreground"> ({r.person.cwid})</span>}
+              {r.person.cwid && <span className="text-muted-foreground"> (<span className="font-mono">{r.person.cwid}</span>)</span>}
               <div className="text-apollo-ink-2 mt-0.5 flex flex-wrap items-center gap-1.5 text-[12.5px]">
                 <CampusChip campus={r.person.campus} />
                 {r.person.department}
@@ -1068,7 +1068,7 @@ function UnattributedGroupTable({
                 ) : (
                   <span className="font-medium">{g.person.displayName}</span>
                 )}
-                {g.person.cwid && <span className="text-muted-foreground"> ({g.person.cwid})</span>}
+                {g.person.cwid && <span className="text-muted-foreground"> (<span className="font-mono">{g.person.cwid}</span>)</span>}
                 <div className="text-apollo-ink-2 mt-0.5 flex flex-wrap items-center gap-1.5 text-[12.5px]">
                   <CampusChip campus={g.person.campus} />
                   {g.person.department}
@@ -1218,7 +1218,7 @@ function PersonCard({
       <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg leading-tight font-semibold">
-            {profile.name} <span className="text-muted-foreground font-normal">({profile.cwid})</span>
+            {profile.name} <span className="text-muted-foreground font-normal">(<span className="font-mono">{profile.cwid}</span>)</span>
           </h2>
           <div className="text-apollo-ink-2 flex flex-wrap items-center gap-1.5 text-[13px]">
             <CampusChip campus={profile.campus} />

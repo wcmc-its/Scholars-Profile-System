@@ -316,7 +316,7 @@ function FrtRow({
           <>
             WCM person: <span className="font-medium">{r.menteeCwidName ?? r.menteeName}</span>{" "}
             <span className="text-muted-foreground text-xs">
-              {r.menteeCwid}
+              <span className="font-mono">{r.menteeCwid}</span>
               {r.cwidAssigned ? "" : " · matched by name"}
             </span>
           </>
