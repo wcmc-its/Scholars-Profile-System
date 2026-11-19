@@ -177,9 +177,9 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
         href: "/departments/medicine/divisions/cardiology",
       },
     ]);
-    expect(screen.getByRole("link", { name: "1 division" }).getAttribute("href")).toBe(
-      "#subunits",
-    );
+    // The count lives on the list heading, not repeated as a stat link.
+    expect(document.getElementById("subunits")?.textContent).toBe("1 division");
+    expect(screen.queryByRole("link", { name: "1 division" })).toBeNull();
   });
 
   // Page-level contract: a division chip filters in place EXACTLY when the

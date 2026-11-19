@@ -236,9 +236,9 @@ describe("CenterPage — Unit Page v2 hero", () => {
     // Program facet from `?program=` on its client mount.
     expect(chip.getAttribute("href")).toBe("/centers/meyer-cancer-center?program=CB#people");
     expect(chip.textContent).toContain("2");
-    expect(screen.getByRole("link", { name: "2 programs" }).getAttribute("href")).toBe(
-      "#subunits",
-    );
+    // The count lives on the list heading, not repeated as a stat link.
+    expect(container.querySelector("#subunits")?.textContent).toBe("2 programs");
+    expect(screen.queryByRole("link", { name: "2 programs" })).toBeNull();
     expect(screen.getByRole("link", { name: "42 scholars" }).getAttribute("href")).toBe(
       "/centers/meyer-cancer-center#people",
     );
