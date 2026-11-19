@@ -14999,7 +14999,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -15754,7 +15754,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -16446,7 +16446,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -17069,7 +17069,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
@@ -18131,7 +18131,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_BASE_URL",
