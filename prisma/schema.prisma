@@ -188,6 +188,7 @@ model Scholar {
 
   appointments         Appointment[]
   educations           Education[]
+  trainings            Training[]
   profileAppointments  ProfileAppointment[]
   unitLeadershipRoles  UnitLeadershipRole[]
   honors               Honor[]
@@ -447,6 +448,26 @@ model Education {
 
   @@index([cwid])
   @@map("education")
+}
+
+/// Postgraduate training (residency / fellowship / internship / postdoc) from
+/// ASMS `fc_doctoral_training`. "Other" and untyped rows are not imported.
+model Training {
+  id              String   @id @default(uuid()) @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// ASMS `fc_doctoral_training_type.title`, e.g. "Residency", "Fellowship".
+  type            String   @db.VarChar(64)
+  institution     String   @db.VarChar(255)
+  specialty       String?  @db.VarChar(255)
+  yearFrom        Int?     @map("year_from")
+  yearTo          Int?     @map("year_to")
+  externalId      String   @unique @map("external_id") @db.VarChar(128)
+  source          String   @default("ASMS") @db.VarChar(32)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
+
+  @@index([cwid])
+  @@map("training")
 }
 
 /// PhD primary-mentor (thesis advisor) relationships from Jenzabar's Graduate

@@ -869,6 +869,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         hasClinicalProfile: true,
         appointments: [],
         // A 2020 MD ⇒ inside the early-career window.
+        trainings: [],
         educations: [{ year: 2020, degree: "MD" }],
         grants: [],
       },
@@ -912,6 +913,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         hasClinicalProfile: false,
         appointments: [],
         // Recent PhD, no major PI award ⇒ inside the ESI window.
+        trainings: [],
         educations: [{ year: thisYear - 2, degree: "PhD" }],
         grants: [],
       },
@@ -922,6 +924,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         hasClinicalProfile: false,
         appointments: [],
         // PhD 30y ago ⇒ past the window.
+        trainings: [],
         educations: [{ year: thisYear - 30, degree: "PhD" }],
         grants: [],
       },
@@ -958,6 +961,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         primaryTitle: "Professor",
         hasClinicalProfile,
         appointments: [],
+        trainings: [],
         educations: [],
         grants,
       };

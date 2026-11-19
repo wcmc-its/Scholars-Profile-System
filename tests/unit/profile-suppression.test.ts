@@ -72,6 +72,7 @@ function scholarRow() {
     // #1760 — the loader `include`s honors, so the emitted row always carries the
     // relation. Gated to published + shown in the query, hence [] by default here.
     honors: [],
+    trainings: [],
     educations: [],
     grants: [],
     coiActivities: [],
@@ -260,6 +261,7 @@ describe("getScholarFullProfileBySlug — entity suppression (#160)", () => {
   it("drops a suppressed education entry from the sidebar", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
     });
     mockPublicationAuthorFindMany.mockResolvedValue([]);
@@ -282,6 +284,7 @@ describe("getScholarFullProfileBySlug — entity suppression (#160)", () => {
   it("keeps education + appointments when nothing is suppressed", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD")],
       appointments: [appointment("APPT-1", "Professor")],
     });
@@ -312,6 +315,7 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
   it("empties the Education section from the payload when hideEducation is set", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
       grants: [grant("INFOED-1-owner001", "Grant A")],
     });
@@ -328,6 +332,7 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
   it("keeps the Education entries but strips their year when hideEducationYears is set", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
     });
     mockPublicationAuthorFindMany.mockResolvedValue([]);
@@ -343,6 +348,7 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
   it("keeps the education years for includeHiddenEducationYears (the CV path, #1997)", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
     });
     mockPublicationAuthorFindMany.mockResolvedValue([]);
@@ -359,9 +365,32 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
     expect(payload?.hiddenSections).toContain("hideEducationYears");
   });
 
+  it("applies the Education hides to postgraduate training too", async () => {
+    const training = {
+      type: "Fellowship",
+      institution: "Inst",
+      specialty: "Infectious Diseases",
+      yearFrom: 2021,
+      yearTo: 2023,
+    };
+    mockScholarFindFirst.mockResolvedValue({ ...scholarRow(), trainings: [training] });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({});
+    mockFieldOverrideFindMany.mockResolvedValue([{ fieldName: "hideEducationYears" }]);
+    const pub = await getScholarFullProfileBySlug("owner-one");
+    expect(pub?.trainings).toEqual([{ ...training, yearFrom: null, yearTo: null }]);
+    const cv = await getScholarFullProfileBySlug("owner-one", undefined, {
+      includeHiddenEducationYears: true,
+    });
+    expect(cv?.trainings).toEqual([training]);
+    mockFieldOverrideFindMany.mockResolvedValue([{ fieldName: "hideEducation" }]);
+    expect((await getScholarFullProfileBySlug("owner-one"))?.trainings).toEqual([]);
+  });
+
   it("empties Funding and surfaces hideMentoring while keeping Education visible", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD")],
       grants: [grant("INFOED-1-owner001", "Grant A"), grant("INFOED-2-owner001", "Grant B")],
     });
@@ -391,6 +420,7 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
   it("keeps every section visible when no section-visibility override is set", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),
+      trainings: [],
       educations: [education("EDU-1", "MD")],
       grants: [grant("INFOED-1-owner001", "Grant A")],
     });

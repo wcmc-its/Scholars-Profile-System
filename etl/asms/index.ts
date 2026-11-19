@@ -31,6 +31,26 @@ type EducationRow = {
   asms_school_id: number; // for externalId / dedup
 };
 
+type TrainingRow = {
+  cwid: string;
+  type: string;
+  institution: string | null;
+  specialty: string | null;
+  year_from: number | null;
+  year_to: number | null;
+  asms_training_id: number;
+};
+
+// ASMS `fc_doctoral_training_type` titles we show. "Other" and untyped rows are
+// left out by decision (2026-11-19).
+const TRAINING_TYPES = [
+  "Internship",
+  "Residency",
+  "Fellowship",
+  "Postdoctoral",
+  "Internship and Residency",
+];
+
 const IN_BATCH = 500;
 const INSERT_BATCH = 1000;
 
@@ -155,17 +175,98 @@ async function main() {
       `Education reconcile complete: +${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}`,
     );
 
+    // Postgraduate training — `fc_doctoral_training`, same reconcile shape as
+    // education above, keyed `ASMS-TRAIN-{id}`.
+    const trainingRows: TrainingRow[] = [];
+    const typeList = TRAINING_TYPES.map((_, i) => `@t${i}`).join(",");
+    for (const batch of chunks(cwidList, IN_BATCH)) {
+      const placeholders = batch.map((_, i) => `@p${i}`).join(",");
+      const req = pool.request();
+      batch.forEach((c, i) => req.input(`p${i}`, c));
+      TRAINING_TYPES.forEach((t, i) => req.input(`t${i}`, t));
+      const result = await req.query(`
+        SELECT
+          p.cwid        AS cwid,
+          y.title       AS type,
+          t.institution AS institution,
+          t.specialty   AS specialty,
+          t.year_from   AS year_from,
+          t.year_to     AS year_to,
+          t.id          AS asms_training_id
+        FROM asms.dbo.fc_doctoral_training t
+        JOIN asms.dbo.wcmc_person              p ON p.id = t.person_id
+        JOIN asms.dbo.fc_doctoral_training_type y ON y.id = t.doctoral_training_type_id
+        WHERE p.cwid IN (${placeholders})
+          AND y.title IN (${typeList})
+      `);
+      trainingRows.push(...(result.recordset as TrainingRow[]));
+    }
+    const trainingInserts = trainingRows
+      .filter((r) => ourCwidSet.has(r.cwid) && r.institution?.trim())
+      .map((r) => ({
+        cwid: r.cwid,
+        type: r.type,
+        institution: r.institution!.trim(),
+        specialty: r.specialty?.trim() || null,
+        yearFrom: r.year_from,
+        yearTo: r.year_to,
+        externalId: `ASMS-TRAIN-${r.asms_training_id}`,
+        source: "ASMS",
+      }));
+    const existingTraining = await db.write.training.findMany({
+      where: { source: "ASMS" },
+      select: {
+        externalId: true, cwid: true, type: true, institution: true,
+        specialty: true, yearFrom: true, yearTo: true, source: true,
+      },
+    });
+    const tplan = classifyByExternalId({
+      incoming: trainingInserts,
+      existing: existingTraining,
+      contentKey: (e) =>
+        JSON.stringify([
+          e.cwid, e.type, e.institution, e.specialty, e.yearFrom, e.yearTo, e.source,
+        ]),
+    });
+    for (const batch of chunks(tplan.toCreate, INSERT_BATCH)) {
+      await db.write.training.createMany({ data: batch });
+    }
+    for (const e of tplan.toUpdate) {
+      await db.write.training.update({
+        where: { externalId: e.externalId },
+        data: { ...e, lastRefreshedAt: new Date() },
+      });
+    }
+    assertPruneVolume("asms:stale-training", {
+      pruning: tplan.staleExternalIds.length,
+      of: existingTraining.length,
+      maxPct: 10,
+    });
+    let trainingTombstoned = 0;
+    if (tplan.staleExternalIds.length > 0) {
+      trainingTombstoned = (
+        await db.write.training.deleteMany({
+          where: { source: "ASMS", externalId: { in: tplan.staleExternalIds } },
+        })
+      ).count;
+    }
+    console.log(
+      `Training reconcile complete: +${tplan.toCreate.length} ~${tplan.toUpdate.length} -${trainingTombstoned}`,
+    );
+
     await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
         completedAt: new Date(),
-        rowsProcessed: inserts.length,
+        rowsProcessed: inserts.length + trainingInserts.length,
       },
     });
 
     const elapsed = Math.round((Date.now() - start) / 1000);
-    console.log(`ASMS ETL complete in ${elapsed}s: education rows=${inserts.length}`);
+    console.log(
+      `ASMS ETL complete in ${elapsed}s: education rows=${inserts.length} training rows=${trainingInserts.length}`,
+    );
   } catch (err) {
     await db.write.etlRun.update({
       where: { id: run.id },

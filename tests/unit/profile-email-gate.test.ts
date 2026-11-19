@@ -74,6 +74,7 @@ function scholarRow(emailVisibility: string | null, email: string | null = EMAIL
     // #1760 — the loader `include`s honors, so the emitted row always carries the
     // relation. Gated to published + shown in the query, hence [] by default here.
     honors: [],
+    trainings: [],
     educations: [],
     grants: [],
     coiActivities: [],

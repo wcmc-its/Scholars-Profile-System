@@ -105,6 +105,7 @@ const SCHOLAR_FIELDS = {
 };
 const CTX = {
   scholar: { ...SCHOLAR_FIELDS, roleCategory: "full_time_faculty" },
+  trainings: [],
   educations: [
     { degree: "PhD", institution: "Example U", field: "Biostatistics", year: 2010, state: "shown" },
     { degree: "MS", institution: "Hidden U", field: "Stats", year: 2006, state: "hidden_by_self" },
