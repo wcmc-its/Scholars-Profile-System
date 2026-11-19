@@ -8,6 +8,7 @@
  * Only the card TYPE contracts remain here, imported type-only by those
  * surfaces and by the shared card components (publication-card / grant-card).
  */
+import type { TranslationalStage } from "@/lib/translational-stage";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 
 export type DeptPublicationCard = {
@@ -19,6 +20,9 @@ export type DeptPublicationCard = {
   doi: string | null;
   pubmedUrl: string | null;
   authors: AuthorChip[];
+  /** The paper's shown stage (`displayStage`); absent when it has none or
+   *  SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET is off. */
+  translationalStage?: TranslationalStage;
 };
 
 export type DeptGrantCard = {

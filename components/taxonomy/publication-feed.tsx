@@ -40,6 +40,7 @@ import { Compass } from "lucide-react";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { SnippetUsageBadge } from "@/components/method/snippet-usage-badge";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { StageBadge } from "@/components/publication/stage-badge";
 import {
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
@@ -937,7 +938,7 @@ export function PubRow({
       </div>
       {/* Kept as `journal || year` (not a boolean) for parity: a row with no
           journal and year 0 has always rendered a stray "0" here. */}
-      {(areaLabel ? true : hit.journal || hit.year) && (
+      {(areaLabel || hit.translationalStage ? true : hit.journal || hit.year) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           {hit.journal && (
             <span
@@ -953,6 +954,7 @@ export function PubRow({
               <span data-testid="pub-area-label">{areaLabel}</span>
             </>
           ) : null}
+          {hit.translationalStage ? <StageBadge stage={hit.translationalStage} /> : null}
         </div>
       )}
       {/* #327 — the paper's argmax topic when it is ANOTHER topic (the server
@@ -985,7 +987,6 @@ export function PubRow({
         pmcid={hit.pmcid}
         doi={hit.doi}
         lazyAbstract={hit.hasAbstract === true}
-        translationalStage={hit.translationalStage}
       />
       {/* #1166/#1166-B — per-(pub × entity) usage sentences on an entity-filtered
           family feed, the entity term <mark>-highlighted (offset-aware, term

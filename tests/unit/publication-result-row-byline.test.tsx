@@ -91,16 +91,17 @@ describe("PublicationResultRow — #718 author fallback", () => {
 });
 
 describe("PublicationResultRow — translational stage", () => {
-  it("hands the stage to the meta row (the badge after Abstract), not the journal line", () => {
-    metaProps.length = 0;
+  it("puts the stage badge at the end of the journal/year line", () => {
     render(<PublicationResultRow hit={makeHit({ translationalStage: "T2" })} />);
-    expect(metaProps.at(-1)).toMatchObject({ translationalStage: "T2" });
-    expect(screen.queryByText(/Clinical trials and efficacy/)).toBeNull();
+    const badge = screen.getByTestId("pub-row-stage");
+    expect(badge.textContent).toBe("T2 Clinical trials and efficacy");
+    const line = badge.parentElement!;
+    expect(line.lastElementChild).toBe(badge);
+    expect(line.textContent).toBe("Nature. 2024.T2 Clinical trials and efficacy");
   });
 
-  it("passes no stage when the hit has none (none, or flag off)", () => {
-    metaProps.length = 0;
+  it("renders no badge when the hit has no stage (none, or flag off)", () => {
     render(<PublicationResultRow hit={makeHit({})} />);
-    expect(metaProps.at(-1)?.translationalStage).toBeUndefined();
+    expect(screen.queryByTestId("pub-row-stage")).toBeNull();
   });
 });
