@@ -528,7 +528,7 @@ function GroupedRoster({
 
   return (
     <div className="mt-5 flex flex-col gap-8 pt-2 md:flex-row md:flex-wrap md:items-start md:gap-x-14">
-      <aside className="md:w-[200px] md:shrink-0 md:grow-0">
+      <aside className="md:w-[200px] md:shrink-0 md:grow-0 md:self-stretch">
         <div className="flex flex-col gap-[22px] md:sticky md:top-[76px] md:max-h-[calc(100vh-76px)] md:overflow-y-auto md:pr-3">
           {anySelected && (
             <button
