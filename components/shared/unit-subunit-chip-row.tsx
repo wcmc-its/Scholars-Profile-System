@@ -1,8 +1,12 @@
 "use client";
 
 /**
- * Unit Page v2 — the hero's subunit chip row (divisions / programs), the one
- * interactive piece of the server-rendered hero. A chip that carries a
+ * Unit Page v2 — the hero's subunit list (divisions / programs), the one
+ * interactive piece of the server-rendered hero. Rendered as up to three
+ * ranked columns of whole-row links (name in slate, count right-aligned under a
+ * column header that names its unit); it was a wrap of slate-outline chips,
+ * which read like the topic tags in the roster below. "Chip" survives in the
+ * names for continuity. A chip that carries a
  * `filter` narrows the roster below IN PLACE (the mock's pick(): set the
  * Division / Program facet to that value, smooth-scroll to #people) through
  * the window-event contract in `lib/unit-subunit-filter.ts`; the roster's own
@@ -57,7 +61,17 @@ function scrollAndFocusRoster(): void {
   scrollIntoViewAndFocus(narrow && results ? results : people, results);
 }
 
-export function UnitSubunitChipRow({ chips }: { chips: SubunitChipView[] }) {
+export function UnitSubunitChipRow({
+  chips,
+  itemLabel = "Name",
+  countLabel,
+}: {
+  chips: SubunitChipView[];
+  /** Left column header, e.g. "Division". */
+  itemLabel?: string;
+  /** Right column header naming what the count counts, e.g. "Scholars". */
+  countLabel?: string;
+}) {
   // Selected filter values per param (a page has one chip row ⇒ one param).
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const param = chips.find((c) => c.filter)?.filter?.param ?? null;
@@ -74,64 +88,102 @@ export function UnitSubunitChipRow({ chips }: { chips: SubunitChipView[] }) {
     return () => window.removeEventListener(SUBUNIT_SELECTION_EVENT, onSelection);
   }, [param]);
 
+  // Rank reads down each column: split into up to three columns of equal
+  // length, so the largest subunits sit at the top of the first column.
+  const columns = chunkColumns(chips, chips.length <= 4 ? 1 : chips.length <= 8 ? 2 : 3);
+
   return (
-    <div className="mt-3 flex flex-wrap gap-[6px]">
-      {chips.map((c) => {
-        const active = !!c.filter && selected.has(c.filter.value);
-        return (
-          <a
-            key={c.key}
-            href={c.href}
-            aria-current={active ? "true" : undefined}
-            onClick={
-              c.filter
-                ? (e) => {
-                    // Let the browser handle new-tab / new-window / download clicks.
-                    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-                      return;
-                    const f = c.filter!;
-                    const handled = requestSubunitSelect(
-                      f.param,
-                      f.value,
-                      active ? "remove" : "only",
-                    );
-                    // No roster listening (another tab / facet off) ⇒ plain link.
-                    if (!handled) return;
-                    e.preventDefault();
-                    if (!active) {
-                      // The roster's replaceState sync keeps the hash (see
-                      // `urlWithQuery`), so the URL ends `?div=<code>#people`.
-                      window.history.replaceState(
-                        window.history.state,
-                        "",
-                        `${window.location.pathname}${window.location.search}#people`,
-                      );
-                      scrollAndFocusRoster();
-                    }
-                  }
-                : undefined
-            }
+    <div
+      className={cn(
+        "mt-3 grid grid-cols-1 items-start gap-x-8",
+        columns.length >= 2 && "sm:grid-cols-2",
+        columns.length === 3 && "lg:grid-cols-3",
+      )}
+    >
+      {columns.map((col, ci) => (
+        <div key={ci} className="flex min-w-0 flex-col">
+          {/* The column header names the count's unit. Repeated per column on
+              wide screens; below `sm` the columns stack, so only the first
+              keeps it. */}
+          <div
             className={cn(
-              "border-apollo-slate text-apollo-slate inline-flex min-h-[26px] max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] leading-tight no-underline transition-colors duration-[120ms] ease-out hover:no-underline",
-              active
-                ? "bg-apollo-slate hover:bg-apollo-slate/90 text-white"
-                : "hover:bg-apollo-slate-tint bg-white",
+              "border-apollo-border-strong text-muted-foreground justify-between border-b pb-1.5 text-[11px]",
+              ci === 0 ? "flex" : "hidden sm:flex",
             )}
+            aria-hidden="true"
           >
-            {c.label}
-            {typeof c.count === "number" && (
-              <span
+            <span>{itemLabel}</span>
+            {countLabel ? <span>{countLabel}</span> : null}
+          </div>
+          {col.map((c) => {
+            const active = !!c.filter && selected.has(c.filter.value);
+            return (
+              <a
+                key={c.key}
+                href={c.href}
+                aria-current={active ? "true" : undefined}
+                onClick={
+                  c.filter
+                    ? (e) => {
+                        // Let the browser handle new-tab / new-window / download clicks.
+                        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+                          return;
+                        const f = c.filter!;
+                        const handled = requestSubunitSelect(
+                          f.param,
+                          f.value,
+                          active ? "remove" : "only",
+                        );
+                        // No roster listening (another tab / facet off) ⇒ plain link.
+                        if (!handled) return;
+                        e.preventDefault();
+                        if (!active) {
+                          // The roster's replaceState sync keeps the hash (see
+                          // `urlWithQuery`), so the URL ends `?div=<code>#people`.
+                          window.history.replaceState(
+                            window.history.state,
+                            "",
+                            `${window.location.pathname}${window.location.search}#people`,
+                          );
+                          scrollAndFocusRoster();
+                        }
+                      }
+                    : undefined
+                }
                 className={cn(
-                  "whitespace-nowrap tabular-nums",
-                  active ? "text-white/80" : "text-muted-foreground",
+                  // A whole-row link: the name is slate (the site's link ink)
+                  // so it reads as clickable at rest; hover tints the row and
+                  // underlines the name.
+                  "group border-apollo-border flex items-baseline justify-between gap-3 border-b py-[7px] text-[14px] no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]",
+                  active ? "bg-apollo-slate-tint" : "hover:bg-apollo-page",
                 )}
               >
-                {c.count.toLocaleString()}
-              </span>
-            )}
-          </a>
-        );
-      })}
+                <span
+                  className={cn(
+                    "text-apollo-slate min-w-0 decoration-1 underline-offset-4 group-hover:underline",
+                    active && "font-medium",
+                  )}
+                >
+                  {c.label}
+                </span>
+                {typeof c.count === "number" && (
+                  <span className="text-muted-foreground text-[13px] whitespace-nowrap tabular-nums">
+                    {c.count.toLocaleString()}
+                  </span>
+                )}
+              </a>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
+}
+
+/** Split `items` into `n` consecutive columns, longest first. */
+export function chunkColumns<T>(items: T[], n: number): T[][] {
+  const size = Math.ceil(items.length / Math.max(1, n));
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
