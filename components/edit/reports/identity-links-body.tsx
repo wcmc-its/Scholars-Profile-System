@@ -79,7 +79,7 @@ function PairBlock({ r }: { r: IdentityLinkRow }) {
             {r.wcmName}
           </a>
         </ScholarHoverCard>
-        <span className="text-muted-foreground text-[13px] tabular-nums">{r.cwid}</span>
+        <span className="text-muted-foreground font-mono text-[13px]">{r.cwid}</span>
         {r.wcmDepartment && (
           <span className="text-muted-foreground text-[13px]">{r.wcmDepartment}</span>
         )}
@@ -87,7 +87,7 @@ function PairBlock({ r }: { r: IdentityLinkRow }) {
       </div>
       <p className="m-0 mt-1 text-[13px]">
         Cornell Ithaca: <span className="font-semibold">{r.cornellName ?? "Unknown name"}</span>{" "}
-        <span className="text-muted-foreground tabular-nums">{r.netid}</span>
+        <span className="text-muted-foreground font-mono">{r.netid}</span>
         {(r.cornellTitle || r.cornellDepartment) && (
           <span className="text-muted-foreground">
             {" "}

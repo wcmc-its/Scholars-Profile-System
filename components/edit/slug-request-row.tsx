@@ -157,7 +157,7 @@ export function SlugRequestRow({ request, onDecided, readOnly = false }: SlugReq
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="text-sm">{request.name ?? request.cwid}</span>
           <span className="text-muted-foreground text-[12.5px]" data-testid="slug-request-meta">
-            {request.cwid}
+            <span className="font-mono">{request.cwid}</span>
             {request.department && ` · ${request.department}`} · asked{" "}
             {formatDate(request.createdAt)}
           </span>

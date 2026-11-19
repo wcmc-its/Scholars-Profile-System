@@ -367,7 +367,7 @@ export function MenteeSuggestionsCard({
                     data-testid={`mentee-suggestion-dismissed-${s.id}`}
                   >
                     <span>
-                      <span className="text-foreground">{s.menteeName}</span> {s.menteeCwid}
+                      <span className="text-foreground">{s.menteeName}</span> <span className="font-mono">{s.menteeCwid}</span>
                       {s.dismissReason ? ` · ${REASON_LABEL[s.dismissReason]}` : null}
                       {errors.get(s.id) ? (
                         <span className="text-destructive"> · {errors.get(s.id)}</span>
@@ -430,7 +430,7 @@ function SuggestionRow({
     <li className="flex flex-col gap-2 p-4" data-testid={`mentee-suggestion-${s.id}`}>
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="text-[15px] font-medium">{s.menteeName}</span>
-        <span className="text-muted-foreground text-xs">{s.menteeCwid}</span>
+        <span className="text-muted-foreground font-mono text-xs">{s.menteeCwid}</span>
         {/* The role is the career-stage tell, so it sits with the name as a
             chip rather than as muted text at the far edge of the row. */}
         <span

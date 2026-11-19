@@ -261,7 +261,7 @@ export function ImpersonationSwitcher({ onPick }: { onPick: (c: Candidate) => vo
                 className="mt-1 text-left font-medium text-primary hover:underline"
                 data-testid="impersonation-view-as-exact-cwid"
               >
-                View as “{exactCwidCandidate.cwid}” by exact CWID — for someone the name search
+                View as “<span className="font-mono">{exactCwidCandidate.cwid}</span>” by exact CWID — for someone the name search
                 can’t find (e.g. when the directory is unavailable).
               </button>
             )}

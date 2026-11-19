@@ -182,7 +182,7 @@ export function ManualMenteesCard({
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-[14px] font-normal">{row.name}</span>
                     {row.cwid ? (
-                      <span className="text-muted-foreground text-xs">{row.cwid}</span>
+                      <span className="text-muted-foreground font-mono text-xs">{row.cwid}</span>
                     ) : null}
                   </div>
                   {metaLine(row) ? (
@@ -198,7 +198,7 @@ export function ManualMenteesCard({
                       className="text-muted-foreground mt-1 text-xs"
                       data-testid={`manual-mentee-unresolved-${index}`}
                     >
-                      No WCM profile matches <span className="font-medium">{row.cwid}</span>, so
+                      No WCM profile matches <span className="font-mono font-medium">{row.cwid}</span>, so
                       their photo, profile link, and co-authored publications won&rsquo;t appear.
                       That&rsquo;s expected for alumni and people outside WCM &mdash; if it should
                       match someone here, use Edit to check the CWID.

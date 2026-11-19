@@ -1018,7 +1018,7 @@ export function EditActivityDashboard({
             actorName(e.actorCwid)
           )}
           {r.kind !== "self" && person && (
-            <span className="text-muted-foreground ml-1.5 font-normal">{e.actorCwid}</span>
+            <span className="text-muted-foreground ml-1.5 font-mono font-normal">{e.actorCwid}</span>
           )}
         </span>
         <span
@@ -1439,7 +1439,7 @@ export function EditActivityDashboard({
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="truncate text-sm font-medium">
                         {actorName(r.actorCwid)}
-                        {person && <span className="text-muted-foreground font-normal"> · {r.actorCwid}</span>}
+                        {person && <span className="text-muted-foreground font-normal"> · <span className="font-mono">{r.actorCwid}</span></span>}
                       </span>
                       <span className={cn(PILL, "text-[11px]", KIND[kind].chip)}>{KIND[kind].tag}</span>
                     </span>
