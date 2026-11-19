@@ -229,3 +229,32 @@ describe("loadHiddenAuthorshipCounts", () => {
     expect(counts.size).toBe(0);
   });
 });
+
+describe("getDeptPublicationsList — translational stage on the card", () => {
+  const withStage = (pmid: string, stage: string | null, confidence: string | null) => ({
+    ...pubRow(pmid, []),
+    translationalStage: stage,
+    translationalStageConfidence: confidence,
+  });
+
+  it("carries the shown stage only while the flag is on", async () => {
+    const original = process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
+    try {
+      mockPublicationCount.mockResolvedValue(3);
+      mockPublicationFindMany.mockResolvedValue([
+        withStage("1", "T2", "high"),
+        withStage("2", "T1", "low"),
+        withStage("3", "T0", null),
+      ]);
+      process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+      const on = await getDeptPublicationsList("DEPT_STAGE_ON");
+      expect(on.hits.map((h) => h.translationalStage)).toEqual(["T2", undefined, "T0"]);
+      process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "off";
+      const off = await getDeptPublicationsList("DEPT_STAGE_OFF");
+      expect(off.hits.every((h) => !("translationalStage" in h))).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
+      else process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = original;
+    }
+  });
+});

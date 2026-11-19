@@ -5,6 +5,7 @@
  */
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { pubTitleProps } from "@/components/publication/pub-html";
+import { StageBadge } from "@/components/publication/stage-badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { DeptPublicationCard } from "@/lib/api/dept-highlights";
 
@@ -19,6 +20,7 @@ export function PublicationCard({ pub }: { pub: DeptPublicationCard }) {
   if (pub.year) meta.push(String(pub.year));
   if (pub.citationCount > 0)
     meta.push(`${pub.citationCount.toLocaleString()} citations`);
+  if (pub.translationalStage) meta.push(pub.translationalStage);
 
   const href = pub.doi
     ? `https://doi.org/${pub.doi}`
@@ -59,6 +61,9 @@ export function PublicationCard({ pub }: { pub: DeptPublicationCard }) {
           {pub.year && pub.citationCount > 0 && " · "}
           {pub.citationCount > 0 && (
             <span>{pub.citationCount.toLocaleString()} citations</span>
+          )}
+          {pub.translationalStage && (
+            <StageBadge stage={pub.translationalStage} className="ml-2 align-[1px]" />
           )}
         </div>
       )}

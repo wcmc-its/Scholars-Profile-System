@@ -2,13 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { CopyButton } from "@/components/publication/copy-button";
-import { Badge } from "@/components/ui/badge";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
-import {
-  translationalStageDisplay,
-  translationalStageLabel,
-  type TranslationalStage,
-} from "@/lib/translational-stage";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { pubSource } from "@/lib/publication-source";
 
@@ -52,10 +46,6 @@ import { pubSource } from "@/lib/publication-source";
  * boolean; the text is fetched from `/api/publications/[pmid]` (the modal's
  * already-gated detail route) on first open. Requires `pmid`; ignored when an
  * eager `abstract` is provided.
- *
- * `translationalStage` — the paper's shown stage, as an outline badge at the
- * trailing edge (after Abstract). The border sets it apart, so it takes no
- * middot. Only the search and topic rows pass it.
  */
 export function PublicationMeta({
   citationCount,
@@ -70,7 +60,6 @@ export function PublicationMeta({
   abstract,
   lazyAbstract = false,
   defaultAbstractOpen = false,
-  translationalStage,
   className,
 }: {
   citationCount?: number | null;
@@ -85,7 +74,6 @@ export function PublicationMeta({
   abstract?: string | null;
   lazyAbstract?: boolean;
   defaultAbstractOpen?: boolean;
-  translationalStage?: TranslationalStage | null;
   className?: string;
 }) {
   const [abstractOpen, setAbstractOpen] = useState(defaultAbstractOpen);
@@ -249,7 +237,7 @@ export function PublicationMeta({
     );
   }
 
-  if (blocks.length === 0 && !translationalStage) return null;
+  if (blocks.length === 0) return null;
 
   const interleaved: ReactNode[] = [];
   blocks.forEach((b, i) => {
@@ -275,18 +263,6 @@ export function PublicationMeta({
       }
     >
       {interleaved}
-      {translationalStage ? (
-        <Badge
-          variant="outline"
-          data-testid="pub-row-stage"
-          className="text-muted-foreground px-1.5 py-0 text-[11px] font-normal"
-        >
-          <span className="text-foreground font-semibold">
-            {translationalStageDisplay(translationalStage).split(" · ")[0]}
-          </span>{" "}
-          {translationalStageLabel(translationalStage)}
-        </Badge>
-      ) : null}
     </div>
   );
 

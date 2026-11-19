@@ -60,6 +60,8 @@ import { pinDivisionChiefFirst, rankRoster, type RosterSort } from "@/lib/roster
 import { loadRosterCounts } from "@/lib/api/roster-counts";
 import { loadUnitRosterIndex } from "@/lib/api/unit-roster-index";
 import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { displayStage } from "@/lib/translational-stage";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -619,6 +621,8 @@ async function getDivisionPublicationsListUncached(
   divCode: string,
   opts: PubListOpts = {},
 ): Promise<DeptListPubResult> {
+  // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the card's stage badge.
+  const includeStage = resolveSearchPubsTranslationalStageFacet();
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
 
@@ -663,6 +667,8 @@ async function getDivisionPublicationsListUncached(
       journal: true,
       year: true,
       citationCount: true,
+      translationalStage: true,
+      translationalStageConfidence: true,
       doi: true,
       pubmedUrl: true,
       authors: {
@@ -706,6 +712,9 @@ async function getDivisionPublicationsListUncached(
     citationCount: p.citationCount,
     doi: p.doi,
     pubmedUrl: p.pubmedUrl,
+    ...(includeStage && displayStage(p.translationalStage, p.translationalStageConfidence)
+      ? { translationalStage: displayStage(p.translationalStage, p.translationalStageConfidence)! }
+      : {}),
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);

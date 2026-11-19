@@ -89,6 +89,8 @@ import {
   buildExternalMemberHit,
   loadExternalMembersByCuid,
 } from "@/lib/api/external-members";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { displayStage } from "@/lib/translational-stage";
 
 /**
  * Active CWID set for a center's public surfaces. Reads the membership rows,
@@ -1508,6 +1510,8 @@ async function getCenterPublicationsListUncached(
   centerCode: string,
   opts: PubListOpts = {},
 ): Promise<DeptListPubResult> {
+  // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the card's stage badge.
+  const includeStage = resolveSearchPubsTranslationalStageFacet();
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
 
@@ -1551,6 +1555,8 @@ async function getCenterPublicationsListUncached(
       journal: true,
       year: true,
       citationCount: true,
+      translationalStage: true,
+      translationalStageConfidence: true,
       doi: true,
       pubmedUrl: true,
       authors: {
@@ -1594,6 +1600,9 @@ async function getCenterPublicationsListUncached(
     citationCount: p.citationCount,
     doi: p.doi,
     pubmedUrl: p.pubmedUrl,
+    ...(includeStage && displayStage(p.translationalStage, p.translationalStageConfidence)
+      ? { translationalStage: displayStage(p.translationalStage, p.translationalStageConfidence)! }
+      : {}),
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);
