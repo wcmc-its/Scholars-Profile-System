@@ -3690,6 +3690,7 @@ function FacetSidebarPubs({
               count={b.count}
               isActive={activeTranslationalStage.includes(b.value)}
               href={toggleHref("translationalStage", b.value)}
+              wrap
             />
           ))}
           <li className="pt-1 text-[12.5px]">
