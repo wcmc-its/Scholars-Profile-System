@@ -257,7 +257,7 @@ describe("/edit/reports/[report] — slug resolution", () => {
     const result = await page("papers", { center: "meyer" });
     render(result as React.ReactElement);
     expect(screen.getByTestId("report-header").getAttribute("data-n")).toBe("3");
-    expect(h.mockLoadPubsReport).toHaveBeenCalledWith("center", "meyer");
+    expect(h.mockLoadPubsReport).toHaveBeenCalledWith("center", "meyer", { stage: false });
 
     cleanup();
     await expect(page("publications", { center: "meyer" })).rejects.toThrow("__NOT_FOUND__");
@@ -314,7 +314,7 @@ describe("/edit/reports/[report] — the unit gate's kinds", () => {
       requestedKind: "core",
     });
     expect(h.mockLoadReportsContext).toHaveBeenCalledWith("14", OWNER, expect.anything(), "core");
-    expect(h.mockLoadPubsReport).toHaveBeenCalledWith("core", "14");
+    expect(h.mockLoadPubsReport).toHaveBeenCalledWith("core", "14", { stage: false });
   });
 
   it("a denied actor gets the 403 page with the unit popover never rendered, and no loader runs", async () => {
