@@ -546,7 +546,7 @@ describe("/edit/usage range", () => {
     // Radix portals the menu to document.body.
     const menu = within(document.body);
     fireEvent.click(menu.getByRole("button", { name: /Last 90 days/ }));
-    expect(h.mockPush).toHaveBeenCalledWith("/edit/usage?range=90");
+    expect(h.mockPush).toHaveBeenCalledWith("/edit/usage?range=90", { scroll: false });
 
     fireEvent.click(root.getByTestId("usage-range-trigger"));
     fireEvent.click(within(document.body).getByRole("button", { name: /Custom range/ }));
@@ -556,6 +556,7 @@ describe("/edit/usage range", () => {
     fireEvent.click(form.getByRole("button", { name: "Apply" }));
     expect(h.mockPush).toHaveBeenLastCalledWith(
       "/edit/usage?range=custom&from=2026-08-01&to=2026-08-15",
+      { scroll: false },
     );
   });
 });

@@ -79,7 +79,7 @@ function DeptPublicationsListInner({
     params.set("tab", "publications");
     params.set("sort", next);
     params.delete("page");
-    router.push(`${listPath}?${params.toString()}`);
+    router.push(`${listPath}?${params.toString()}`, { scroll: false });
   }
 
   function setStage(next: TranslationalStage | "all") {
@@ -88,7 +88,7 @@ function DeptPublicationsListInner({
     if (next === "all") params.delete("stage");
     else params.set("stage", next);
     params.delete("page");
-    router.push(`${listPath}?${params.toString()}`);
+    router.push(`${listPath}?${params.toString()}`, { scroll: false });
   }
 
   function buildHref(p: number): string {

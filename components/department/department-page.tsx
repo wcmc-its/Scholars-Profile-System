@@ -13,7 +13,6 @@ import {
   type GrantSort,
 } from "@/lib/api/dept-lists";
 import { officialUnitName } from "@/lib/org-unit-names";
-import { isOrgUnitMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
 import { ViceChairsList } from "@/components/department/vice-chairs-list";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
@@ -128,7 +127,6 @@ export async function DepartmentPage({
   // when the roster offers a Division facet, which rides the org-unit facet
   // flag (`DepartmentFacultyClient` gates it on `methodFacet !== undefined`,
   // i.e. this same flag). Flag off ⇒ the chips link the division pages.
-  const divisionChipsFilter = isOrgUnitMethodsFacetEnabled();
   // Pill counts = the preview's visible total (the same number as the card's
   // blurb, its "See all" and the filtered tab), re-sorted by it.
   const researchAreas = applyAreaPreviewCounts(detail.topResearchAreas, areaPreviews);
@@ -232,10 +230,8 @@ export async function DepartmentPage({
 
         <ViceChairsList viceChairs={detail.viceChairs ?? []} />
 
-        {/* Unit Page v2 — a division chip filters the roster's Division facet
-            in place (href `?div=<code>#people` for other tabs / new-tab clicks,
-            filtered client-side on mount — JS-off lands unfiltered) when that
-            facet exists; otherwise it links the division page as before. */}
+        {/* A division chip links its division page; the roster's Division
+            facet does the in-place filtering. */}
         <UnitSubunitChips
           noun={["division", "divisions"]}
           ariaLabel="Divisions"
@@ -243,11 +239,8 @@ export async function DepartmentPage({
           chips={detail.divisions.map((d) => ({
             key: d.code,
             label: d.name,
-            href: divisionChipsFilter
-              ? `${basePath}?div=${encodeURIComponent(d.code)}#people`
-              : `/departments/${detail.dept.slug}/divisions/${d.slug}`,
+            href: `/departments/${detail.dept.slug}/divisions/${d.slug}`,
             count: divisionCounts.get(d.code) ?? 0,
-            filter: divisionChipsFilter ? { param: "div" as const, value: d.code } : undefined,
           }))}
         />
 

@@ -177,22 +177,15 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
         href: "/departments/medicine/divisions/cardiology",
       },
     ]);
-    expect(screen.getByRole("link", { name: "1 division" }).getAttribute("href")).toBe(
-      "#subunits",
-    );
+    // The stats line no longer repeats the subunit count; the list heading carries it.
+    expect(screen.queryByRole("link", { name: "1 division" })).toBeNull();
   });
 
-  // Page-level contract: a division chip filters in place EXACTLY when the
-  // roster offers the Division facet. `DepartmentFacultyClient` shows that facet
-  // only while `methodFacet !== undefined`, which the real `getDepartmentFaculty`
-  // sets iff `isOrgUnitMethodsFacetEnabled()` — the mock below mirrors that
-  // gating, so a page that decided the chip's mode from any other signal fails.
-  it.each([
-    ["on", "/departments/medicine?div=D1#people"],
-    ["off", "/departments/medicine/divisions/cardiology"],
-  ])(
-    "ORG_UNIT_METHODS_FACET=%s: chip filters in place iff the roster gets a methodFacet",
-    async (flag, href) => {
+  // A division chip always links the division page, whether or not the roster
+  // offers the Division facet (that facet does the in-place filtering).
+  it.each(["on", "off"])(
+    "ORG_UNIT_METHODS_FACET=%s: chip links the division page",
+    async (flag) => {
       vi.stubEnv("METHODS_LENS_ENABLED", "on");
       vi.stubEnv("ORG_UNIT_METHODS_FACET", flag);
       try {
@@ -207,12 +200,9 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
         });
         mockGetDivisionCounts.mockResolvedValue(new Map([["D1", 198]]));
         render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
-        const chipHref = screen.getByRole("link", { name: /Cardiology/ }).getAttribute("href");
-        expect(chipHref).toBe(href);
-        const { methodFacet } = mockFacultyClient.mock.calls[0][0] as {
-          methodFacet?: unknown[];
-        };
-        expect(chipHref!.includes("?div=")).toBe(methodFacet !== undefined);
+        expect(screen.getByRole("link", { name: /Cardiology/ }).getAttribute("href")).toBe(
+          "/departments/medicine/divisions/cardiology",
+        );
       } finally {
         vi.unstubAllEnvs();
       }
