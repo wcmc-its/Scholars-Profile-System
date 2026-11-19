@@ -43,7 +43,7 @@ import {
   type ResearchSecurityFacts,
 } from "@/lib/api/research-security-report";
 
-const SECRET_NAME = "Guoqiang Xu";
+const SECRET_NAME = "Liqun Tan";
 const ARTICLE = (articleId: string) => ({
   articleId,
   pmid: Number(articleId),
@@ -63,10 +63,10 @@ const FACTS = {
   people: [
     {
       articleId: "1",
-      cwid: "gux2002",
+      cwid: "lqt9002",
       displayName: SECRET_NAME,
-      firstName: "Guoqiang",
-      lastName: "Xu",
+      firstName: "Liqun",
+      lastName: "Tan",
       campus: "wcm",
       department: "Medicine",
       title: null,
@@ -251,7 +251,7 @@ describe("allowed", () => {
       rows: 1,
     });
     expect(lines[0]).not.toContain(SECRET_NAME);
-    expect(lines[0]).not.toContain("gux2002");
+    expect(lines[0]).not.toContain("lqt9002");
     expect(lines[0]).not.toContain("Soochow");
   });
 

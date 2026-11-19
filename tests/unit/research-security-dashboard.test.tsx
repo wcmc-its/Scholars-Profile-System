@@ -27,10 +27,10 @@ const article: ArticleFact = {
 };
 const candidate: PersonFact = {
   articleId: article.articleId,
-  cwid: "gux2002",
-  displayName: "Guoqiang Xu",
-  firstName: "Guoqiang",
-  lastName: "Xu",
+  cwid: "lqt9002",
+  displayName: "Liqun Tan",
+  firstName: "Liqun",
+  lastName: "Tan",
   campus: "wcm",
   department: "Medicine",
   title: null,

@@ -335,17 +335,17 @@ describe("unattributedPriority", () => {
 });
 
 describe("candidate also lists the entity", () => {
-  const guo = person("1", "gux2002", { displayName: "Guoqiang Xu", firstName: "Guoqiang", lastName: "Xu" });
+  const guo = person("1", "lqt9002", { displayName: "Liqun Tan", firstName: "Liqun", lastName: "Tan" });
   const soochow = (o: Partial<MatchFact> = {}) =>
-    match("1", "Soochow University", { authorName: "Guoqiang Xu", isInstitutionAuthor: true, ...o });
+    match("1", "Soochow University", { authorName: "Liqun Tan", isInstitutionAuthor: true, ...o });
 
   it("is the ETL's verdict (ourAuthorCwids), never a name compared again here", () => {
     // reciterdb's bit alone does not say WHO: nobody is named, so nobody is it.
     expect(candidateListsEntity(guo, [soochow()])).toBe(false);
-    expect(candidateListsEntity(guo, [soochow({ ourAuthorCwids: "gux2002" })])).toBe(true);
-    expect(candidateListsEntity(guo, [soochow({ ourAuthorCwids: "abc1,GUX2002" })])).toBe(true);
+    expect(candidateListsEntity(guo, [soochow({ ourAuthorCwids: "lqt9002" })])).toBe(true);
+    expect(candidateListsEntity(guo, [soochow({ ourAuthorCwids: "abc1,LQT9002" })])).toBe(true);
     // Same displayed name, someone else's id: the ETL decided it is not them.
-    expect(candidateListsEntity(guo, [soochow({ ourAuthorCwids: "xug9001" })])).toBe(false);
+    expect(candidateListsEntity(guo, [soochow({ ourAuthorCwids: "tnl9001" })])).toBe(false);
     // "Yi Ming Wang" on the byline, candidate "Yi Wang": the names look alike,
     // the ETL (reciterdb's rule) said no, and that is the answer.
     const yi = person("1", "yiw2001", { displayName: "Yi Wang", firstName: "Yi", lastName: "Wang" });
@@ -356,15 +356,15 @@ describe("candidate also lists the entity", () => {
   });
 
   it("a person with no id is never the one", () => {
-    expect(listedBy(soochow({ ourAuthorCwids: "gux2002" }), [{ cwid: null }])).toBe(false);
-    expect(listedBy(soochow({ ourAuthorCwids: null }), [{ cwid: "gux2002" }])).toBe(false);
+    expect(listedBy(soochow({ ourAuthorCwids: "lqt9002" }), [{ cwid: null }])).toBe(false);
+    expect(listedBy(soochow({ ourAuthorCwids: null }), [{ cwid: "lqt9002" }])).toBe(false);
   });
 
   it("drives priority 1 in the built rows", () => {
     const f = facts({
       articles: [article("1")],
       people: [{ ...guo, attribution: "pending", reciterScore: 100 }],
-      matches: [soochow({ ourAuthorCwids: "gux2002" })],
+      matches: [soochow({ ourAuthorCwids: "lqt9002" })],
     });
     expect(buildUnattributedRows(f, "both")[0]).toMatchObject({ priority: 1, candidateListsEntity: true });
     expect(buildEntityRows(f, "both")[0]).toMatchObject({ papers: 0, unattributedPapers: 1, unattributedPriority12: 1 });
@@ -377,10 +377,10 @@ describe("candidate also lists the entity", () => {
         { ...guo, attribution: "pending", reciterScore: 30 },
         person("1", "w7", { attribution: "pending", reciterScore: 30 }),
       ],
-      matches: [soochow({ ourAuthorCwids: "gux2002" })],
+      matches: [soochow({ ourAuthorCwids: "lqt9002" })],
     });
     expect(buildUnattributedRows(f, "both").map((r) => [r.person.cwid, r.priority])).toEqual([
-      ["gux2002", 1],
+      ["lqt9002", 1],
       ["w7", 3],
     ]);
   });
