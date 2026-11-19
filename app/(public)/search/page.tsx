@@ -186,12 +186,12 @@ function SearchShellSkeleton() {
         Loading search results…
       </div>
       {/* SearchMeta — h1 */}
-      <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
+      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 pt-5 pb-3">
         <Skeleton className="mb-2 h-7 w-72" />
         <Skeleton className="h-3 w-60" />
       </div>
       {/* ModeTabs — Scholars / Publications / Funding */}
-      <div className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+      <div className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-4 sm:px-6">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex h-[42px] items-center gap-2 px-4">
             <Skeleton className="h-3 w-20" />
@@ -200,7 +200,7 @@ function SearchShellSkeleton() {
         ))}
       </div>
       {/* Facet rail + results column */}
-      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
+      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-4 pt-6 pb-16 sm:px-6 md:grid-cols-[240px_1fr]">
         <ResultsGridFallback type="people" />
       </div>
     </div>
@@ -953,7 +953,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           scope={scope}
         />
         {showAZ && azBuckets ? (
-          <div className="mx-auto max-w-[1280px] px-6 pt-6">
+          <div className="mx-auto max-w-[1280px] px-4 sm:px-6 pt-6">
             <AZDirectory buckets={azBuckets} />
             <div className="mt-2 text-right">
               <Link prefetch={false}
@@ -965,7 +965,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             </div>
           </div>
         ) : null}
-        <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
+        <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-4 pt-6 pb-16 sm:px-6 md:grid-cols-[240px_1fr]">
           {/* Perf streaming — the active tab's full faceted search runs inside
               this Suspense boundary so the shell above (header, chip, tabs,
               counts) paints first and the results grid fills in when ready. The
@@ -1101,7 +1101,7 @@ function SearchMeta({
   taxonomyMatch: TaxonomyMatchResult;
 }) {
   return (
-    <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
+    <div className="mx-auto max-w-[1280px] px-4 sm:px-6 pt-5 pb-3">
       <h1 className="page-title mb-1 text-[28px] leading-tight tracking-[-0.01em]">
         {q ? (
           <>
@@ -1160,7 +1160,7 @@ function ModeTabs({
   const pubHref = tabHref("publications");
   const fundingHref = tabHref("funding");
   return (
-    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 overflow-x-auto border-b border-[#e3e2dd] px-6">
+    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 overflow-x-auto border-b border-[#e3e2dd] px-4 sm:px-6">
       <ModeTab
         href={peopleHref}
         label="Scholars"

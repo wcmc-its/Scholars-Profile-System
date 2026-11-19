@@ -364,8 +364,10 @@ function GrantRow({
 
   return (
     <div className="border-t border-border first:border-t-0">
-      <div className="grid grid-cols-[64px_1fr_auto] items-baseline gap-3 py-3">
-        <HoverTooltip text={title}>
+      {/* Phone width: role chip and award number share the first line and the
+          title runs full width under them. From `sm` up: chip | title | award. */}
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-3 sm:grid-cols-[64px_minmax(0,1fr)_auto] sm:items-baseline sm:gap-y-0">
+        <HoverTooltip text={title} triggerClassName="col-start-1 row-start-1">
           <span
             className={
               group.isActive
@@ -376,7 +378,7 @@ function GrantRow({
             {label}
           </span>
         </HoverTooltip>
-        <div>
+        <div className="col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1">
           <div
             className="text-base font-medium leading-snug"
             dangerouslySetInnerHTML={{ __html: sanitizePubTitle(grant.title) }}
@@ -424,7 +426,7 @@ function GrantRow({
             <button
               type="button"
               onClick={() => setExpanded((e) => !e)}
-              className="group mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
+              className="group mt-1.5 inline-flex min-h-8 items-center gap-1 whitespace-nowrap text-sm text-[var(--color-accent-slate)] sm:min-h-0"
               aria-expanded={expanded}
             >
               <Caret open={expanded} className="text-muted-foreground" />
@@ -443,7 +445,9 @@ function GrantRow({
             <NoPubsLabel tier={noPubsTier(group)} />
           ) : null}
         </div>
-        <AwardNumberDisplay grant={grant} applId={applId} />
+        <div className="col-start-2 row-start-1 justify-self-end sm:col-start-3">
+          <AwardNumberDisplay grant={grant} applId={applId} />
+        </div>
       </div>
 
       {expanded ? (
@@ -453,7 +457,7 @@ function GrantRow({
           applId={applId ?? null}
           coreProjectNum={group.primary.coreProjectNum}
           publications={group.publications}
-          indentClass="ml-[76px]"
+          indentClass="sm:ml-[76px]"
         />
       ) : null}
     </div>
