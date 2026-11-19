@@ -52,10 +52,13 @@ import {
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
-import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
+import {
+  resolveHiddenStudentCoauthorChips,
+  resolveSearchPubsTranslationalStageFacet,
+} from "@/lib/api/search-flags";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
-import type { TranslationalStage } from "@/lib/translational-stage";
+import { displayStage, type TranslationalStage } from "@/lib/translational-stage";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -811,6 +814,9 @@ export type TopicPublicationHit = {
    *  feed's per-row "· {subarea}" label (TAXONOMY_FEED_LOAD_MORE). Null when
    *  the pub has none. */
   primarySubtopicId: string | null;
+  /** The paper's shown stage (`displayStage`). Absent when it has none or
+   *  SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET is off. */
+  translationalStage?: TranslationalStage;
 };
 
 export type TopicPublicationsResult = {
@@ -937,6 +943,9 @@ export async function getTopicPublications(
   // shape so flipping `SEARCH_PUB_TAB_IMPACT=off` hides the new number on
   // topic pages too. Computed once here, passed to mapToTopicPublicationHit.
   const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+  // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET — the row label rides the same flag
+  // as the Stage select; off, the hit carries no stage.
+  const includeStage = resolveSearchPubsTranslationalStageFacet();
 
   const page = Math.max(0, opts.page ?? 0);
   const pageSize = opts.pageSize ?? TOPIC_PUBLICATIONS_PAGE_SIZE;
@@ -1068,6 +1077,9 @@ export async function getTopicPublications(
     // GPT-generated rubric justification (issue #316 PR-C) — surfaced as a
     // hover tooltip on the inline `Impact: NN` value.
     impactJustification: true,
+    // Raw stage + confidence; `displayStage` decides what the row shows.
+    translationalStage: true,
+    translationalStageConfidence: true,
     // Issue #327 — paper-level top topic (`Publication.topTopicId` + its
     // FK relation). The mapper drops the field when it matches the
     // current page's topic so the redundant inline label never renders.
@@ -1159,6 +1171,7 @@ export async function getTopicPublications(
         r as any,
         authorsByPmid.get(r.pmid),
         includeImpact,
+        includeStage,
         topicSlug,
         pmidsWithAbstract.has(r.pmid),
       ),
@@ -1196,6 +1209,7 @@ function mapToTopicPublicationHit(
   r: any,
   wcmAuthors: TopicPublicationHit["authors"] | undefined,
   includeImpact: boolean,
+  includeStage: boolean,
   currentTopicSlug: string,
   hasAbstract: boolean,
 ): TopicPublicationHit {
@@ -1236,6 +1250,9 @@ function mapToTopicPublicationHit(
   ) {
     topTopic = { id: rawTopTopic.id, label: rawTopTopic.label };
   }
+  const stage = includeStage
+    ? displayStage(r.publication.translationalStage, r.publication.translationalStageConfidence)
+    : null;
   return {
     pmid: r.pmid,
     title: r.publication.title ?? "",
@@ -1252,6 +1269,7 @@ function mapToTopicPublicationHit(
     hasAbstract,
     topTopic,
     primarySubtopicId: typeof r.primarySubtopicId === "string" ? r.primarySubtopicId : null,
+    ...(stage ? { translationalStage: stage } : {}),
   };
 }
 

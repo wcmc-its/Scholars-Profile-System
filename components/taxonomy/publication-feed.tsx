@@ -108,6 +108,8 @@ export type FeedHit = {
   authors: ComponentProps<typeof AuthorChipRow>["authors"];
   /** #1881 — drives the lazy Abstract link (#1537); the text is never shipped. */
   hasAbstract?: boolean;
+  /** Topic hits only; the paper's shown translational stage, absent when none. */
+  translationalStage?: TranslationalStage;
   /** #327 — topic hits only: the paper's argmax topic when it is another topic. */
   topTopic?: { id: string; label: string } | null;
   /** #1166 — family hits under `?entity=` only: usage sentences, best first. */
@@ -935,7 +937,7 @@ export function PubRow({
       </div>
       {/* Kept as `journal || year` (not a boolean) for parity: a row with no
           journal and year 0 has always rendered a stray "0" here. */}
-      {(areaLabel ? true : hit.journal || hit.year) && (
+      {(areaLabel || hit.translationalStage ? true : hit.journal || hit.year) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           {hit.journal && (
             <span
@@ -949,6 +951,14 @@ export function PubRow({
             <>
               {hit.journal || hit.year ? <span aria-hidden="true">·</span> : null}
               <span data-testid="pub-area-label">{areaLabel}</span>
+            </>
+          ) : null}
+          {hit.translationalStage ? (
+            <>
+              {hit.journal || hit.year || areaLabel ? <span aria-hidden="true">·</span> : null}
+              <span data-testid="pub-row-stage">
+                {translationalStageDisplay(hit.translationalStage)}
+              </span>
             </>
           ) : null}
         </div>
