@@ -2255,11 +2255,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -3010,11 +3010,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -3702,11 +3702,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -4325,11 +4325,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -5387,11 +5387,11 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ROSTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",

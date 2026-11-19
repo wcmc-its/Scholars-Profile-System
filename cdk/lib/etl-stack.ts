@@ -1092,15 +1092,16 @@ export class EtlStack extends Stack {
       ORCID_HISTORY_BAND: "on",
       // Ithaca ORCID plan, step 1 — etl:ithaca-roster writes Cornell Ithaca scholar
       // rows only when this is exactly "on"; otherwise it logs the counts it would
-      // write. Staging on; prod off until the staging load is reviewed.
+      // write. On in both envs since 2026-11-19: the prod dry run matched the
+      // staging load (9,305 rows to create, 0 held by WCM rows).
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      ITHACA_ROSTER: env === "prod" ? "off" : "on",
+      ITHACA_ROSTER: "on",
       // Ithaca ORCID plan, step 2 — Cornell Ithaca rows join ORCID curation: Affiliation
       // Manager and Identity candidates (etl:orcid-candidates, etl:identity) and evidence
       // scoring (etl:orcid-evidence), only when this is exactly "on". Never auto-confirmed
-      // and never pushed, whatever the value. Staging on; prod off until the staging queue
-      // is reviewed. Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      ITHACA_ORCID_CURATION: env === "prod" ? "off" : "on",
+      // and never pushed, whatever the value. On in both envs since 2026-11-19.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ITHACA_ORCID_CURATION: "on",
       // Research security dashboard — etl:research-security copies reciterdb's
       // watch-list screen (sensitive, per-person) into research_security_* only
       // when this is exactly "on"; otherwise the step reads and writes nothing.
