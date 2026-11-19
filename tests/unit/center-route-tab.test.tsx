@@ -28,7 +28,15 @@ describe("CenterRoute ?tab= parse", () => {
       centerSlug: "synthetic-center",
       tab: "grants",
       sort: "end_date",
+      stage: null,
       page: 2,
+    });
+  });
+
+  it("passes ?stage= through raw (CenterPage validates it)", async () => {
+    expect(await propsFor({ tab: "publications", stage: "T2" })).toMatchObject({
+      tab: "publications",
+      stage: "T2",
     });
   });
 

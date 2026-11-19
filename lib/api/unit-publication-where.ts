@@ -10,7 +10,9 @@
  *   1. it has at least one CONFIRMED author who is a unit member, and
  *   2. (with `area`) a unit member has a `publication_topic` row for that
  *      parent topic, and
- *   3. its pmid is not one of the unit's dark pmids (`resolveUnitDarkPmids`).
+ *   3. its pmid is not one of the unit's dark pmids (`resolveUnitDarkPmids`), and
+ *   4. (with `stage`) it is shown at that translational stage (`displayStage`:
+ *      the stage matches and confidence is not "low"; no confidence is shown).
  *
  * `membership` is the unit's member predicate as the Publications tab defines
  * it — `{ scholar: { deptCode, deletedAt: null, status: "active" } }` for a
@@ -24,6 +26,7 @@
  * server-side.
  */
 import type { Prisma } from "@/lib/generated/prisma/client";
+import type { TranslationalStage } from "@/lib/translational-stage";
 
 export type UnitMembershipWhere =
   | { scholar: { deptCode: string; deletedAt: null; status: string } }
@@ -33,15 +36,27 @@ export function unitPublicationWhere({
   membership,
   darkPmids,
   area,
+  stage,
 }: {
   membership: UnitMembershipWhere;
   darkPmids: string[];
   /** Parent topic id (`Topic.id`) to restrict to; omit for every area. */
   area?: string | null;
+  /** Translational stage to restrict to; omit for every stage. */
+  stage?: TranslationalStage | null;
 }): Prisma.PublicationWhereInput {
   return {
     authors: { some: { isConfirmed: true, ...membership } },
     ...(area ? { publicationTopics: { some: { parentTopicId: area, ...membership } } } : {}),
     ...(darkPmids.length > 0 ? { pmid: { notIn: darkPmids } } : {}),
+    ...(stage
+      ? {
+          translationalStage: stage,
+          OR: [
+            { translationalStageConfidence: null },
+            { translationalStageConfidence: { not: "low" } },
+          ],
+        }
+      : {}),
   };
 }

@@ -42,12 +42,14 @@ export default async function DepartmentRoute({
           ? "collaboration"
           : "scholars";
   const sortRaw = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
+  const stageRaw = Array.isArray(sp.stage) ? sp.stage[0] : sp.stage;
   return (
     <DepartmentPage
       deptSlug={slug}
       page={page}
       tab={tab}
       sort={sortRaw ?? null}
+      stage={stageRaw ?? null}
     />
   );
 }
