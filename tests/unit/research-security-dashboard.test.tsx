@@ -27,10 +27,10 @@ const article: ArticleFact = {
 };
 const candidate: PersonFact = {
   articleId: article.articleId,
-  cwid: "gux2002",
-  displayName: "Guoqiang Xu",
-  firstName: "Guoqiang",
-  lastName: "Xu",
+  cwid: "lqt9002",
+  displayName: "Liqun Tan",
+  firstName: "Liqun",
+  lastName: "Tan",
   campus: "wcm",
   department: "Medicine",
   title: null,
@@ -363,7 +363,7 @@ describe("ResearchSecurityDashboard", () => {
             rows: [],
             groups: [
               {
-                key: "gux2002",
+                key: "lqt9002",
                 person: candidate,
                 rows,
                 papers: 7,
@@ -377,8 +377,8 @@ describe("ResearchSecurityDashboard", () => {
         })}
       />,
     );
-    const mine = "/edit/research-security?view=unattributed&person=gux2002";
-    expect(screen.getByRole("link", { name: "Guoqiang Xu" }).getAttribute("href")).toBe(mine);
+    const mine = "/edit/research-security?view=unattributed&person=lqt9002";
+    expect(screen.getByRole("link", { name: "Liqun Tan" }).getAttribute("href")).toBe(mine);
     expect(screen.getByText("7 rows")).toBeTruthy();
     // Five papers are previewed; the rest are behind the person.
     expect(screen.getByText("Paper 4")).toBeTruthy();

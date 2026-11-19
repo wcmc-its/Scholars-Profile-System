@@ -314,11 +314,11 @@ describe("name keys: reciterdb's is_our_author, ported", () => {
     expect(isOurAuthor("Yiming Wang", keys("Yi Ming", "Wang"))).toBe(true);
     expect(isOurAuthor("Yi-Ming Wang", keys("Yiming", "Wang"))).toBe(true);
     expect(isOurAuthor("Yi Ming Wang", keys("Yi-Ming", "Wang"))).toBe(true);
-    expect(isOurAuthor("Guóqiang M. Xu", keys("Guoqiang", "Xu"))).toBe(true);
-    expect(isOurAuthor("Guoqiang Xue", keys("Guoqiang", "Xu"))).toBe(false);
-    expect(isOurAuthor("Xu", keys("Guoqiang", "Xu"))).toBe(false);
-    expect(isOurAuthor(null, keys("Guoqiang", "Xu"))).toBe(false);
-    expect(isOurAuthor("Guoqiang Xu", [])).toBe(false);
+    expect(isOurAuthor("Lìqun M. Tan", keys("Liqun", "Tan"))).toBe(true);
+    expect(isOurAuthor("Liqun Tang", keys("Liqun", "Tan"))).toBe(false);
+    expect(isOurAuthor("Tan", keys("Liqun", "Tan"))).toBe(false);
+    expect(isOurAuthor(null, keys("Liqun", "Tan"))).toBe(false);
+    expect(isOurAuthor("Liqun Tan", [])).toBe(false);
   });
 
   it("a person has every key from person AND identity, so the publishing name counts", () => {
