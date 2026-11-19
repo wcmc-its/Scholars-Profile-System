@@ -29,6 +29,7 @@ import {
   countUnattributedPapers,
   forConfirmedAuthors,
   loadCategories,
+  loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
@@ -41,6 +42,7 @@ import {
   PAGE_SIZE,
   parseResearchSecurityParams,
   withKnownCategory,
+  withKnownEntity,
   type ResearchSecurityUiParams,
 } from "@/lib/edit/research-security-dashboard";
 import { buildResearchSecurityMethodsDoc } from "@/lib/edit/research-security-methods-doc";
@@ -100,7 +102,9 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
   // loaded, and the checked filters are the ones every link, the form and the
   // export are built from: a stale category is dropped, never applied unseen.
   const categories = await loadCategories(db.read, requested.filters);
-  const f = withKnownCategory(requested.filters, categories);
+  const known = withKnownCategory(requested.filters, categories);
+  const entities = await loadEntities(db.read, known);
+  const f = withKnownEntity(known, entities);
   const ui = { ...requested, filters: f };
   const facts = await loadResearchSecurityFacts(db.read, f);
   const entity = buildEntityRows(facts, f.campus);
@@ -108,6 +112,11 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
   const paper = buildPaperRows(facts, f.campus);
   const funding = buildFundingRows(facts, f.campus);
   const unattributed = buildUnattributedRows(facts, f.campus);
+
+  const who = f.person
+    ? facts.people.find((p) => p.cwid?.toLowerCase() === f.person)
+    : undefined;
+  const personLabel = who ? `${who.displayName} (${who.cwid})` : undefined;
 
   let current: ResearchSecurityViewRows;
   let paged: { page: number; totalPages: number };
@@ -158,6 +167,8 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
       page={paged.page}
       totalPages={paged.totalPages}
       categories={categories}
+      entities={entities}
+      personLabel={personLabel}
       dataAsOf={facts.dataAsOf}
       methods={buildResearchSecurityMethodsDoc()}
     />

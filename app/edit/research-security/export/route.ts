@@ -1,5 +1,5 @@
 /**
- * GET /edit/research-security/export?view=&campus=&list=&category=&from=&to=&consortia=
+ * GET /edit/research-security/export?view=&campus=&list=&category=&entity=&person=&from=&to=&consortia=
  *
  * The current view of the research security dashboard as an `.xlsx`, under the
  * same filters the page reads (`parseResearchSecurityParams`): every row of
@@ -23,6 +23,7 @@ import {
   buildUnattributedRows,
   forConfirmedAuthors,
   loadCategories,
+  loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
 } from "@/lib/api/research-security-report";
@@ -34,6 +35,7 @@ import {
   isResearchSecurityDashboardEnabled,
   parseResearchSecurityParams,
   withKnownCategory,
+  withKnownEntity,
 } from "@/lib/edit/research-security-dashboard";
 import {
   buildResearchSecurityMethodsDoc,
@@ -77,10 +79,11 @@ export async function GET(request: Request) {
   // Same rule as the page: a category the selected list does not have is
   // dropped, so the workbook is never silently empty and its Criteria sheet
   // names the filters that were really applied.
-  const filters = withKnownCategory(
+  const known = withKnownCategory(
     requested.filters,
     await loadCategories(db.read, requested.filters),
   );
+  const filters = withKnownEntity(known, await loadEntities(db.read, known));
   const methods = buildResearchSecurityMethodsDoc();
   const date = new Date().toISOString().slice(0, 10);
   const facts = await loadResearchSecurityFacts(db.read, filters);

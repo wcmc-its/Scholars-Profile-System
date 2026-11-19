@@ -43,11 +43,11 @@ export function buildResearchSecurityMethodsDoc(): ResearchSecurityMethodsDoc {
       {
         heading: "Lists",
         body:
-          "House Section 1286 nominations: the 134 entities in the House Select Committee on the CCP's " +
+          "House Select Committee nominations: the 134 entities in the House Select Committee on the CCP's " +
           "letter of 2026-10-01 recommending additions to the Section 1286 List (14 CAS institutes, 62 " +
           "defense and national laboratories with duplicate names merged, 58 SASTIND universities). These " +
           "are nominations, not designations.\n" +
-          "Usual suspects: a short curated list of entities of concern regardless of any one letter " +
+          "Defense-affiliated institutions (curated): a short list of entities of concern regardless of any one letter " +
           "(the Seven Sons of National Defence, defence universities and research academies, PLA medical " +
           "universities and hospitals).\n" +
           "Country of concern: any co-author affiliation in China (including Hong Kong and Macau), Russia, " +

@@ -74,6 +74,7 @@ function props(over: Partial<ResearchSecurityDashboardProps> = {}): ResearchSecu
     page: 1,
     totalPages: 3,
     categories: ["CAS institute", "SASTIND university"],
+    entities: ["Shanghai Jiao Tong University", "Soochow University"],
     dataAsOf: new Date("2026-11-17T08:00:00Z"),
     methods: buildResearchSecurityMethodsDoc(),
     ...over,
@@ -111,7 +112,7 @@ describe("ResearchSecurityDashboard", () => {
     expect(screen.getAllByText(/never added to an entity total/).length).toBeGreaterThan(0);
   });
 
-  it("the line under the tiles names campus, category and the consortium rule", () => {
+  it("names the filters in force as chips, each removable on its own", () => {
     render(
       <ResearchSecurityDashboard
         {...props({
@@ -119,9 +120,92 @@ describe("ResearchSecurityDashboard", () => {
         })}
       />,
     );
-    expect(
-      screen.getByText(/Cornell University · .* · category: CAS institute · .* · 50\+ author consortia excluded · data as of/),
-    ).toBeTruthy();
+    const chips = within(screen.getByRole("list", { name: "Filters applied" }));
+    expect(chips.getByText("Cornell University")).toBeTruthy();
+    expect(chips.getByText("50+ author consortia excluded")).toBeTruthy();
+    expect(chips.getByRole("link", { name: "Remove filter: Category: CAS institute" }).getAttribute("href")).toBe(
+      "/edit/research-security?campus=ithaca&consortia=exclude",
+    );
+    // A filter at its default is named but has nothing to remove.
+    expect(chips.queryByRole("link", { name: /Remove filter: All listed entities/ })).toBeNull();
+    expect(screen.getByText(/Data as of 2026-11-17/)).toBeTruthy();
+  });
+
+  it("an entity row drills down: the name and its counts link to the rows behind them", () => {
+    const ui = parseResearchSecurityParams({ campus: "ithaca" });
+    render(<ResearchSecurityDashboard {...props({ ui })} />);
+    const e = "entity=Shanghai+Jiao+Tong+University";
+    expect(screen.getByRole("link", { name: "Shanghai Jiao Tong University" }).getAttribute("href")).toBe(
+      `/edit/research-security?view=paper&campus=ithaca&${e}`,
+    );
+    expect(screen.getByRole("link", { name: "280" }).getAttribute("href")).toBe(
+      `/edit/research-security?view=person&campus=ithaca&${e}`,
+    );
+    expect(screen.getByRole("link", { name: "201" }).getAttribute("href")).toBe(
+      `/edit/research-security?view=unattributed&campus=ithaca&${e}`,
+    );
+    // The WCM count links to WCM papers whatever campus is selected.
+    expect(screen.getByRole("link", { name: "254" }).getAttribute("href")).toBe(
+      `/edit/research-security?view=paper&campus=wcm&${e}`,
+    );
+  });
+
+  it("the headline tiles link to their views and keep the filters", () => {
+    render(<ResearchSecurityDashboard {...props({ ui: parseResearchSecurityParams({ consortia: "exclude" }) })} />);
+    expect(screen.getByRole("link", { name: /Papers awaiting review/ }).getAttribute("href")).toBe(
+      "/edit/research-security?view=unattributed&consortia=exclude",
+    );
+  });
+
+  it("a person row links to that person's papers, and each entity to the pair", () => {
+    render(
+      <ResearchSecurityDashboard
+        {...props({
+          ui: parseResearchSecurityParams({ view: "person" }),
+          current: {
+            view: "person",
+            rows: [
+              {
+                cwid: "abc2001",
+                name: "Ann Chen",
+                campus: "wcm",
+                department: "Medicine",
+                title: "Professor",
+                papers: 4,
+                papersExcludingConsortia: 4,
+                entities: ["Soochow University"],
+              },
+            ],
+          },
+        })}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Ann Chen" }).getAttribute("href")).toBe(
+      "/edit/research-security?view=paper&person=abc2001",
+    );
+    expect(screen.getByRole("link", { name: "Soochow University" }).getAttribute("href")).toBe(
+      "/edit/research-security?view=paper&entity=Soochow+University&person=abc2001",
+    );
+  });
+
+  it("the country tier offers a Country filter instead of Category, and keeps a person filter", () => {
+    const { container } = render(
+      <ResearchSecurityDashboard
+        {...props({
+          ui: parseResearchSecurityParams({ list: "country-of-concern", entity: "China", person: "abc2001" }),
+          summary: { ...props().summary, tier: "country" },
+          entities: ["China", "Russia"],
+          personLabel: "Ann Chen (abc2001)",
+        })}
+      />,
+    );
+    const form = container.querySelector("form")!;
+    expect(form.querySelector('select[name="category"]')).toBeNull();
+    expect(within(form).getByLabelText("Country")).toBeTruthy();
+    expect((form.querySelector('select[name="entity"]') as HTMLSelectElement).value).toBe("China");
+    expect((form.querySelector('input[name="person"]') as HTMLInputElement).value).toBe("abc2001");
+    expect(screen.getByText("Person: Ann Chen (abc2001)")).toBeTruthy();
+    expect(screen.getByText(/every count covers this person's papers only/)).toBeTruthy();
   });
 
   it("tabs, pager and export are links that keep the filters", () => {

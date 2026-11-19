@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   loadFacts: vi.fn(),
   loadStrings: vi.fn(),
   loadCategories: vi.fn(),
+  loadEntities: vi.fn(),
   realSession: vi.fn(),
 }));
 
@@ -29,6 +30,7 @@ vi.mock("@/lib/api/research-security-report", async (orig) => ({
   loadResearchSecurityFacts: h.loadFacts,
   loadMatchedStrings: h.loadStrings,
   loadCategories: h.loadCategories,
+  loadEntities: h.loadEntities,
 }));
 
 import ExcelJS from "exceljs";
@@ -128,6 +130,7 @@ beforeEach(() => {
   h.loadFacts.mockResolvedValue(FACTS);
   h.loadStrings.mockResolvedValue([]);
   h.loadCategories.mockResolvedValue(["SASTIND university"]);
+  h.loadEntities.mockResolvedValue(["Soochow University"]);
   h.realSession.mockResolvedValue({ cwid: "viewer1" });
   log = vi.spyOn(console, "log").mockImplementation(() => {});
 });
@@ -196,6 +199,14 @@ describe("allowed", () => {
     expect(h.loadFacts.mock.calls[0][1]).toMatchObject({ list: "country-of-concern", category: undefined });
     await get("?list=country-of-concern&category=Country");
     expect(h.loadFacts.mock.calls[1][1]).toMatchObject({ category: "Country" });
+  });
+
+  it("applies an entity the list has and a person, and drops an entity it does not have", async () => {
+    h.loadEntities.mockResolvedValue(["China", "Russia"]);
+    await get("?list=country-of-concern&entity=China&person=ABC2001");
+    expect(h.loadFacts.mock.calls[0][1]).toMatchObject({ entity: "China", person: "abc2001" });
+    await get("?list=country-of-concern&entity=Soochow%20University");
+    expect(h.loadFacts.mock.calls[1][1]).toMatchObject({ entity: undefined });
   });
 
   // The workbook is the page's view, every row of it: the data rows of the

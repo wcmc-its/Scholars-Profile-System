@@ -99,6 +99,9 @@ export type ResearchSecurityFacts = {
   flags: FlagFact[];
   /** When the nightly copy was last replaced; null before the first load. */
   dataAsOf: Date | null;
+  /** The person filter (a cwid): every view keeps only this person's papers.
+   *  Applied by `indexFacts`, so the rules below hold under it unchanged. */
+  person?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +122,7 @@ function matchWhere(f: ResearchSecurityFilters) {
   return {
     listCode: { in: listCodesFor(f.list) },
     ...(f.category ? { category: f.category } : {}),
+    ...(f.entity ? { entity: f.entity } : {}),
   };
 }
 
@@ -195,6 +199,7 @@ export async function loadResearchSecurityFacts(
     matches,
     flags,
     dataAsOf: asOf._max.lastRefreshedAt ?? null,
+    person: f.person,
   };
 }
 
@@ -210,6 +215,24 @@ export async function loadCategories(
     orderBy: { category: "asc" },
   });
   return rows.map((r) => r.category);
+}
+
+/** The entities (countries, in the country tier) the entity filter offers for
+ *  a list and category choice. */
+export async function loadEntities(
+  client: ResearchSecurityClient,
+  f: ResearchSecurityFilters,
+): Promise<string[]> {
+  const rows = await client.researchSecurityMatch.findMany({
+    where: {
+      listCode: { in: listCodesFor(f.list) },
+      ...(f.category ? { category: f.category } : {}),
+    },
+    distinct: ["entity"],
+    select: { entity: true },
+    orderBy: { entity: "asc" },
+  });
+  return rows.map((r) => r.entity);
 }
 
 export type MatchedString = {
@@ -321,17 +344,35 @@ type Index = {
   matches: Map<string, MatchFact[]>;
 };
 
+function isPerson(p: Pick<PersonFact, "cwid">, cwid: string): boolean {
+  return p.cwid != null && p.cwid.toLowerCase() === cwid.toLowerCase();
+}
+
 function indexFacts(facts: ResearchSecurityFacts, campus: CampusFilter): Index {
   const known = facts.people.filter((p) => facts.articles.has(p.articleId));
   const confirmedAny = known.filter((p) => p.attribution === "confirmed");
+  const who = facts.person;
+  // Under a person filter a paper is confirmed only when THAT person is a
+  // confirmed author of it in the campus filter (all of the paper's confirmed
+  // authors stay listed), and only that person's own open rows are kept.
+  // `confirmedAny` is not narrowed: whether a paper is already confirmed for
+  // someone is the same fact with or without the filter.
+  const confirmed = group(
+    confirmedAny.filter((p) => inCampus(p, campus)),
+    (p) => p.articleId,
+  );
+  if (who) {
+    for (const [id, people] of confirmed) {
+      if (!people.some((p) => isPerson(p, who))) confirmed.delete(id);
+    }
+  }
   return {
-    confirmed: group(
-      confirmedAny.filter((p) => inCampus(p, campus)),
-      (p) => p.articleId,
-    ),
+    confirmed,
     confirmedAny: group(confirmedAny, (p) => p.articleId),
     unattributed: group(
-      known.filter((p) => p.attribution !== "confirmed" && inCampus(p, campus)),
+      known.filter(
+        (p) => p.attribution !== "confirmed" && inCampus(p, campus) && (!who || isPerson(p, who)),
+      ),
       (p) => p.articleId,
     ),
     matches: group(
@@ -512,6 +553,8 @@ export function buildPersonRows(facts: ResearchSecurityFacts, campus: CampusFilt
   for (const [articleId, people] of ix.confirmed) {
     if (!ix.matches.has(articleId)) continue;
     for (const p of people) {
+      // Under a person filter this view is that person's row alone.
+      if (facts.person && !isPerson(p, facts.person)) continue;
       const k = personKey(p);
       const entry = byPerson.get(k) ?? { person: p, articleIds: new Set<string>() };
       entry.articleIds.add(articleId);

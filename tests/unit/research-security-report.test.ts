@@ -20,6 +20,7 @@ import {
   countUnattributedPapers,
   forConfirmedAuthors,
   listedBy,
+  loadEntities,
   loadMatchedStrings,
   loadResearchSecurityFacts,
   paginate,
@@ -553,6 +554,57 @@ describe("paginate", () => {
     expect(paginate(rows, 2, 50).rows[0]).toBe(50);
     expect(paginate(rows, 99, 50).page).toBe(3);
     expect(paginate([], 1, 50)).toMatchObject({ page: 1, totalPages: 1, rows: [] });
+  });
+});
+
+describe("drill-down filters: entity and person", () => {
+  it("the entity filter narrows the matches in SQL, and the entity list is read per list and category", async () => {
+    const client = fakeClient();
+    const f = parseResearchSecurityParams({ list: LIST_COUNTRY, entity: "China", person: "W1" }).filters;
+    const loaded = await loadResearchSecurityFacts(client, f);
+    expect(client.researchSecurityMatch.findMany.mock.calls[0][0].where).toMatchObject({
+      listCode: { in: [LIST_COUNTRY] },
+      entity: "China",
+    });
+    expect(loaded.person).toBe("w1");
+    await loadEntities(client, parseResearchSecurityParams({ list: LIST_HOUSE, category: "CAS institute", entity: "X" }).filters);
+    const call = client.researchSecurityMatch.findMany.mock.calls[1][0];
+    expect(call.where).toEqual({ listCode: { in: [LIST_HOUSE] }, category: "CAS institute" });
+    expect(call).toMatchObject({ distinct: ["entity"] });
+  });
+
+  it("a person filter keeps only the papers that person is a confirmed author of", () => {
+    const f = { ...base, person: "w1" };
+    expect(buildPaperRows(f, "both").map((r) => r.article.articleId)).toEqual(["1"]);
+    expect(buildPersonRows(f, "both").map((r) => r.cwid)).toEqual(["w1"]);
+    expect(buildEntityRows(f, "both").map((r) => [r.entity, r.papers, r.unattributedPapers])).toEqual([
+      ["Peking University", 1, 0],
+    ]);
+    expect(buildFundingRows(f, "both").map((r) => r.article.articleId)).toEqual(["5"]);
+    expect(buildUnattributedRows(f, "both")).toEqual([]);
+  });
+
+  it("a paper's other confirmed authors stay listed, but By person is that person's row alone", () => {
+    const shared = { ...base, people: [...base.people, person("1", "i9", { campus: "ithaca" })], person: "W1" };
+    const [paper] = buildPaperRows(shared, "both");
+    expect(paper.wcmAuthors).toEqual(["Name w1 (w1)"]);
+    expect(paper.ithacaAuthors).toEqual(["Name i9 (i9)"]);
+    expect(buildPersonRows(shared, "both").map((r) => r.cwid)).toEqual(["w1"]);
+  });
+
+  it("a candidate's open rows are theirs alone, and a paper confirmed for someone else is still not counted", () => {
+    const w2 = buildUnattributedRows({ ...base, person: "w2" }, "both");
+    expect(w2.map((r) => [r.article.articleId, r.person.cwid, r.alreadyConfirmed])).toEqual([["2", "w2", true]]);
+    expect(countUnattributedPapers(w2)).toBe(0);
+    // w2 is not a CONFIRMED author of paper 2, so it is not one of w2's confirmed papers.
+    expect(buildPaperRows({ ...base, person: "w2" }, "both")).toEqual([]);
+    const w3 = buildUnattributedRows({ ...base, person: "w3" }, "both");
+    expect(w3.map((r) => r.article.articleId)).toEqual(["3"]);
+    expect(countUnattributedPapers(w3)).toBe(1);
+  });
+
+  it("the campus filter still applies under a person filter", () => {
+    expect(buildPaperRows({ ...base, person: "w1" }, "ithaca")).toEqual([]);
   });
 });
 
