@@ -24,6 +24,7 @@ import {
   arrangeFundingRows,
   arrangePaperRows,
   arrangePersonRows,
+  buildEntityProfile,
   buildEntityRows,
   buildFundingRows,
   buildPaperRows,
@@ -41,12 +42,14 @@ import {
   paginate,
   searchUnattributedRows,
   sortUnattributedGroups,
+  topAffiliations,
 } from "@/lib/api/research-security-report";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { canViewDashboard } from "@/lib/edit/dashboard-access";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import {
+  LIST_COUNTRY,
   PAGE_SIZE,
   parseResearchSecurityParams,
   withKnownCategory,
@@ -57,6 +60,9 @@ import { buildResearchSecurityMethodsDoc } from "@/lib/edit/research-security-me
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
+
+/** The entity card reads affiliation strings for at most this many papers. */
+const ENTITY_STRINGS_PAPERS = 2000;
 
 export const metadata = {
   title: "Research security — Scholars Console",
@@ -130,6 +136,22 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
         select: { cwid: true, slug: true, status: true },
       })
     : null;
+
+  // One entity: the summary card. The affiliation text is read for its
+  // confirmed papers only, newest first, and not at all in the country tier,
+  // where free-text strings under one country do not repeat.
+  const entityProfile = buildEntityProfile(facts, f.campus, f.entity);
+  const entityAffiliations =
+    entityProfile && f.list !== LIST_COUNTRY
+      ? topAffiliations(
+          await loadMatchedStrings(
+            db.read,
+            entityProfile.confirmedArticleIds.slice(0, ENTITY_STRINGS_PAPERS),
+            f,
+          ),
+          entityProfile.entity,
+        )
+      : undefined;
 
   // Search and sort belong to the selected view's table alone: the tiles and
   // the tab counts are never narrowed by them.
@@ -207,6 +229,8 @@ async function ResearchSecurityBody({ ui: requested }: { ui: ResearchSecurityUiP
             }
           : undefined
       }
+      entityProfile={entityProfile}
+      entityAffiliations={entityAffiliations}
       viewShown={paged.total}
       viewTotal={viewTotal}
       dataAsOf={facts.dataAsOf}

@@ -22,6 +22,7 @@ import {
   attributionReason,
   isoDay,
   type ArticleFact,
+  type EntityProfile,
   type EntityRow,
   type FundingRow,
   type MatchedString,
@@ -47,6 +48,7 @@ import {
   defaultSortDir,
   filterChips,
   researchSecurityQuery,
+  type ListFilter,
   type ResearchSecurityFilters,
   type ResearchSecurityUiParams,
   type ResearchSecurityView,
@@ -92,6 +94,10 @@ export type ResearchSecurityDashboardProps = {
   profile?: PersonProfile | null;
   /** Where else this person has a record; absent when they have none. */
   profileLinks?: { console: string; publicProfile?: string };
+  /** The entity of the entity filter, when it has a match in scope. */
+  entityProfile?: EntityProfile | null;
+  /** Its most common matched affiliation strings (entity lists only). */
+  entityAffiliations?: Array<{ affiliation: string; papers: number }>;
   /** Rows of the selected view after the search, and before it. */
   viewShown?: number;
   viewTotal?: number;
@@ -1339,6 +1345,196 @@ function PersonCard({
   );
 }
 
+const cardHeading = "text-muted-foreground text-[11.5px] font-medium tracking-[.06em] uppercase";
+
+/** Everything the screen holds about the selected entity (or country), under
+ *  the other filters. Shown above the tabs whenever an entity filter is on. */
+function EntityCard({
+  profile,
+  affiliations,
+  ui,
+}: {
+  profile: EntityProfile;
+  affiliations?: Array<{ affiliation: string; papers: number }>;
+  ui: ResearchSecurityUiParams;
+}) {
+  const to = linkBuilder(ui.filters);
+  const country = ui.filters.list === LIST_COUNTRY;
+  const maxYear = Math.max(1, ...profile.byYear.map((y) => y.papers));
+  const maxPeople = Math.max(1, ...profile.topPeople.map((p) => p.papers));
+  const maxDept = Math.max(1, ...profile.departments.map((d) => d.papers));
+  return (
+    <section
+      aria-label={`On file for ${profile.entity}`}
+      className={cn(cardClass, "border-l-apollo-slate flex flex-col gap-4 border-l-4 px-4 py-4 sm:px-5")}
+    >
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-lg leading-tight font-semibold">{profile.entity}</h2>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {profile.listings.map((l) => (
+              <Chip key={`${l.listCode}|${l.category}`}>
+                {LIST_FILTER_LABEL[l.listCode as ListFilter] ?? l.listCode}
+                {country ? "" : ` · ${l.category}`}
+                {l.listNo != null ? ` · no. ${l.listNo}` : ""}
+              </Chip>
+            ))}
+          </div>
+        </div>
+        <Link href={to(ui.view, { entity: undefined })} className={cn(linkClass, "ml-auto text-[13px]")}>
+          Close
+        </Link>
+      </div>
+
+      <div className="flex flex-wrap gap-2.5">
+        <Stat
+          label="Confirmed co-publications"
+          value={profile.confirmedPapers}
+          href={to("paper")}
+          sub={`WCM ${profile.papersWcm.toLocaleString("en-US")} · Cornell ${profile.papersIthaca.toLocaleString("en-US")} · ${profile.confirmedExcludingConsortia.toLocaleString("en-US")} excluding consortia`}
+        />
+        <Stat
+          label="Our authors"
+          value={profile.people}
+          href={to("person")}
+          sub="Distinct confirmed WCM and Cornell people"
+        />
+        <Stat
+          label={country ? "Our author lists the country" : "Our author lists it"}
+          value={profile.papersOurAuthorListsEntity}
+          tone="pending"
+          sub="Confirmed papers where the co-author here has one of our authors' names: verify"
+        />
+        <Stat
+          label="Not yet attributed"
+          value={profile.unattributedPapers}
+          href={to("unattributed")}
+          tone="pending"
+          sub="Papers awaiting review · not in any confirmed count"
+        />
+        <Stat
+          label="Also funding-flagged"
+          value={profile.fundingFlagPapers}
+          sub="Confirmed co-publications naming CSC or a talent program"
+        />
+      </div>
+
+      {profile.byYear.length > 1 && (
+        <div className="flex flex-col gap-1.5">
+          <h3 className={cardHeading}>Confirmed co-publications by year</h3>
+          <ol className="flex h-[92px] items-end gap-1.5" aria-label="Confirmed co-publications by year">
+            {profile.byYear.map((y) => (
+              <li
+                key={y.year}
+                title={`${y.year}: ${y.papers.toLocaleString("en-US")}`}
+                className="flex h-full max-w-14 min-w-7 flex-1 flex-col items-center justify-end gap-0.5"
+              >
+                <span className="text-[11.5px] font-medium tabular-nums">
+                  {y.papers.toLocaleString("en-US")}
+                </span>
+                <span
+                  className="bg-apollo-slate w-full rounded-t-[3px]"
+                  style={{ height: `${Math.max(y.papers > 0 ? 3 : 1, (y.papers / maxYear) * 52)}px` }}
+                />
+                <span className="text-muted-foreground text-[11.5px] tabular-nums">{y.year}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(320px,100%),1fr))] gap-x-8 gap-y-4">
+        {profile.topPeople.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <h3 className={cardHeading}>
+              Our people with the most co-publications
+              {profile.people > profile.topPeople.length ? ` · top ${profile.topPeople.length} of ${profile.people.toLocaleString("en-US")}` : ""}
+            </h3>
+            <ul className="flex flex-col gap-1 text-[13px]">
+              {profile.topPeople.map((p) => (
+                <li key={p.cwid ?? p.name} className="flex items-center gap-2">
+                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
+                    {p.cwid ? (
+                      <Link href={to(ui.view, { person: p.cwid.toLowerCase() })} className={linkClass}>
+                        {p.name}
+                      </Link>
+                    ) : (
+                      p.name
+                    )}
+                    <CampusChip campus={p.campus} />
+                    {p.department && <span className="text-muted-foreground">{p.department}</span>}
+                  </span>
+                  <BarCell value={p.papers} max={maxPeople} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {profile.departments.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <h3 className={cardHeading}>Our departments</h3>
+            <ul className="flex flex-col gap-1 text-[13px]">
+              {profile.departments.map((d) => (
+                <li key={`${d.campus}|${d.department}`} className="flex items-center gap-2">
+                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5">
+                    {d.department}
+                    <CampusChip campus={d.campus} />
+                  </span>
+                  <BarCell value={d.papers} max={maxDept} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {profile.coAuthors.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h3 className={cardHeading}>
+            Co-authors {country ? "there" : "at this entity"} on two or more of these papers
+          </h3>
+          <ul className="flex flex-wrap gap-1.5">
+            {profile.coAuthors.map((c) => (
+              <li
+                key={c.name}
+                title={c.ourName ? "Has the name of one of our confirmed authors: verify" : undefined}
+                className={cn(chipBase, CHIP_TONE[c.ourName ? "amber" : "neutral"], "gap-1.5")}
+              >
+                {c.name}
+                <span className="font-semibold tabular-nums">{c.papers}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-muted-foreground text-[12.5px]">
+            Grouped by the name in the byline, which is approximate: two people can share a name.
+            Amber = the name is also one of our confirmed authors&apos;. Verify against the matched
+            strings (By paper).
+          </p>
+        </div>
+      )}
+
+      {affiliations && affiliations.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <h3 className={cardHeading}>Most common matched affiliation strings</h3>
+          <ul className="flex flex-col gap-1 text-[13px]">
+            {affiliations.map((a) => (
+              <li key={a.affiliation} className="border-apollo-slate-tint-border flex gap-2 border-l-2 pl-2">
+                <span className="text-apollo-ink-2 min-w-0 flex-1 break-words">{a.affiliation}</span>
+                <span className="font-semibold tabular-nums">{a.papers.toLocaleString("en-US")}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="text-muted-foreground text-[12.5px]">
+        Screening results under the filters above, not a determination: a match says an affiliation
+        string fits a pattern, nothing about the collaboration itself.
+      </p>
+    </section>
+  );
+}
+
 const VIEW_NOTE: Record<ResearchSecurityView, string> = {
   entity:
     "Confirmed co-publications per listed entity. Select a name or a count to see the rows behind it. The two shaded columns are the not-yet-attributed tier and are not part of any confirmed count.",
@@ -1410,6 +1606,8 @@ export function ResearchSecurityDashboard({
   entities,
   profile,
   profileLinks,
+  entityProfile,
+  entityAffiliations,
   viewShown,
   viewTotal,
   dataAsOf,
@@ -1487,6 +1685,9 @@ export function ResearchSecurityDashboard({
             </p>
           </div>
 
+          {entityProfile && (
+            <EntityCard profile={entityProfile} affiliations={entityAffiliations} ui={ui} />
+          )}
           {profile && <PersonCard profile={profile} links={profileLinks} ui={ui} />}
           {f.person && !profile && (
             <p className={cn(cardClass, "text-apollo-ink-2 px-4 py-3 text-[13.5px]")}>

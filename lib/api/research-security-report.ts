@@ -846,6 +846,180 @@ export function buildPersonProfile(
 }
 
 // ---------------------------------------------------------------------------
+// One entity (or country): everything this screen holds about it
+// ---------------------------------------------------------------------------
+
+export type EntityProfile = {
+  entity: string;
+  /** The list(s) it is on, with the category and number each gives it. */
+  listings: Array<{ listCode: string; category: string; listNo: number | null }>;
+  /** Confirmed co-publications under the filters. */
+  confirmedPapers: number;
+  papersWcm: number;
+  papersIthaca: number;
+  confirmedExcludingConsortia: number;
+  /** Distinct confirmed people of ours. */
+  people: number;
+  papersOurAuthorListsEntity: number;
+  /** Papers with a match here that nobody is confirmed on yet. */
+  unattributedPapers: number;
+  /** Confirmed co-publications that also carry a funding flag. */
+  fundingFlagPapers: number;
+  /** Confirmed co-publications per publication year, every year in the span. */
+  byYear: Array<{ year: number; papers: number }>;
+  topPeople: Array<{
+    cwid: string | null;
+    name: string;
+    campus: string;
+    department: string | null;
+    papers: number;
+  }>;
+  departments: Array<{ department: string; campus: string; papers: number }>;
+  /**
+   * Co-authors at the entity on two or more confirmed papers, by the name in
+   * the byline. APPROXIMATE: two people can share a name, and one person can
+   * be spelled two ways. `ourName` = the name is one of our confirmed authors'.
+   */
+  coAuthors: Array<{ name: string; papers: number; ourName: boolean }>;
+  /** The articles the affiliation strings are read for (confirmed, newest first). */
+  confirmedArticleIds: string[];
+};
+
+const PROFILE_PEOPLE = 10;
+const PROFILE_DEPARTMENTS = 8;
+const PROFILE_COAUTHORS = 10;
+
+/** The entity of the entity filter, summarized under the other filters; null
+ *  when it has no match in scope. `facts.matches` may hold other entities
+ *  (a caller without the SQL filter): only this entity's are read. */
+export function buildEntityProfile(
+  facts: ResearchSecurityFacts,
+  campus: CampusFilter,
+  entity: string | undefined,
+): EntityProfile | null {
+  if (!entity) return null;
+  const mine = facts.matches.filter((m) => m.entity === entity && facts.articles.has(m.articleId));
+  if (mine.length === 0) return null;
+  const ix = indexFacts(facts, campus);
+  const byArticle = group(mine, (m) => m.articleId);
+  const confirmedIds = [...byArticle.keys()]
+    .filter((id) => ix.confirmed.has(id))
+    .sort((a, b) => byDateDesc(facts.articles.get(a)!, facts.articles.get(b)!));
+  const open = new Set(
+    buildUnattributedRows(facts, campus)
+      .filter((r) => !r.alreadyConfirmed && byArticle.has(r.article.articleId))
+      .map((r) => r.article.articleId),
+  );
+  const flagged = new Set(facts.flags.map((f) => f.articleId));
+  const has = (id: string, c: Campus) => ix.confirmed.get(id)!.some((p) => p.campus === c);
+
+  const years = new Map<number, number>();
+  for (const id of confirmedIds) {
+    const y = facts.articles.get(id)!.publicationDate?.getUTCFullYear();
+    if (y != null) years.set(y, (years.get(y) ?? 0) + 1);
+  }
+  const span = [...years.keys()];
+  const byYear =
+    span.length === 0
+      ? []
+      : Array.from({ length: Math.max(...span) - Math.min(...span) + 1 }, (_, i) => {
+          const year = Math.min(...span) + i;
+          return { year, papers: years.get(year) ?? 0 };
+        });
+
+  const people = new Map<string, EntityProfile["topPeople"][number]>();
+  const departments = new Map<string, EntityProfile["departments"][number]>();
+  const coAuthors = new Map<string, { name: string; ids: Set<string>; ourName: boolean }>();
+  for (const id of confirmedIds) {
+    const ours = ix.confirmed.get(id)!;
+    for (const [k, [p]] of group(ours, personKey)) {
+      const e = people.get(k) ?? {
+        cwid: p.cwid,
+        name: p.displayName,
+        campus: p.campus,
+        department: p.department,
+        papers: 0,
+      };
+      e.papers += 1;
+      people.set(k, e);
+    }
+    // A paper counts once per department, however many of its people are on it.
+    for (const [k, [p]] of group(
+      ours.filter((p) => p.department),
+      (p) => `${p.campus}\u0000${p.department}`,
+    )) {
+      const d = departments.get(k) ?? { department: p.department!, campus: p.campus, papers: 0 };
+      d.papers += 1;
+      departments.set(k, d);
+    }
+    for (const m of byArticle.get(id)!) {
+      const name = m.authorName?.trim();
+      if (!name) continue;
+      const k = name.toLowerCase();
+      const c = coAuthors.get(k) ?? { name, ids: new Set<string>(), ourName: false };
+      c.ids.add(id);
+      c.ourName ||= listedBy(m, ours);
+      coAuthors.set(k, c);
+    }
+  }
+  const top = <T extends { papers: number }>(rows: T[], label: (r: T) => string, n: number) =>
+    rows.sort((a, b) => b.papers - a.papers || label(a).localeCompare(label(b))).slice(0, n);
+
+  return {
+    entity,
+    listings: [...group(mine, (m) => `${m.listCode}\u0000${m.category}`).values()]
+      .map(([m]) => ({ listCode: m.listCode, category: m.category, listNo: m.listNo }))
+      .sort((a, b) => a.listCode.localeCompare(b.listCode) || a.category.localeCompare(b.category)),
+    confirmedPapers: confirmedIds.length,
+    papersWcm: confirmedIds.filter((id) => has(id, "wcm")).length,
+    papersIthaca: confirmedIds.filter((id) => has(id, "ithaca")).length,
+    confirmedExcludingConsortia: confirmedIds.filter(
+      (id) => !isConsortium(facts.articles.get(id)!.totalAuthors),
+    ).length,
+    people: people.size,
+    papersOurAuthorListsEntity: confirmedIds.filter((id) =>
+      byArticle.get(id)!.some((m) => listedBy(m, ix.confirmed.get(id)!)),
+    ).length,
+    unattributedPapers: open.size,
+    fundingFlagPapers: confirmedIds.filter((id) => flagged.has(id)).length,
+    byYear,
+    topPeople: top([...people.values()], (p) => p.name, PROFILE_PEOPLE),
+    departments: top([...departments.values()], (d) => d.department, PROFILE_DEPARTMENTS),
+    coAuthors: top(
+      [...coAuthors.values()]
+        .map((c) => ({ name: c.name, papers: c.ids.size, ourName: c.ourName }))
+        .filter((c) => c.papers >= 2),
+      (c) => c.name,
+      PROFILE_COAUTHORS,
+    ),
+    confirmedArticleIds: confirmedIds,
+  };
+}
+
+/** The affiliation strings that recur most among an entity's matches: they
+ *  show which sub-units (a hospital, a school, a lab) are involved. Strings
+ *  are compared ignoring case and spacing; a paper counts once per string. */
+export function topAffiliations(
+  strings: readonly Pick<MatchedString, "articleId" | "entity" | "affiliation">[],
+  entity: string,
+  limit = 8,
+): Array<{ affiliation: string; papers: number }> {
+  const seen = new Map<string, { affiliation: string; ids: Set<string> }>();
+  for (const m of strings) {
+    const text = m.affiliation?.replace(/\s+/g, " ").trim();
+    if (!text || m.entity !== entity) continue;
+    const k = text.toLowerCase();
+    const e = seen.get(k) ?? { affiliation: text, ids: new Set<string>() };
+    e.ids.add(m.articleId);
+    seen.set(k, e);
+  }
+  return [...seen.values()]
+    .map((e) => ({ affiliation: e.affiliation, papers: e.ids.size }))
+    .sort((a, b) => b.papers - a.papers || a.affiliation.localeCompare(b.affiliation))
+    .slice(0, limit);
+}
+
+// ---------------------------------------------------------------------------
 // Search and sort of one view's table
 // ---------------------------------------------------------------------------
 

@@ -13,6 +13,7 @@ import {
   arrangeFundingRows,
   arrangePaperRows,
   arrangePersonRows,
+  buildEntityProfile,
   buildEntityRows,
   buildFundingRows,
   buildPaperRows,
@@ -32,6 +33,7 @@ import {
   paginate,
   searchUnattributedRows,
   sortUnattributedGroups,
+  topAffiliations,
   unattributedPriority,
   type MatchedString,
   type ArticleFact,
@@ -755,6 +757,104 @@ describe("one person: everything on file", () => {
   it("a person with only open suggestions still has a profile", () => {
     const p = buildPersonProfile({ ...base, person: "w3" }, "both")!;
     expect([p.name, p.confirmedPapers, p.openPapers, p.firstYear]).toEqual(["Name w3", 0, 1, null]);
+  });
+});
+
+describe("one entity: everything on file", () => {
+  const f = facts({
+    articles: [
+      article("1", { publicationDate: new Date("2022-05-01T00:00:00Z") }),
+      article("2", { publicationDate: new Date("2024-02-01T00:00:00Z"), totalAuthors: 80 }),
+      article("3", { publicationDate: new Date("2024-06-01T00:00:00Z") }),
+      article("4"),
+      article("5"),
+    ],
+    people: [
+      person("1", "w1"),
+      person("1", "w9"),
+      person("2", "w1"),
+      person("3", "i1", { campus: "ithaca", department: "Physics" }),
+      person("4", "w3", { attribution: "pending", reciterScore: 95 }),
+      person("5", "w1"),
+    ],
+    matches: [
+      match("1", "Peking University", { authorName: "Wei Li", ourAuthorCwids: "w1" }),
+      match("1", "Peking University", { authorName: "Bo Xu", authorRank: 2 }),
+      match("2", "Peking University", { authorName: "wei li" }),
+      match("3", "Peking University", { authorName: "Wei Li", listCode: LIST_USUAL, category: "Seven Sons", listNo: null }),
+      match("4", "Peking University"),
+      match("5", "Zhejiang University"),
+    ],
+    flags: [{ articleId: "2", program: "China Scholarship Council (CSC)", agency: "CSC", grantId: "1" }],
+  });
+
+  it("is null with no entity, and for an entity with no match in scope", () => {
+    expect(buildEntityProfile(f, "both", undefined)).toBeNull();
+    expect(buildEntityProfile(f, "both", "Nowhere University")).toBeNull();
+  });
+
+  it("summarizes volume, trend, our people and departments, and recurring co-authors", () => {
+    const p = buildEntityProfile(f, "both", "Peking University")!;
+    expect(p).toMatchObject({
+      entity: "Peking University",
+      listings: [
+        { listCode: LIST_HOUSE, category: "SASTIND university", listNo: 1 },
+        { listCode: LIST_USUAL, category: "Seven Sons", listNo: null },
+      ],
+      confirmedPapers: 3,
+      papersWcm: 2,
+      papersIthaca: 1,
+      confirmedExcludingConsortia: 2,
+      people: 3,
+      papersOurAuthorListsEntity: 1,
+      unattributedPapers: 1,
+      fundingFlagPapers: 1,
+      // Every year in the span, so a gap year reads as zero.
+      byYear: [
+        { year: 2022, papers: 1 },
+        { year: 2023, papers: 0 },
+        { year: 2024, papers: 2 },
+      ],
+      // Newest first; the open paper (4) and the other entity's paper (5) are not here.
+      confirmedArticleIds: ["3", "2", "1"],
+    });
+    expect(p.topPeople.map((x) => [x.cwid, x.papers])).toEqual([["w1", 2], ["i1", 1], ["w9", 1]]);
+    // Paper 1 has two Medicine people: it counts once for the department.
+    expect(p.departments).toEqual([
+      { department: "Medicine", campus: "wcm", papers: 2 },
+      { department: "Physics", campus: "ithaca", papers: 1 },
+    ]);
+    // Names are grouped ignoring case; a co-author on one paper is left out.
+    expect(p.coAuthors).toEqual([{ name: "Wei Li", papers: 3, ourName: true }]);
+  });
+
+  it("respects the campus filter", () => {
+    const p = buildEntityProfile(f, "ithaca", "Peking University")!;
+    expect([p.confirmedPapers, p.people, p.confirmedArticleIds]).toEqual([1, 1, ["3"]]);
+  });
+
+  it("the most common affiliation strings count a paper once, ignoring case and spacing", () => {
+    const s = (articleId: string, affiliation: string | null, entity = "Peking University") => ({
+      articleId,
+      entity,
+      affiliation,
+    });
+    expect(
+      topAffiliations(
+        [
+          s("1", "Peking University Third Hospital, Beijing"),
+          s("1", "peking university  third hospital, beijing"),
+          s("2", "Peking University Third Hospital, Beijing"),
+          s("2", "School of Physics, Peking University"),
+          s("3", null),
+          s("3", "Zhejiang University", "Zhejiang University"),
+        ],
+        "Peking University",
+      ),
+    ).toEqual([
+      { affiliation: "Peking University Third Hospital, Beijing", papers: 2 },
+      { affiliation: "School of Physics, Peking University", papers: 1 },
+    ]);
   });
 });
 

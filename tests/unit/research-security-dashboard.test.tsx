@@ -248,6 +248,53 @@ describe("ResearchSecurityDashboard", () => {
     );
   });
 
+  it("an entity filter shows the entity card, with its figures and people linked", () => {
+    render(
+      <ResearchSecurityDashboard
+        {...props({
+          ui: parseResearchSecurityParams({ view: "paper", entity: "Soochow University" }),
+          current: { view: "paper", rows: [], matchedStrings: [] },
+          entityProfile: {
+            entity: "Soochow University",
+            listings: [{ listCode: "house-1286-nominations", category: "SASTIND university", listNo: 40 }],
+            confirmedPapers: 41,
+            papersWcm: 30,
+            papersIthaca: 12,
+            confirmedExcludingConsortia: 39,
+            people: 17,
+            papersOurAuthorListsEntity: 2,
+            unattributedPapers: 9,
+            fundingFlagPapers: 1,
+            byYear: [
+              { year: 2023, papers: 16 },
+              { year: 2024, papers: 25 },
+            ],
+            topPeople: [{ cwid: "abc2001", name: "Ann Chen", campus: "wcm", department: "Medicine", papers: 8 }],
+            departments: [{ department: "Medicine", campus: "wcm", papers: 22 }],
+            coAuthors: [{ name: "Wei Li", papers: 5, ourName: true }],
+            confirmedArticleIds: [],
+          },
+          entityAffiliations: [{ affiliation: "First Affiliated Hospital of Soochow University", papers: 14 }],
+        })}
+      />,
+    );
+    const card = within(screen.getByRole("region", { name: "On file for Soochow University" }));
+    const e = "entity=Soochow+University";
+    expect(card.getByText("House Select Committee nominations (Oct 2026) · SASTIND university · no. 40")).toBeTruthy();
+    expect(card.getByRole("link", { name: "41" }).getAttribute("href")).toBe(`/edit/research-security?view=paper&${e}`);
+    expect(card.getByRole("link", { name: "17" }).getAttribute("href")).toBe(`/edit/research-security?view=person&${e}`);
+    expect(card.getByRole("link", { name: "9" }).getAttribute("href")).toBe(`/edit/research-security?view=unattributed&${e}`);
+    expect(card.getByText("WCM 30 · Cornell 12 · 39 excluding consortia")).toBeTruthy();
+    expect(card.getByRole("list", { name: "Confirmed co-publications by year" }).children).toHaveLength(2);
+    // A person keeps the entity, so both cards show.
+    expect(card.getByRole("link", { name: "Ann Chen" }).getAttribute("href")).toBe(
+      `/edit/research-security?view=paper&${e}&person=abc2001`,
+    );
+    expect(card.getByText("Wei Li").closest("li")!.getAttribute("title")).toMatch(/verify/);
+    expect(card.getByText("First Affiliated Hospital of Soochow University")).toBeTruthy();
+    expect(card.getByRole("link", { name: "Close" }).getAttribute("href")).toBe("/edit/research-security?view=paper");
+  });
+
   it("says so when the selected person is on nothing in scope", () => {
     render(<ResearchSecurityDashboard {...props({ ui: parseResearchSecurityParams({ person: "zzz9" }), profile: null })} />);
     expect(screen.getByText(/Nothing is on file for/)).toBeTruthy();
