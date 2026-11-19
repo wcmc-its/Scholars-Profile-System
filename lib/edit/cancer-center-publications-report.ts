@@ -37,6 +37,7 @@ import { loadConfirmedCorePmidsByCore } from "@/lib/api/cores";
 import { loadDivisionMemberCwids } from "@/lib/api/divisions";
 import type { ReportableUnitKind } from "@/lib/edit/cancer-center-reports";
 import { normalizeJournalAbbrev } from "@/lib/journal-abbrev";
+import { displayStage, type TranslationalStage } from "@/lib/translational-stage";
 
 /** `impactScore1` (current-year JIF) threshold for the report's "high impact"
  *  headline stat. See the `JournalImpactFactor` schema doc comment for how
@@ -93,6 +94,10 @@ export type PublicationsReportRow = {
    *  are exactly the people on the bylines of the work it enabled. Keying it
    *  on members instead would leave the rail permanently empty. */
   authorRoleCategories: ReadonlyArray<string>;
+  /** The paper's shown translational stage (`displayStage`: T0..T3-4, low
+   *  confidence hidden). Null when it has none, or when the caller did not ask
+   *  for stage (`opts.stage`, the SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET flag). */
+  translationalStage: TranslationalStage | null;
 };
 
 export type PublicationsReport = {
@@ -251,6 +256,8 @@ async function resolvePublicationScope(
 export async function loadUnitPublicationsReport(
   kind: ReportableUnitKind,
   code: string,
+  /** `stage` — fill `translationalStage` (the body passes the flag). */
+  opts: { stage?: boolean } = {},
 ): Promise<PublicationsReport> {
   const scope = await resolvePublicationScope(kind, code);
   if (scope === null) return EMPTY_REPORT;
@@ -266,6 +273,8 @@ export async function loadUnitPublicationsReport(
       impactScore: true,
       impactJustification: true,
       synopsis: true,
+      translationalStage: true,
+      translationalStageConfidence: true,
       // The Person-type facet's key — see `resolvePublicationScope`. For a
       // member kind this is only the CONFIRMED MEMBER authors, never the full
       // author list (which includes non-member co-authors); for a core it is
@@ -345,6 +354,9 @@ export async function loadUnitPublicationsReport(
       impactJustification: p.impactJustification ?? null,
       synopsis: p.synopsis ?? null,
       authorRoleCategories,
+      translationalStage: opts.stage
+        ? displayStage(p.translationalStage, p.translationalStageConfidence)
+        : null,
     });
   }
   rows.sort((a, b) => {

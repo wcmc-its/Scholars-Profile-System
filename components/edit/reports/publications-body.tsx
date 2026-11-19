@@ -32,12 +32,42 @@ import {
 } from "@/lib/edit/cancer-center-publications-report";
 import type { ReportableUnitKind } from "@/lib/edit/cancer-center-reports";
 import type { ReportRender, UnitReportProps } from "@/lib/edit/report-registry";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
+import { TRANSLATIONAL_STAGES } from "@/lib/translational-stage";
 
 function pct(n: number): string {
   return `${Math.round(n)}%`;
 }
 
-function ReportSummary({ report, kind }: { report: PublicationsReport; kind: ReportableUnitKind }) {
+/** Stage mix of the MATCHED publications (the table's rows), with the
+ *  unclassified remainder stated, so the four stages are never read as the
+ *  whole set. Only while SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET is on. */
+function StageMixLine({ report }: { report: PublicationsReport }) {
+  const counts = new Map<string, number>();
+  for (const r of report.rows) {
+    const key = r.translationalStage ?? "none";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const staged = report.matchedPublications - (counts.get("none") ?? 0);
+  return (
+    <p className="text-muted-foreground mt-1 text-sm" data-testid="pubs-report-stage-line">
+      Translational stage, matched publications:{" "}
+      {TRANSLATIONAL_STAGES.map((st) => `${st.replace("-", "\u2013")} ${(counts.get(st) ?? 0).toLocaleString()}`).join(" · ")}
+      {" · "}No stage {(counts.get("none") ?? 0).toLocaleString()}
+      {report.matchedPublications > 0 ? ` (${pct((staged / report.matchedPublications) * 100)} classified).` : "."}
+    </p>
+  );
+}
+
+function ReportSummary({
+  report,
+  kind,
+  stageEnabled,
+}: {
+  report: PublicationsReport;
+  kind: ReportableUnitKind;
+  stageEnabled: boolean;
+}) {
   const { totalPublications, matchedPublications, matchRatePct, highImpactCount, highImpactRatePct } = report;
 
   if (totalPublications === 0) {
@@ -65,6 +95,7 @@ function ReportSummary({ report, kind }: { report: PublicationsReport; kind: Rep
         Of those, <strong>{highImpactCount.toLocaleString()}</strong> ({pct(highImpactRatePct)}) are in a
         journal with a current Impact Factor of {HIGH_IMPACT_THRESHOLD} or higher.
       </p>
+      {stageEnabled ? <StageMixLine report={report} /> : null}
       <p className="text-muted-foreground mt-1 text-xs">
         Unmatched publications are omitted from the table below — their journal isn&rsquo;t in the
         Impact Factor source, or its abbreviation didn&rsquo;t match exactly.
@@ -80,7 +111,8 @@ export async function renderPublicationsReport({
   kind,
   ctx,
 }: UnitReportProps): Promise<ReportRender> {
-  const report = await loadUnitPublicationsReport(kind, code);
+  const stageEnabled = resolveSearchPubsTranslationalStageFacet();
+  const report = await loadUnitPublicationsReport(kind, code, { stage: stageEnabled });
 
   return {
     subtitle: (
@@ -100,8 +132,10 @@ export async function renderPublicationsReport({
     ),
     main: (
       <>
-        <ReportSummary report={report} kind={kind} />
-        {report.totalPublications > 0 ? <PublicationsReportTable rows={report.rows} /> : null}
+        <ReportSummary report={report} kind={kind} stageEnabled={stageEnabled} />
+        {report.totalPublications > 0 ? (
+          <PublicationsReportTable rows={report.rows} stageEnabled={stageEnabled} />
+        ) : null}
       </>
     ),
   };
