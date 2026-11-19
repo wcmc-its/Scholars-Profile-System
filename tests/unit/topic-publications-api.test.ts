@@ -377,6 +377,44 @@ describe("getTopicPublications", () => {
       expect(countSql).toContain("translational_stage");
     });
 
+    it("hits carry the shown stage only while the flag is on", async () => {
+      const original = process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
+      const withStage = (pmid: string, stage: string | null, confidence: string | null) => {
+        const r = makePtRow({ pmid });
+        Object.assign(r.publication, {
+          translationalStage: stage,
+          translationalStageConfidence: confidence,
+        });
+        return r;
+      };
+      const rows = [
+        withStage("1", "T2", "high"),
+        withStage("2", "T0", null),
+        withStage("3", "T1", "low"),
+        withStage("4", "NA", "high"),
+        withStage("5", null, null),
+      ];
+      try {
+        mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+        mockTransaction.mockResolvedValue(txn({ rows, total: 5 }));
+        process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "on";
+        const on = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+        expect(on!.hits.map((h) => h.translationalStage)).toEqual([
+          "T2",
+          "T0",
+          undefined,
+          undefined,
+          undefined,
+        ]);
+        process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = "off";
+        const off = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+        expect(off!.hits.every((h) => !("translationalStage" in h))).toBe(true);
+      } finally {
+        if (original === undefined) delete process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET;
+        else process.env.SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET = original;
+      }
+    });
+
     it("no stage ⇒ no stage filter", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       mockTransaction.mockResolvedValue(txn());

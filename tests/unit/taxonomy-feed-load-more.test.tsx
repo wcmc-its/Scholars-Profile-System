@@ -77,6 +77,7 @@ type Server = {
   parentAlso?: number;
   subtopicOf?: (i: number) => string | null;
   familyOf?: (i: number) => string;
+  stageOf?: (i: number) => string | undefined;
   /** Row indexes the server drops from a page (dark pubs filtered after paging). */
   dropped?: Set<number>;
 };
@@ -114,6 +115,7 @@ function stubServer(s: Server) {
         hasAbstract: false,
         primarySubtopicId: s.subtopicOf ? s.subtopicOf(i) : null,
         familyLabel: s.familyOf ? s.familyOf(i) : undefined,
+        translationalStage: s.stageOf ? s.stageOf(i) : undefined,
       };
       });
     const body = {
@@ -394,6 +396,14 @@ describe("topic feed, Load more", () => {
     rerender(<TopicPublicationFeed topicSlug="cardio" activeSubtopic="sub_a" loadMore subtopicLabels={labels} />);
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(screen.queryByTestId("pub-area-label")).toBeNull();
+  });
+
+  it("a row shows its translational stage on the journal line, and nothing when it has none", async () => {
+    stubServer({ strongly: 2, also: 0, stageOf: (i) => (i === 0 ? "T2" : undefined) });
+    render(<TopicPublicationFeed topicSlug="cardio" activeSubtopic={null} loadMore />);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const text = rows().map((li) => within(li).queryByTestId("pub-row-stage")?.textContent ?? null);
+    expect(text).toEqual(["T2 · Clinical trials and efficacy", null]);
   });
 
   it("flag off: no label, numbered pages, stacked tiers (unchanged)", async () => {
