@@ -79,7 +79,7 @@ export function UsageRangePicker({
 
   const go = (href: string) => {
     setOpen(false);
-    startTransition(() => router.push(href));
+    startTransition(() => router.push(href, { scroll: false }));
   };
 
   return (

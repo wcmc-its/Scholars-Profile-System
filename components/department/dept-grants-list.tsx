@@ -63,7 +63,7 @@ function DeptGrantsListInner({
     params.set("tab", "grants");
     params.set("sort", next);
     params.delete("page");
-    router.push(`${basePath}?${params.toString()}`);
+    router.push(`${basePath}?${params.toString()}`, { scroll: false });
   }
 
   function buildHref(p: number): string {
