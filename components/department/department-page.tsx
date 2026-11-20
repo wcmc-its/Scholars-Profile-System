@@ -183,7 +183,7 @@ export async function DepartmentPage({
       </Breadcrumb>
 
       {/* Hero card (Unit Page v2) — eyebrow + website link, name, description,
-          the stats line, the chair card beside them, vice chairs, and
+          the stats line, the chair card with the vice chairs beside it, and
           divisions. Top research areas were cut from the department hero
           (ranked by volume, they named the broad areas every large department
           shares); the Publications tab's area filter and the
@@ -203,31 +203,30 @@ export async function DepartmentPage({
             />
           </span>
         </div>
-        {/* Title block and chair card side by side on wide screens: the chair
-            card used to take a full-width row of its own under the title. */}
-        <div className="mt-2 flex flex-col gap-x-8 gap-y-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <h1 className="page-title text-[40px] leading-[1.15] text-balance">
-              {deptDisplayName}
-            </h1>
-            <UnitStatsLine stats={stats} variant="inline" />
-            {detail.dept.description && (
-              <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
-                {detail.dept.description}
-              </p>
-            )}
-          </div>
+        <h1 className="page-title mt-2 text-[40px] leading-[1.15] text-balance">
+          {deptDisplayName}
+        </h1>
+        <UnitStatsLine stats={stats} variant="inline" />
+        {detail.dept.description && (
+          <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
+            {detail.dept.description}
+          </p>
+        )}
+
+        {/* Leadership row: the chair card on the left and the vice chairs
+            beside it on wide screens, instead of each taking full-width rows
+            of their own. Stacks below `lg`. */}
+        <div className="mt-[22px] flex flex-col gap-x-8 gap-y-4 lg:flex-row lg:items-start">
           {detail.chair && (
             <LeaderCard
               leader={detail.chair}
               role={detail.chair.role}
               interim={detail.chair.isInterim}
-              className="mt-0 lg:w-[360px] lg:flex-none"
+              className="mt-0 lg:w-[320px] lg:flex-none"
             />
           )}
+          <ViceChairsList viceChairs={detail.viceChairs ?? []} className="min-w-0 flex-1" />
         </div>
-
-        <ViceChairsList viceChairs={detail.viceChairs ?? []} />
 
         {/* A division chip links its division page; the roster's Division
             facet does the in-place filtering. */}
