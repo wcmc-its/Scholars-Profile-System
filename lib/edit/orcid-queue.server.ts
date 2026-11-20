@@ -29,6 +29,7 @@ import {
   isOrcidCandidateSource,
   isReciterWorkStatus,
   ORCID_QUEUE_BANDS,
+  ORCID_UNDO_WINDOW_MS,
   pairState,
   type OrcidCandidateSource,
   type OrcidEvidenceDetail,
@@ -74,7 +75,9 @@ export class OrcidQueueRefused extends Error {
       | "state_changed"
       | "other_not_in_queue"
       | "held_by_other"
-      | "on_linked_record",
+      | "on_linked_record"
+      | "not_bulk_eligible"
+      | "undo_expired",
   ) {
     super(code);
   }
@@ -124,6 +127,8 @@ type OpenPair = {
   band: OrcidQueueBand;
   shared: number;
   worksTotal: number;
+  /** Works on the record not in the scholar's publications ("only on ORCID"). */
+  newWorks: number;
   nameAgrees: boolean;
   competitor: boolean;
   state: "queue" | "conflict";
@@ -196,6 +201,7 @@ async function loadQueueState(
       band: true,
       shared: true,
       worksTotal: true,
+      newWorks: true,
       nameAgrees: true,
       competitor: true,
     },
@@ -246,6 +252,7 @@ async function loadQueueState(
       band: r.band as OrcidQueueBand,
       shared: r.shared,
       worksTotal: r.worksTotal,
+      newWorks: r.newWorks,
       nameAgrees: r.nameAgrees,
       competitor: r.competitor,
       state,
@@ -278,6 +285,8 @@ type WriteMeta = {
   retire?: boolean;
   /** v3 B2: the iD was confirmed for this other scholar (belongs_to_other). */
   otherCwid?: string;
+  /** A bulk confirm: the rule the librarian set, recorded on each confirm. */
+  bulkRule?: Record<string, number>;
 };
 
 /** The `orcid_dismissal` who/why columns for a dismissal made with `meta`. */
@@ -384,6 +393,7 @@ export async function confirmPair(
       method: "librarian",
       band: evidence.band,
       ...(replaced.length > 0 ? { dismissed: replaced } : {}),
+      ...(meta.bulkRule ? { bulk: true, bulk_rule: meta.bulkRule } : {}),
     },
     ts: meta.ts,
     requestId: meta.requestId,
@@ -467,7 +477,11 @@ export async function decideSharedId(
   if (!theirs || other.cwid === pair.cwid) throw new OrcidQueueRefused(404, "other_not_in_queue");
   if (other.belongs) {
     // `pair.cwid` may hold the iD (an email auto-confirm); the dismiss below clears it.
-    await confirmPair(tx, { cwid: other.cwid, orcid: pair.orcid }, { ...meta, allowHolder: pair.cwid });
+    await confirmPair(
+      tx,
+      { cwid: other.cwid, orcid: pair.orcid },
+      { ...meta, allowHolder: pair.cwid },
+    );
     return dismissPair(tx, pair, { ...meta, otherCwid: other.cwid });
   }
   await dismissPair(tx, { cwid: other.cwid, orcid: pair.orcid }, meta);
@@ -502,6 +516,153 @@ export async function dismissOthers(
     done.push(orcid);
   }
   return done;
+}
+
+/**
+ * The server's floor for a bulk confirm: whatever rule the librarian set in the
+ * browser, a pair is only confirmed in bulk when it passes the same verified rule
+ * as `etl:bulk-confirm-strong` (etl/bulk-confirm-strong/sql/orcid.sql): an active
+ * WCM scholar with nothing on file and no dismissal of any kind; Strong, the only
+ * open candidate, no competitor (flag or lists), name agrees, >= 3 shared works,
+ * institution match; a ReCiter read with zero rejected works; and an iD that no
+ * other scholar holds or is a candidate for. Anything else is refused
+ * (`not_bulk_eligible`) and stays in the one-at-a-time queue.
+ */
+export async function assertBulkConfirmable(
+  tx: Tx,
+  pair: { cwid: string; orcid: string },
+): Promise<void> {
+  const refuse = () => {
+    throw new OrcidQueueRefused(409, "not_bulk_eligible");
+  };
+  const rows = await tx.orcidCandidateEvidence.findMany({
+    where: { cwid: pair.cwid },
+    select: {
+      orcid: true,
+      band: true,
+      competitor: true,
+      competitorCwids: true,
+      competitorOrcids: true,
+      nameAgrees: true,
+      shared: true,
+      instMatch: true,
+      evidenceDetail: true,
+    },
+  });
+  const { held, dismissed } = await readOnFile(tx, pair.cwid);
+  const open = rows.filter((r) => !dismissed.has(r.orcid));
+  const mine = open.find((r) => r.orcid === pair.orcid);
+  if (!mine) throw new OrcidQueueRefused(404, "not_in_queue");
+  // Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
+  const scholar = await tx.scholar.findUnique({
+    where: { cwid: pair.cwid },
+    select: { campus: true, status: true, deletedAt: true },
+  });
+  if (scholar?.campus !== "wcm" || scholar.status !== "active" || scholar.deletedAt) refuse();
+  const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
+  const work = (
+    mine.evidenceDetail as {
+      workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
+    } | null
+  )?.workStatus;
+  if (
+    held.orcid !== null ||
+    dismissed.size > 0 ||
+    open.length !== 1 ||
+    mine.band !== "strong" ||
+    mine.competitor ||
+    !emptyList(mine.competitorCwids) ||
+    !emptyList(mine.competitorOrcids) ||
+    !mine.nameAgrees ||
+    mine.shared < 3 ||
+    !mine.instMatch ||
+    work?.reciterRead !== true ||
+    Number(work.counts?.rejected ?? 0) !== 0
+  )
+    refuse();
+  const [otherCandidates, holders, rejected] = await Promise.all([
+    tx.orcidCandidateEvidence.count({ where: { orcid: pair.orcid, cwid: { not: pair.cwid } } }),
+    tx.scholar.count({ where: { orcid: pair.orcid } }),
+    tx.orcidCandidate.count({
+      where: { cwid: pair.cwid, orcid: pair.orcid, articlesRejected: { gt: 0 } },
+    }),
+  ]);
+  if (otherCandidates > 0 || holders > 0 || rejected > 0) refuse();
+}
+
+/**
+ * Undo the actor's own recent queue decision on one scholar, within
+ * `ORCID_UNDO_WINDOW_MS`: clear the iD they confirmed (only a librarian
+ * confirm by this actor, still on file) and delete the dismissals they wrote
+ * (only rows by this actor). The scholar is back where they were: undecided,
+ * in the queue. A Replace is not undoable here (the replaced iD would not come
+ * back on file), and an email auto-confirm Undo is not either; the client
+ * offers neither. Nothing matching, or past the window, is a 409.
+ */
+export async function undoLibrarianDecision(
+  tx: Tx,
+  pair: { cwid: string; confirmed: string | null; dismissed: readonly string[] },
+  meta: WriteMeta,
+): Promise<void> {
+  const since = new Date(meta.ts.getTime() - ORCID_UNDO_WINDOW_MS);
+  const scholar = await tx.scholar.findUnique({
+    where: { cwid: pair.cwid },
+    select: {
+      orcid: true,
+      orcidConfirmMethod: true,
+      orcidConfirmedBy: true,
+      orcidConfirmedAt: true,
+    },
+  });
+  if (!scholar) throw new OrcidQueueRefused(404, "scholar_not_found");
+  if (pair.confirmed) {
+    if (
+      scholar.orcid !== pair.confirmed ||
+      scholar.orcidConfirmMethod !== "librarian" ||
+      scholar.orcidConfirmedBy !== meta.actor
+    )
+      throw new OrcidQueueRefused(409, "state_changed");
+    if (!scholar.orcidConfirmedAt || scholar.orcidConfirmedAt < since)
+      throw new OrcidQueueRefused(409, "undo_expired");
+    const { count } = await tx.scholar.updateMany({
+      where: { cwid: pair.cwid, orcid: pair.confirmed, orcidConfirmMethod: "librarian" },
+      data: {
+        orcid: null,
+        orcidConfirmedAt: null,
+        orcidConfirmMethod: null,
+        orcidConfirmedBy: null,
+      },
+    });
+    if (count !== 1) throw new OrcidQueueRefused(409, "state_changed");
+  }
+  const ids = [...new Set(pair.dismissed)];
+  if (ids.length > 0) {
+    const mine = await tx.orcidDismissal.findMany({
+      where: { cwid: pair.cwid, orcid: { in: ids }, dismissedBy: meta.actor },
+      select: { orcid: true, dismissedAt: true },
+    });
+    if (mine.length !== ids.length) throw new OrcidQueueRefused(409, "state_changed");
+    if (mine.some((d) => d.dismissedAt < since)) throw new OrcidQueueRefused(409, "undo_expired");
+    await tx.orcidDismissal.deleteMany({
+      where: { cwid: pair.cwid, orcid: { in: ids }, dismissedBy: meta.actor },
+    });
+  }
+  await appendAuditRow(tx, {
+    actorCwid: meta.actor,
+    impersonatedCwid: meta.impersonatedCwid,
+    targetEntityType: "scholar",
+    targetEntityId: pair.cwid,
+    action: "orcid_librarian_undo",
+    fieldsChanged: pair.confirmed ? ["orcid"] : null,
+    beforeValues: { orcid: scholar.orcid, method: scholar.orcidConfirmMethod },
+    afterValues: {
+      orcid: pair.confirmed ? null : scholar.orcid,
+      ...(pair.confirmed ? { unconfirmed: pair.confirmed } : {}),
+      ...(ids.length > 0 ? { undismissed: ids } : {}),
+    },
+    ts: meta.ts,
+    requestId: meta.requestId,
+  });
 }
 
 /** The ETL's `evidence_detail`, or null (a v1 row, or a shape we do not know). */
@@ -580,7 +741,7 @@ const publishedName = (s: ScholarRow | undefined, cwid: string) =>
 type CardPair = Pick<
   OpenPair,
   "orcid" | "band" | "shared" | "worksTotal" | "nameAgrees" | "competitor" | "onFile"
-> & { state: OrcidQueueRow["state"] };
+> & { state: OrcidQueueRow["state"]; newWorks?: number };
 
 function pairsByScholar(
   st: QueueState,
@@ -712,15 +873,18 @@ export async function loadOrcidQueue(
       name: publishedName(s, cwid),
       surname: (s?.fullName ?? cwid).trim().split(/\s+/).pop()!.toLowerCase(),
       department: s?.primaryDepartment ?? null,
-      candidates: ps.map(({ orcid, band, shared, worksTotal, nameAgrees, competitor }) => ({
-        orcid,
-        band,
-        shared,
-        worksTotal,
-        nameAgrees,
-        competitor,
-        sources: st.sources.get(pairKey(cwid, orcid)) ?? [],
-      })),
+      candidates: ps.map(
+        ({ orcid, band, shared, worksTotal, newWorks, nameAgrees, competitor }) => ({
+          orcid,
+          band,
+          shared,
+          worksTotal,
+          ...(newWorks !== undefined ? { newWorks } : {}),
+          nameAgrees,
+          competitor,
+          sources: st.sources.get(pairKey(cwid, orcid)) ?? [],
+        }),
+      ),
       conflict: ps.some((p) => p.state === "conflict"),
       autoConfirmed: ps.some((p) => p.state === "auto_confirmed"),
       firstQueuedAt: queued[0] ?? null,

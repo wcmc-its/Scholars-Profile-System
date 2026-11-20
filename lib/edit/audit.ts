@@ -339,6 +339,13 @@ export type AuditAction =
    *  extended in scripts/sql/audit-log.sql. */
   | "orcid_librarian_confirm"
   | "orcid_librarian_dismiss"
+  /** A librarian undid their own queue confirm or Not this person within
+   *  `ORCID_UNDO_WINDOW_MS` (`POST /api/edit/orcid-queue/undo`): the iD they
+   *  confirmed is cleared and the dismissals they wrote are deleted.
+   *  `targetEntityType='scholar'`, `targetEntityId` the cwid; after carries
+   *  `{ orcid, unconfirmed?, undismissed? }`. ENUM extended in
+   *  scripts/sql/audit-log.sql. */
+  | "orcid_librarian_undo"
   /** One "Confirm remaining N" on a band whose review sample passed; each
    *  scholar it confirmed also gets an `orcid_librarian_confirm` row.
    *  `targetEntityType='orcid_queue_sample'`, `targetEntityId` the sample id;

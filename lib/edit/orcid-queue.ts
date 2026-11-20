@@ -450,6 +450,9 @@ export type OrcidQueueSummaryCandidate = {
   band: OrcidQueueBand;
   shared: number;
   worksTotal: number;
+  /** Works on the record not in the scholar's publications ("only on
+   *  ORCID"); absent on summaries built before it was carried. */
+  newWorks?: number;
   nameAgrees: boolean;
   competitor: boolean;
   /** `orcid_candidate.source` values for the pair (the How discovered counts). */
@@ -624,4 +627,73 @@ export function parseOrcidQueueFilter(
       ),
     ),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Review throughput (bulk confirm, undo, Weak split)
+// ---------------------------------------------------------------------------
+
+/** How long a librarian can undo their own decision from the queue. After
+ *  this, a confirmed iD comes off through the scholar's editor (Remove). */
+export const ORCID_UNDO_WINDOW_MS = 15 * 60 * 1000;
+
+/** Most pairs one bulk-confirm or undo request takes. */
+export const ORCID_BULK_MAX = 100;
+
+/** A Weak iD is one of two very different things: too little evidence to
+ *  call (thin) or evidence that points away (conflicting: a competitor or a
+ *  name that differs). Null for any other band. Pure. */
+export function weakKind(c: {
+  band: string;
+  competitor: boolean;
+  nameAgrees: boolean;
+}): "thin" | "conflicting" | null {
+  if (c.band !== "weak") return null;
+  return c.competitor || !c.nameAgrees ? "conflicting" : "thin";
+}
+
+/** The tier as shown: the band label, with Weak split by `weakKind`. Pure. */
+export function tierLabel(c: { band: OrcidQueueBand; competitor: boolean; nameAgrees: boolean }) {
+  const k = weakKind(c);
+  return k === "thin" ? "Thin evidence" : k === "conflicting" ? "Conflicting" : ORCID_QUEUE_BAND_LABEL[c.band];
+}
+
+/** The adjustable part of the bulk-confirm rule. The fixed part: one
+ *  candidate iD, Strong, no competitor, name agrees, nothing on file, not
+ *  already decided. */
+export type OrcidBulkRule = {
+  /** At least this many ORCID works also in ReCiter. */
+  minShared: number;
+  /** At most this many works only on ORCID (not in ReCiter). */
+  maxOnlyOrcid: number;
+  /** Found by at least this many discovery sources. */
+  minSources: number;
+};
+
+export const ORCID_BULK_RULE_DEFAULT: OrcidBulkRule = {
+  minShared: 5,
+  maxOnlyOrcid: 1,
+  minSources: 2,
+};
+
+/** The scholar qualifies for bulk confirm under `rule`. Pure over the
+ *  summary; the server re-checks the fixed part (`assertBulkConfirmable`). */
+export function bulkEligible(s: OrcidQueueSummary, rule: OrcidBulkRule): boolean {
+  if (s.candidates.length !== 1 || s.conflict || s.autoConfirmed || s.decisions) return false;
+  // Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
+  if (s.campus === "ithaca") return false;
+  const c = s.candidates[0]!;
+  return (
+    c.band === "strong" &&
+    !c.competitor &&
+    c.nameAgrees &&
+    c.shared >= rule.minShared &&
+    onlyOnOrcid(c) <= rule.maxOnlyOrcid &&
+    c.sources.length >= rule.minSources
+  );
+}
+
+/** Works on the ORCID record that are not in ReCiter. Pure. */
+export function onlyOnOrcid(c: { newWorks?: number; worksTotal: number; shared: number }): number {
+  return c.newWorks ?? Math.max(0, c.worksTotal - c.shared);
 }

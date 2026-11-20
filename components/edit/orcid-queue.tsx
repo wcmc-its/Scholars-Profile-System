@@ -36,6 +36,8 @@ import {
   OrcidQueueFilterBar,
   type OrcidQueueClientFilter,
 } from "@/components/edit/orcid-queue-filter-bar";
+import { errorMessage, postBatch } from "@/components/edit/orcid-queue-api";
+import { OrcidBulkReview } from "@/components/edit/orcid-queue-bulk";
 import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Button } from "@/components/ui/button";
@@ -55,8 +57,11 @@ import {
   ORCID_QUEUE_SORTS,
   ORCID_SOURCE_LABEL,
   ORCID_SURNAME_RULE_LABEL,
+  ORCID_BULK_MAX,
   pmCurateHref,
   RECITER_WORK_STATUS_LABEL,
+  tierLabel,
+  weakKind,
   RECITER_WORK_STATUSES,
   workHref,
   type OrcidInstitutionPair,
@@ -82,24 +87,21 @@ const EYEBROW = "text-muted-foreground text-[11.5px] font-semibold tracking-[0.0
 const CHIP = "rounded-full px-2 py-px text-xs font-medium whitespace-nowrap";
 const MONO = "font-mono text-[0.92em]";
 
-function errorMessage(status: number, code: string | undefined): string {
-  if (code === "already_on_file") return "This iD is already on file for this scholar.";
-  if (code === "on_file_differs")
-    return "This scholar now has a different iD on file. Reload to see it as a possible error.";
-  if (code === "on_file")
-    return "This iD was confirmed by the scholar or a librarian. Remove it from the scholar's own editor.";
-  if (code === "dismissed")
-    return "This iD was removed by the scholar or marked Not this person, so it can't be confirmed here.";
-  if (code === "state_changed")
-    return "This scholar changed since the page loaded. Reload to see where they are now.";
-  if (code === "held_by_other")
-    return "Another scholar record already holds this iD. Remove it there first if it belongs here.";
-  if (code === "on_linked_record")
-    return "This person's record on the other campus already holds this iD, so it stays there.";
-  if (code === "other_not_in_queue")
-    return "One of this scholar's other iDs left the queue since the page loaded. Reload and try again.";
-  if (status === 403) return "Only a superuser, signed in as themselves, can decide this queue.";
-  return "We couldn't record that. Please try again.";
+/** A keyboard-shortcut hint on a button. */
+function Kbd({ children, tone = "light" }: { children: React.ReactNode; tone?: "light" | "dark" }) {
+  return (
+    <kbd
+      aria-hidden
+      className={cn(
+        "ml-1.5 rounded border px-1 font-sans text-[10.5px] leading-[15px]",
+        tone === "dark"
+          ? "border-white/45 text-white/90"
+          : "border-apollo-border-strong text-muted-foreground bg-apollo-surface",
+      )}
+    >
+      {children}
+    </kbd>
+  );
 }
 
 async function postDecision(
@@ -120,6 +122,30 @@ async function postDecision(
 }
 
 const pairKey = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
+
+/** One scholar's worth of the actor's own decisions, as the undo route takes
+ *  them: the iD confirmed, and the iDs marked Not this person. */
+export type UndoItem = { cwid: string; confirmed?: string; dismissed?: string[] };
+
+/** Ignore single-key shortcuts while typing or with a modifier held. */
+export function isTypingTarget(e: KeyboardEvent): boolean {
+  if (e.metaKey || e.ctrlKey || e.altKey) return true;
+  return (
+    e.target instanceof HTMLElement &&
+    !!e.target.closest("input, textarea, select, [contenteditable]")
+  );
+}
+
+/** Tier chip tone: one slate ramp by strength; a conflicting Weak is coral. */
+export function tierTone(c: { band: OrcidQueueBand; competitor: boolean; nameAgrees: boolean }) {
+  if (weakKind(c) === "conflicting")
+    return "border-apollo-coral-tint-border bg-apollo-coral-tint text-apollo-coral-foreground";
+  if (c.band === "strong" || c.band === "email_verified")
+    return "border-apollo-slate bg-apollo-slate text-white";
+  if (c.band === "moderate" || c.band === "shared_only")
+    return "border-apollo-slate-tint-border bg-apollo-slate-tint-border text-apollo-slate";
+  return "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate";
+}
 
 /** A decision's extras: the other iDs it also rules out (v2), as "None of
  *  these" (v3) or as the scholar's own retired duplicates (v3 B2), or (v3 B2)
@@ -187,6 +213,10 @@ export function OrcidQueue({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /** The last decision's undo, while its toast is up. */
+  const [undo, setUndo] = useState<{ items: UndoItem[]; select?: string } | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [mode, setMode] = useState<"one" | "bulk">("one");
   const canDecide = !readOnly;
 
   const list = useMemo(
@@ -220,19 +250,22 @@ export function OrcidQueue({
       detailRef.current?.scrollIntoView({ block: "start" });
   }, []);
 
-  // J / K move through the list.
+  // J / K move through the list; Z undoes the last decision while its toast is up.
+  const undoRef = useRef<(() => Promise<void>) | null>(null);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const listRef = useRef(list);
   listRef.current = list;
   const currentRef = useRef(current);
   currentRef.current = current;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (
-        e.target instanceof HTMLElement &&
-        e.target.closest("input, textarea, select, [contenteditable]")
-      )
+      if (isTypingTarget(e)) return;
+      if (e.key === "z") {
+        if (undoRef.current) void undoRef.current();
         return;
+      }
+      if (modeRef.current !== "one") return;
       if (e.key !== "j" && e.key !== "k") return;
       const l = listRef.current;
       if (l.length === 0) return;
@@ -309,8 +342,37 @@ export function OrcidQueue({
             : "dismissed",
         ...Object.fromEntries(others.map((x) => [pairKey(x.cwid, x.orcid), "dismissed" as const])),
       }));
-      setSticky(c.cwid);
-      setSel(c.cwid);
+      // Undo: only the actor's own plain decisions. A Replace would not bring
+      // the replaced iD back on file, an email auto-confirm Undo would not
+      // restore the confirm, and a shared-iD decision spans two scholars.
+      const undoable =
+        !opts.shared && !undone && !(decision === "confirm" && row.state === "conflict");
+      setUndo(
+        undoable
+          ? {
+              select: c.cwid,
+              items: [
+                decision === "confirm"
+                  ? { cwid: row.cwid, confirmed: row.orcid, dismissed: others.map((o) => o.orcid) }
+                  : { cwid: row.cwid, dismissed: [row.orcid, ...others.map((o) => o.orcid)] },
+              ],
+            }
+          : null,
+      );
+      // Move on once the scholar is decided: a confirm, None of these, or the
+      // last open iD ruled out. A dismissal that leaves iDs open stays put.
+      const ruledOut = new Set([row.orcid, ...others.map((o) => o.orcid)]);
+      const left = openRows(c, outcomes).filter((r) => !ruledOut.has(r.orcid));
+      const done = decision === "confirm" || opts.noneOfThese || left.length === 0 || !!opts.shared;
+      const l = listRef.current;
+      const next = done ? l[l.findIndex((s) => s.cwid === c.cwid) + 1] : undefined;
+      if (next) {
+        setSticky(null);
+        setSel(next.cwid);
+      } else {
+        setSticky(c.cwid);
+        setSel(c.cwid);
+      }
       setToast(
         opts.shared
           ? opts.shared.belongs
@@ -330,8 +392,51 @@ export function OrcidQueue({
       );
       return true;
     },
-    [canDecide, busy],
+    [canDecide, busy, outcomes],
   );
+
+  const runUndo = useCallback(async () => {
+    if (!undo || undoing || !canDecide) return;
+    setUndoing(true);
+    // A bulk confirm can run past one request's worth: undo in chunks.
+    const results: Array<{ cwid: string; ok: boolean; code?: string }> = [];
+    for (let i = 0; i < undo.items.length; i += ORCID_BULK_MAX) {
+      const part = await postBatch<{ cwid: string; ok: boolean; code?: string }>(
+        "/api/edit/orcid-queue/undo",
+        { items: undo.items.slice(i, i + ORCID_BULK_MAX) },
+      );
+      if (!part.ok) {
+        setError(part.message);
+        break;
+      }
+      results.push(...part.results);
+    }
+    setUndoing(false);
+    if (results.length === 0) return;
+    const r = { results };
+    const okCwids = new Set(r.results.filter((x) => x.ok).map((x) => x.cwid));
+    const back = new Set(
+      undo.items
+        .filter((i) => okCwids.has(i.cwid))
+        .flatMap((i) =>
+          [i.confirmed, ...(i.dismissed ?? [])].filter(Boolean).map((o) => pairKey(i.cwid, o!)),
+        ),
+    );
+    setOutcomes((o) => Object.fromEntries(Object.entries(o).filter(([k]) => !back.has(k))));
+    const failed = r.results.filter((x) => !x.ok);
+    if (failed.length > 0) setError(errorMessage(409, failed[0]!.code));
+    if (undo.select && okCwids.has(undo.select)) {
+      setSticky(null);
+      setSel(undo.select);
+    }
+    setUndo(null);
+    setToast(
+      failed.length === 0
+        ? "Undone. Back in the queue, undecided."
+        : `Undid ${fmt(okCwids.size)}; ${fmt(failed.length)} could not be undone.`,
+    );
+  }, [undo, undoing, canDecide]);
+  undoRef.current = undo ? runUndo : null;
 
   const moveNext = () => {
     const i = list.findIndex((s) => s.cwid === current?.cwid);
@@ -372,7 +477,72 @@ export function OrcidQueue({
         </div>
       ) : null}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+      <div
+        role="tablist"
+        aria-label="Review mode"
+        className="border-apollo-border-strong bg-apollo-rail flex w-max gap-0.5 rounded-[10px] border p-[3px]"
+        data-testid="orcid-queue-mode"
+      >
+        {(
+          [
+            ["one", "One at a time"],
+            ["bulk", "Bulk review"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={mode === k}
+            onClick={() => setMode(k)}
+            className={cn(
+              "rounded-[7px] px-3.5 py-1.5 text-[13px]",
+              mode === k
+                ? "bg-apollo-surface font-medium shadow-[0_1px_2px_rgba(42,36,33,0.12)]"
+                : "text-muted-foreground",
+            )}
+            data-testid={`orcid-queue-mode-${k}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "bulk" ? (
+        <OrcidBulkReview
+          list={list}
+          outcomes={outcomes}
+          canDecide={canDecide}
+          onConfirmed={(pairs, skipped) => {
+            setOutcomes((o) => ({
+              ...o,
+              ...Object.fromEntries(
+                pairs.map((x) => [pairKey(x.cwid, x.orcid), "confirmed" as const]),
+              ),
+            }));
+            setUndo(
+              pairs.length > 0
+                ? { items: pairs.map((x) => ({ cwid: x.cwid, confirmed: x.orcid })) }
+                : null,
+            );
+            setToast(
+              `Confirmed ${plural(pairs.length, "iD")}. They reach WCM Identity overnight.${
+                skipped > 0
+                  ? ` ${plural(skipped, "scholar")} no longer qualified and stayed in the queue.`
+                  : ""
+              }`,
+            );
+          }}
+          onError={setError}
+        />
+      ) : null}
+
+      <div
+        className={cn(
+          "grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)]",
+          mode === "bulk" && "hidden",
+        )}
+      >
         <ScholarList
           list={list}
           current={current}
@@ -423,10 +593,13 @@ export function OrcidQueue({
       {toast ? (
         <DecisionStatusBar
           text={toast}
-          canUndo={false}
-          undoing={false}
-          onUndo={() => {}}
-          onDismiss={() => setToast(null)}
+          canUndo={!!undo && canDecide}
+          undoing={undoing}
+          onUndo={() => void runUndo()}
+          onDismiss={() => {
+            setToast(null);
+            setUndo(null);
+          }}
           testId="orcid-queue-status"
           className="fixed bottom-5 left-1/2 z-20 w-max max-w-[calc(100vw-32px)] -translate-x-1/2 shadow-[0_6px_20px_rgba(0,0,0,.18)]"
         />
@@ -590,13 +763,27 @@ function ScholarList({
                   {s.department ? `${s.department} · ` : ""}
                   <span className={MONO}>{s.cwid}</span>
                 </span>
-                <span className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                <span
+                  className={cn(
+                    "flex flex-wrap items-center gap-1.5 text-[12.5px] tabular-nums",
+                    !resolved && best && weakKind(best) === "conflicting"
+                      ? "text-apollo-coral-foreground"
+                      : "text-muted-foreground",
+                  )}
+                  data-testid="orcid-queue-item-summary"
+                >
                   {resolved
                     ? s.autoConfirmed &&
                       !s.candidates.some((c) => outcomes[pairKey(s.cwid, c.orcid)])
                       ? "Confirmed by email · automatic"
                       : "Decided"
-                    : plural(s.candidates.length, "candidate iD")}
+                    : best
+                      ? `${
+                          best.worksTotal === 0
+                            ? "No works on ORCID"
+                            : `${fmt(best.shared)}/${fmt(best.worksTotal)} shared`
+                        } · ${plural(s.candidates.length, "iD")}`
+                      : plural(s.candidates.length, "candidate iD")}
                   {s.conflict ? (
                     <span className="border-apollo-border-strong inline-flex items-center gap-1 rounded border px-1.5 text-[11px]">
                       <Lock className="size-2.5" aria-hidden />
@@ -610,14 +797,14 @@ function ScholarList({
                   className={cn("flex shrink-0 flex-col items-end gap-1", resolved && "opacity-40")}
                 >
                   <EvidenceMeter band={best.band} competitor={best.competitor} />
-                  <span className="text-muted-foreground flex items-center gap-1 text-[12.5px]">
+                  <span className="flex items-center gap-1">
                     {best.competitor ? (
                       <ArrowLeftRight
                         className="text-apollo-amber size-3"
                         aria-label="Competitor"
                       />
                     ) : null}
-                    {ORCID_QUEUE_BAND_LABEL[best.band]}
+                    <span className={cn(CHIP, "border", tierTone(best))}>{tierLabel(best)}</span>
                   </span>
                 </span>
               ) : null}
@@ -736,6 +923,43 @@ function ScholarDetail({
   const [retire, setRetire] = useState(false);
   const conflict = rows.some((r) => r.state === "conflict");
 
+  // C / X / N decide the open row (or the best open iD): Confirm, Not this
+  // person, None of these. Same calls as the buttons.
+  type KeyActions = { confirm: () => void; dismiss: () => void; none: () => void };
+  const keys = useRef<(() => KeyActions) | null>(null);
+  keys.current =
+    canDecide && !busy && !decided && open.length > 0
+      ? () => {
+          const target = open.find((o) => o.orcid === openId) ?? open[0]!;
+          return {
+            confirm: () =>
+              void onDecide(target, "confirm", {
+                others: alsoDismiss ? open.filter((o) => o.orcid !== target.orcid) : [],
+                retire,
+              }),
+            dismiss: () =>
+              void onDecide(target, "dismiss").then((ok) => {
+                if (ok) setOpenId(open.find((o) => o.orcid !== target.orcid)?.orcid ?? null);
+              }),
+            none: () =>
+              void onDecide(open[0]!, "dismiss", { others: open.slice(1), noneOfThese: true }),
+          };
+        }
+      : null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const get = keys.current;
+      if (isTypingTarget(e) || !get) return;
+      const act =
+        e.key === "c" ? "confirm" : e.key === "x" ? "dismiss" : e.key === "n" ? "none" : null;
+      if (!act) return;
+      e.preventDefault();
+      get()[act]();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const header = (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
       {card.department ? <span className={EYEBROW}>{card.department}</span> : null}
@@ -842,7 +1066,7 @@ function ScholarDetail({
                 {decided ? "Match evidence before review" : "Match evidence"}
               </span>
               <EvidenceMeter band={best.band} competitor={best.competitor} />
-              <span className="text-[17px] font-semibold">{ORCID_QUEUE_BAND_LABEL[best.band]}</span>
+              <span className="text-[17px] font-semibold">{tierLabel(best)}</span>
             </span>
             <span className="text-[#3a3532]">
               {ranked.length > 1 ? `Best of ${ranked.length} iDs: ` : "From its one iD: "}
@@ -890,7 +1114,7 @@ function ScholarDetail({
                 className="text-[13px]"
                 data-testid="orcid-queue-none"
               >
-                None of these
+                None of these <Kbd>N</Kbd>
               </Button>
             ) : null}
           </div>
@@ -1145,14 +1369,7 @@ function CandidateRow({
           ) : null}
         </span>
         <span>
-          <span
-            className={cn(
-              CHIP,
-              "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate border",
-            )}
-          >
-            {ORCID_QUEUE_BAND_LABEL[r.band]}
-          </span>
+          <span className={cn(CHIP, "border", tierTone(r))}>{tierLabel(r)}</span>
         </span>
         <span className="flex flex-col gap-0.5">
           <span className="flex items-center gap-1.5">
@@ -1186,18 +1403,24 @@ function CandidateRow({
           />
           {INST_SHORT(r)}
         </span>
-        <span className="flex flex-col gap-1">
-          <span className="flex items-baseline justify-between gap-2">
-            <span className="font-semibold">{fmt(r.shared)} shared</span>
-            <span className="text-muted-foreground text-[12.5px]">of {fmt(r.worksTotal)}</span>
+        {r.worksTotal === 0 ? (
+          <span className="text-muted-foreground" data-testid="orcid-queue-no-works">
+            No works on ORCID
           </span>
-          <span
-            className="bg-apollo-amber-tint-border h-[5px] overflow-hidden rounded-full"
-            aria-hidden
-          >
-            <span className="bg-apollo-slate block h-full" style={{ width: `${pct}%` }} />
+        ) : (
+          <span className="flex flex-col gap-1">
+            <span className="flex items-baseline justify-between gap-2">
+              <span className="font-semibold">{fmt(r.shared)} shared</span>
+              <span className="text-muted-foreground text-[12.5px]">of {fmt(r.worksTotal)}</span>
+            </span>
+            <span
+              className="bg-apollo-rail-border h-[5px] overflow-hidden rounded-full"
+              aria-hidden
+            >
+              <span className="bg-apollo-slate block h-full" style={{ width: `${pct}%` }} />
+            </span>
           </span>
-        </span>
+        )}
         <span className="flex flex-col gap-0.5">
           <span className={r.sources.length >= 2 ? "text-apollo-slate font-semibold" : undefined}>
             {foundBy(r)}
@@ -1244,8 +1467,10 @@ function CandidateRow({
             </div>
           ) : null}
           {canDecide && pending ? (
+            // Sticky: the evidence above can run long (a dozen works), and the
+            // decision should never sit below the fold.
             <div
-              className="flex flex-wrap items-center gap-x-4 gap-y-2"
+              className="border-apollo-border-strong bg-apollo-surface sticky bottom-3 z-10 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[10px] border px-3 py-2.5 shadow-[0_2px_8px_rgba(42,36,33,0.10)]"
               data-testid="orcid-queue-decision-bar"
             >
               <Button
@@ -1253,21 +1478,22 @@ function CandidateRow({
                 size="sm"
                 disabled={busy}
                 onClick={onConfirm}
-                className="bg-foreground hover:bg-foreground/90 text-[13px] text-white"
+                className="bg-apollo-maroon hover:bg-apollo-maroon-press text-[13px] text-white"
                 data-testid="orcid-queue-confirm"
               >
                 {r.state === "conflict" ? "Replace with this iD" : "Confirm"}
+                <Kbd tone="dark">C</Kbd>
               </Button>
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 disabled={busy}
                 onClick={onDismiss}
-                className="text-destructive hover:bg-apollo-red-tint hover:text-destructive text-[13px] font-normal"
+                className="text-destructive hover:bg-apollo-red-tint hover:text-destructive border-apollo-red-tint-border text-[13px] font-normal"
                 data-testid="orcid-queue-dismiss"
               >
-                Not this person
+                Not this person <Kbd>X</Kbd>
               </Button>
               {others > 0 ? (
                 <label className="text-muted-foreground flex items-center gap-2 text-[13px]">
@@ -1466,6 +1692,27 @@ const SOURCE_SIDE: Record<OrcidInstitutionPair["ours"]["source"], string> = {
 const years = (start: number | null, end: number | null) =>
   start || end ? ` ${start ?? "?"}–${end ?? "present"}` : "";
 
+/** One line per ORCID affiliation, with every record of ours it matched under
+ *  it: the same institution matched against WCM, education and ReCiter
+ *  Identity used to repeat its name once per match. Pure. */
+export function groupInstitutions(pairs: OrcidInstitutionPair[]) {
+  const groups: Array<{ orcid: string; years: string; ours: string[] }> = [];
+  for (const p of pairs) {
+    const y = years(p.orcid.start, p.orcid.end);
+    let g = groups.find((x) => x.orcid === p.orcid.name && x.years === y);
+    if (!g) {
+      g = { orcid: p.orcid.name, years: y, ours: [] };
+      groups.push(g);
+    }
+    const side =
+      p.ours.name === p.orcid.name
+        ? SOURCE_SIDE[p.ours.source]
+        : `${SOURCE_SIDE[p.ours.source]}: ${p.ours.name}`;
+    if (!g.ours.includes(side)) g.ours.push(side);
+  }
+  return groups;
+}
+
 function NameAndSignals({ card, row: r }: { card: OrcidQueueCard; row: OrcidQueueRow }) {
   const d = r.detail;
   const name = orcidDisplayName(r);
@@ -1526,10 +1773,17 @@ function NameAndSignals({ card, row: r }: { card: OrcidQueueCard; row: OrcidQueu
           INST_LONG(r),
           d && (d.institutions.length > 0 || d.institutionEmail) ? (
             <>
-              {d.institutions.map((p, i) => (
-                <span key={i} className="block">
-                  {p.orcid.name}
-                  {years(p.orcid.start, p.orcid.end)} ↔ {SOURCE_SIDE[p.ours.source]}: {p.ours.name}
+              {groupInstitutions(d.institutions).map((g, i) => (
+                <span key={i} className="block" data-testid="orcid-queue-inst-group">
+                  <span className="text-foreground">
+                    {g.orcid}
+                    {g.years}
+                  </span>
+                  {g.ours.map((o, j) => (
+                    <span key={j} className="block pl-3">
+                      ↔ {o}
+                    </span>
+                  ))}
                 </span>
               ))}
               {d.institutionEmail ? (
@@ -1639,8 +1893,15 @@ function Publications({
   const onlyRec = Math.max(0, card.reciterTotal - r.shared);
   const total = onlyOrcid + both + onlyRec;
   const pm = pmCurateHref(pmBaseUrl, card.cwid);
+  // "Only on ORCID" is the one count that can point to someone else's record,
+  // so it is the only one that warns (coral) — and only when it is above 0.
   const tabs: Array<{ k: PubTab; label: string; n: number; swatch: string }> = [
-    { k: "orcid", label: "Only on ORCID", n: onlyOrcid, swatch: "bg-apollo-amber-tint-border" },
+    {
+      k: "orcid",
+      label: "Only on ORCID",
+      n: onlyOrcid,
+      swatch: onlyOrcid > 0 ? "bg-apollo-coral-tint-border" : "bg-apollo-rail-border",
+    },
     { k: "both", label: "In both", n: both, swatch: "bg-apollo-slate" },
     { k: "rec", label: "Only in ReCiter", n: onlyRec, swatch: "bg-apollo-rail-border" },
   ];
@@ -1675,7 +1936,9 @@ function Publications({
               "inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-[13px]",
               tab === t.k
                 ? "bg-apollo-surface-2 border-[#5c574d] font-semibold"
-                : "border-apollo-border-strong bg-apollo-surface",
+                : t.k === "orcid" && t.n > 0
+                  ? "border-apollo-coral-tint-border bg-apollo-coral-tint text-apollo-coral-foreground"
+                  : "border-apollo-border-strong bg-apollo-surface",
             )}
             data-testid={`orcid-queue-pubs-${t.k}`}
           >

@@ -3,7 +3,7 @@
 /**
  * The ORCID queue's filter bar (v3): search (name, CWID, ORCID iD), then
  * Confidence, Decision, Person type, Department, Institution, How discovered
- * and Possible errors, with every applied filter as one row of removable
+ * and Different iD on file ("possible errors"), with every applied filter as one row of removable
  * pills and "Clear all". The `/edit/orcid-coverage` bar's popover.
  *
  * Two kinds of facet. Person type, department / division, institution and how
@@ -218,7 +218,8 @@ export function OrcidQueueFilterBar({
           },
         ]
       : []),
-    ...(view.decision
+    // The default (Unassigned) is already on the Decision button: no pill for it.
+    ...(view.decision && view.decision !== "open"
       ? [
           {
             key: "dec",
@@ -239,7 +240,7 @@ export function OrcidQueueFilterBar({
           {
             key: "err",
             label: "Show",
-            value: "Possible errors",
+            value: "Different iD on file",
             clear: () => onView({ ...view, errorsOnly: false }),
           },
         ]
@@ -319,7 +320,7 @@ export function OrcidQueueFilterBar({
           title="Scholars with a different iD already on file"
           data-testid="orcid-queue-filter-errors"
         >
-          Possible errors · {errors.toLocaleString("en-US")}
+          Different iD on file · {errors.toLocaleString("en-US")}
         </button>
         {facets === null ? (
           <span className="text-muted-foreground text-xs">
