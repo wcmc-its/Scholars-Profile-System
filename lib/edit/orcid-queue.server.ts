@@ -680,6 +680,31 @@ export async function undoLibrarianDecision(
   });
 }
 
+/** Bulk review's extra columns for pairs that passed the dry run: the name on
+ *  the ORCID record (credit name, else given + family; null = not public) and
+ *  whether the record lists the scholar's email as verified. One query. */
+export async function bulkPairFacts(
+  client: ReadClient,
+  pairs: Array<{ cwid: string; orcid: string }>,
+): Promise<Map<string, { orcidName: string | null; verifiedEmail: boolean }>> {
+  const out = new Map<string, { orcidName: string | null; verifiedEmail: boolean }>();
+  if (pairs.length === 0) return out;
+  const rows = await client.orcidCandidateEvidence.findMany({
+    where: { OR: pairs.map((p) => ({ cwid: p.cwid, orcid: p.orcid })) },
+    select: { cwid: true, orcid: true, evidenceDetail: true },
+  });
+  for (const r of rows) {
+    const d = asDetail(r.evidenceDetail);
+    const n = d?.names.orcid;
+    const full = [n?.given, n?.family].filter(Boolean).join(" ").trim();
+    out.set(pairKey(r.cwid, r.orcid), {
+      orcidName: n?.credit?.trim() || full || null,
+      verifiedEmail: !!d?.email,
+    });
+  }
+  return out;
+}
+
 /** The ETL's `evidence_detail`, or null (a v1 row, or a shape we do not know). */
 function asDetail(v: unknown): OrcidEvidenceDetail | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;

@@ -262,7 +262,7 @@ export function OrcidQueueFilterBar({
       data-testid="orcid-queue-filters"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <label className="border-apollo-border-strong bg-apollo-surface flex h-[34px] w-full max-w-[280px] items-center gap-2 rounded-lg border px-2.5">
+        <label className="border-apollo-border-strong bg-apollo-surface flex h-[34px] w-full max-w-[260px] items-center gap-2 rounded-lg border px-2.5">
           <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
           <input
             type="search"
@@ -274,7 +274,6 @@ export function OrcidQueueFilterBar({
             data-testid="orcid-queue-search"
           />
         </label>
-        <span className="text-muted-foreground mx-0.5 text-[13px]">Filter</span>
         <FacetPopover
           def={confidence}
           selected={view.bands}
@@ -315,7 +314,11 @@ export function OrcidQueueFilterBar({
           onClick={() => onView({ ...view, errorsOnly: !view.errorsOnly })}
           className={cn(
             "bg-apollo-surface inline-flex h-[34px] items-center rounded-lg border px-3 text-[13.5px] whitespace-nowrap",
-            view.errorsOnly ? "border-apollo-slate" : "border-apollo-border-strong",
+            view.errorsOnly
+              ? "border-apollo-slate"
+              : errors > 0
+                ? "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber"
+                : "border-apollo-border-strong",
           )}
           title="Scholars with a different iD already on file"
           data-testid="orcid-queue-filter-errors"

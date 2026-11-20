@@ -986,7 +986,7 @@ describe("client", () => {
       expect.stringContaining("Jane Doe, MD"),
       expect.stringContaining("John Smith, PhD"),
     ]);
-    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("2 scholars");
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("2 left");
     const card = await screen.findByTestId("orcid-queue-card-jd0001");
     expect(within(card).getByText("View profile ↗").getAttribute("href")).toBe("/jane-doe");
     expect(within(card).getByTestId("orcid-queue-evidence").textContent).toContain(
@@ -1020,13 +1020,13 @@ describe("client", () => {
     fireEvent.change(screen.getByTestId("orcid-queue-search"), {
       target: { value: "0000000151093700" },
     });
-    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 left");
     fireEvent.change(screen.getByTestId("orcid-queue-search"), { target: { value: "" } });
     expect(screen.getByTestId("orcid-queue-filter-errors").textContent).toBe(
       "Different iD on file · 1",
     );
     fireEvent.click(screen.getByTestId("orcid-queue-filter-errors"));
-    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 scholar");
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 left");
     expect(screen.getByTestId("orcid-queue-item-cf0003")).toBeTruthy();
   });
 
@@ -1165,7 +1165,11 @@ describe("client", () => {
   it("Confirm also marks the others, unless the box is cleared; then moves to the next scholar", async () => {
     const { posts } = mount([CARD({}, [ROW, SECOND]), JOHN]);
     await screen.findByTestId("orcid-queue-card-jd0001");
-    expect(screen.getByText("2 candidate iDs, best first")).toBeTruthy();
+    // The decision bar sits at the top of the panel and acts on the best open iD.
+    const bar = screen.getByTestId("orcid-queue-decision-bar");
+    expect(within(bar).getByTestId("orcid-queue-target").textContent).toBe(ORCID);
+    expect(bar.textContent).toContain("Best match");
+    expect(bar.textContent).toContain("Also mark the other iD");
     fireEvent.click(screen.getByTestId("orcid-queue-confirm"));
     await vi.waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]).toMatchObject({
@@ -1176,7 +1180,13 @@ describe("client", () => {
     });
     // Decided: the queue moves on by itself, and the toast says what happened.
     expect(await screen.findByTestId("orcid-queue-card-js0002")).toBeTruthy();
-    expect(screen.queryByTestId("orcid-queue-item-jd0001")).toBeNull();
+    // The decided scholar stays in the list, greyed, and counts as progress.
+    expect(
+      within(screen.getByTestId("orcid-queue-item-jd0001")).getByTestId("orcid-queue-item-outcome")
+        .textContent,
+    ).toContain("Confirmed");
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("1 left");
+    expect(screen.getByTestId("orcid-queue-decided").textContent).toBe("1 decided this session");
     expect(screen.getByTestId("orcid-queue-status").textContent).toContain(
       "Confirmed. The iD is on file and reaches WCM Identity overnight.",
     );
@@ -1354,7 +1364,7 @@ describe("client", () => {
       ],
     );
     const { posts } = mount([auto]);
-    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("0 scholars");
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("0 left");
     fireEvent.click(screen.getByTestId("orcid-queue-filter-dec"));
     fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
     await screen.findByTestId("orcid-queue-card-jd0001");
@@ -1416,7 +1426,16 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
         if (url.endsWith("/bulk-confirm"))
           return Response.json({
             results: body.pairs!.map((p) =>
-              ok(p.cwid) ? { ...p, ok: true } : { ...p, ok: false, code: "not_bulk_eligible" },
+              ok(p.cwid)
+                ? {
+                    ...p,
+                    ok: true,
+                    // A dry run's extras: the name on ORCID, a verified email (aa0001 only).
+                    ...(body.dryRun
+                      ? { orcidName: `ORCID ${p.cwid}`, verifiedEmail: p.cwid === "aa0001" }
+                      : {}),
+                  }
+                : { ...p, ok: false, code: "not_bulk_eligible" },
             ),
           });
         return Response.json({ ok: true });
@@ -1554,7 +1573,7 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     );
     fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
     expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
-      "2 of 4 scholars in this view match",
+      "2 of 4 scholars match",
     );
     expect(screen.queryByTestId("orcid-bulk-row-cc0003")).toBeNull();
     expect(screen.queryByTestId("orcid-bulk-row-dd0004")).toBeNull();
@@ -1562,6 +1581,23 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect(screen.getByTestId("orcid-bulk-footer").textContent).toContain(
       "1 tinted row still checked",
     );
+    // The mode toggle carries the count; each row shows the name on the ORCID record.
+    expect((await screen.findByTestId("orcid-queue-bulk-count")).textContent).toBe("2");
+    expect(screen.getByTestId("orcid-bulk-row-aa0001").textContent).toContain("ORCID aa0001");
+
+    // Verified email narrows to rows whose record lists the scholar's email.
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-email"));
+    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe("1 of 4 scholars match");
+    expect(screen.queryByTestId("orcid-bulk-row-bb0002")).toBeNull();
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-email"));
+
+    // Unchecking a threshold stops applying it; checking it restores the default.
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-minSources-on"));
+    expect((screen.getByTestId("orcid-bulk-rule-minSources") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-minSources-on"));
+    expect((screen.getByTestId("orcid-bulk-rule-minSources") as HTMLSelectElement).value).toBe("2");
 
     // Tighten the rule: nothing only on ORCID.
     fireEvent.change(screen.getByTestId("orcid-bulk-rule-maxOnlyOrcid"), {
@@ -1608,7 +1644,7 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     );
     fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
     expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
-      "102 of 102 scholars in this view match",
+      "102 of 102 scholars match",
     );
     expect(screen.getByTestId("orcid-bulk-ithaca-cap").textContent).toContain(
       "2 more after this one",
