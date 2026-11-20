@@ -154,7 +154,7 @@ export function UnitSubunitChipRow({
                   // A whole-row link: the name is slate (the site's link ink)
                   // so it reads as clickable at rest; hover tints the row and
                   // underlines the name.
-                  "group border-apollo-border flex items-baseline justify-between gap-3 border-b py-[7px] text-[14px] no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]",
+                  "group border-apollo-border flex items-baseline justify-between gap-3 border-b py-[7px] last:border-b-0 text-[14px] no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]",
                   active ? "bg-apollo-slate-tint" : "hover:bg-apollo-page",
                 )}
               >

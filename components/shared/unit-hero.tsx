@@ -171,7 +171,7 @@ export function UnitResearchAreas({
 
 /** A ranked research-area row: whole-row link, tinted on hover. */
 const AREA_ROW_CLASS =
-  "group border-apollo-border hover:bg-apollo-page flex items-baseline border-b py-[7px] no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]";
+  "group border-apollo-border hover:bg-apollo-page flex items-baseline border-b py-[7px] last:border-b-0 no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]";
 
 export type UnitStat = { value: number; label: string; href: string };
 
