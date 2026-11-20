@@ -639,6 +639,8 @@ export const ORCID_UNDO_WINDOW_MS = 15 * 60 * 1000;
 
 /** Most pairs one bulk-confirm or undo request takes. */
 export const ORCID_BULK_MAX = 100;
+/** Cornell Ithaca iDs confirmed per Bulk review batch (Paul, 2026-11-19). */
+export const ORCID_BULK_ITHACA_MAX = 100;
 
 /** A Weak iD is one of two very different things: too little evidence to
  *  call (thin) or evidence that points away (conflicting: a competitor or a
@@ -680,13 +682,13 @@ export const ORCID_BULK_RULE_DEFAULT: OrcidBulkRule = {
  *  summary; the server re-checks the fixed part (`assertBulkConfirmable`). */
 export function bulkEligible(s: OrcidQueueSummary, rule: OrcidBulkRule): boolean {
   if (s.candidates.length !== 1 || s.conflict || s.autoConfirmed || s.decisions) return false;
-  // Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
-  if (s.campus === "ithaca") return false;
   const c = s.candidates[0]!;
+  if (c.band !== "strong" || c.competitor || !c.nameAgrees) return false;
+  // Cornell Ithaca: no SPS publications, so the work/source thresholds can't
+  // apply; Strong there means an Affiliation Manager pair (`affiliationManagerBand`).
+  // The server floor does the rest; at most ORCID_BULK_ITHACA_MAX per batch.
+  if (s.campus === "ithaca") return true;
   return (
-    c.band === "strong" &&
-    !c.competitor &&
-    c.nameAgrees &&
     c.shared >= rule.minShared &&
     onlyOnOrcid(c) <= rule.maxOnlyOrcid &&
     c.sources.length >= rule.minSources
