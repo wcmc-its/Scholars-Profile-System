@@ -98,6 +98,15 @@ describe("ViceChairsList", () => {
     expect(container.querySelector("ul")?.getAttribute("data-columns")).toBe("1");
   });
 
+  it("uses three columns from nine names", () => {
+    const many = Array.from({ length: 9 }, (_, i) => v(`c${i}`, `Person ${i}`, "Vice Chair"));
+    const { container, rerender } = render(<ViceChairsList viceChairs={many} />);
+    expect(container.querySelector("ul")?.getAttribute("data-columns")).toBe("3");
+    expect(container.querySelector("ul")?.className).toContain("lg:columns-3");
+    rerender(<ViceChairsList viceChairs={many.slice(0, 8)} />);
+    expect(container.querySelector("ul")?.getAttribute("data-columns")).toBe("2");
+  });
+
   it("renders nothing for an empty list", () => {
     const { container } = render(<ViceChairsList viceChairs={[]} />);
     expect(container.innerHTML).toBe("");
