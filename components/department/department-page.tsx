@@ -183,8 +183,7 @@ export async function DepartmentPage({
       </Breadcrumb>
 
       {/* Hero card (Unit Page v2) — eyebrow + website link, name, description,
-          the stats line, the chair card with the vice chairs beside it, and
-          divisions. Top research areas were cut from the department hero
+          the stats line, the chair card, vice chairs, and divisions. Top research areas were cut from the department hero
           (ranked by volume, they named the broad areas every large department
           shares); the Publications tab's area filter and the
           /departments/{slug}/areas/{area} pages are unchanged. */}
@@ -213,20 +212,15 @@ export async function DepartmentPage({
           </p>
         )}
 
-        {/* Leadership row: the chair card on the left and the vice chairs
-            beside it on wide screens, instead of each taking full-width rows
-            of their own. Stacks below `lg`. */}
-        <div className="mt-[22px] flex flex-col gap-x-8 gap-y-4 lg:flex-row lg:items-start">
-          {detail.chair && (
-            <LeaderCard
-              leader={detail.chair}
-              role={detail.chair.role}
-              interim={detail.chair.isInterim}
-              className="mt-0 lg:w-[320px] lg:flex-none"
-            />
-          )}
-          <ViceChairsList viceChairs={detail.viceChairs ?? []} className="min-w-0 flex-1" />
-        </div>
+        {detail.chair && (
+          <LeaderCard
+            leader={detail.chair}
+            role={detail.chair.role}
+            interim={detail.chair.isInterim}
+          />
+        )}
+
+        <ViceChairsList viceChairs={detail.viceChairs ?? []} className="mt-5" />
 
         {/* A division chip links its division page; the roster's Division
             facet does the in-place filtering. */}
