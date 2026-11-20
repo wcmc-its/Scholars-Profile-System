@@ -113,7 +113,10 @@ export function FundingResultRow({
   }
 
   return (
-    <article className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-[#e3e2dd] py-5">
+    // Phone width: the award id and status sit on one line ABOVE the title (the
+    // trials row's pattern) and the title gets the full width. From `sm` up:
+    // title column | award id column.
+    <article className="flex flex-col gap-1.5 border-t border-[#e3e2dd] py-4 sm:grid sm:grid-cols-[1fr_auto] sm:items-baseline sm:gap-4 sm:py-5">
       <div className="min-w-0">
         {/* Title — two-line clamp. PLAN P4: when the query literally matched the
             title, render the highlighted fragment (same sanitize + pale-tint
@@ -246,7 +249,7 @@ export function FundingResultRow({
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
-            className="group mt-1.5 inline-flex items-center gap-1 text-[13px] text-[var(--color-accent-slate)]"
+            className="group mt-1.5 inline-flex min-h-8 items-center gap-1 whitespace-nowrap text-[13px] text-[var(--color-accent-slate)] sm:min-h-0"
             aria-expanded={expanded}
           >
             <Caret open={expanded} className="text-muted-foreground" />
@@ -269,19 +272,20 @@ export function FundingResultRow({
         ) : null}
       </div>
 
-      {/* Right column: award identifier. */}
-      <div className="text-right">
+      {/* Right column: award identifier. On a phone it leads the row: the award
+          id at the right edge, the status pill (if any) at the left. */}
+      <div className="order-first flex flex-row-reverse items-center justify-between gap-2 sm:order-none sm:block sm:text-right">
         <AwardId hit={hit} applId={effectiveApplId ?? undefined} />
         {hit.status === "active" ? (
-          <div className="mt-1.5 inline-flex items-center rounded-full bg-[#eaf3de] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#27500a]">
+          <div className="inline-flex sm:mt-1.5 items-center rounded-full bg-[#eaf3de] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#27500a]">
             Active
           </div>
         ) : hit.status === "ending_soon" ? (
-          <div className="mt-1.5 inline-flex items-center rounded-full bg-[#faeeda] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#854f0b]">
+          <div className="inline-flex sm:mt-1.5 items-center rounded-full bg-[#faeeda] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#854f0b]">
             Ending soon
           </div>
         ) : hit.status === "recently_ended" ? (
-          <div className="mt-1.5 inline-flex items-center rounded-full bg-[#f1efe8] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#5a5a5a]">
+          <div className="inline-flex sm:mt-1.5 items-center rounded-full bg-[#f1efe8] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#5a5a5a]">
             Recently ended
           </div>
         ) : null}

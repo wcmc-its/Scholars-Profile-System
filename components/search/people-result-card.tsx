@@ -108,7 +108,7 @@ const unit = (n: number | undefined, word: "pub" | "grant"): string | null =>
  */
 function RoleTag({ role }: { role: string }) {
   return (
-    <span className="ml-2 inline-flex h-[16px] items-center rounded-sm bg-[#f0eeea] px-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
+    <span className="inline-flex h-[16px] items-center rounded-sm bg-[#f0eeea] px-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
       {role}
     </span>
   );
@@ -547,15 +547,21 @@ export function PeopleResultCard({
   );
 
   return (
-    <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
+    // Phone width: a header row (small avatar + name) and everything else full
+    // width beneath it, with the counts inline. From `sm` up: the three-column
+    // card (avatar | name, title, evidence | counts). Placement is explicit on
+    // both layouts so the DOM order (avatar, name, meta, counts, evidence) can
+    // read top to bottom on a phone.
+    <div className="group relative grid grid-cols-[40px_minmax(0,1fr)] items-center gap-x-3 gap-y-1 border-b border-[#e3e2dd] py-4 hover:bg-[#fafaf8] sm:grid-cols-[56px_minmax(0,1fr)_auto] sm:items-start sm:gap-x-4 sm:gap-y-0 sm:py-5">
       <HeadshotAvatar
         size="md"
         cwid={hit.cwid}
         preferredName={hit.preferredName}
         identityImageEndpoint={hit.identityImageEndpoint}
+        className="h-10 w-10 sm:row-span-3 sm:row-start-1 sm:h-12 sm:w-12"
       />
-      <div className="min-w-0">
-        <div className="mb-[2px] flex flex-wrap items-baseline text-[16px] font-semibold leading-tight text-[#1a1a1a]">
+      <div className="min-w-0 sm:col-start-2 sm:row-start-1">
+        <div className="mb-[2px] flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[16px] font-semibold leading-tight text-[#1a1a1a]">
           {/* The name IS the stretched profile link: `after:absolute inset-0`
               spans the whole card so clicking anywhere (outside a `z-10` control)
               navigates. The analytics beacon fires here. */}
@@ -569,14 +575,41 @@ export function PeopleResultCard({
           </Link>
           {roleLabel ? <RoleTag role={roleLabel} /> : null}
         </div>
+      </div>
+      <div className="col-span-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-2">
         {hit.primaryTitle ? (
           <div className="mb-[2px] text-[13px] leading-snug text-[#4a4a4a]">
             {hit.primaryTitle}
           </div>
         ) : null}
         {deptLine ? (
-          <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
+          <div className="text-xs text-muted-foreground sm:mb-2">{deptLine}</div>
         ) : null}
+      </div>
+      <div className="col-span-2 flex flex-wrap items-baseline gap-x-1 whitespace-nowrap text-xs text-muted-foreground sm:col-span-1 sm:col-start-3 sm:row-span-3 sm:row-start-1 sm:flex-col sm:items-end sm:gap-1 sm:text-right">
+        {hit.pubCount > 0 ? (
+          <span>
+            <span className="text-[13px] font-semibold tabular-nums text-[#1a1a1a] sm:text-[16px]">
+              {hit.pubCount.toLocaleString()}
+            </span>{" "}
+            {pubLabel}
+          </span>
+        ) : null}
+        {hit.pubCount > 0 && hit.grantCount > 0 ? (
+          <span aria-hidden className="sm:hidden">
+            ·
+          </span>
+        ) : null}
+        {hit.grantCount > 0 ? (
+          <span>
+            <span className="text-[13px] font-semibold tabular-nums text-[#1a1a1a] sm:text-[16px]">
+              {hit.grantCount.toLocaleString()}
+            </span>{" "}
+            {grantLabel}
+          </span>
+        ) : null}
+      </div>
+      <div className="col-span-2 mt-1 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-3 sm:mt-0">
         {/* #1366 follow-up — tiered evidence: ONE prominent primary signal + a compact
             "Also matched" group (the demoted lesser stacked lines + the Funding row).
             Funding LEADS instead when it's the strongest signal (promoted — no
@@ -705,24 +738,6 @@ export function PeopleResultCard({
             ) : null}
           </>
         )}
-      </div>
-      <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
-        {hit.pubCount > 0 ? (
-          <span>
-            <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
-              {hit.pubCount.toLocaleString()}
-            </span>{" "}
-            {pubLabel}
-          </span>
-        ) : null}
-        {hit.grantCount > 0 ? (
-          <span>
-            <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
-              {hit.grantCount.toLocaleString()}
-            </span>{" "}
-            {grantLabel}
-          </span>
-        ) : null}
       </div>
     </div>
   );

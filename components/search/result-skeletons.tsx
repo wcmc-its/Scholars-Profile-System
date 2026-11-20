@@ -14,18 +14,20 @@ import { Skeleton } from "@/components/ui/skeleton";
  * Components such as loading.tsx without a "use client" boundary.
  */
 
-/** Mirrors PeopleResultCard — 56px avatar | name/title/dept/snippet | stats. */
+/** Mirrors PeopleResultCard — 56px avatar | name/title/dept/snippet | stats; on a
+ *  phone, a 40px avatar + name header with the rest full width below. */
 export function PeopleResultSkeleton() {
   return (
-    <div className="grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5">
-      <Skeleton className="h-14 w-14 rounded-full" />
-      <div className="min-w-0 space-y-2">
-        <Skeleton className="h-4 w-44" />
-        <Skeleton className="h-3 w-64" />
+    <div className="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-[#e3e2dd] py-4 sm:grid-cols-[56px_minmax(0,1fr)_auto] sm:items-start sm:gap-4 sm:py-5">
+      <Skeleton className="h-10 w-10 rounded-full sm:h-14 sm:w-14" />
+      <Skeleton className="h-4 w-44 sm:hidden" />
+      <div className="col-span-2 min-w-0 space-y-2 sm:col-span-1">
+        <Skeleton className="hidden h-4 w-44 sm:block" />
+        <Skeleton className="h-3 w-64 max-w-full" />
         <Skeleton className="h-3 w-40" />
         <Skeleton className="h-3 w-full max-w-md" />
       </div>
-      <div className="flex flex-col items-end gap-1.5">
+      <div className="col-span-2 flex gap-1.5 sm:col-span-1 sm:flex-col sm:items-end">
         <Skeleton className="h-4 w-14" />
         <Skeleton className="h-4 w-14" />
       </div>
@@ -52,7 +54,7 @@ export function PublicationResultSkeleton() {
 /** Mirrors FundingResultRow — title (2 lines) + people + sponsor | award id. */
 export function FundingResultSkeleton() {
   return (
-    <div className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-[#e3e2dd] py-5">
+    <div className="flex flex-col gap-1.5 border-t border-[#e3e2dd] py-4 sm:grid sm:grid-cols-[1fr_auto] sm:items-baseline sm:gap-4 sm:py-5">
       <div className="min-w-0 space-y-2">
         <Skeleton className="h-4 w-full max-w-xl" />
         <Skeleton className="h-4 w-2/3" />
@@ -63,7 +65,7 @@ export function FundingResultSkeleton() {
         </div>
         <Skeleton className="h-3 w-52" />
       </div>
-      <div className="flex flex-col items-end gap-2">
+      <div className="order-first flex flex-row-reverse items-center justify-between gap-2 sm:order-none sm:flex-col sm:items-end">
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-5 w-16 rounded-full" />
       </div>

@@ -24,13 +24,13 @@ export default function SearchLoading() {
       </div>
 
       {/* SearchMeta — h1 + counts subhead */}
-      <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
+      <div className="mx-auto max-w-[1280px] px-4 sm:px-6 pt-5 pb-3">
         <Skeleton className="mb-2 h-7 w-72" />
         <Skeleton className="h-3 w-60" />
       </div>
 
       {/* ModeTabs — Scholars / Publications / Funding */}
-      <div className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+      <div className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-4 sm:px-6">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex h-[42px] items-center gap-2 px-4">
             <Skeleton className="h-3 w-20" />
@@ -40,7 +40,7 @@ export default function SearchLoading() {
       </div>
 
       {/* Facet rail + results column */}
-      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
+      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-4 pt-6 pb-16 sm:px-6 md:grid-cols-[240px_1fr]">
         <FacetRailSkeleton />
         <div>
           {/* ResultsToolbar — count line + sort control */}
