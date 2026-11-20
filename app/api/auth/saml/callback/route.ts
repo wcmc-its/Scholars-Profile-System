@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDefaultReturnPath } from "@/lib/auth/config";
 import { safeReturnPath } from "@/lib/auth/return-path";
-import { createSessionCookie } from "@/lib/auth/session";
+import { createSessionCookie, isPartnerCwid } from "@/lib/auth/session";
+import { db } from "@/lib/db";
 import { validateSamlResponse, type SamlValidationResult } from "@/lib/auth/saml";
 import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
 
@@ -146,7 +147,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return errorPage(401, "Your sign-in could not be verified. Please try again.");
   }
 
-  const dest = safeReturnPath(form.get("RelayState"), getDefaultReturnPath());
+  // Partner login (ITHACA_LOGIN): admit only NetIDs with a live Ithaca roster
+  // row, and land on the home page — no gated path takes a partner session yet,
+  // so a RelayState of /edit would 403. Fail closed on a DB error.
+  const partner = isPartnerCwid(result.cwid);
+  if (partner) {
+    const netid = result.cwid.slice(0, result.cwid.indexOf("@"));
+    let admitted = false;
+    try {
+      admitted =
+        (await db.read.scholar.count({
+          where: { cwid: netid, campus: "ithaca", deletedAt: null },
+        })) > 0;
+    } catch {
+      return errorPage(500, "Sign-in is temporarily unavailable.");
+    }
+    if (!admitted) {
+      console.warn(
+        JSON.stringify({ event: "saml_callback_failed", reason: "partner_not_admitted" }),
+      );
+      return errorPage(403, "Your Cornell account isn't set up for Scholars.");
+    }
+  }
+
+  const dest = partner
+    ? "/"
+    : safeReturnPath(form.get("RelayState"), getDefaultReturnPath());
   // Relative Location, NOT new URL(dest, request.url): behind CloudFront -> ALB
   // -> Fargate, request.url is the container's internal address
   // (e.g. http://ip-10-0-0-0.ec2.internal:3000) -- absolutizing against it sends
