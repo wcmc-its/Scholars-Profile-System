@@ -7,7 +7,7 @@
  * render or 500 an edit — get degrades to a miss, set/revalidateTag no-op).
  * Also the cross-task propagation path and Buffer round-trip through S3 JSON.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // CJS module (module.exports = class, with test hooks attached as props).
 import mod from "../../lib/cache/s3-cache-handler.js";
 
@@ -177,6 +177,81 @@ describe("fail-open (S3 unavailable never throws)", () => {
       throw new Error("s3-down");
     }; // break subsequent reads
     expect((await h.get("k", { tags: ["/p"] }))?.value).toEqual({ html: "x" });
+  });
+});
+
+describe("timeouts abort the S3 request (socket-pool exhaustion → OOM)", () => {
+  // A hung send that only settles when its abortSignal fires. Before the fix
+  // the handler raced a timer and walked away, so `aborted` stayed false and
+  // the request (and its pooled socket) lived on.
+  function hungS3() {
+    const signals: AbortSignal[] = [];
+    return {
+      signals,
+      send(_cmd: unknown, opts?: { abortSignal?: AbortSignal }) {
+        const sig = opts?.abortSignal;
+        if (sig) signals.push(sig);
+        return new Promise((_, reject) =>
+          sig?.addEventListener("abort", () => reject(new Error("aborted"))),
+        );
+      },
+    };
+  }
+
+  it("get falls open to a miss AND aborts the hung request", async () => {
+    vi.useFakeTimers();
+    try {
+      const s3 = hungS3();
+      const h = createHandler({ client: s3, bucket: "b", now: () => 1 });
+      const p = h.get("k");
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(p).resolves.toBeNull();
+      expect(s3.signals).toHaveLength(1);
+      expect(s3.signals[0].aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("set aborts a hung PUT instead of leaving it queued", async () => {
+    vi.useFakeTimers();
+    try {
+      const s3 = hungS3();
+      const h = createHandler({ client: s3, bucket: "b", now: () => 1 });
+      const p = h.set("k", { html: "x" }, { tags: [] });
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(p).resolves.toBeUndefined();
+      expect(s3.signals).toHaveLength(1);
+      expect(s3.signals[0].aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a GET whose body stalls has the body destroyed on abort", async () => {
+    vi.useFakeTimers();
+    try {
+      let destroyed = false;
+      const s3 = {
+        async send() {
+          return {
+            Body: {
+              transformToString: () => new Promise(() => {}),
+              destroy: () => {
+                destroyed = true;
+              },
+            },
+          };
+        },
+      };
+      const h = createHandler({ client: s3, bucket: "b", now: () => 1 });
+      const p = h.get("k");
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(p).resolves.toBeNull();
+      expect(destroyed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
