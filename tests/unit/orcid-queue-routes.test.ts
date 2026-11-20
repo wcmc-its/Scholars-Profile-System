@@ -290,6 +290,25 @@ vi.mock("@/lib/db", () => ({
         findUnique: vi.fn(async () => ({ slug: "jane-doe" })),
         findMany: vi.fn(async () => []),
       },
+      // Bulk review's dry-run extras (`bulkPairFacts`).
+      orcidCandidateEvidence: {
+        findMany: vi.fn(async () => [
+          {
+            cwid: "jd0001",
+            orcid: "0000-0002-1825-0097",
+            evidenceDetail: {
+              names: {
+                orcid: { credit: null, given: "Jane", family: "Doe", other: [] },
+                givenAgrees: true,
+                surnameRule: "exact",
+              },
+              institutions: [],
+              shared: [],
+              email: "jd0001@med.cornell.edu",
+            },
+          },
+        ]),
+      },
     },
   },
 }));
@@ -884,8 +903,13 @@ describe("bulk-confirm", () => {
         rule: RULE,
       }),
     );
-    const { results } = (await res.json()) as { results: Array<{ ok: boolean }> };
+    const { results } = (await res.json()) as {
+      results: Array<{ ok: boolean; orcidName?: string | null; verifiedEmail?: boolean }>;
+    };
     expect(results.map((r) => r.ok)).toEqual([true, false]);
+    // A passing pair carries Bulk review's Name on ORCID and Verified email.
+    expect(results[0]).toMatchObject({ orcidName: "Jane Doe", verifiedEmail: true });
+    expect(results[1]!.orcidName).toBeUndefined();
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
     expect(audits()).toHaveLength(0);
     expect(h.reflectOverviewEdit).not.toHaveBeenCalled();

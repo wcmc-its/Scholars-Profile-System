@@ -171,6 +171,14 @@ const dateTime = (iso: string) =>
 const openRows = (card: OrcidQueueCard, outcomes: Record<string, Outcome>) =>
   card.candidates.filter((r) => !r.autoConfirmed && !outcomes[pairKey(r.cwid, r.orcid)]);
 
+/** The actor decided one of the scholar's iDs on this page. */
+function decidedHere(s: OrcidQueueSummary, outcomes: Record<string, Outcome>): boolean {
+  return s.candidates.some((c) => {
+    const o = outcomes[pairKey(s.cwid, c.orcid)];
+    return o === "confirmed" || o === "dismissed";
+  });
+}
+
 /** Decided: the ETL confirmed an iD, or every candidate was decided here, or
  *  one was confirmed here. Pure over the summary (the card may not be loaded). */
 function isResolved(s: OrcidQueueSummary, outcomes: Record<string, Outcome>): boolean {
@@ -186,7 +194,10 @@ export function OrcidQueue({
   readOnly,
   facets = null,
   pmBaseUrl = null,
+  header = null,
 }: {
+  /** The page's title block, set beside the mode toggle. */
+  header?: React.ReactNode;
   data: OrcidQueueData;
   basePath: string;
   /** View as: every control off (the routes refuse impersonated decisions). */
@@ -217,6 +228,8 @@ export function OrcidQueue({
   const [undo, setUndo] = useState<{ items: UndoItem[]; select?: string } | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [mode, setMode] = useState<"one" | "bulk">("one");
+  /** Bulk review's match count, once it has asked the server. */
+  const [bulkCount, setBulkCount] = useState<number | null>(null);
   const canDecide = !readOnly;
 
   const list = useMemo(
@@ -231,7 +244,11 @@ export function OrcidQueue({
           )
             return false;
           if (view.errorsOnly && !s.conflict) return false;
-          if (view.decision === "open") return s.candidates.length > 0 && !isResolved(s, outcomes);
+          // Scholars decided on this page stay listed (greyed) so the run reads as progress.
+          if (view.decision === "open")
+            return (
+              s.candidates.length > 0 && (!isResolved(s, outcomes) || decidedHere(s, outcomes))
+            );
           if (view.decision) return hasDecision(s, view.decision);
           return true;
         })
@@ -447,6 +464,47 @@ export function OrcidQueue({
 
   return (
     <div className="flex flex-col gap-4" data-slot="orcid-queue">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">{header}</div>
+        <div
+          role="tablist"
+          aria-label="Review mode"
+          className="border-apollo-border-strong bg-apollo-rail flex w-max shrink-0 gap-0.5 rounded-[10px] border p-[3px]"
+          data-testid="orcid-queue-mode"
+        >
+          {(
+            [
+              ["one", "One at a time"],
+              ["bulk", "Bulk review"],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={mode === k}
+              onClick={() => setMode(k)}
+              className={cn(
+                "rounded-[7px] px-3.5 py-1.5 text-[13px]",
+                mode === k
+                  ? "bg-apollo-surface font-medium shadow-[0_1px_2px_rgba(42,36,33,0.12)]"
+                  : "text-muted-foreground",
+              )}
+              data-testid={`orcid-queue-mode-${k}`}
+            >
+              {label}
+              {k === "bulk" && bulkCount !== null ? (
+                <span
+                  className="text-muted-foreground ml-1.5 tabular-nums"
+                  data-testid="orcid-queue-bulk-count"
+                >
+                  {fmt(bulkCount)}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      </div>
       <OrcidQueueFilterBar
         facets={facets}
         filter={filter}
@@ -477,37 +535,6 @@ export function OrcidQueue({
         </div>
       ) : null}
 
-      <div
-        role="tablist"
-        aria-label="Review mode"
-        className="border-apollo-border-strong bg-apollo-rail flex w-max gap-0.5 rounded-[10px] border p-[3px]"
-        data-testid="orcid-queue-mode"
-      >
-        {(
-          [
-            ["one", "One at a time"],
-            ["bulk", "Bulk review"],
-          ] as const
-        ).map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={mode === k}
-            onClick={() => setMode(k)}
-            className={cn(
-              "rounded-[7px] px-3.5 py-1.5 text-[13px]",
-              mode === k
-                ? "bg-apollo-surface font-medium shadow-[0_1px_2px_rgba(42,36,33,0.12)]"
-                : "text-muted-foreground",
-            )}
-            data-testid={`orcid-queue-mode-${k}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
       {mode === "bulk" ? (
         <OrcidBulkReview
           list={list}
@@ -534,6 +561,7 @@ export function OrcidQueue({
             );
           }}
           onError={setError}
+          onCount={setBulkCount}
         />
       ) : null}
 
@@ -660,6 +688,8 @@ function ScholarList({
   onSelect: (cwid: string) => void;
 }) {
   const [sortOpen, setSortOpen] = useState(false);
+  const decided = list.filter((s) => decidedHere(s, outcomes)).length;
+  const left = list.filter((s) => !isResolved(s, outcomes)).length;
   return (
     <aside
       className={cn(CARD, "bg-apollo-surface-2 overflow-hidden lg:sticky lg:top-[72px]")}
@@ -668,7 +698,7 @@ function ScholarList({
       <div className="border-apollo-border flex flex-col gap-1.5 border-b px-4 pt-3.5 pb-2.5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[13.5px] font-semibold" data-testid="orcid-queue-count">
-            {plural(list.length, "scholar")}
+            {fmt(left)} left
           </span>
           <span className="text-muted-foreground flex items-center gap-1 text-[12px]">
             <kbd className="border-apollo-border-strong bg-apollo-surface rounded border px-1.5 font-sans text-[11px]">
@@ -680,54 +710,65 @@ function ScholarList({
             to move
           </span>
         </div>
-        <Popover open={sortOpen} onOpenChange={setSortOpen}>
-          <PopoverTrigger
-            className="text-muted-foreground inline-flex w-max items-center gap-1 text-[12.5px]"
-            data-testid="orcid-queue-sort"
-          >
-            Sort:{" "}
-            <span className="text-foreground font-semibold">
-              {ORCID_QUEUE_SORT_LABEL[sort].label}
-            </span>
-            <ChevronDown className="size-3.5" strokeWidth={2.4} aria-hidden />
-          </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            className="border-apollo-border-strong bg-apollo-surface flex w-[300px] flex-col rounded-[10px] p-1"
-          >
-            {ORCID_QUEUE_SORTS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => {
-                  onSort(k);
-                  setSortOpen(false);
-                }}
-                className={cn(
-                  "flex items-start gap-2 rounded-md px-2.5 py-2 text-left",
-                  sort === k ? "bg-apollo-slate-tint" : "hover:bg-apollo-surface-2",
-                )}
-                data-testid={`orcid-queue-sort-${k}`}
-              >
-                <Check
+        <span className="bg-apollo-rail-border h-[3px] overflow-hidden rounded-full" aria-hidden>
+          <span
+            className="bg-apollo-slate block h-full"
+            style={{ width: `${decided + left > 0 ? (decided / (decided + left)) * 100 : 0}%` }}
+          />
+        </span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground text-[12.5px]" data-testid="orcid-queue-decided">
+            {fmt(decided)} decided this session
+          </span>
+          <Popover open={sortOpen} onOpenChange={setSortOpen}>
+            <PopoverTrigger
+              className="text-muted-foreground inline-flex w-max items-center gap-1 text-[12.5px]"
+              data-testid="orcid-queue-sort"
+            >
+              Sort:{" "}
+              <span className="text-foreground font-semibold">
+                {ORCID_QUEUE_SORT_LABEL[sort].label}
+              </span>
+              <ChevronDown className="size-3.5" strokeWidth={2.4} aria-hidden />
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              className="border-apollo-border-strong bg-apollo-surface flex w-[300px] flex-col rounded-[10px] p-1"
+            >
+              {ORCID_QUEUE_SORTS.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    onSort(k);
+                    setSortOpen(false);
+                  }}
                   className={cn(
-                    "mt-0.5 size-3.5 shrink-0",
-                    sort === k ? "opacity-100" : "opacity-0",
+                    "flex items-start gap-2 rounded-md px-2.5 py-2 text-left",
+                    sort === k ? "bg-apollo-slate-tint" : "hover:bg-apollo-surface-2",
                   )}
-                  aria-hidden
-                />
-                <span className="flex flex-col">
-                  <span className="text-[13.5px] font-medium">
-                    {ORCID_QUEUE_SORT_LABEL[k].label}
+                  data-testid={`orcid-queue-sort-${k}`}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 size-3.5 shrink-0",
+                      sort === k ? "opacity-100" : "opacity-0",
+                    )}
+                    aria-hidden
+                  />
+                  <span className="flex flex-col">
+                    <span className="text-[13.5px] font-medium">
+                      {ORCID_QUEUE_SORT_LABEL[k].label}
+                    </span>
+                    <span className="text-muted-foreground text-[12px]">
+                      {ORCID_QUEUE_SORT_LABEL[k].hint}
+                    </span>
                   </span>
-                  <span className="text-muted-foreground text-[12px]">
-                    {ORCID_QUEUE_SORT_LABEL[k].hint}
-                  </span>
-                </span>
-              </button>
-            ))}
-          </PopoverContent>
-        </Popover>
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
       <div
         className="max-h-[calc(100vh-170px)] overflow-y-auto"
@@ -738,6 +779,10 @@ function ScholarList({
           const best = s.candidates[0];
           const selected = s.cwid === current?.cwid;
           const resolved = isResolved(s, outcomes);
+          const here = decidedHere(s, outcomes);
+          const confirmedHere = s.candidates.some(
+            (c) => outcomes[pairKey(s.cwid, c.orcid)] === "confirmed",
+          );
           return (
             <button
               key={s.cwid}
@@ -747,6 +792,7 @@ function ScholarList({
               onClick={() => onSelect(s.cwid)}
               className={cn(
                 "border-apollo-border flex w-full items-start gap-3 border-b border-l-[3px] px-4 py-3 text-left",
+                here && !selected && "bg-apollo-surface-2",
                 selected
                   ? "border-l-apollo-slate bg-apollo-slate-tint"
                   : "hover:bg-apollo-surface border-l-transparent",
@@ -754,10 +800,34 @@ function ScholarList({
               data-testid={`orcid-queue-item-${s.cwid}`}
             >
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span
-                  className={cn("truncate text-[14px]", selected ? "font-semibold" : "font-medium")}
-                >
-                  {s.name}
+                <span className="flex items-start justify-between gap-2">
+                  <span
+                    className={cn(
+                      "truncate text-[14px]",
+                      selected ? "font-semibold" : "font-medium",
+                      here && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {s.name}
+                  </span>
+                  {here ? (
+                    <span
+                      className="text-muted-foreground flex shrink-0 items-center gap-1 text-[12px]"
+                      data-testid="orcid-queue-item-outcome"
+                    >
+                      {confirmedHere ? (
+                        <>
+                          <Check className="size-3" aria-hidden /> Confirmed
+                        </>
+                      ) : (
+                        "Not this person"
+                      )}
+                    </span>
+                  ) : best ? (
+                    <span className={cn(CHIP, "shrink-0 border", tierTone(best))}>
+                      {tierLabel(best)}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-muted-foreground truncate text-[12.5px]">
                   {s.department ? `${s.department} · ` : ""}
@@ -792,22 +862,6 @@ function ScholarList({
                   ) : null}
                 </span>
               </span>
-              {best ? (
-                <span
-                  className={cn("flex shrink-0 flex-col items-end gap-1", resolved && "opacity-40")}
-                >
-                  <EvidenceMeter band={best.band} competitor={best.competitor} />
-                  <span className="flex items-center gap-1">
-                    {best.competitor ? (
-                      <ArrowLeftRight
-                        className="text-apollo-amber size-3"
-                        aria-label="Competitor"
-                      />
-                    ) : null}
-                    <span className={cn(CHIP, "border", tierTone(best))}>{tierLabel(best)}</span>
-                  </span>
-                </span>
-              ) : null}
             </button>
           );
         })}
@@ -922,6 +976,8 @@ function ScholarDetail({
   const [alsoDismiss, setAlsoDismiss] = useState(true);
   const [retire, setRetire] = useState(false);
   const conflict = rows.some((r) => r.state === "conflict");
+  /** The iD the decision bar acts on: the open row, else the best open one. */
+  const target = open.find((o) => o.orcid === openId) ?? open[0];
 
   // C / X / N decide the open row (or the best open iD): Confirm, Not this
   // person, None of these. Same calls as the buttons.
@@ -963,7 +1019,7 @@ function ScholarDetail({
   const header = (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
       {card.department ? <span className={EYEBROW}>{card.department}</span> : null}
-      <h2 className="m-0 text-[26px] leading-tight font-semibold tracking-[-0.01em]">
+      <h2 className="m-0 font-serif text-[28px] leading-tight font-normal tracking-[-0.005em]">
         {card.name}
       </h2>
       {card.title ? <span className="text-[15px] text-[#3a3532]">{card.title}</span> : null}
@@ -1066,7 +1122,7 @@ function ScholarDetail({
                 {decided ? "Match evidence before review" : "Match evidence"}
               </span>
               <EvidenceMeter band={best.band} competitor={best.competitor} />
-              <span className="text-[17px] font-semibold">{tierLabel(best)}</span>
+              <span className={cn(CHIP, "border", tierTone(best))}>{tierLabel(best)}</span>
             </span>
             <span className="text-[#3a3532]">
               {ranked.length > 1 ? `Best of ${ranked.length} iDs: ` : "From its one iD: "}
@@ -1096,30 +1152,35 @@ function ScholarDetail({
               </span>
             ) : null}
           </div>
-          <div className="flex items-center justify-end gap-3 text-[13px]">
-            <span className="text-muted-foreground">
-              {ranked.length > 1
-                ? `${plural(ranked.length, "candidate iD")}, best first`
-                : plural(ranked.length, "candidate iD")}
-            </span>
-            {canDecide && open.length > 0 ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void onDecide(open[0]!, "dismiss", { others: open.slice(1), noneOfThese: true })
-                }
-                className="text-[13px]"
-                data-testid="orcid-queue-none"
-              >
-                None of these <Kbd>N</Kbd>
-              </Button>
-            ) : null}
-          </div>
         </div>
       </div>
+
+      {canDecide && !decided && open.length > 0 ? (
+        <DecisionBar
+          target={target!}
+          isBest={target === open[0] && ranked.length > 1}
+          others={open.length - 1}
+          alsoDismiss={alsoDismiss}
+          onAlsoDismiss={setAlsoDismiss}
+          retire={retire}
+          onRetire={setRetire}
+          busy={busy}
+          onConfirm={() =>
+            void onDecide(target!, "confirm", {
+              others: alsoDismiss ? open.filter((o) => o.orcid !== target!.orcid) : [],
+              retire,
+            })
+          }
+          onDismiss={async () => {
+            if (await onDecide(target!, "dismiss")) {
+              setOpenId(open.find((o) => o.orcid !== target!.orcid)?.orcid ?? null);
+            }
+          }}
+          onNone={() =>
+            void onDecide(open[0]!, "dismiss", { others: open.slice(1), noneOfThese: true })
+          }
+        />
+      ) : null}
 
       <div className="border-apollo-border overflow-x-auto border-t">
         <div className="min-w-[870px]">
@@ -1147,22 +1208,11 @@ function ScholarDetail({
               outcome={outcomeOf(r) ?? null}
               onToggle={() => setOpenId(openId === r.orcid ? null : r.orcid)}
               onOpen={(orcid) => setOpenId(orcid)}
-              open={open}
-              alsoDismiss={alsoDismiss}
-              onAlsoDismiss={setAlsoDismiss}
-              retire={retire}
-              onRetire={setRetire}
               onShared={(shared) => void onDecide(r, "dismiss", { shared })}
               canDecide={canDecide}
               busy={busy}
               pmBaseUrl={pmBaseUrl}
               conflict={conflict}
-              onConfirm={() =>
-                void onDecide(r, "confirm", {
-                  others: alsoDismiss ? open.filter((o) => o.orcid !== r.orcid) : [],
-                  retire,
-                })
-              }
               onDismiss={async () => {
                 if (await onDecide(r, "dismiss")) {
                   const next = open.find((o) => o.orcid !== r.orcid);
@@ -1202,6 +1252,111 @@ function ScholarDetail({
 // Fits the detail panel at a ~1380px window (list 300px): 870px of columns and gaps.
 const GRID =
   "grid grid-cols-[28px_minmax(156px,1fr)_84px_minmax(140px,1.2fr)_124px_132px_minmax(130px,1fr)] items-start gap-x-3 px-4";
+
+/** The one decision bar, at the top of the scholar's panel (sticky under the
+ *  console header so it stays in reach while a long works list scrolls). It
+ *  acts on the open candidate row, else the best open iD. */
+function DecisionBar({
+  target,
+  isBest,
+  others,
+  alsoDismiss,
+  onAlsoDismiss,
+  retire,
+  onRetire,
+  busy,
+  onConfirm,
+  onDismiss,
+  onNone,
+}: {
+  target: OrcidQueueRow;
+  isBest: boolean;
+  others: number;
+  alsoDismiss: boolean;
+  onAlsoDismiss: (v: boolean) => void;
+  retire: boolean;
+  onRetire: (v: boolean) => void;
+  busy: boolean;
+  onConfirm: () => void;
+  onDismiss: () => void;
+  onNone: () => void;
+}) {
+  return (
+    <div className="bg-apollo-surface sticky top-[64px] z-10 px-7 pb-4">
+      <div
+        className="border-apollo-border-strong bg-apollo-surface flex flex-col gap-1.5 rounded-[10px] border px-4 py-3 shadow-[0_1px_3px_rgba(42,36,33,0.06)]"
+        data-testid="orcid-queue-decision-bar"
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13.5px]">
+          <span className="text-muted-foreground">
+            {isBest ? "Best match" : "Candidate"}{" "}
+            <span className={cn(MONO, "text-foreground")} data-testid="orcid-queue-target">
+              {target.orcid}
+            </span>
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={onConfirm}
+            className="bg-apollo-maroon hover:bg-apollo-maroon-press text-[13px] text-white"
+            data-testid="orcid-queue-confirm"
+          >
+            {target.state === "conflict" ? "Replace with this iD" : "Confirm"}
+            <Kbd tone="dark">C</Kbd>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={onDismiss}
+            className="text-destructive hover:bg-apollo-red-tint hover:text-destructive border-apollo-red-tint-border text-[13px] font-normal"
+            data-testid="orcid-queue-dismiss"
+          >
+            Not this person <Kbd>X</Kbd>
+          </Button>
+          {others > 0 ? (
+            <label className="text-muted-foreground flex items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={alsoDismiss}
+                onChange={(e) => onAlsoDismiss(e.target.checked)}
+                className="accent-apollo-slate size-4"
+                data-testid="orcid-queue-also-dismiss"
+              />
+              Also mark the other {others === 1 ? "iD" : `${others} iDs`}
+              <select
+                value={retire ? "retire" : "not_me"}
+                onChange={(e) => onRetire(e.target.value === "retire")}
+                disabled={!alsoDismiss}
+                className="border-apollo-border rounded border bg-transparent px-1 py-0.5 text-[13px]"
+                data-testid="orcid-queue-others-as"
+                aria-label="Mark the other iDs as"
+              >
+                <option value="not_me">not this person</option>
+                <option value="retire">retired: duplicate records of this scholar</option>
+              </select>
+            </label>
+          ) : null}
+          <span className="flex-1" />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={onNone}
+            className="text-[13px]"
+            data-testid="orcid-queue-none"
+          >
+            None of these <Kbd>N</Kbd>
+          </Button>
+        </div>
+        <span className="text-muted-foreground text-[12.5px]">Moves to the next scholar</span>
+      </div>
+    </div>
+  );
+}
 
 function DecisionBlock({
   card,
@@ -1256,17 +1411,11 @@ function CandidateRow({
   outcome,
   onToggle,
   onOpen,
-  open,
-  alsoDismiss,
-  onAlsoDismiss,
-  retire,
-  onRetire,
   onShared,
   canDecide,
   busy,
   pmBaseUrl,
   conflict,
-  onConfirm,
   onDismiss,
 }: {
   card: OrcidQueueCard;
@@ -1276,29 +1425,26 @@ function CandidateRow({
   outcome: Outcome | null;
   onToggle: () => void;
   onOpen: (orcid: string) => void;
-  open: OrcidQueueRow[];
-  alsoDismiss: boolean;
-  onAlsoDismiss: (v: boolean) => void;
-  /** v3 B2: the others are retired as this scholar's duplicate records. */
-  retire: boolean;
-  onRetire: (v: boolean) => void;
   /** v3 B2: decide an iD shared with another scholar. */
   onShared: (shared: { cwid: string; name: string; belongs: boolean }) => void;
   canDecide: boolean;
   busy: boolean;
   pmBaseUrl: string | null;
   conflict: boolean;
-  onConfirm: () => void;
   onDismiss: () => void;
 }) {
   const name = orcidDisplayName(r);
   const pct = r.worksTotal > 0 ? Math.min(100, (r.shared / r.worksTotal) * 100) : 0;
   const struck = outcome === "dismissed" || outcome === "undone";
-  const others = open.filter((o) => o.orcid !== r.orcid).length;
   const pending = !outcome && !r.autoConfirmed;
   return (
     <div
-      className={cn("border-apollo-border border-b", isOpen && "bg-apollo-surface-2")}
+      className={cn(
+        "border-apollo-border border-b",
+        pending && weakKind(r) === "conflicting"
+          ? "bg-apollo-coral-tint"
+          : isOpen && "bg-apollo-surface-2",
+      )}
       data-testid={`orcid-queue-row-${r.cwid}-${r.orcid}`}
     >
       {/* A div, not a <button>: the iD inside is a link people click and copy. */}
@@ -1426,7 +1572,14 @@ function CandidateRow({
             {foundBy(r)}
           </span>
           {r.competitor ? (
-            <span className="text-apollo-amber flex items-center gap-1 text-[12.5px]">
+            <span
+              className={cn(
+                "flex items-center gap-1 text-[12.5px]",
+                weakKind(r) === "conflicting"
+                  ? "text-apollo-coral-foreground"
+                  : "text-apollo-amber",
+              )}
+            >
               <ArrowLeftRight className="size-3 shrink-0" aria-hidden />
               Competitor
             </span>
@@ -1464,59 +1617,6 @@ function CandidateRow({
               <span className="text-muted-foreground text-[13px]">
                 Takes the iD off file and marks it Not this person.
               </span>
-            </div>
-          ) : null}
-          {canDecide && pending ? (
-            // Sticky: the evidence above can run long (a dozen works), and the
-            // decision should never sit below the fold.
-            <div
-              className="border-apollo-border-strong bg-apollo-surface sticky bottom-3 z-10 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[10px] border px-3 py-2.5 shadow-[0_2px_8px_rgba(42,36,33,0.10)]"
-              data-testid="orcid-queue-decision-bar"
-            >
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                onClick={onConfirm}
-                className="bg-apollo-maroon hover:bg-apollo-maroon-press text-[13px] text-white"
-                data-testid="orcid-queue-confirm"
-              >
-                {r.state === "conflict" ? "Replace with this iD" : "Confirm"}
-                <Kbd tone="dark">C</Kbd>
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={onDismiss}
-                className="text-destructive hover:bg-apollo-red-tint hover:text-destructive border-apollo-red-tint-border text-[13px] font-normal"
-                data-testid="orcid-queue-dismiss"
-              >
-                Not this person <Kbd>X</Kbd>
-              </Button>
-              {others > 0 ? (
-                <label className="text-muted-foreground flex items-center gap-2 text-[13px]">
-                  <input
-                    type="checkbox"
-                    checked={alsoDismiss}
-                    onChange={(e) => onAlsoDismiss(e.target.checked)}
-                    data-testid="orcid-queue-also-dismiss"
-                  />
-                  Also mark the other {others}
-                  <select
-                    value={retire ? "retire" : "not_me"}
-                    onChange={(e) => onRetire(e.target.value === "retire")}
-                    disabled={!alsoDismiss}
-                    className="border-apollo-border rounded border bg-transparent px-1 py-0.5 text-[13px]"
-                    data-testid="orcid-queue-others-as"
-                    aria-label="Mark the other iDs as"
-                  >
-                    <option value="not_me">Not this person</option>
-                    <option value="retire">Retired: duplicate records of this scholar</option>
-                  </select>
-                </label>
-              ) : null}
             </div>
           ) : null}
         </div>

@@ -25,6 +25,7 @@ import { normalizeOrcid } from "@/lib/edit/orcid";
 import { isOrcidLibrarianQueueEnabled, ORCID_BULK_MAX } from "@/lib/edit/orcid-queue";
 import {
   assertBulkConfirmable,
+  bulkPairFacts,
   confirmPair,
   OrcidQueueRefused,
 } from "@/lib/edit/orcid-queue.server";
@@ -113,6 +114,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } catch (err) {
       logEditFailure(`${PATH}#reflect`, err);
     }
+  }
+
+  // Dry run: Bulk review's Name on ORCID and Verified email columns.
+  if (dryRun) {
+    const facts = await bulkPairFacts(
+      db.read,
+      results.filter((r) => r.ok),
+    );
+    return editOk({
+      results: results.map((r) => ({ ...r, ...facts.get(`${r.cwid}|${r.orcid}`) })),
+    });
   }
 
   return editOk({ results });

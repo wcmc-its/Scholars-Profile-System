@@ -117,23 +117,25 @@ export default async function OrcidQueuePage({
       pendingSlugRequests={pendingSlugRequests}
       pendingHonors={pendingHonors}
     >
-      <div className="mb-[22px] flex flex-col gap-1.5">
-        <h1 className="m-0 text-[30px] font-semibold tracking-[-0.01em]">ORCID queue</h1>
-        <QueueIntro
-          panelId="orcid-queue-guide"
-          toggleTestId="orcid-queue-guide-toggle"
-          introClassName="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal"
-          intro={
-            <>
-              ORCID iDs that may belong to a scholar, with the evidence from each public ORCID
-              record. A confirmed iD goes on file and reaches WCM Identity overnight.
-            </>
-          }
-        >
-          <OrcidQueueGuide />
-        </QueueIntro>
-      </div>
       <OrcidQueue
+        header={
+          <div className="mb-1 flex flex-col gap-1.5">
+            <h1 className="page-title m-0 text-[32px] leading-tight">ORCID queue</h1>
+            <QueueIntro
+              panelId="orcid-queue-guide"
+              toggleTestId="orcid-queue-guide-toggle"
+              introClassName="text-muted-foreground m-0 max-w-[80ch] text-[14.5px] leading-normal"
+              intro={
+                <>
+                  ORCID iDs that may belong to a scholar, with the evidence from each public ORCID
+                  record. A confirmed iD goes on file and reaches WCM Identity overnight.
+                </>
+              }
+            >
+              <OrcidQueueGuide />
+            </QueueIntro>
+          </div>
+        }
         data={data}
         facets={facets}
         basePath={BASE_PATH}
