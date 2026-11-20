@@ -11,9 +11,11 @@
  *
  * `variant="unit"` (department / center / division pages only — Unit Page
  * v2): warm surface-2 panel, auto-fit grid (min 260px), a 1px left rule on
- * every card, trailing-period tidy + full-title tooltip, the venue line
- * pinned to the card bottom, and the 28px spotlight author chips. Topic and
- * methods pages pass no variant and keep the original rendering.
+ * every card, trailing-period tidy + full-title tooltip. Compact: the title
+ * clamps at two lines with the venue right under it, the byline is one line
+ * (two spotlight chips + "+N more", the senior author pinned last) at the card
+ * bottom, and "View all N publications →" sits at the right of the heading.
+ * Topic and methods pages pass no variant and keep the original rendering.
  *
  * `paged` (topic page only): the pool may hold up to 9 cards, shown 3 at a
  * time with an "n of m" position and round ‹ › buttons (wrap-around) in the
@@ -98,7 +100,7 @@ function SpotlightInner({
       href={viewAllHref as never}
       className={
         unit
-          ? "mt-7 inline-block text-[14px] text-foreground underline decoration-apollo-border-strong underline-offset-[3px] hover:text-apollo-slate"
+          ? "text-[13px] whitespace-nowrap text-foreground underline decoration-apollo-border-strong underline-offset-[3px] hover:text-apollo-slate"
           : "border-b-[0.5px] border-black/25 pb-px text-[13px] text-[var(--color-text-secondary)] no-underline hover:text-foreground"
       }
     >
@@ -113,15 +115,21 @@ function SpotlightInner({
     <section
       className={
         unit
-          ? "my-8 rounded-[13px] bg-apollo-surface-2 px-[26px] pb-7 pt-[26px]"
+          ? "my-8 rounded-[13px] bg-apollo-surface-2 px-[22px] pb-5 pt-[18px]"
           : "my-8 rounded-[14px] bg-[#f5f3ee] px-[26px] pb-6 pt-[22px]"
       }
     >
-      <header className={unit ? "mb-5" : "mb-[22px] flex flex-wrap items-center gap-x-2 gap-y-2"}>
+      <header
+        className={
+          unit
+            ? "mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1"
+            : "mb-[22px] flex flex-wrap items-center gap-x-2 gap-y-2"
+        }
+      >
         <h2
           className={
             unit
-              ? "m-0 inline-flex items-center gap-2 text-[22px] font-medium leading-[28px]"
+              ? "m-0 inline-flex items-center gap-2 text-[18px] font-medium leading-[24px]"
               : "m-0 inline-flex items-center gap-2 text-[22px] font-medium leading-[1.15] tracking-[-0.01em]"
           }
         >
@@ -155,6 +163,7 @@ function SpotlightInner({
             />
           </div>
         )}
+        {unit ? viewAll : null}
       </header>
 
       <div
@@ -173,7 +182,7 @@ function SpotlightInner({
         )}
       </div>
 
-      {unit ? viewAll : <div className="mt-[22px]">{viewAll}</div>}
+      {unit ? null : <div className="mt-[22px]">{viewAll}</div>}
     </section>
   );
 }
@@ -283,7 +292,7 @@ function UnitSpotlightPubCard({ card }: { card: SpotlightCard }) {
     "line-clamp-2 min-h-[30px] text-[11px] font-semibold uppercase leading-[15px] tracking-[0.1em] text-[var(--color-primary-cornell-red)]";
 
   return (
-    <article className="-ml-px flex flex-col gap-3 border-l border-apollo-border-strong px-[22px]">
+    <article className="-ml-px flex flex-col gap-2 border-l border-apollo-border-strong px-5">
       {card.kickerHref ? (
         <Link
           href={card.kickerHref as never}
@@ -302,12 +311,14 @@ function UnitSpotlightPubCard({ card }: { card: SpotlightCard }) {
           title={fullTitle || undefined}
           {...pubTitleProps(
             titleHtml,
-            "line-clamp-3 text-pretty text-left text-foreground underline-offset-[3px] transition-colors duration-[120ms] ease-out hover:text-apollo-slate hover:underline",
+            "line-clamp-2 text-pretty text-left text-foreground underline-offset-[3px] transition-colors duration-[120ms] ease-out hover:text-apollo-slate hover:underline",
           )}
         />
       </h3>
-      <AuthorChipRow authors={card.authors} pmid={card.pmid} variant="spotlight" />
-      <SpotlightVenue card={card} className="mt-auto text-[13px] italic text-muted-foreground" />
+      <SpotlightVenue card={card} className="text-[12.5px] italic text-muted-foreground" />
+      <div className="mt-auto pt-1">
+        <AuthorChipRow authors={card.authors} pmid={card.pmid} variant="spotlight" cap={2} />
+      </div>
     </article>
   );
 }
