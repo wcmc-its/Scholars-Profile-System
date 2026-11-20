@@ -19,7 +19,16 @@ import { Button } from "@/components/ui/button";
 
 export type EditableUnitKind = "department" | "division" | "center";
 
-export function EditUnitLink({ kind, code }: { kind: EditableUnitKind; code: string }) {
+export function EditUnitLink({
+  kind,
+  code,
+  className = "mt-4 flex",
+}: {
+  kind: EditableUnitKind;
+  code: string;
+  /** The wrapper's layout; the default puts it on its own line. */
+  className?: string;
+}) {
   const [canEdit, setCanEdit] = useState(false);
 
   useEffect(() => {
@@ -48,7 +57,7 @@ export function EditUnitLink({ kind, code }: { kind: EditableUnitKind; code: str
   if (!canEdit) return null;
 
   return (
-    <div className="mt-4 flex">
+    <div className={className}>
       <Button asChild variant="outline" size="sm">
         <Link href={`/edit/${kind}/${encodeURIComponent(code)}`} data-testid="edit-unit-link">
           Edit this {kind}

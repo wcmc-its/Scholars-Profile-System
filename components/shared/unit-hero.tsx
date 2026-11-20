@@ -61,8 +61,8 @@ export function UnitSubunitChips({
 
 /**
  * "TOP RESEARCH AREAS" as a ranked list: up to two columns of numbered rows,
- * each a link to /topics/{slug} with its publication count and a thin bar
- * sized against the top area, so the spread between areas reads at a glance.
+ * each a link to /topics/{slug} with a thin bar sized against the top area and
+ * its publication count on the same line, so the spread between areas reads at a glance.
  * Each row keeps the research-area hover preview (`AreaPreviewPill`) when
  * `previews` has an entry for it; a row without one is the plain link.
  */
@@ -94,7 +94,7 @@ export function UnitResearchAreas({
   );
   return (
     <div>
-      <div className={cn("mt-7 inline-flex items-center gap-1.5", UNIT_HERO_LABEL_CLASS)}>
+      <div className={cn("mt-6 inline-flex items-center gap-1.5", UNIT_HERO_LABEL_CLASS)}>
         Top research areas
         {infoButton}
       </div>
@@ -126,8 +126,11 @@ export function UnitResearchAreas({
                 membersNoun={membersNoun}
                 className={AREA_ROW_CLASS}
               >
-                <span className="flex items-baseline justify-between gap-3 text-[14px]">
-                  <span className="flex min-w-0 items-baseline">
+                {/* One line per area: rank, name, bar, count. The bar sits
+                    between name and count (fixed width) rather than on a second
+                    line, so the list is as short as the divisions list. */}
+                <span className="flex min-w-0 flex-1 items-baseline gap-3 text-[14px]">
+                  <span className="flex min-w-0 flex-1 items-baseline">
                     <span
                       className="text-muted-foreground w-5 flex-none text-[12px] tabular-nums"
                       aria-hidden="true"
@@ -138,15 +141,18 @@ export function UnitResearchAreas({
                       {area.topicLabel}
                     </span>
                   </span>
-                  <span className="text-muted-foreground text-[13px] whitespace-nowrap tabular-nums">
+                  <span
+                    aria-hidden="true"
+                    className="bg-apollo-surface-2 hidden h-1 w-16 flex-none self-center rounded-sm sm:block"
+                  >
+                    <span
+                      className="bg-apollo-border-strong block h-1 rounded-sm"
+                      style={{ width: `${Math.round((area.pubCount / max) * 1000) / 10}%` }}
+                    />
+                  </span>
+                  <span className="text-muted-foreground w-12 flex-none text-right text-[13px] whitespace-nowrap tabular-nums">
                     {area.pubCount.toLocaleString()}
                   </span>
-                </span>
-                <span aria-hidden="true" className="bg-apollo-surface-2 ml-5 block h-1 rounded-sm">
-                  <span
-                    className="bg-apollo-border-strong block h-1 rounded-sm"
-                    style={{ width: `${Math.round((area.pubCount / max) * 1000) / 10}%` }}
-                  />
                 </span>
               </AreaPreviewPill>
             ))}
@@ -159,7 +165,7 @@ export function UnitResearchAreas({
 
 /** A ranked research-area row: whole-row link, tinted on hover. */
 const AREA_ROW_CLASS =
-  "group border-apollo-border hover:bg-apollo-page flex flex-col gap-1.5 border-b py-[9px] no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]";
+  "group border-apollo-border hover:bg-apollo-page flex items-baseline border-b py-[7px] no-underline transition-colors duration-[120ms] ease-out hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--apollo-ring)]";
 
 export type UnitStat = { value: number; label: string; href: string };
 

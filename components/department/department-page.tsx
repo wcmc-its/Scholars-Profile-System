@@ -195,38 +195,46 @@ export async function DepartmentPage({
       </Breadcrumb>
 
       {/* Hero card (Unit Page v2) — eyebrow + website link, name, description,
-          the stats line, the embedded chair card, divisions, and top research
-          areas. */}
+          the stats line, the chair card beside them, vice chairs, divisions,
+          and top research areas. */}
       <section className="mt-4 rounded-[10px] border border-apollo-border bg-background px-7 pb-[26px] pt-7">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-cornell-red)]">
             Department
           </span>
-          <UnitWebsiteLink
-            url={detail.dept.url}
-            unitName={deptDisplayName}
-            variant="text"
-            label="Department website"
-          />
+          <span className="flex items-center gap-4">
+            <EditUnitLink kind="department" code={detail.dept.code} className="flex" />
+            <UnitWebsiteLink
+              url={detail.dept.url}
+              unitName={deptDisplayName}
+              variant="text"
+              label="Department website"
+            />
+          </span>
         </div>
-        <h1 className="page-title mt-2 text-[40px] leading-[1.15] text-balance">
-          {deptDisplayName}
-        </h1>
-        <UnitStatsLine stats={stats} variant="inline" />
-        {detail.dept.description && (
-          <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
-            {detail.dept.description}
-          </p>
-        )}
-        <EditUnitLink kind="department" code={detail.dept.code} />
-
-        {detail.chair && (
-          <LeaderCard
-            leader={detail.chair}
-            role={detail.chair.role}
-            interim={detail.chair.isInterim}
-          />
-        )}
+        {/* Title block and chair card side by side on wide screens: the chair
+            card used to take a full-width row of its own under the title. */}
+        <div className="mt-2 flex flex-col gap-x-8 gap-y-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="page-title text-[40px] leading-[1.15] text-balance">
+              {deptDisplayName}
+            </h1>
+            <UnitStatsLine stats={stats} variant="inline" />
+            {detail.dept.description && (
+              <p className="mt-[14px] max-w-[600px] text-pretty text-[15px] leading-[25px] text-muted-foreground">
+                {detail.dept.description}
+              </p>
+            )}
+          </div>
+          {detail.chair && (
+            <LeaderCard
+              leader={detail.chair}
+              role={detail.chair.role}
+              interim={detail.chair.isInterim}
+              className="mt-0 lg:w-[360px] lg:flex-none"
+            />
+          )}
+        </div>
 
         <ViceChairsList viceChairs={detail.viceChairs ?? []} />
 
