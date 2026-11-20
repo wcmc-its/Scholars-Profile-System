@@ -134,11 +134,18 @@ export async function DepartmentPage({
   });
 
   // Hero stats — each one links into the page (Unit Page v2): scholars to the
-  // roster, publications / grants to their tab. The division count is not
-  // repeated here: the "{N} divisions" list heading already carries it.
+  // roster, divisions to the list below, publications / grants to their tab.
+  // The count lives here; the list's heading is just "Divisions".
   const stats: UnitStat[] = [
     detail.stats.scholars > 0
       ? { value: detail.stats.scholars, label: "scholars", href: `${basePath}#people` }
+      : null,
+    detail.divisions.length > 0
+      ? {
+          value: detail.divisions.length,
+          label: detail.divisions.length === 1 ? "division" : "divisions",
+          href: "#subunits",
+        }
       : null,
     detail.stats.publications > 0
       ? {
@@ -228,6 +235,7 @@ export async function DepartmentPage({
           noun={["division", "divisions"]}
           ariaLabel="Divisions"
           countLabel="Scholars"
+          countInHeading={false}
           chips={detail.divisions.map((d) => ({
             key: d.code,
             label: d.name,

@@ -36,6 +36,7 @@ export function UnitSubunitChips({
   chips,
   ariaLabel,
   countLabel = "Scholars",
+  countInHeading = true,
 }: {
   /** Singular / plural noun, e.g. ["division", "divisions"]. */
   noun: [string, string];
@@ -43,12 +44,17 @@ export function UnitSubunitChips({
   ariaLabel: string;
   /** What each count counts — the right-hand column header. */
   countLabel?: string;
+  /** "{N} divisions" (default) or just "Divisions", for a page whose stats
+   *  line already carries the count. */
+  countInHeading?: boolean;
 }) {
   if (chips.length === 0) return null;
   return (
     <nav aria-label={ariaLabel}>
       <div id="subunits" className={cn("mt-7 scroll-mt-16", UNIT_HERO_LABEL_CLASS)}>
-        {chips.length} {chips.length === 1 ? noun[0] : noun[1]}
+        {countInHeading
+          ? `${chips.length} ${chips.length === 1 ? noun[0] : noun[1]}`
+          : noun[1].charAt(0).toUpperCase() + noun[1].slice(1)}
       </div>
       <UnitSubunitChipRow
         chips={chips}

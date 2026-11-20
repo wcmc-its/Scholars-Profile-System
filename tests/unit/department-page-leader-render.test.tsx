@@ -160,7 +160,7 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
     mockGetDivisionCounts.mockResolvedValue(new Map([["D1", 198]]));
     const { container } = render(await DepartmentPage({ deptSlug: "medicine", page: 1 }));
     expect(mockGetDivisionCounts).toHaveBeenCalledWith("MED");
-    expect(container.querySelector("#subunits")?.textContent).toBe("1 division");
+    expect(container.querySelector("#subunits")?.textContent).toBe("Divisions");
     const chip = screen.getByRole("link", { name: /Cardiology/ });
     expect(chip.getAttribute("href")).toBe("/departments/medicine/divisions/cardiology");
     expect(chip.textContent).toContain("198");
@@ -177,8 +177,10 @@ describe("DepartmentPage — Unit Page v2 hero", () => {
         href: "/departments/medicine/divisions/cardiology",
       },
     ]);
-    // The stats line no longer repeats the subunit count; the list heading carries it.
-    expect(screen.queryByRole("link", { name: "1 division" })).toBeNull();
+    // The count is on the stats line (linking the list); the heading is just "Divisions".
+    expect(screen.getByRole("link", { name: "1 division" }).getAttribute("href")).toBe(
+      "#subunits",
+    );
   });
 
   // A division chip always links the division page, whether or not the roster
