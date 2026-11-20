@@ -5819,8 +5819,7 @@ async function searchPublicationsCore(opts: {
       // Issue #316 PR-C follow-up — optional pass-through justification text.
       impactJustification?: string;
       // Whether the pub has an abstract; the text itself is lazy-loaded from the DB.
-      // Optional: docs indexed before this field existed lack it.
-      hasAbstract?: boolean;
+      hasAbstract: boolean;
       // Issue #707 — descriptor UIs this publication is tagged with (#259 uses
       // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
       // the match-provenance path; kept in the `_source` include list above.
@@ -6136,10 +6135,7 @@ async function searchPublicationsCore(opts: {
         impactScore,
         conceptImpactScore,
         impactJustification,
-        // ponytail: docs indexed before `hasAbstract` existed lack it; default true so the
-        // toggle still shows (the lazy fetch says "Abstract unavailable" for the ~5% without
-        // one). Drop the `?? true` after the first full reindex.
-        hasAbstract: h._source.hasAbstract ?? true,
+        hasAbstract: h._source.hasAbstract,
         matchProvenance: pubProvenanceOn
           ? computeMatchProvenance({
               publicationMeshUi: h._source.meshDescriptorUi,
