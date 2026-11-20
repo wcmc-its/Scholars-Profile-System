@@ -211,6 +211,14 @@ export function clearedSessionCookie(): SerializedSessionCookie {
 }
 
 /**
+ * A partner-institution session key (`netid@cornell.edu`, minted only by
+ * `extractPartnerEppn` in lib/auth/saml.ts) — the only kind containing `@`.
+ */
+export function isPartnerCwid(cwid: string): boolean {
+  return cwid.includes("@");
+}
+
+/**
  * Unseal and validate a sealed cookie value. Returns the session, or `null`
  * for anything that is not a live, well-formed session — absent, tampered,
  * sealed with a different key, expired, idle past the idle timeout, or missing
@@ -218,6 +226,7 @@ export function clearedSessionCookie(): SerializedSessionCookie {
  */
 export async function readSessionValue(
   sealed: string | undefined | null,
+  { allowPartner = false }: { allowPartner?: boolean } = {},
 ): Promise<SessionData | null> {
   if (!sealed) return null;
   const cfg = getSessionConfig();
@@ -239,6 +248,11 @@ export async function readSessionValue(
   ) {
     return null;
   }
+  // Partner fence (ITHACA_LOGIN): a partner session is invisible to every
+  // reader except the ones that opt in, so no WCM path (roles, /edit routes,
+  // the internal-viewer basis, self-edit) ever sees one. ponytail: opt-in
+  // readers are the allowlist; add one per partner surface as it ships.
+  if (!allowPartner && isPartnerCwid(data.cwid)) return null;
   // Explicit expiry check on the sealed `exp` — the authoritative 8h cap,
   // immune to any later change in the configured ttl.
   const now = nowSeconds();
@@ -261,7 +275,8 @@ export async function readSessionValue(
  */
 export async function getSessionFromRequest(
   request: NextRequest,
+  opts: { allowPartner?: boolean } = {},
 ): Promise<SessionData | null> {
   const cfg = getSessionConfig();
-  return readSessionValue(request.cookies.get(cfg.cookieName)?.value);
+  return readSessionValue(request.cookies.get(cfg.cookieName)?.value, opts);
 }

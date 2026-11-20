@@ -2055,6 +2055,11 @@ export class AppStack extends Stack {
         //   SCHOLARS_OBSERVER_GROUP_CN -- ED group, created 2026-09-30.
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         OBSERVER_ENABLED: "on",
+        // ITHACA_LOGIN -- Cornell Ithaca NetID sign-in through the WCM login
+        // proxy, keyed on the full eppn (lib/auth/saml.ts extractPartnerEppn).
+        // Admits only NetIDs with a live Ithaca roster row; a partner session
+        // reaches no /edit path yet. Staging only until a real Ithaca login.
+        ITHACA_LOGIN: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_OBSERVER_GROUP_CN: "ITS:Library:Scholars/observer-role",
         // `content_editor` role (2026-10-01) -- edits profile and unit content
         // site-wide (bios, Highlights, one-profile hides, units, centers,

@@ -939,6 +939,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_LOGIN",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_OBSERVER_GROUP_CN",
                 "Value": "ITS:Library:Scholars/observer-role",
               },
@@ -6079,6 +6083,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "OBSERVER_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_LOGIN",
                 "Value": "on",
               },
               {

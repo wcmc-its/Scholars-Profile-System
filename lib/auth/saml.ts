@@ -121,6 +121,19 @@ export async function validateSamlResponse(
     maxAssertionAgeMs: MAX_ASSERTION_AGE_MS,
   });
   if (bindingError) return { ok: false, reason: bindingError };
+  // Partner institution (Cornell Ithaca, `ITHACA_LOGIN`): key the session on
+  // the FULL lower-cased eppn and ignore every other identifier, so a NetID can
+  // never be read as a same-string WCM CWID (CViche #1452). The `@` keeps the
+  // value out of every WCM path: session readers drop it (lib/auth/session.ts)
+  // and `isSafeCwid` refuses it before any LDAP DN.
+  const partner = extractPartnerEppn(profile, env.eppnAttribute);
+  if (partner) {
+    const assertion = extractAssertionIdentity(profile, samlResponseB64, {
+      now: new Date(),
+      clockSkewMs: env.clockSkewMs,
+    });
+    return { ok: true, cwid: partner, assertion };
+  }
   // Primary: the WCM-direct `CWID` attribute (or NameID when unconfigured).
   // Fallback: the eppn local-part for federated (NYP / WCM-Q) logins, which
   // arrive without a `CWID` attribute — gated by the trusted-scope allowlist.
@@ -185,6 +198,33 @@ export function extractCwidFromEppn(
   if (local.includes("@")) return null;
   const scope = eppn.slice(at + 1).toLowerCase();
   return trustedScopes.includes(scope) ? local : null;
+}
+
+/** Partner eppn scopes admitted to sign in, keyed on their full eppn. */
+export const PARTNER_SCOPES: readonly string[] = ["cornell.edu"];
+
+/** `ITHACA_LOGIN` kill switch — anything but exactly `"on"` keeps partner login off. */
+export function isPartnerLoginEnabled(): boolean {
+  return process.env.ITHACA_LOGIN === "on";
+}
+
+/**
+ * The full lower-cased eppn (`netid@cornell.edu`) when partner login is on and
+ * the eppn's scope is a partner scope; otherwise null. Exactly one `@` and a
+ * non-empty local part, like {@link extractCwidFromEppn}.
+ */
+export function extractPartnerEppn(
+  profile: Profile,
+  eppnAttribute: string,
+): string | null {
+  if (!isPartnerLoginEnabled() || !eppnAttribute) return null;
+  const eppn = firstStringValue(profile[eppnAttribute])?.toLowerCase();
+  if (!eppn) return null;
+  const parts = eppn.split("@");
+  if (parts.length !== 2 || !parts[0] || !PARTNER_SCOPES.includes(parts[1])) {
+    return null;
+  }
+  return eppn;
 }
 
 /**

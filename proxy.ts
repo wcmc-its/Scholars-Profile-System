@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
   getSessionFromRequest,
+  isPartnerCwid,
   refreshSessionCookie,
   sessionNeedsIdleRefresh,
   type SessionData,
@@ -289,11 +290,17 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   let session: SessionData | null = null;
   try {
-    session = await getSessionFromRequest(request);
+    session = await getSessionFromRequest(request, { allowPartner: true });
   } catch {
     // Misconfigured (e.g. SESSION_COOKIE_SECRET unset) — fail toward
     // "unauthenticated" so the gate stays closed rather than 500ing the page.
     session = null;
+  }
+  // Partner sessions (ITHACA_LOGIN) reach no gated path yet: 403, never the
+  // SSO redirect — the IdP would just re-sign them in and loop. ponytail: no
+  // partner allowlist until a partner surface ships (plan steps 3-5).
+  if (session && isPartnerCwid(session.cwid)) {
+    return withSecurityHeaders(new NextResponse(null, { status: 403 }));
   }
   if (session) return withSecurityHeaders(await idleRefreshed(request, session));
 
