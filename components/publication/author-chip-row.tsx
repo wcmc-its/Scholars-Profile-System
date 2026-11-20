@@ -80,6 +80,7 @@ export function AuthorChipRow({
   pmid,
   currentProfileCwid,
   variant = "default",
+  cap = CHIP_CAP,
 }: {
   authors: AuthorChip[];
   /** CWIDs that must always render visibly regardless of the CHIP_CAP
@@ -98,6 +99,10 @@ export function AuthorChipRow({
   /** "spotlight" — the Unit Page v2 Spotlight chip (28px, 13px, 20px avatar,
    *  featured-vs-plain borders). Default keeps the site-wide chip unchanged. */
   variant?: "default" | "spotlight";
+  /** Most chips shown before the "+N more" pill (the senior author still pins
+   *  last). Defaults to `CHIP_CAP`; the compact unit Spotlight passes 2 to keep
+   *  each card's byline to one line. */
+  cap?: number;
 }) {
   if (authors.length === 0) return null;
   // A chip needs a cwid to render the headshot identity. Linked authors
@@ -141,19 +146,19 @@ export function AuthorChipRow({
   let visible: AuthorChip[];
   let overflow: number;
   let tail: AuthorChip | null = null;
-  if (ordered.length <= CHIP_CAP) {
+  if (ordered.length <= cap) {
     visible = ordered;
     overflow = 0;
   } else {
-    const head = ordered.slice(0, CHIP_CAP - 1);
+    const head = ordered.slice(0, Math.max(1, cap - 1));
     if (seniorChip && !head.some((a) => a.cwid === seniorChip.cwid)) {
       visible = head;
       tail = seniorChip;
       // Overflow excludes both the head chips and the pinned-to-tail senior.
       overflow = ordered.length - head.length - 1;
     } else {
-      visible = ordered.slice(0, CHIP_CAP);
-      overflow = ordered.length - CHIP_CAP;
+      visible = ordered.slice(0, cap);
+      overflow = ordered.length - cap;
     }
   }
 

@@ -9,6 +9,7 @@ import { render, screen } from "@testing-library/react";
 import { UnitResearchAreas, UnitStatsLine, UnitSubunitChips } from "@/components/shared/unit-hero";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
 import { Spotlight } from "@/components/shared/spotlight";
+import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
 import type { SpotlightData } from "@/lib/api/spotlight";
 
@@ -212,11 +213,20 @@ describe("Spotlight (shared) — variant=\"unit\" vs default", () => {
     expect(co.className).toContain("h-7");
   });
 
-  it("draws a left rule on every card and pins the venue line to the bottom", () => {
+  it("draws a left rule on every card; venue under the title, byline pinned to the bottom", () => {
     const { container } = renderSpotlight();
     const article = container.querySelector("article")!;
     expect(article.className).toContain("border-l");
-    expect(screen.getByText(/Nature/).closest("div")!.className).toContain("mt-auto");
+    const venue = screen.getByText(/Nature/).closest("div")!;
+    expect(venue.className).not.toContain("mt-auto");
+    expect(venue.previousElementSibling?.tagName).toBe("H3");
+    expect(venue.nextElementSibling?.className).toContain("mt-auto");
+  });
+
+  it("compact: View all sits in the heading row, and the byline caps at two chips", () => {
+    const { container } = renderSpotlight();
+    const viewAll = screen.getByRole("link", { name: "View all 33,591 publications →" });
+    expect(viewAll.closest("header")).toBe(container.querySelector("header"));
   });
 
   it("default (topic / methods pages): keeps the original cream surface, title and chips", () => {
@@ -305,5 +315,30 @@ describe("Unit hero lists (column + ranked layouts)", () => {
       />,
     );
     expect(container.firstElementChild?.className).not.toContain("border-dashed");
+  });
+});
+
+describe("AuthorChipRow cap", () => {
+  const a = (i: number, over: Partial<{ isFirst: boolean; isLast: boolean }> = {}) => ({
+    name: `Author ${i}`,
+    cwid: `au${i}`,
+    slug: `author-${i}`,
+    isFirst: false,
+    isLast: false,
+    ...over,
+  });
+
+  it("with cap 2: the first author, a +N pill, then the senior author pinned last", () => {
+    const authors = [a(1, { isFirst: true }), a(2), a(3), a(4), a(5, { isLast: true })];
+    const { container } = render(
+      <AuthorChipRow authors={authors} pmid="1" variant="spotlight" cap={2} />,
+    );
+    expect(container.textContent).toBe("A1Author 1+3 more →A5Author 5"); // initials avatars + names
+  });
+
+  it("defaults to the site-wide cap", () => {
+    const authors = [1, 2, 3, 4, 5].map((i) => a(i));
+    const { container } = render(<AuthorChipRow authors={authors} pmid="1" />);
+    expect(container.textContent).not.toContain("more");
   });
 });
