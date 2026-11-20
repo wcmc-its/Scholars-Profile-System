@@ -5,7 +5,6 @@ import { getSpotlightCardsForDepartment } from "@/lib/api/spotlight";
 import { getDepartmentDivisionMemberCounts } from "@/lib/api/unit-members";
 import { isDepartmentCollaborationEligible } from "@/lib/api/department-collaboration";
 import { isCenterCollaborationNetworkEnabled } from "@/lib/center-collaboration/flags";
-import { applyAreaPreviewCounts, getUnitAreaPreviews } from "@/lib/api/unit-area-previews";
 import {
   getDeptPublicationsList,
   getDeptGrantsList,
@@ -15,7 +14,6 @@ import {
 import { officialUnitName } from "@/lib/org-unit-names";
 import { ViceChairsList } from "@/components/department/vice-chairs-list";
 import { LeaderCard } from "@/components/scholar/leader-card";
-import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import { parseRosterSort } from "@/lib/roster-sort";
 import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
@@ -24,7 +22,6 @@ import { Spotlight } from "@/components/shared/spotlight";
 import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
 import { EditUnitLink } from "@/components/shared/edit-unit-link";
 import {
-  UnitResearchAreas,
   UnitStatsLine,
   UnitSubunitChips,
   type UnitStat,
@@ -84,17 +81,11 @@ export async function DepartmentPage({
   const grantSort = (sort === "end_date" ? "end_date" : "most_recent") as GrantSort;
   // Unit Page v2 roster toolbar — the Scholars tab's own `?sort=` values.
   const rosterSort = parseRosterSort(sort);
-  const [spotlightCards, divisionCounts, areaPreviews, faculty, pubsList, grantsList] = await Promise.all([
+  const [spotlightCards, divisionCounts, faculty, pubsList, grantsList] = await Promise.all([
     getSpotlightCardsForDepartment(detail.dept.code),
     // Public per-division counts under the Division-facet predicate (NOT the
     // ETL's Division.scholarCount) — feeds both the hero chips and the facet.
     getDepartmentDivisionMemberCounts(detail.dept.code),
-    // Hero research-area hover previews (cached per dept + area list).
-    getUnitAreaPreviews(
-      "department",
-      detail.dept.code,
-      detail.topResearchAreas.map((t) => t.topicId),
-    ),
     tab === "scholars"
       ? getDepartmentFaculty(detail.dept.code, { page: pageIdx, sort: rosterSort })
       : Promise.resolve(null),
@@ -127,9 +118,6 @@ export async function DepartmentPage({
   // when the roster offers a Division facet, which rides the org-unit facet
   // flag (`DepartmentFacultyClient` gates it on `methodFacet !== undefined`,
   // i.e. this same flag). Flag off ⇒ the chips link the division pages.
-  // Pill counts = the preview's visible total (the same number as the card's
-  // blurb, its "See all" and the filtered tab), re-sorted by it.
-  const researchAreas = applyAreaPreviewCounts(detail.topResearchAreas, areaPreviews);
   const spotlightData = spotlightCards
     ? {
         cards: spotlightCards,
@@ -195,8 +183,11 @@ export async function DepartmentPage({
       </Breadcrumb>
 
       {/* Hero card (Unit Page v2) — eyebrow + website link, name, description,
-          the stats line, the chair card beside them, vice chairs, divisions,
-          and top research areas. */}
+          the stats line, the chair card beside them, vice chairs, and
+          divisions. Top research areas were cut from the department hero
+          (ranked by volume, they named the broad areas every large department
+          shares); the Publications tab's area filter and the
+          /departments/{slug}/areas/{area} pages are unchanged. */}
       <section className="mt-4 rounded-[10px] border border-apollo-border bg-background px-7 pb-[26px] pt-7">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--color-primary-cornell-red)]">
@@ -251,22 +242,6 @@ export async function DepartmentPage({
             count: divisionCounts.get(d.code) ?? 0,
           }))}
         />
-
-        <UnitResearchAreas
-          areas={researchAreas}
-          previews={areaPreviews}
-          basePath={basePath}
-          unitShort={deptDisplayName.replace(/^Department of /, "")}
-          membersNoun="faculty"
-          infoButton={
-            <SectionInfoButton label="Top research areas" anchor="topResearchAreas">
-              Research areas are aggregated from ReCiterAI publication scores
-              for this department&apos;s scholars. The order reflects recent
-              publication activity, not editorial judgment.
-            </SectionInfoButton>
-          }
-        />
-
       </section>
 
       {/* §16 Spotlight — replaces the prior Recent publications + Active
