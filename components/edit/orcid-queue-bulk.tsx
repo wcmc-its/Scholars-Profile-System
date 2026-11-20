@@ -7,13 +7,14 @@
  * rule (`bulkEligible`): the fixed part (one candidate iD, Strong, no
  * competitor, name agrees, nothing on file, WCM campus, no decision on file)
  * plus three thresholds the librarian sets: shared works, works only on ORCID,
- * and discovery sources. Each row can be unchecked; a row with any work only on
+ * and discovery sources. Only pairs that also pass the server's floor (the
+ * etl:bulk-confirm-strong rule, asked once via a `dryRun` post) are listed. Each row can be unchecked; a row with any work only on
  * ORCID is tinted so it gets a look first. "Confirm N iDs" asks once more, then
  * posts in chunks of `ORCID_BULK_MAX` to `POST /api/edit/orcid-queue/bulk-confirm`,
  * which re-checks the fixed part per pair and skips anything that no longer
  * qualifies. The page's toast offers Undo for the whole batch.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +35,9 @@ type Pair = { cwid: string; orcid: string };
 type Result = Pair & { ok: boolean; code?: string };
 
 const PAGE = 100;
+/** The fixed client floor only: the adjustable rule at its loosest. */
+const ANY_RULE: OrcidBulkRule = { minShared: 0, maxOnlyOrcid: 10_000, minSources: 0 };
+const keyOf = (s: OrcidQueueSummary) => `${s.cwid}|${s.candidates[0]!.orcid}`;
 const fmt = (n: number) => n.toLocaleString("en-US");
 
 export function OrcidBulkReview({
@@ -57,12 +61,57 @@ export function OrcidBulkReview({
   const [asking, setAsking] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
 
+  // The server's floor (`assertBulkConfirmable`, the etl:bulk-confirm-strong
+  // rule) needs facts the summary doesn't carry, so ask it which pairs pass
+  // (dry run, writes nothing) and list only those. null = still checking.
+  const [floorOk, setFloorOk] = useState<ReadonlySet<string> | null>(null);
+  const floorKeys = useMemo(
+    () =>
+      list
+        .filter((s) => bulkEligible(s, ANY_RULE))
+        .map(keyOf)
+        .sort()
+        .join(","),
+    [list],
+  );
+  useEffect(() => {
+    if (!canDecide) return;
+    let live = true;
+    setFloorOk(null);
+    (async () => {
+      const pairs = floorKeys ? floorKeys.split(",").map((k) => k.split("|")) : [];
+      const ok = new Set<string>();
+      for (let i = 0; i < pairs.length; i += ORCID_BULK_MAX) {
+        const r = await postBatch<Result>("/api/edit/orcid-queue/bulk-confirm", {
+          dryRun: true,
+          pairs: pairs.slice(i, i + ORCID_BULK_MAX).map(([cwid, orcid]) => ({ cwid, orcid })),
+          rule: ANY_RULE,
+        });
+        if (!live) return;
+        if (!r.ok) {
+          onError(r.message);
+          break;
+        }
+        for (const x of r.results) if (x.ok) ok.add(`${x.cwid}|${x.orcid}`);
+      }
+      if (live) setFloorOk(ok);
+    })();
+    return () => {
+      live = false;
+    };
+    // onError is a fresh closure each render; the check only reruns on the pairs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorKeys, canDecide]);
+
   const eligible = useMemo(
     () =>
       list.filter(
-        (s) => bulkEligible(s, rule) && !s.candidates.some((c) => outcomes[`${s.cwid}|${c.orcid}`]),
+        (s) =>
+          bulkEligible(s, rule) &&
+          !!floorOk?.has(keyOf(s)) &&
+          !s.candidates.some((c) => outcomes[`${s.cwid}|${c.orcid}`]),
       ),
-    [list, rule, outcomes],
+    [list, rule, outcomes, floorOk],
   );
   const selected = eligible.filter((s) => !excluded.has(s.cwid));
   const tintedChecked = selected.filter((s) => onlyOnOrcid(s.candidates[0]!) > 0).length;
@@ -169,7 +218,11 @@ export function OrcidBulkReview({
         </span>
       </section>
 
-      {eligible.length === 0 ? (
+      {canDecide && floorOk === null ? (
+        <p className="text-muted-foreground m-0 text-[14px]" data-testid="orcid-bulk-checking">
+          Checking which scholars qualify…
+        </p>
+      ) : eligible.length === 0 ? (
         <p className="text-muted-foreground m-0 text-[14px]" data-testid="orcid-bulk-empty">
           No scholars in this view match the rule.
         </p>

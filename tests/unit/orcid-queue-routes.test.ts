@@ -23,7 +23,14 @@ const h = vi.hoisted(() => {
       computedAt?: Date;
       competitor?: boolean;
       nameAgrees?: boolean;
+      /** Bulk floor facts; defaults pass (etl:bulk-confirm-strong rule). */
+      instMatch?: boolean;
+      reciterRead?: boolean;
+      rejected?: number;
+      competitorCwids?: string[];
     }>,
+    /** `orcid_candidate` pairs with articles_rejected > 0 (`cwid|orcid`). */
+    rpmRejected: new Set<string>(),
     /** `orcid_candidate` rows with source `rpm_admin`. */
     admins: [] as Array<{ cwid: string; orcid: string }>,
     /** Other `orcid_candidate` rows (any source). */
@@ -63,14 +70,28 @@ const h = vi.hoisted(() => {
         h.state.evidence
           .filter((r) => args?.where?.band === undefined || r.band === args.where.band)
           .filter((r) => args?.where?.cwid === undefined || r.cwid === args.where.cwid)
-          .map(({ cwid, orcid, band, competitor, nameAgrees }) => ({
-            cwid,
-            orcid,
-            band,
+          .map((r) => ({
+            cwid: r.cwid,
+            orcid: r.orcid,
+            band: r.band,
             shared: 5,
-            nameAgrees: nameAgrees ?? true,
-            competitor: competitor ?? false,
+            nameAgrees: r.nameAgrees ?? true,
+            competitor: r.competitor ?? false,
+            competitorCwids: r.competitorCwids ?? [],
+            competitorOrcids: [],
+            instMatch: r.instMatch ?? true,
+            evidenceDetail: {
+              workStatus: {
+                reciterRead: r.reciterRead ?? true,
+                counts: { rejected: r.rejected ?? 0 },
+              },
+            },
           })),
+      ),
+      count: vi.fn(
+        async ({ where }: { where: { orcid: string; cwid: { not: string } } }) =>
+          h.state.evidence.filter((r) => r.orcid === where.orcid && r.cwid !== where.cwid.not)
+            .length,
       ),
       findFirst: vi.fn(async ({ where }: { where: { band: string; computedAt: { gt: Date } } }) => {
         const e = h.state.evidence.find(
@@ -80,6 +101,9 @@ const h = vi.hoisted(() => {
       }),
     },
     orcidCandidate: {
+      count: vi.fn(async ({ where }: { where: Pair }) =>
+        h.state.rpmRejected.has(k(where.cwid, where.orcid)) ? 1 : 0,
+      ),
       findMany: vi.fn(async ({ where }: { where: { cwid: { in: string[] }; source?: string } }) =>
         [
           ...h.state.admins.map((a) => ({ ...a, source: "rpm_admin" })),
@@ -108,8 +132,12 @@ const h = vi.hoisted(() => {
     scholar: {
       findUnique: vi.fn(async ({ where }: { where: { cwid: string } }) => {
         const s = h.state.scholars.get(where.cwid);
-        return s ? { ...s } : null;
+        return s ? { campus: "wcm", status: "active", deletedAt: null, ...s } : null;
       }),
+      count: vi.fn(
+        async ({ where }: { where: { orcid: string } }) =>
+          [...h.state.scholars.values()].filter((s) => s.orcid === where.orcid).length,
+      ),
       findMany: vi.fn(
         async ({
           where,
@@ -291,6 +319,7 @@ beforeEach(() => {
   h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong" }];
   h.state.scholars = new Map([["jd0001", { orcid: null, orcidConfirmMethod: null }]]);
   h.state.dismissals = new Set();
+  h.state.rpmRejected = new Set();
   h.state.dismissMeta = new Map();
   h.state.admins = [];
   h.state.sources = [];
@@ -775,6 +804,65 @@ describe("bulk-confirm", () => {
     const { results } = (await res.json()) as { results: Array<{ ok: boolean }> };
     expect(results.map((r) => r.ok)).toEqual([false, false]);
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no institution match", { instMatch: false }],
+    ["ReCiter not read", { reciterRead: false }],
+    ["a work rejected in ReCiter", { rejected: 1 }],
+    ["a competitor cwid listed", { competitorCwids: ["xx0009"] }],
+  ])("refuses a Strong pair with %s (etl:bulk-confirm-strong floor)", async (_, extra) => {
+    h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong", ...extra }];
+    const res = await bulkConfirm(req({ pairs: [{ cwid: "jd0001", orcid: ORCID }], rule: RULE }));
+    const { results } = (await res.json()) as { results: Array<{ code?: string }> };
+    expect(results[0]!.code).toBe("not_bulk_eligible");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses an iD another scholar holds or is a candidate for, a rejected RPM pair, and any earlier dismissal", async () => {
+    const one = async () => {
+      const res = await bulkConfirm(req({ pairs: [{ cwid: "jd0001", orcid: ORCID }], rule: RULE }));
+      return ((await res.json()) as { results: Array<{ code?: string }> }).results[0]!.code;
+    };
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "zz0002", orcid: ORCID, band: "weak" },
+    ];
+    expect(await one()).toBe("not_bulk_eligible");
+    h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong" }];
+    h.state.scholars.set("zz0002", { orcid: ORCID, orcidConfirmMethod: "self" });
+    expect(await one()).toBe("not_bulk_eligible");
+    h.state.scholars.delete("zz0002");
+    h.state.rpmRejected = new Set([`jd0001|${ORCID}`]);
+    expect(await one()).toBe("not_bulk_eligible");
+    h.state.rpmRejected = new Set();
+    h.state.evidence.push({ cwid: "jd0001", orcid: OTHER, band: "weak" });
+    h.state.dismissals = new Set([`jd0001|${OTHER}`]);
+    expect(await one()).toBe("not_bulk_eligible");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("dryRun reports which pairs pass the floor and writes nothing", async () => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "js0002", orcid: OTHER, band: "strong", instMatch: false },
+    ];
+    h.state.scholars.set("js0002", { orcid: null, orcidConfirmMethod: null });
+    const res = await bulkConfirm(
+      req({
+        dryRun: true,
+        pairs: [
+          { cwid: "jd0001", orcid: ORCID },
+          { cwid: "js0002", orcid: OTHER },
+        ],
+        rule: RULE,
+      }),
+    );
+    const { results } = (await res.json()) as { results: Array<{ ok: boolean }> };
+    expect(results.map((r) => r.ok)).toEqual([true, false]);
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    expect(audits()).toHaveLength(0);
+    expect(h.reflectOverviewEdit).not.toHaveBeenCalled();
   });
 
   it("400 on a bad body: no pairs, a repeated scholar, a bad iD, or a missing rule", async () => {

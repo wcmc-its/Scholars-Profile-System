@@ -6,11 +6,13 @@
  * minSources } }`, at most `ORCID_BULK_MAX` pairs. The librarian picks the pairs
  * in the browser under an adjustable rule (`bulkEligible`); the rule is
  * recorded on each confirm's audit row. The server does not trust the
- * selection: each pair must also pass `assertBulkConfirmable` (Strong, no
- * competitor, name agrees, nothing on file, the scholar's only open candidate,
- * WCM campus) and then goes through `confirmPair`, the same write as a single
+ * selection: each pair must also pass `assertBulkConfirmable` (the same
+ * verified rule as `etl:bulk-confirm-strong`) and then goes through `confirmPair`, the same write as a single
  * Confirm, in its own transaction. A refused pair is skipped with its code; it
  * stays in the one-at-a-time queue.
+ *
+ * `dryRun: true` runs only `assertBulkConfirmable` and writes nothing: the Bulk
+ * review list uses it so it shows only pairs the server will confirm.
  *
  * Gates as `decide`: the queue flag (404), the shared preamble, View as (403),
  * `isSuperuser` (403).
@@ -78,6 +80,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     rule[k] = v;
   }
 
+  const dryRun = body.dryRun === true;
   const ts = new Date();
   const meta = { actor: realCwid, impersonatedCwid, requestId, ts, bulkRule: rule };
   const results: Array<{ cwid: string; orcid: string; ok: boolean; code?: string }> = [];
@@ -85,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       await db.write.$transaction(async (tx) => {
         await assertBulkConfirmable(tx, pair);
-        await confirmPair(tx, pair, meta);
+        if (!dryRun) await confirmPair(tx, pair, meta);
       });
       results.push({ ...pair, ok: true });
     } catch (err) {
@@ -100,7 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // The iD feeds each profile's JSON-LD sameAs.
   for (const r of results) {
-    if (!r.ok) continue;
+    if (!r.ok || dryRun) continue;
     try {
       const s = await db.read.scholar.findUnique({
         where: { cwid: r.cwid },

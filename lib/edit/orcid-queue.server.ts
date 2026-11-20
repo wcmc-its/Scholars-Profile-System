@@ -477,7 +477,11 @@ export async function decideSharedId(
   if (!theirs || other.cwid === pair.cwid) throw new OrcidQueueRefused(404, "other_not_in_queue");
   if (other.belongs) {
     // `pair.cwid` may hold the iD (an email auto-confirm); the dismiss below clears it.
-    await confirmPair(tx, { cwid: other.cwid, orcid: pair.orcid }, { ...meta, allowHolder: pair.cwid });
+    await confirmPair(
+      tx,
+      { cwid: other.cwid, orcid: pair.orcid },
+      { ...meta, allowHolder: pair.cwid },
+    );
     return dismissPair(tx, pair, { ...meta, otherCwid: other.cwid });
   }
   await dismissPair(tx, { cwid: other.cwid, orcid: pair.orcid }, meta);
@@ -516,37 +520,74 @@ export async function dismissOthers(
 
 /**
  * The server's floor for a bulk confirm: whatever rule the librarian set in the
- * browser, a pair is only confirmed in bulk when its evidence row is Strong,
- * has no competitor and the name agrees, the scholar has nothing on file, and
- * it is the scholar's only open candidate. Anything else is refused
+ * browser, a pair is only confirmed in bulk when it passes the same verified rule
+ * as `etl:bulk-confirm-strong` (etl/bulk-confirm-strong/sql/orcid.sql): an active
+ * WCM scholar with nothing on file and no dismissal of any kind; Strong, the only
+ * open candidate, no competitor (flag or lists), name agrees, >= 3 shared works,
+ * institution match; a ReCiter read with zero rejected works; and an iD that no
+ * other scholar holds or is a candidate for. Anything else is refused
  * (`not_bulk_eligible`) and stays in the one-at-a-time queue.
  */
 export async function assertBulkConfirmable(
   tx: Tx,
   pair: { cwid: string; orcid: string },
 ): Promise<void> {
+  const refuse = () => {
+    throw new OrcidQueueRefused(409, "not_bulk_eligible");
+  };
   const rows = await tx.orcidCandidateEvidence.findMany({
     where: { cwid: pair.cwid },
-    select: { orcid: true, band: true, competitor: true, nameAgrees: true },
+    select: {
+      orcid: true,
+      band: true,
+      competitor: true,
+      competitorCwids: true,
+      competitorOrcids: true,
+      nameAgrees: true,
+      shared: true,
+      instMatch: true,
+      evidenceDetail: true,
+    },
   });
   const { held, dismissed } = await readOnFile(tx, pair.cwid);
-  // Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
-  const scholar = await tx.scholar.findUnique({
-    where: { cwid: pair.cwid },
-    select: { campus: true },
-  });
-  if (scholar?.campus === "ithaca") throw new OrcidQueueRefused(409, "not_bulk_eligible");
   const open = rows.filter((r) => !dismissed.has(r.orcid));
   const mine = open.find((r) => r.orcid === pair.orcid);
   if (!mine) throw new OrcidQueueRefused(404, "not_in_queue");
+  // Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
+  const scholar = await tx.scholar.findUnique({
+    where: { cwid: pair.cwid },
+    select: { campus: true, status: true, deletedAt: true },
+  });
+  if (scholar?.campus !== "wcm" || scholar.status !== "active" || scholar.deletedAt) refuse();
+  const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
+  const work = (
+    mine.evidenceDetail as {
+      workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
+    } | null
+  )?.workStatus;
   if (
     held.orcid !== null ||
+    dismissed.size > 0 ||
     open.length !== 1 ||
     mine.band !== "strong" ||
     mine.competitor ||
-    !mine.nameAgrees
+    !emptyList(mine.competitorCwids) ||
+    !emptyList(mine.competitorOrcids) ||
+    !mine.nameAgrees ||
+    mine.shared < 3 ||
+    !mine.instMatch ||
+    work?.reciterRead !== true ||
+    Number(work.counts?.rejected ?? 0) !== 0
   )
-    throw new OrcidQueueRefused(409, "not_bulk_eligible");
+    refuse();
+  const [otherCandidates, holders, rejected] = await Promise.all([
+    tx.orcidCandidateEvidence.count({ where: { orcid: pair.orcid, cwid: { not: pair.cwid } } }),
+    tx.scholar.count({ where: { orcid: pair.orcid } }),
+    tx.orcidCandidate.count({
+      where: { cwid: pair.cwid, orcid: pair.orcid, articlesRejected: { gt: 0 } },
+    }),
+  ]);
+  if (otherCandidates > 0 || holders > 0 || rejected > 0) refuse();
 }
 
 /**

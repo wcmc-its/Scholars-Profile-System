@@ -1400,19 +1400,23 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     cards: OrcidQueueCard[],
     summaries?: OrcidQueueSummary[],
     bulkOk: (cwid: string) => boolean = () => true,
+    /** The server floor's dry-run verdict (`dryRun: true`). */
+    floorOk: (cwid: string) => boolean = () => true,
   ) {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         const body = JSON.parse(init.body as string) as {
           items?: Array<{ cwid: string }>;
           pairs?: Array<{ cwid: string; orcid: string }>;
+          dryRun?: boolean;
         };
+        const ok = body.dryRun ? floorOk : bulkOk;
         if (url.endsWith("/undo"))
           return Response.json({ results: body.items!.map((i) => ({ cwid: i.cwid, ok: true })) });
         if (url.endsWith("/bulk-confirm"))
           return Response.json({
             results: body.pairs!.map((p) =>
-              bulkOk(p.cwid) ? { ...p, ok: true } : { ...p, ok: false, code: "not_bulk_eligible" },
+              ok(p.cwid) ? { ...p, ok: true } : { ...p, ok: false, code: "not_bulk_eligible" },
             ),
           });
         return Response.json({ ok: true });
@@ -1435,7 +1439,9 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
         .map(([u, i]) => ({
           url: u,
           body: JSON.parse(i!.body as string) as Record<string, unknown>,
-        }));
+        }))
+        // The Bulk review's eligibility dry run writes nothing.
+        .filter((p) => p.body.dryRun !== true);
     return { posts };
   }
 
@@ -1525,6 +1531,8 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     const clean = mk("aa0001", { shared: 7, worksTotal: 7, newWorks: 0 });
     const oneExtra = mk("bb0002", { shared: 7, worksTotal: 8, newWorks: 1 });
     const moderate = mk("cc0003", { band: "moderate", shared: 7, worksTotal: 7, newWorks: 0 });
+    // Passes the client rule but not the server floor (e.g. no institution match).
+    const floorFail = mk("dd0004", { shared: 7, worksTotal: 7, newWorks: 0 });
     const withNew = (c: OrcidQueueCard) =>
       summaryOf(c, {
         candidates: c.candidates.map((r) => ({
@@ -1539,15 +1547,17 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
         })),
       });
     const { posts } = mountWith(
-      [clean, oneExtra, moderate],
-      [clean, oneExtra, moderate].map(withNew),
+      [clean, oneExtra, moderate, floorFail],
+      [clean, oneExtra, moderate, floorFail].map(withNew),
       (cwid) => cwid === "aa0001",
+      (cwid) => cwid !== "dd0004",
     );
     fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
-    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe(
-      "2 of 3 scholars in this view match",
+    expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
+      "2 of 4 scholars in this view match",
     );
     expect(screen.queryByTestId("orcid-bulk-row-cc0003")).toBeNull();
+    expect(screen.queryByTestId("orcid-bulk-row-dd0004")).toBeNull();
     expect(screen.getByTestId("orcid-bulk-row-bb0002").className).toContain("bg-apollo-coral-tint");
     expect(screen.getByTestId("orcid-bulk-footer").textContent).toContain(
       "1 tinted row still checked",
