@@ -8,12 +8,11 @@
  * The division page keeps its own hero (it is not part of the v2 mock).
  */
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { chunkColumns, cn } from "@/lib/utils";
 import { AreaPreviewPill } from "@/components/shared/area-preview-pill";
 import type { UnitAreaPreviews } from "@/lib/api/unit-area-previews";
 import {
   UnitSubunitChipRow,
-  chunkColumns,
   type SubunitChipView,
 } from "@/components/shared/unit-subunit-chip-row";
 

@@ -150,3 +150,11 @@ export function initials(name: string): string {
     .join("")
     .toUpperCase();
 }
+
+/** Split `items` into `n` consecutive columns, longest first. */
+export function chunkColumns<T>(items: T[], n: number): T[][] {
+  const size = Math.ceil(items.length / Math.max(1, n));
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}

@@ -25,7 +25,7 @@
  * gets `aria-current="true"` and clicking it clears that value.
  */
 import { useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
+import { chunkColumns, cn } from "@/lib/utils";
 import { matchesMedia, scrollIntoViewAndFocus } from "@/lib/scroll-focus";
 import {
   SUBUNIT_SELECTION_EVENT,
@@ -178,12 +178,4 @@ export function UnitSubunitChipRow({
       ))}
     </div>
   );
-}
-
-/** Split `items` into `n` consecutive columns, longest first. */
-export function chunkColumns<T>(items: T[], n: number): T[][] {
-  const size = Math.ceil(items.length / Math.max(1, n));
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
 }
