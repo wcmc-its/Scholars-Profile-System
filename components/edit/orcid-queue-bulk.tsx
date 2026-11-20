@@ -5,10 +5,12 @@
  *
  * Lists every scholar in the current view who qualifies under an adjustable
  * rule (`bulkEligible`): the fixed part (one candidate iD, Strong, no
- * competitor, name agrees, nothing on file, WCM campus, no decision on file)
- * plus three thresholds the librarian sets: shared works, works only on ORCID,
- * and discovery sources. Only pairs that also pass the server's floor (the
- * etl:bulk-confirm-strong rule, asked once via a `dryRun` post) are listed. Each row can be unchecked; a row with any work only on
+ * competitor, name agrees, nothing on file, no decision on file) plus, for WCM,
+ * three thresholds the librarian sets: shared works, works only on ORCID, and
+ * discovery sources. Only pairs that also pass the server's floor
+ * (`assertBulkConfirmable`, asked once via a `dryRun` post) are listed. Cornell
+ * Ithaca rows (Affiliation Manager pairs) skip the thresholds and are capped at
+ * `ORCID_BULK_ITHACA_MAX` per batch: the rest wait, unchecked, for the next one. Each row can be unchecked; a row with any work only on
  * ORCID is tinted so it gets a look first. "Confirm N iDs" asks once more, then
  * posts in chunks of `ORCID_BULK_MAX` to `POST /api/edit/orcid-queue/bulk-confirm`,
  * which re-checks the fixed part per pair and skips anything that no longer
@@ -20,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import {
   bulkEligible,
   isOrcidCandidateSource,
+  ORCID_BULK_ITHACA_MAX,
   ORCID_BULK_MAX,
   ORCID_BULK_RULE_DEFAULT,
   ORCID_SOURCE_LABEL,
@@ -113,8 +116,17 @@ export function OrcidBulkReview({
       ),
     [list, rule, outcomes, floorOk],
   );
-  const selected = eligible.filter((s) => !excluded.has(s.cwid));
-  const tintedChecked = selected.filter((s) => onlyOnOrcid(s.candidates[0]!) > 0).length;
+  // Cornell Ithaca: at most ORCID_BULK_ITHACA_MAX per batch; the rest wait.
+  const overCap = useMemo(() => {
+    const ithaca = eligible.filter((s) => s.campus === "ithaca" && !excluded.has(s.cwid));
+    return new Set(ithaca.slice(ORCID_BULK_ITHACA_MAX).map((s) => s.cwid));
+  }, [eligible, excluded]);
+  const selected = eligible.filter((s) => !excluded.has(s.cwid) && !overCap.has(s.cwid));
+  // Ithaca works are all "only on ORCID" (no SPS publications): never tinted.
+  const tinted = (s: OrcidQueueSummary) =>
+    s.campus !== "ithaca" && onlyOnOrcid(s.candidates[0]!) > 0;
+  const tintedChecked = selected.filter(tinted).length;
+  const ithacaSelected = selected.filter((s) => s.campus === "ithaca").length;
   const busy = progress !== null;
 
   const setNum = (k: keyof OrcidBulkRule, v: string) => {
@@ -131,7 +143,7 @@ export function OrcidBulkReview({
       return next;
     });
 
-  const allOn = selected.length === eligible.length && eligible.length > 0;
+  const allOn = selected.length === eligible.length - overCap.size && eligible.length > 0;
 
   async function confirmAll() {
     const pairs: Pair[] = selected.map((s) => ({ cwid: s.cwid, orcid: s.candidates[0]!.orcid }));
@@ -260,7 +272,8 @@ export function OrcidBulkReview({
             {eligible.slice(0, shown).map((s) => {
               const c = s.candidates[0]!;
               const only = onlyOnOrcid(c);
-              const on = !excluded.has(s.cwid);
+              const capped = overCap.has(s.cwid);
+              const on = !excluded.has(s.cwid) && !capped;
               const sources = c.sources.filter(isOrcidCandidateSource);
               return (
                 <div
@@ -269,7 +282,7 @@ export function OrcidBulkReview({
                   className={cn(
                     GRID,
                     "border-t py-2.5 text-[13.5px]",
-                    only > 0
+                    tinted(s)
                       ? "border-apollo-coral-tint-border bg-apollo-coral-tint"
                       : "border-apollo-border",
                     !on && "opacity-55",
@@ -280,8 +293,14 @@ export function OrcidBulkReview({
                     <input
                       type="checkbox"
                       checked={on}
+                      disabled={capped}
                       onChange={() => toggle(s.cwid)}
                       aria-label={`Include ${s.name}`}
+                      title={
+                        capped
+                          ? `Up to ${ORCID_BULK_ITHACA_MAX} Cornell Ithaca iDs per batch`
+                          : undefined
+                      }
                     />
                   </span>
                   <span role="cell" className="flex min-w-0 flex-col">
@@ -346,6 +365,13 @@ export function OrcidBulkReview({
                 · {fmt(tintedChecked)} tinted {tintedChecked === 1 ? "row" : "rows"} still checked
               </span>
             ) : null}
+            {overCap.size > 0 ? (
+              <span className="text-muted-foreground" data-testid="orcid-bulk-ithaca-cap">
+                {" "}
+                · Cornell Ithaca: {fmt(ORCID_BULK_ITHACA_MAX)} per batch, {fmt(overCap.size)} more
+                after this one
+              </span>
+            ) : null}
           </span>
           <span className="flex-1" />
           {progress ? (
@@ -355,7 +381,12 @@ export function OrcidBulkReview({
           ) : asking ? (
             <>
               <span className="text-[13px]">
-                Put {fmt(selected.length)} iDs on file? Each reaches WCM Identity overnight.
+                Put {fmt(selected.length)} iDs on file?{" "}
+                {ithacaSelected === 0
+                  ? "Each reaches WCM Identity overnight."
+                  : ithacaSelected === selected.length
+                    ? "Cornell Ithaca iDs stay in Scholars (not sent to Identity)."
+                    : "WCM iDs reach WCM Identity overnight; Cornell Ithaca iDs stay in Scholars."}
               </span>
               <Button
                 type="button"

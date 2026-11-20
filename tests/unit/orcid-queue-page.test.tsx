@@ -1594,4 +1594,30 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect(screen.getByTestId("orcid-bulk-row-bb0002")).toBeTruthy();
     expect(screen.getByTestId("orcid-queue-status-undo")).toBeTruthy();
   });
+
+  it("Bulk review takes Cornell Ithaca Strong pairs without the thresholds, at most 100 per batch", async () => {
+    const cards = Array.from({ length: 102 }, (_, i) => {
+      const cwid = `ith${String(i).padStart(4, "0")}`;
+      return CARD({ cwid, name: `Scholar ${cwid}` }, [
+        { ...ROW, cwid, orcid: ORCID, shared: 0, worksTotal: 9, newWorks: 9, sources: [] },
+      ]);
+    });
+    const { posts } = mountWith(
+      cards,
+      cards.map((c) => ({ ...summaryOf(c), campus: "ithaca" as const })),
+    );
+    fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
+    expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
+      "102 of 102 scholars in this view match",
+    );
+    expect(screen.getByTestId("orcid-bulk-ithaca-cap").textContent).toContain(
+      "2 more after this one",
+    );
+    // Never tinted: Ithaca works are all only on ORCID.
+    expect(screen.getByTestId("orcid-bulk-row-ith0000").className).not.toContain("coral");
+    fireEvent.click(screen.getByTestId("orcid-bulk-confirm"));
+    fireEvent.click(screen.getByTestId("orcid-bulk-confirm-yes"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    expect((posts()[0]!.body.pairs as unknown[]).length).toBe(100);
+  });
 });

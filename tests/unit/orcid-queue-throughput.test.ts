@@ -54,14 +54,13 @@ describe("bulkEligible", () => {
     expect(bulkEligible(summary(), ORCID_BULK_RULE_DEFAULT)).toBe(true);
   });
 
-  it("never takes two candidates, a competitor, a differing name, an iD on file, Ithaca, or an earlier decision", () => {
+  it("never takes two candidates, a competitor, a differing name, an iD on file, or an earlier decision", () => {
     const r = ORCID_BULK_RULE_DEFAULT;
     expect(bulkEligible(summary({ candidates: [cand(), cand({ orcid: "x" })] }), r)).toBe(false);
     expect(bulkEligible(summary({ candidates: [cand({ competitor: true })] }), r)).toBe(false);
     expect(bulkEligible(summary({ candidates: [cand({ nameAgrees: false })] }), r)).toBe(false);
     expect(bulkEligible(summary({ candidates: [cand({ band: "moderate" })] }), r)).toBe(false);
     expect(bulkEligible(summary({ conflict: true }), r)).toBe(false);
-    expect(bulkEligible(summary({ campus: "ithaca" }), r)).toBe(false);
     expect(
       bulkEligible(
         summary({ decisions: { byScholar: true, byStaff: false, librarian: false, at: null } }),
@@ -81,5 +80,20 @@ describe("bulkEligible", () => {
   it("counts works only on ORCID from new_works, else from the totals", () => {
     expect(onlyOnOrcid({ newWorks: 1, worksTotal: 10, shared: 5 })).toBe(1);
     expect(onlyOnOrcid({ worksTotal: 10, shared: 7 })).toBe(3);
+  });
+});
+
+describe("bulkEligible: Cornell Ithaca", () => {
+  it("takes a Strong Ithaca pair without the work/source thresholds; still refuses Moderate and a competitor", () => {
+    const r = ORCID_BULK_RULE_DEFAULT;
+    const ith = (c: Parameters<typeof cand>[0] = {}) =>
+      summary({
+        campus: "ithaca",
+        candidates: [cand({ shared: 0, worksTotal: 12, sources: [], ...c })],
+      });
+    expect(bulkEligible(ith(), r)).toBe(true);
+    expect(bulkEligible(ith({ band: "moderate" }), r)).toBe(false);
+    expect(bulkEligible(ith({ competitor: true }), r)).toBe(false);
+    expect(bulkEligible(ith({ nameAgrees: false }), r)).toBe(false);
   });
 });

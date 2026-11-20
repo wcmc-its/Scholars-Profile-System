@@ -49,6 +49,7 @@ const h = vi.hoisted(() => {
         orcidConfirmedBy?: string | null;
         orcidConfirmedAt?: Date | null;
         campus?: string;
+        status?: string;
       }
     >(),
     dismissals: new Set<string>(),
@@ -101,8 +102,14 @@ const h = vi.hoisted(() => {
       }),
     },
     orcidCandidate: {
-      count: vi.fn(async ({ where }: { where: Pair }) =>
-        h.state.rpmRejected.has(k(where.cwid, where.orcid)) ? 1 : 0,
+      count: vi.fn(async ({ where }: { where: Pair & { source?: string } }) =>
+        where.source
+          ? h.state.sources.filter(
+              (x) => x.cwid === where.cwid && x.orcid === where.orcid && x.source === where.source,
+            ).length
+          : h.state.rpmRejected.has(k(where.cwid, where.orcid))
+            ? 1
+            : 0,
       ),
       findMany: vi.fn(async ({ where }: { where: { cwid: { in: string[] }; source?: string } }) =>
         [
@@ -782,7 +789,7 @@ describe("bulk-confirm", () => {
     });
   });
 
-  it("refuses a scholar with a second open iD, an Ithaca scholar, and one with an iD on file", async () => {
+  it("refuses a scholar with a second open iD, and an Ithaca pair Affiliation Manager didn't supply", async () => {
     h.state.evidence = [
       { cwid: "jd0001", orcid: ORCID, band: "strong" },
       { cwid: "jd0001", orcid: OTHER, band: "weak" },
@@ -790,7 +797,7 @@ describe("bulk-confirm", () => {
     ];
     h.state.scholars = new Map([
       ["jd0001", { orcid: null, orcidConfirmMethod: null }],
-      ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca" }],
+      ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca", status: "external" }],
     ]);
     const res = await bulkConfirm(
       req({
@@ -840,6 +847,25 @@ describe("bulk-confirm", () => {
     h.state.dismissals = new Set([`jd0001|${OTHER}`]);
     expect(await one()).toBe("not_bulk_eligible");
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("confirms a Strong Cornell Ithaca Affiliation Manager pair without the WCM work checks", async () => {
+    const ITH = "0000-0001-5109-3700";
+    h.state.evidence = [
+      // No SPS publications: not read in ReCiter, no institution match.
+      { cwid: "it0001", orcid: ITH, band: "strong", instMatch: false, reciterRead: false },
+    ];
+    h.state.scholars = new Map([
+      ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca", status: "external" }],
+    ]);
+    h.state.sources = [{ cwid: "it0001", orcid: ITH, source: "cornell_affiliation_manager" }];
+    const res = await bulkConfirm(req({ pairs: [{ cwid: "it0001", orcid: ITH }], rule: RULE }));
+    const { results } = (await res.json()) as { results: Array<{ ok: boolean; code?: string }> };
+    expect(results[0]).toMatchObject({ ok: true });
+    expect(h.state.scholars.get("it0001")).toMatchObject({
+      orcid: ITH,
+      orcidConfirmMethod: "librarian",
+    });
   });
 
   it("dryRun reports which pairs pass the floor and writes nothing", async () => {

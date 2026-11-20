@@ -520,13 +520,17 @@ export async function dismissOthers(
 
 /**
  * The server's floor for a bulk confirm: whatever rule the librarian set in the
- * browser, a pair is only confirmed in bulk when it passes the same verified rule
- * as `etl:bulk-confirm-strong` (etl/bulk-confirm-strong/sql/orcid.sql): an active
- * WCM scholar with nothing on file and no dismissal of any kind; Strong, the only
- * open candidate, no competitor (flag or lists), name agrees, >= 3 shared works,
- * institution match; a ReCiter read with zero rejected works; and an iD that no
- * other scholar holds or is a candidate for. Anything else is refused
- * (`not_bulk_eligible`) and stays in the one-at-a-time queue.
+ * browser, a pair is only confirmed in bulk when it passes this. Common to both
+ * campuses: nothing on file and no dismissal of any kind; Strong, the only open
+ * candidate, no competitor (flag or lists), name agrees; an iD that no other
+ * scholar holds or is a candidate for. Then per campus:
+ *  - WCM (active): the rest of `etl:bulk-confirm-strong`'s verified rule
+ *    (etl/bulk-confirm-strong/sql/orcid.sql): >= 3 shared works, institution
+ *    match, a ReCiter read with zero rejected works, no rejected RPM pair.
+ *  - Cornell Ithaca (external): a Cornell Affiliation Manager pair. Ithaca rows
+ *    have no SPS publications, so the work checks can't apply; their iDs are
+ *    never pushed to Identity.
+ * Anything else is refused (`not_bulk_eligible`) and stays in the queue.
  */
 export async function assertBulkConfirmable(
   tx: Tx,
@@ -553,18 +557,14 @@ export async function assertBulkConfirmable(
   const open = rows.filter((r) => !dismissed.has(r.orcid));
   const mine = open.find((r) => r.orcid === pair.orcid);
   if (!mine) throw new OrcidQueueRefused(404, "not_in_queue");
-  // Cornell Ithaca iDs are human-confirmed one by one (Ithaca ORCID plan).
   const scholar = await tx.scholar.findUnique({
     where: { cwid: pair.cwid },
     select: { campus: true, status: true, deletedAt: true },
   });
-  if (scholar?.campus !== "wcm" || scholar.status !== "active" || scholar.deletedAt) refuse();
+  const wcm = scholar?.campus === "wcm" && scholar.status === "active";
+  const ithaca = scholar?.campus === "ithaca" && scholar.status === "external";
+  if ((!wcm && !ithaca) || scholar?.deletedAt) refuse();
   const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
-  const work = (
-    mine.evidenceDetail as {
-      workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
-    } | null
-  )?.workStatus;
   if (
     held.orcid !== null ||
     dismissed.size > 0 ||
@@ -573,21 +573,36 @@ export async function assertBulkConfirmable(
     mine.competitor ||
     !emptyList(mine.competitorCwids) ||
     !emptyList(mine.competitorOrcids) ||
-    !mine.nameAgrees ||
-    mine.shared < 3 ||
-    !mine.instMatch ||
-    work?.reciterRead !== true ||
-    Number(work.counts?.rejected ?? 0) !== 0
+    !mine.nameAgrees
   )
     refuse();
-  const [otherCandidates, holders, rejected] = await Promise.all([
+  if (wcm) {
+    const work = (
+      mine.evidenceDetail as {
+        workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
+      } | null
+    )?.workStatus;
+    if (
+      mine.shared < 3 ||
+      !mine.instMatch ||
+      work?.reciterRead !== true ||
+      Number(work.counts?.rejected ?? 0) !== 0
+    )
+      refuse();
+  }
+  const [otherCandidates, holders, rejected, amSource] = await Promise.all([
     tx.orcidCandidateEvidence.count({ where: { orcid: pair.orcid, cwid: { not: pair.cwid } } }),
     tx.scholar.count({ where: { orcid: pair.orcid } }),
     tx.orcidCandidate.count({
       where: { cwid: pair.cwid, orcid: pair.orcid, articlesRejected: { gt: 0 } },
     }),
+    ithaca
+      ? tx.orcidCandidate.count({
+          where: { cwid: pair.cwid, orcid: pair.orcid, source: "cornell_affiliation_manager" },
+        })
+      : Promise.resolve(1),
   ]);
-  if (otherCandidates > 0 || holders > 0 || rejected > 0) refuse();
+  if (otherCandidates > 0 || holders > 0 || rejected > 0 || amSource === 0) refuse();
 }
 
 /**
