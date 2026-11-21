@@ -38,13 +38,19 @@ import {
   stateMatches,
 } from "@/lib/edit/orcid-connect";
 import { editError, logEditFailure, resolveEditIdentityForWrite } from "@/lib/edit/request";
+import { PARTNER_HOME, ithacaScholar } from "@/lib/auth/partner-login";
+import { getPartnerNetid } from "@/lib/auth/session-server";
+import { OrcidQueueRefused, assertOrcidFree } from "@/lib/edit/orcid-queue.server";
 import { reflectOverviewEdit } from "@/lib/edit/revalidation";
 
 const PATH = "/api/edit/orcid/callback";
 
-function back(outcome: "connected" | "denied" | "failed", request: NextRequest): NextResponse {
+type Outcome = "connected" | "denied" | "failed" | "held";
+
+function back(outcome: Outcome, request: NextRequest, partner = false): NextResponse {
   const origin = process.env.SITE_URL?.replace(/\/+$/, "") ?? request.nextUrl.origin;
-  const res = NextResponse.redirect(`${origin}${RETURN_PATH}&orcid=${outcome}`, 302);
+  const to = partner ? `${PARTNER_HOME}?orcid=${outcome}` : `${RETURN_PATH}&orcid=${outcome}`;
+  const res = NextResponse.redirect(`${origin}${to}`, 302);
   res.cookies.set(STATE_COOKIE, "", { ...STATE_COOKIE_OPTIONS, maxAge: 0 });
   return res;
 }
@@ -67,25 +73,35 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const cfg = orcidConnectConfig();
   if (!cfg) return editError(500, "orcid_connect_unconfigured");
 
-  const resolved = await resolveEditIdentityForWrite();
-  if (!resolved.ok) return resolved.response;
-  const { realCwid, impersonatedCwid } = resolved.id;
-  if (impersonatedCwid !== null) return back("failed", request);
+  // A Cornell Ithaca partner session writes its own Ithaca roster row, as itself.
+  const netid = await getPartnerNetid();
+  const partner = netid !== null;
+  let realCwid: string;
+  if (netid) {
+    realCwid = netid;
+  } else {
+    const resolved = await resolveEditIdentityForWrite();
+    if (!resolved.ok) return resolved.response;
+    if (resolved.id.impersonatedCwid !== null) return back("failed", request);
+    realCwid = resolved.id.realCwid;
+  }
 
   const q = request.nextUrl.searchParams;
   if (!stateMatches(request.cookies.get(STATE_COOKIE)?.value, q.get("state"))) {
-    return back("failed", request);
+    return back("failed", request, partner);
   }
   // The person clicked Deny on ORCID's page.
-  if (q.get("error")) return back("denied", request);
+  if (q.get("error")) return back("denied", request, partner);
   const code = q.get("code");
-  if (!code) return back("failed", request);
+  if (!code) return back("failed", request, partner);
 
-  const scholar = await db.read.scholar.findUnique({
-    where: { cwid: realCwid },
-    select: { cwid: true, slug: true },
-  });
-  if (!scholar) return back("failed", request);
+  const scholar = partner
+    ? await ithacaScholar(realCwid)
+    : await db.read.scholar.findUnique({
+        where: { cwid: realCwid },
+        select: { cwid: true, slug: true },
+      });
+  if (!scholar) return back("failed", request, partner);
 
   let replaced: { accessTokenEnc: string; sandbox: boolean } | null = null;
   let newToken = "";
@@ -95,6 +111,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const orcid = normalizeOrcid(tok.orcid);
     if (!orcid) throw new Error("ORCID returned an invalid iD");
     await db.write.$transaction(async (tx) => {
+      // One iD, one person: an Ithaca row never takes an iD another live row
+      // holds (a known-linked WCM row keeps it — Ithaca ORCID plan). WCM
+      // self-connect is unchanged.
+      if (partner) await assertOrcidFree(tx, scholar.cwid, orcid);
       const held =
         (await tx.scholar.findUnique({ where: { cwid: scholar.cwid }, select: { orcid: true } }))
           ?.orcid ?? null;
@@ -169,13 +189,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
     });
   } catch (err) {
+    if (err instanceof OrcidQueueRefused) return back("held", request, partner);
     logEditFailure(PATH, err);
-    return back("failed", request);
+    return back("failed", request, partner);
   }
 
   // ORCID may hand back the same token on a repeat sign-in; never revoke the live one.
   const old = replaced as { accessTokenEnc: string; sandbox: boolean } | null;
   if (old && !isSameToken(old, newToken, cfg)) await revokeStoredTokens([old], cfg);
   await reflectOverviewEdit(scholar.slug);
-  return back("connected", request);
+  return back("connected", request, partner);
 }

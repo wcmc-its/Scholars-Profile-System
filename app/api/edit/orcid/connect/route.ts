@@ -19,6 +19,8 @@ import {
   STATE_COOKIE_OPTIONS,
   STATE_MAX_AGE_S,
 } from "@/lib/edit/orcid-connect";
+import { ithacaScholar } from "@/lib/auth/partner-login";
+import { getPartnerNetid } from "@/lib/auth/session-server";
 import { editError, resolveEditIdentityForWrite } from "@/lib/edit/request";
 
 export async function GET(): Promise<NextResponse> {
@@ -26,12 +28,18 @@ export async function GET(): Promise<NextResponse> {
   const cfg = orcidConnectConfig();
   if (!cfg) return editError(500, "orcid_connect_unconfigured");
 
-  const resolved = await resolveEditIdentityForWrite();
-  if (!resolved.ok) return resolved.response;
-  const { realCwid, impersonatedCwid } = resolved.id;
-  if (impersonatedCwid !== null) return editError(403, "not_self");
-  const scholar = await db.read.scholar.findUnique({ where: { cwid: realCwid }, select: { cwid: true } });
-  if (!scholar) return editError(403, "not_self");
+  // A Cornell Ithaca partner session connects its own Ithaca roster row.
+  const netid = await getPartnerNetid();
+  if (netid) {
+    if (!(await ithacaScholar(netid))) return editError(403, "not_self");
+  } else {
+    const resolved = await resolveEditIdentityForWrite();
+    if (!resolved.ok) return resolved.response;
+    const { realCwid, impersonatedCwid } = resolved.id;
+    if (impersonatedCwid !== null) return editError(403, "not_self");
+    const scholar = await db.read.scholar.findUnique({ where: { cwid: realCwid }, select: { cwid: true } });
+    if (!scholar) return editError(403, "not_self");
+  }
 
   const state = newState();
   const res = NextResponse.redirect(authorizeUrl(cfg, state), 302);
