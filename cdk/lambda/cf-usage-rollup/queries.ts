@@ -154,11 +154,13 @@ const GEO_CASE = [
  * crawlers without either token are named explicitly (#3368).
  */
 const BOT_UA_PATTERN =
-  "(?i)(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|crawler|fetch|monitor|curl|wget|python-requests|httpclient|headless|perplexity|googleother|siteimprove)";
+  "(?i)(bot|crawl|spider|slurp|bingpreview|facebookexternalhit|crawler|fetch|monitor|curl|wget|python-requests|httpclient|headless|perplexity|googleother|siteimprove|lightpanda)";
 
 // `siteimprove`: WCM's site-QA crawler ("... LinkCheck by Siteimprove.com")
 // sends a full browser UA with no bot token; unnamed, it counted as human
 // (~10k pages/day from 2026-11-10).
+// `lightpanda`: a headless browser built for AI agents and scraping (UA
+// "Lightpanda/1.0", no bot token); ~30k "human" page views on 2026-11-20.
 
 /**
  * Exact User-Agents of scrapers that spoof a real browser, so no token regex
@@ -170,9 +172,26 @@ const BOT_UA_PATTERN =
  *   /search requests; WAF-blocked since #3367). A genuine Chrome 133 user
  *   matches too, but Chrome auto-updates and 133 is long superseded, so the
  *   real-user cost is negligible.
+ * - The ten Chrome 118-120 / Edge 119-120 / Firefox 120-121 UAs below: the
+ *   residential-proxy botnet of 2026-11-20 (~1.9M requests/day from ~170k
+ *   IPs), one fleet of headless Chromium 146 that swaps its UA but not its
+ *   client hints -- 97-100% of each string's traffic sent a Chromium 146
+ *   `sec-ch-ua` (real Firefox sends none). It runs JS and solves WAF
+ *   challenges, and was 44% of that day's "human" page requests. These are
+ *   late-2023 releases, years superseded, so the real-user cost is negligible.
  */
 export const KNOWN_SCRAPER_UAS: readonly string[] = [
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
 ];
 
 const KNOWN_SCRAPER_UA_LIST = KNOWN_SCRAPER_UAS.map(
@@ -188,6 +207,12 @@ const IS_BOT_UA = [
 /**
  * Human-traffic filter for the pageview/profile/search arms. coalesce: a NULL
  * User-Agent makes IS_BOT_UA NULL, and `NOT NULL` would silently drop the row.
+ *
+ * The traffic-shape arms (referrer/geo/device) deliberately keep bots:
+ * /edit/usage shows Geography and Device side by side as "All requests" under
+ * one shared total (app/edit/usage/page.tsx TrafficSources), and the device
+ * arm's 'bot' bucket is the bot share of that population. The dashboard's
+ * referrer views read daily_traffic (referrer_page/landing), which does filter.
  */
 const NOT_BOT_UA = `NOT coalesce(${IS_BOT_UA}, false)`;
 
