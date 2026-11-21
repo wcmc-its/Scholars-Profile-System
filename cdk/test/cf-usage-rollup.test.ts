@@ -158,7 +158,7 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
     );
     // Compared against the url-decoded UA, never the raw %20-encoded field.
-    expect(sql).toContain(`url_decode(cs_user_agent) IN (${SCRAPER})`);
+    expect(sql).toContain(`url_decode(cs_user_agent) IN (${SCRAPER}, `);
   });
 
   it("excludes bot UAs from the pageview, profile, and search arms", () => {
@@ -172,7 +172,7 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
   });
 
   it("counts Siteimprove in the generic bot device bucket, not one of its own", () => {
-    expect(device).toContain("googleother|siteimprove)");
+    expect(device).toContain("googleother|siteimprove|lightpanda)");
     expect(device).not.toContain("THEN 'siteimprove'");
   });
 
@@ -216,6 +216,77 @@ describe("buildRollupInsert bot / prefetch / edge-error filters (#3368)", () => 
     for (const arm of [pageviews, profile, search]) {
       expect(arm).not.toContain("starts_with(cs_uri_stem, '/_next/')");
     }
+  });
+});
+
+describe("bot User-Agent classification (2026-11-20 botnet, Lightpanda)", () => {
+  const sql = buildRollupInsert(CFG, "2026-11-20");
+  const [pageviews, profile, search, , , device, hourly] = sql.split("UNION ALL");
+  // IS_BOT_UA exactly as the device arm's 'bot' branch emits it.
+  const isBotUa = device.slice(
+    device.indexOf("WHEN (regexp_like(") + "WHEN ".length,
+    device.indexOf(" THEN 'bot'"),
+  );
+  // Evaluate that predicate in JS: Trino's regexp_like is a substring search,
+  // like RegExp.test, and the IN list is an exact match on the decoded UA.
+  const pattern = /'\(\?i\)(\(.*?\))'\)/.exec(isBotUa)?.[1] ?? "";
+  const listed = [...(isBotUa.split(" IN (")[1] ?? "").matchAll(/'((?:[^']|'')*)'/g)].map((m) =>
+    m[1].replace(/''/g, "'"),
+  );
+  const isBot = (ua: string): boolean => new RegExp(pattern, "i").test(ua) || listed.includes(ua);
+
+  // The botnet's ten spoofed UAs, decoded, exactly as sent.
+  const BOTNET_UAS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+  ];
+
+  it("reads the regex and the exact-match list back out of the SQL", () => {
+    expect(pattern).toMatch(/^\(bot\|crawl\|.*\|lightpanda\)$/);
+    expect(listed).toEqual([...KNOWN_SCRAPER_UAS]);
+  });
+
+  it("lists every botnet UA decoded, once", () => {
+    expect(KNOWN_SCRAPER_UAS).toEqual(expect.arrayContaining(BOTNET_UAS));
+    expect(new Set(KNOWN_SCRAPER_UAS).size).toBe(KNOWN_SCRAPER_UAS.length);
+    for (const ua of KNOWN_SCRAPER_UAS) expect(ua).not.toContain("%");
+  });
+
+  it.each(BOTNET_UAS)("classifies %s as a bot", (ua) => {
+    expect(isBot(ua)).toBe(true);
+  });
+
+  it("classifies Lightpanda as a bot", () => {
+    expect(isBot("Lightpanda/1.0")).toBe(true);
+  });
+
+  it.each([
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0",
+  ])("does not flag an up-to-date browser: %s", (ua) => {
+    expect(isBot(ua)).toBe(false);
+  });
+
+  it("applies that one predicate to the human arms and the hourly bot class", () => {
+    for (const arm of [pageviews, profile, search]) {
+      expect(arm).toContain(`NOT coalesce(${isBotUa}, false)`);
+    }
+    expect(hourly).toContain(`WHEN coalesce(${isBotUa}, false)`);
+    const traffic = buildTrafficInsert(
+      { database: "sps_usage_staging", rawTable: "cf_access_logs", trafficTable: "daily_traffic" },
+      "2026-11-20",
+    );
+    expect(traffic).toContain(`NOT coalesce(${isBotUa}, false)`);
   });
 });
 
