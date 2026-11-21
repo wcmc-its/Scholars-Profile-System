@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getDefaultReturnPath } from "@/lib/auth/config";
 import { safeReturnPath } from "@/lib/auth/return-path";
 import { createSessionCookie, isPartnerCwid } from "@/lib/auth/session";
-import { db } from "@/lib/db";
+import { resolvePartnerLogin } from "@/lib/auth/partner-login";
 import { validateSamlResponse, type SamlValidationResult } from "@/lib/auth/saml";
 import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
 
@@ -147,30 +147,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return errorPage(401, "Your sign-in could not be verified. Please try again.");
   }
 
-  // Partner login (ITHACA_LOGIN): admit only NetIDs with a live Ithaca roster
-  // row, and land on the home page — no gated path takes a partner session yet,
-  // so a RelayState of /edit would 403. Fail closed on a DB error.
-  const partner = isPartnerCwid(result.cwid);
-  if (partner) {
-    const netid = result.cwid.slice(0, result.cwid.indexOf("@"));
-    let admitted = false;
+  // Partner login (ITHACA_LOGIN): a joint-appointment NetID becomes its WCM
+  // CWID; otherwise only NetIDs with a live Ithaca roster row are admitted
+  // (lib/auth/partner-login.ts). A partner session lands on the home page — no
+  // gated path takes one yet, so a RelayState of /edit would 403. Fail closed
+  // on a DB error.
+  let sessionCwid = result.cwid;
+  if (isPartnerCwid(result.cwid)) {
+    let resolved: string | null;
     try {
-      admitted =
-        (await db.read.scholar.count({
-          where: { cwid: netid, campus: "ithaca", deletedAt: null },
-        })) > 0;
+      resolved = await resolvePartnerLogin(result.cwid);
     } catch {
       return errorPage(500, "Sign-in is temporarily unavailable.");
     }
-    if (!admitted) {
+    if (!resolved) {
       console.warn(
         JSON.stringify({ event: "saml_callback_failed", reason: "partner_not_admitted" }),
       );
       return errorPage(403, "Your Cornell account isn't set up for Scholars.");
     }
+    sessionCwid = resolved;
   }
 
-  const dest = partner
+  const dest = isPartnerCwid(sessionCwid)
     ? "/"
     : safeReturnPath(form.get("RelayState"), getDefaultReturnPath());
   // Relative Location, NOT new URL(dest, request.url): behind CloudFront -> ALB
@@ -185,7 +184,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     status: 302,
     headers: { Location: dest },
   });
-  const cookie = await createSessionCookie(result.cwid);
+  const cookie = await createSessionCookie(sessionCwid);
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   return response;
 }
