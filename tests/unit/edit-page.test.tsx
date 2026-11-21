@@ -82,6 +82,7 @@ const ctx: EditContext = {
     },
   ],
   historicalAppointments: [],
+  trainings: [],
   educations: [
     {
       externalId: "edu-1",

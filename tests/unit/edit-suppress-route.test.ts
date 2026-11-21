@@ -74,6 +74,7 @@ vi.mock("@/lib/db", () => ({
       personDatasetDeposit: { findUnique: mockPersonDatasetDepositFindUnique },
       grant: { findUnique: mockGrantFindUnique },
       education: { findUnique: mockEducationFindUnique },
+      training: { findUnique: vi.fn().mockResolvedValue(null) },
       appointment: { findUnique: mockAppointmentFindUnique },
       // #2542 contract A — `isChairAppointment` resolves the department's
       // chair/director `OrgUnitRoleAssignment` row first, then the

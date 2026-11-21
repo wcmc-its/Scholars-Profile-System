@@ -270,6 +270,25 @@ describe("getScholarFullProfileBySlug — entity suppression (#160)", () => {
     expect((payload?.educations ?? []).map((e) => e.degree)).toEqual(["MD"]);
   });
 
+  it("drops a hidden training row (education suppression type) from the sidebar", async () => {
+    const t = (externalId: string, type: string) => ({
+      externalId,
+      type,
+      institution: "Inst",
+      specialty: null,
+      yearFrom: 2020,
+      yearTo: 2021,
+    });
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      trainings: [t("ASMS-TRAIN-1", "Residency"), t("SPS-TRAIN-2", "Fellowship")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({ education: ["ASMS-TRAIN-1"] });
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.trainings ?? []).map((x) => x.type)).toEqual(["Fellowship"]);
+  });
+
   it("drops a suppressed appointment from the sidebar", async () => {
     mockScholarFindFirst.mockResolvedValue({
       ...scholarRow(),

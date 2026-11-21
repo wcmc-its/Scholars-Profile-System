@@ -463,7 +463,11 @@ model Training {
   yearFrom        Int?     @map("year_from")
   yearTo          Int?     @map("year_to")
   externalId      String   @unique @map("external_id") @db.VarChar(128)
+  /// "ASMS" (ETL-owned, reconciled nightly) or "SELF" / "CURATOR" (entered on
+  /// /edit; the ETL never touches these).
   source          String   @default("ASMS") @db.VarChar(32)
+  /// Who entered a SELF / CURATOR row (the real actor cwid); null for ASMS.
+  enteredByCwid   String?  @map("entered_by_cwid") @db.VarChar(32)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])

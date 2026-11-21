@@ -1515,9 +1515,13 @@ export const getScholarFullProfileBySlug = cache(
     // hides that one role from this profile.
     const [suppressedEducationIds, suppressedAppointmentIds, suppressedGrantIds] =
       await Promise.all([
+        // Training rows hide under the `education` type, so one load covers both.
         loadEntitySuppressions(
           "education",
-          scholar.educations.map((e) => e.externalId),
+          [
+            ...scholar.educations.map((e) => e.externalId),
+            ...scholar.trainings.map((t) => t.externalId),
+          ],
           prisma,
         ),
         loadEntitySuppressions(
@@ -1911,17 +1915,19 @@ export const getScholarFullProfileBySlug = cache(
             })),
       trainings: hiddenSections.has("hideEducation")
         ? []
-        : scholar.trainings.map((t) => {
-            const hideYears =
-              hiddenSections.has("hideEducationYears") && !opts?.includeHiddenEducationYears;
-            return {
-              type: t.type,
-              institution: t.institution,
-              specialty: t.specialty,
-              yearFrom: hideYears ? null : t.yearFrom,
-              yearTo: hideYears ? null : t.yearTo,
-            };
-          }),
+        : scholar.trainings
+            .filter((t) => !suppressedEducationIds.has(t.externalId))
+            .map((t) => {
+              const hideYears =
+                hiddenSections.has("hideEducationYears") && !opts?.includeHiddenEducationYears;
+              return {
+                type: t.type,
+                institution: t.institution,
+                specialty: t.specialty,
+                yearFrom: hideYears ? null : t.yearFrom,
+                yearTo: hideYears ? null : t.yearTo,
+              };
+            }),
       // Issue #78 — runtime canonicalization fallback. When the stored
       // canonical short is null but the raw matches the current sponsor
       // lookup (e.g. due to alias / normalization additions made after the
