@@ -547,7 +547,7 @@ export class SpsObservabilityStack extends Stack {
       datapointsToAlarm: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    }).addAlarmAction(crashAction);
+    }).addAlarmAction(warnAction); // P2 -- the same crash already pages via (4c)
 
     // (4b) ISR cache S3 errors running hot -- the lead-up to (4a). The handler
     // logs one JSON line per failed or timed-out S3 op (lib/cache/

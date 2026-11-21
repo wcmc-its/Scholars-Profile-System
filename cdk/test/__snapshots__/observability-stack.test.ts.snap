@@ -80,7 +80,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "An app task ran out of JavaScript heap and crashed (prod); every request in flight on it failed. ECS replaces the task, so the serving alarms stay OK. Next: check sps-app-isr-s3-errors-prod and sps-app-memory-high-prod (the 2026-11 OOMs were ISR S3 calls piling up under a scraper crawl, #3505), then the ALB request count and the edge WAF logs for a crawl.",

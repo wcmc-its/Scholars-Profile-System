@@ -384,8 +384,10 @@ describe("SpsObservabilityStack", () => {
         // challenged, not that the site is down: warn tier.
         "sps-search-challenge-surge-prod": warnId,
         // 2026-11 OOM incident -- a crash fails in-flight requests: page in
-        // prod. The S3 error rate and memory pressure come before it: warn.
-        "sps-app-heap-oom-prod": pageId,
+        // prod, once, via the task-crash alarm. The OOM alarm names the cause
+        // of that same crash, so it warns rather than paging a second time.
+        // The S3 error rate and memory pressure come before it: warn.
+        "sps-app-heap-oom-prod": warnId,
         "sps-app-task-crash-prod": pageId,
         "sps-app-isr-s3-errors-prod": warnId,
         "sps-app-memory-high-prod": warnId,
