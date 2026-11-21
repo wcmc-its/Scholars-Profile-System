@@ -2090,6 +2090,141 @@ describe("EdgeStack", () => {
         });
       });
 
+      describe("2026-11-20 botnet: client-hint mismatch rules", () => {
+        const acl = Object.values(template.findResources("AWS::WAFv2::WebACL"))[0]
+          ?.Properties as Record<string, unknown>;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rules = acl.Rules as any[];
+        const byName = (n: string) => rules.find((r) => r.Name === n);
+        const firefox = byName("block-firefox-ua-with-client-hints");
+        const chromium = byName("block-chromium146-ua-mismatch");
+        const count = byName("count-chrome-ua-without-client-hints");
+
+        // Just enough of WAF's evaluator for these three rules. A statement
+        // on a header the request lacks does NOT match (AWS WAF developer
+        // guide, "Request components"), so an absence test has to be a
+        // NotStatement around a presence test.
+        type Req = { campus?: boolean; headers: Record<string, string> };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const matches = (s: any, req: Req): boolean => {
+          if (s.AndStatement)
+            return s.AndStatement.Statements.every((x: unknown) => matches(x, req));
+          if (s.NotStatement) return !matches(s.NotStatement.Statement, req);
+          if (s.IPSetReferenceStatement) return req.campus === true;
+          const st = s.ByteMatchStatement ?? s.SizeConstraintStatement;
+          const value = req.headers[st.FieldToMatch.SingleHeader.Name];
+          if (value === undefined) return false;
+          if (s.SizeConstraintStatement) {
+            expect(st.ComparisonOperator).toBe("GT");
+            return value.length > st.Size;
+          }
+          expect(st.PositionalConstraint).toBe("CONTAINS");
+          return value.includes(st.SearchString);
+        };
+        const hits = (req: Req) =>
+          [firefox, chromium, count].filter((r) => matches(r.Statement, req)).map((r) => r.Name);
+        const hints146 = '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"';
+        const ua = {
+          chrome146:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+          chrome120:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          edge119:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+          firefox121:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+          googlebot:
+            "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        };
+
+        it("blocks the two contradictions with a branded 403 and only counts the third", () => {
+          for (const r of [firefox, chromium]) {
+            expect(r?.Action?.Block?.CustomResponse).toEqual({
+              ResponseCode: 403,
+              CustomResponseBodyKey: "inconsistentClient",
+            });
+          }
+          expect(count?.Action).toEqual({ Count: {} });
+          const bodies = acl.CustomResponseBodies as Record<
+            string,
+            { ContentType: string; Content: string }
+          >;
+          const body = bodies.inconsistentClient;
+          expect(body.ContentType).toBe("TEXT_HTML");
+          expect(body.Content).toContain("inconsistent");
+          expect(Buffer.byteLength(body.Content, "utf8")).toBeLessThanOrEqual(4096);
+          expect(body.Content).not.toMatch(/https?:\/\//);
+          expect(body.Content).not.toContain("mailto:");
+          const total = Object.values(bodies).reduce(
+            (n, b) => n + Buffer.byteLength(b.Content, "utf8"),
+            0,
+          );
+          expect(total).toBeLessThanOrEqual(51200);
+        });
+
+        it("matches the botnet's requests and leaves consistent browsers alone", () => {
+          // The fleet: Chromium 146 hints under an older or foreign UA. A
+          // Firefox UA trips both block rules (the first one to run wins);
+          // only the Firefox rule survives the fleet moving its engine.
+          expect(hits({ headers: { "user-agent": ua.firefox121, "sec-ch-ua": hints146 } })).toEqual(
+            ["block-firefox-ua-with-client-hints", "block-chromium146-ua-mismatch"],
+          );
+          expect(
+            hits({
+              headers: { "user-agent": ua.firefox121, "sec-ch-ua": '"Chromium";v="147"' },
+            }),
+          ).toEqual(["block-firefox-ua-with-client-hints"]);
+          expect(hits({ headers: { "user-agent": ua.chrome120, "sec-ch-ua": hints146 } })).toEqual([
+            "block-chromium146-ua-mismatch",
+          ]);
+          expect(hits({ headers: { "user-agent": ua.edge119, "sec-ch-ua": hints146 } })).toEqual([
+            "block-chromium146-ua-mismatch",
+          ]);
+          // Real browsers: Firefox sends no sec-ch-ua; Chrome's hints agree.
+          expect(hits({ headers: { "user-agent": ua.firefox121 } })).toEqual([]);
+          expect(hits({ headers: { "user-agent": ua.chrome146, "sec-ch-ua": hints146 } })).toEqual(
+            [],
+          );
+          expect(
+            hits({
+              headers: {
+                "user-agent": ua.chrome120,
+                "sec-ch-ua": '"Chromium";v="120", "Google Chrome";v="120"',
+              },
+            }),
+          ).toEqual([]);
+          // Chrome UA, no hints: counted, not blocked. Declared crawlers are not.
+          expect(hits({ headers: { "user-agent": ua.chrome120 } })).toEqual([
+            "count-chrome-ua-without-client-hints",
+          ]);
+          expect(hits({ headers: { "user-agent": ua.googlebot } })).toEqual([]);
+          // Campus is exempt from all three.
+          expect(
+            hits({ campus: true, headers: { "user-agent": ua.firefox121, "sec-ch-ua": hints146 } }),
+          ).toEqual([]);
+          expect(
+            hits({ campus: true, headers: { "user-agent": ua.chrome120, "sec-ch-ua": hints146 } }),
+          ).toEqual([]);
+          expect(hits({ campus: true, headers: { "user-agent": ua.chrome120 } })).toEqual([]);
+        });
+
+        it("runs before Bot Control (no inspection billed for a blocked request), after the managed groups", () => {
+          const p = (r: { Priority: number } | undefined) => Number(r?.Priority);
+          const botCommon = byName("AWSManagedRulesBotControlRuleSet");
+          for (const r of [firefox, chromium, count]) {
+            expect(p(r)).toBeLessThan(p(botCommon));
+            expect(p(r)).toBeGreaterThan(p(byName("AWSManagedRulesSQLiRuleSet")));
+          }
+          for (const env of ["staging", "prod"] as const) {
+            const priorities = (
+              Object.values(buildEdgeStack(env).template.findResources("AWS::WAFv2::WebACL"))[0]
+                ?.Properties as { Rules: Array<{ Priority: number }> }
+            ).Rules.map((r) => r.Priority);
+            expect(new Set(priorities).size).toBe(priorities.length);
+          }
+        });
+      });
+
       it("ENFORCES the per-IP rate rule, exempting verified bots (#1434 + #125)", () => {
         const acl = Object.values(
           template.findResources("AWS::WAFv2::WebACL"),

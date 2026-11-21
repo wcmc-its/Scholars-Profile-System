@@ -125,6 +125,7 @@ function handler(event) {
  * page can put a `<script>` after it (only OFF_NETWORK_HTML does).
  *
  * Third caller: ORIGIN_DOWN_HTML (#2503), the CloudFront 502/503/504 page.
+ * Fourth: INCONSISTENT_CLIENT_HTML, the client-hint mismatch block.
  *
  * Duplication with `app/global-error.tsx` is DELIBERATE (#2503 decision). That
  * boundary draws the same lockup with its own inline styles, and the two have
@@ -184,6 +185,21 @@ const RATE_LIMITED_HTML = wafPage(
 <h1>Too many requests</h1>
 <p>Scholars has paused requests from your network because it received an unusually large number of them in a short time. This is automatic and temporary - access resumes on its own within a few minutes.</p>
 <p class="n">If this keeps happening, or you believe it is a mistake, email <a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a>.</p>
+</main></body></html>`,
+);
+
+/**
+ * Body for the client-hint mismatch rules (2026-11-20 botnet). A person who
+ * sees it is most likely running something that rewrites the User-Agent (an
+ * extension, a testing tool), so the page says what to change. No contact
+ * line: these are bot requests by the million, and the fix is on the client.
+ */
+const INCONSISTENT_CLIENT_HTML = wafPage(
+  "Browser not recognized - Scholars @ Weill Cornell Medicine",
+  `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
+<h1>Browser not recognized</h1>
+<p>Scholars could not load this page because your browser's identity headers were inconsistent: it described itself as one browser while reporting the details of another. A browser extension or tool that changes how your browser identifies itself usually causes this.</p>
+<p class="n">Try again in a standard, up-to-date browser, with any such extension turned off.</p>
 </main></body></html>`,
 );
 
@@ -1324,6 +1340,34 @@ export class EdgeStack extends Stack {
           statement: { ipSetReferenceStatement: { arn: ipAllowSet.attrArn } },
         },
       };
+      // For the client-hint rules below. AWS WAF evaluates a statement on a
+      // component the request lacks as NOT matching, so `hasSecChUa` (size
+      // > 0) is false when sec-ch-ua is absent and its negation is the
+      // absence test. (A size EQ 0 test would never see a missing header.)
+      const headerContains = (name: string, searchString: string) => ({
+        byteMatchStatement: {
+          searchString,
+          fieldToMatch: { singleHeader: { Name: name } },
+          positionalConstraint: "CONTAINS",
+          textTransformations: [{ priority: 0, type: "NONE" }],
+        },
+      });
+      const hasSecChUa = {
+        sizeConstraintStatement: {
+          fieldToMatch: { singleHeader: { Name: "sec-ch-ua" } },
+          comparisonOperator: "GT",
+          size: 0,
+          textTransformations: [{ priority: 0, type: "NONE" }],
+        },
+      };
+      const inconsistentClientBlock = {
+        block: {
+          customResponse: {
+            responseCode: 403,
+            customResponseBodyKey: "inconsistentClient",
+          },
+        },
+      };
       // TARGETED Bot Control runs on off-campus /search; COMMON takes exactly
       // the rest (campus /search included), so every request still gets one
       // Bot Control pass for its labels and none is billed twice.
@@ -1393,6 +1437,10 @@ export class EdgeStack extends Stack {
           rateLimited: {
             contentType: "TEXT_HTML",
             content: RATE_LIMITED_HTML,
+          },
+          inconsistentClient: {
+            contentType: "TEXT_HTML",
+            content: INCONSISTENT_CLIENT_HTML,
           },
         },
         rules: [
@@ -1502,6 +1550,96 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           })),
+          // 2026-11-20 incident: a residential-proxy botnet (~1.9M requests a
+          // day from ~170k IPs, ~11 per IP) heap-OOM'd the prod tasks. It is
+          // one fleet of headless Chromium 146 that runs JS and solves WAF
+          // challenges, so Bot Control does not stop it. It rewrites its
+          // User-Agent to ten fixed strings (Chrome 118-120, Edge 119-120,
+          // Firefox 120-121) but leaves its client hints alone: sec-ch-ua
+          // still says Chromium 146. The rules below act on that
+          // contradiction on every path, off campus only, and sit BEFORE Bot
+          // Control so a blocked request is never billed for its inspection
+          // ($1/M COMMON, $10/M TARGETED). Together they add 55 WCU (prod ACL
+          // 1,257 -> 1,312, inside the 1,500 the base price covers).
+          //
+          // Firefox has never sent sec-ch-ua. 24h: ~560k matches, none with
+          // consistent hints. Unlike the next rule it does not depend on the
+          // fleet's engine version. If Firefox ever ships UA client hints,
+          // revisit.
+          {
+            name: "block-firefox-ua-with-client-hints",
+            priority: managedGroups.length + 1,
+            action: inconsistentClientBlock,
+            statement: {
+              andStatement: {
+                statements: [headerContains("user-agent", "Firefox/"), hasSecChUa, notWcm],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-block-firefox-ua-with-client-hints`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // Chromium 146 hints under a UA that is not Chrome 146. 24h: ~1.32M
+          // matches. Pinned to the fleet's engine on purpose: WAF cannot
+          // compare two headers, so a general version-mismatch test would
+          // need a CloudFront Function, and the pin keeps real users of
+          // unusual browsers out of scope (Edge, Opera, Brave, WebView and
+          // HeadlessChrome all carry Chrome/<engine>. in the UA). UPDATE the
+          // version here if the fleet's engine moves.
+          {
+            name: "block-chromium146-ua-mismatch",
+            priority: managedGroups.length + 2,
+            action: inconsistentClientBlock,
+            statement: {
+              andStatement: {
+                statements: [
+                  headerContains("sec-ch-ua", '"Chromium";v="146"'),
+                  {
+                    notStatement: {
+                      statement: headerContains("user-agent", "Chrome/146."),
+                    },
+                  },
+                  notWcm,
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-block-chromium146-ua-mismatch`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          // Observation only. Chrome 89+ sends sec-ch-ua on every HTTPS
+          // request, so a Chrome UA without it is likely a script wearing one
+          // (~186k a day, 6.5% of Chrome-UA traffic), but that is less
+          // certain than the two above. "compatible" marks declared crawlers
+          // (Googlebot, bingbot), which are left out.
+          {
+            name: "count-chrome-ua-without-client-hints",
+            priority: managedGroups.length + 3,
+            action: { count: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  headerContains("user-agent", "Chrome/"),
+                  {
+                    notStatement: {
+                      statement: headerContains("user-agent", "compatible"),
+                    },
+                  },
+                  { notStatement: { statement: hasSecChUa } },
+                  notWcm,
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-count-chrome-ua-without-client-hints`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // #125 -- Bot Control runs label-only (count override): its
           // `awswaf:managed:aws:bot-control:bot:verified` label exempts
           // verified crawlers/AI fetchers (Googlebot, Bingbot, GPTBot, ...)
@@ -1522,7 +1660,7 @@ export class EdgeStack extends Stack {
           // so /search* is labeled the same way it was under COMMON.
           {
             name: "AWSManagedRulesBotControlRuleSet",
-            priority: managedGroups.length + 1,
+            priority: managedGroups.length + 4,
             overrideAction: { count: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1574,7 +1712,7 @@ export class EdgeStack extends Stack {
           // /search* requests in scope only.
           {
             name: "AWSManagedRulesBotControlRuleSet-Targeted",
-            priority: managedGroups.length + 2,
+            priority: managedGroups.length + 5,
             overrideAction: { none: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1625,7 +1763,7 @@ export class EdgeStack extends Stack {
           // the sitemap.
           {
             name: "search-block-bots",
-            priority: managedGroups.length + 3,
+            priority: managedGroups.length + 6,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1655,7 +1793,7 @@ export class EdgeStack extends Stack {
           // ponytail: one hardcoded UA; promote to a list if a second shows up.
           {
             name: "search-block-scraper-ua",
-            priority: managedGroups.length + 4,
+            priority: managedGroups.length + 7,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1685,7 +1823,7 @@ export class EdgeStack extends Stack {
           // pools legitimately peak ~470/5min on /search alone.
           {
             name: "search-rate-limit",
-            priority: managedGroups.length + 5,
+            priority: managedGroups.length + 8,
             action: {
               block: {
                 customResponse: {
@@ -1723,7 +1861,7 @@ export class EdgeStack extends Stack {
           },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 6,
+            priority: managedGroups.length + 9,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
@@ -1795,7 +1933,7 @@ export class EdgeStack extends Stack {
           //       their first page sees the challenge once.
           {
             name: "search-challenge-tokenless",
-            priority: managedGroups.length + 7,
+            priority: managedGroups.length + 10,
             action: { challenge: {} },
             statement: {
               andStatement: {
@@ -1854,7 +1992,7 @@ export class EdgeStack extends Stack {
           // ponytail: one fixed limit; revisit if the baseline drifts up.
           {
             name: "search-challenge-tokenless-surge",
-            priority: managedGroups.length + 8,
+            priority: managedGroups.length + 11,
             action: { challenge: {} },
             statement: {
               rateBasedStatement: {
