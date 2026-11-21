@@ -79,6 +79,7 @@ import type { ReportAccessPopoverProps } from "@/components/edit/report-access-p
 import { ReportHeader } from "@/components/edit/report-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { getPartnerReportSession, PARTNER_HOME } from "@/lib/auth/partner-login";
 import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { db } from "@/lib/db";
@@ -102,6 +103,7 @@ import {
   ARTICLE_COUNT_ACCESS_NOTE,
   ARTICLE_COUNT_REPORT,
   getReportScopes,
+  PARTNER_REPORT_KEYS,
 } from "@/lib/edit/report-access";
 import { loadReportAccessPopoverProps } from "@/lib/edit/report-access-popover-props";
 import { ADMIN_AUDIENCE } from "@/lib/edit/report-access-summary";
@@ -165,7 +167,11 @@ export default async function EditReportPage({
   searchParams?: Promise<ReportSearchParams>;
 }) {
   const { report: segment } = await params;
-  const session = await getEffectiveEditSession();
+  // A Cornell Ithaca partner (ITHACA_LOGIN) gets a narrow, all-false session
+  // here and only the PARTNER_REPORT_KEYS reports below; every other report 404s.
+  const wcmSession = await getEffectiveEditSession();
+  const session = wcmSession ?? (await getPartnerReportSession());
+  const partner = wcmSession === null && session !== null;
   if (!session) {
     redirect(`/api/auth/saml/login?return=/edit/reports/${encodeURIComponent(segment)}`);
   }
@@ -183,6 +189,11 @@ export default async function EditReportPage({
   const n: ReportKey = meta.key;
   const basePath = `/edit/reports/${meta.slug}`;
   const def = REPORTS[n];
+  if (partner) {
+    const key =
+      def.gate === "admin" ? ARTICLE_COUNT_REPORT : def.gate === "person" ? def.accessKey : null;
+    if (key === null || !PARTNER_REPORT_KEYS.has(key)) notFound();
+  }
 
   let back: string;
   // Deferred so the grant list (person gate), the shell counts and the
@@ -286,6 +297,11 @@ export default async function EditReportPage({
   // The body is NOT awaited here: the shell, back link and header render at
   // once and the body streams in under its own skeleton (the Suspense
   // boundaries below). Started now so it runs alongside the shell reads.
+  if (partner) {
+    // The grantee list (other people's names) stays with WCM viewers.
+    loadAccess = async () => ({ mode: "unit", audience: "People granted access" });
+    back = PARTNER_HOME;
+  }
   const rendered = render();
   // Mark it handled so a body that fails before a boundary awaits it is not
   // reported as an unhandled rejection; the boundaries still see the error.
@@ -301,17 +317,11 @@ export default async function EditReportPage({
   // Keyed on the query so a filter change (same route, new params) shows the
   // skeleton again instead of leaving the old results up while it loads.
   const bodyKey = querySuffix(sp);
-  return (
-    <ConsoleShell
-      active="reports"
-      session={session}
-      pendingSlugRequests={pendingSlugRequests}
-      pendingHonors={pendingHonors}
-      reportsTab
-    >
+  const body = (
+    <>
       {coreHeader ?? (
         <Link href={back} className="text-apollo-slate mb-4 inline-block text-sm hover:underline">
-          &larr; All reports
+          &larr; {partner ? "Back" : "All reports"}
         </Link>
       )}
       <ReportHeader n={n} session={session} access={access} underCoreHeader={coreHeader !== null}>
@@ -322,6 +332,19 @@ export default async function EditReportPage({
       <Suspense key={bodyKey} fallback={<ReportBodySkeleton />}>
         <RenderedPart rendered={rendered} part="main" />
       </Suspense>
+    </>
+  );
+  // No console shell for a partner: its nav leads only to pages they can't open.
+  if (partner) return <main className="mx-auto max-w-7xl px-4 py-8">{body}</main>;
+  return (
+    <ConsoleShell
+      active="reports"
+      session={session}
+      pendingSlugRequests={pendingSlugRequests}
+      pendingHonors={pendingHonors}
+      reportsTab
+    >
+      {body}
     </ConsoleShell>
   );
 }

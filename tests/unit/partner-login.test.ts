@@ -16,6 +16,7 @@ vi.mock("@/lib/db", () => ({
     read: {
       scholar: { count: vi.fn() },
       scholarIdentityLink: { findMany: vi.fn() },
+      reportAccess: { findFirst: vi.fn() },
     },
   },
 }));
@@ -43,6 +44,7 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.mocked(markAssertionConsumed).mockResolvedValue({ duplicate: false });
   vi.mocked(db.read.scholarIdentityLink.findMany).mockResolvedValue([]);
+  vi.mocked(db.read.reportAccess.findFirst).mockResolvedValue(null);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -98,7 +100,17 @@ describe("proxy", () => {
   }
 
   it("403s a partner session on gated paths, never redirecting to SSO", async () => {
-    for (const path of ["/edit", "/edit/scholar/zq99", "/edit/cornellx", "/api/edit/field", "/api/edit/orcid"]) {
+    for (const path of [
+      "/edit",
+      "/edit/scholar/zq99",
+      "/edit/cornellx",
+      "/edit/reports",
+      "/edit/reportsx/article-count",
+      "/api/edit/field",
+      "/api/edit/orcid",
+      "/api/edit/reports/mentored-publications",
+      "/api/edit/reports/article-count/cwid-list",
+    ]) {
       const res = await proxy(await partnerRequest(path));
       expect(res.status).toBe(403);
       expect(res.headers.get("location")).toBeNull();
@@ -106,7 +118,15 @@ describe("proxy", () => {
   });
 
   it("lets a partner session reach exactly its allowlisted paths", async () => {
-    for (const path of ["/edit/cornell", "/api/edit/orcid/connect", "/api/edit/orcid/callback"]) {
+    for (const path of [
+      "/edit/cornell",
+      "/api/edit/orcid/connect",
+      "/api/edit/orcid/callback",
+      "/edit/reports/article-count",
+      "/edit/reports/high-impact-publications",
+      "/api/edit/reports/article-count",
+      "/api/edit/reports/high-impact-publications",
+    ]) {
       const res = await proxy(await partnerRequest(path));
       expect(res.status).not.toBe(403);
       expect(res.headers.get("location")).toBeNull();
@@ -185,6 +205,21 @@ describe("SAML callback", () => {
     ] as never);
     vi.mocked(db.read.scholar.count).mockResolvedValue(0);
     expect((await callback()).status).toBe(403);
+  });
+
+  it("admits a report viewer with no roster row (Ithaca staff), on partner reports only", async () => {
+    vi.mocked(db.read.scholar.count).mockResolvedValue(0);
+    vi.mocked(db.read.reportAccess.findFirst).mockResolvedValue({ cwid: "zq99@cornell.edu" } as never);
+    const res = await callback();
+    expect(res.status).toBe(302);
+    expect(await sessionCwidOf(res)).toBe("zq99@cornell.edu");
+    expect(db.read.reportAccess.findFirst).toHaveBeenCalledWith({
+      where: {
+        cwid: "zq99@cornell.edu",
+        reportKey: { in: ["article-count", "high-impact-publications"] },
+      },
+      select: { cwid: true },
+    });
   });
 
   it("refuses a NetID without one, and mints no cookie", async () => {

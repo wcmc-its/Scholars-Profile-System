@@ -109,7 +109,17 @@ const PARTNER_PATHS: ReadonlySet<string> = new Set([
   "/edit/cornell",
   "/api/edit/orcid/connect",
   "/api/edit/orcid/callback",
+  "/api/edit/reports/article-count",
+  "/api/edit/reports/high-impact-publications",
 ]);
+
+/**
+ * Report pages, one dispatcher (`app/edit/reports/[report]/page.tsx`), which
+ * refuses a partner every report outside `PARTNER_REPORT_KEYS` — a prefix so a
+ * superuser renaming a report's slug can't lock the partner out or widen
+ * access. The index (`/edit/reports`, no trailing slash) stays WCM-only.
+ */
+const PARTNER_REPORT_PAGE_PREFIX = "/edit/reports/";
 
 /**
  * The path prefixes the SSO gate + legacy-redirect logic below acts on — the
@@ -310,7 +320,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Partner sessions (ITHACA_LOGIN) reach only PARTNER_PATHS; anything else
   // gated is a 403, never the SSO redirect (the IdP would re-sign them in and loop).
   if (session && isPartnerCwid(session.cwid)) {
-    if (!PARTNER_PATHS.has(request.nextUrl.pathname)) {
+    const p = request.nextUrl.pathname;
+    if (!PARTNER_PATHS.has(p) && !p.startsWith(PARTNER_REPORT_PAGE_PREFIX)) {
       return withSecurityHeaders(new NextResponse(null, { status: 403 }));
     }
     return withSecurityHeaders(await idleRefreshed(request, session));

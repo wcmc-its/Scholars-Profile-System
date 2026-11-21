@@ -4,9 +4,9 @@
  * session through `getPartnerNetid` itself; every other `/edit` page sees a
  * partner as signed out.
  *
- * v1: the person's own ORCID iD, and "Connect your ORCID iD" (the shared
- * `/api/edit/orcid/connect` flow, which returns here). Later steps add reports
- * and center rosters.
+ * The reports granted to the person's eppn (step 3; PARTNER_REPORT_KEYS only),
+ * and, for someone with an Ithaca roster row, their own ORCID iD with "Connect
+ * your ORCID iD" (the shared `/api/edit/orcid/connect` flow, which returns here).
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -16,6 +16,13 @@ import { buttonVariants } from "@/components/ui/button";
 import { ithacaScholar } from "@/lib/auth/partner-login";
 import { getPartnerNetid, getSession } from "@/lib/auth/session-server";
 import { isOrcidConnectEnabled } from "@/lib/edit/orcid-connect";
+import {
+  ARTICLE_COUNT_REPORT,
+  HIGH_IMPACT_PUBS_REPORT,
+  loadReportScopesForCwid,
+  PARTNER_REPORT_KEYS,
+} from "@/lib/edit/report-access";
+import { loadReportMeta } from "@/lib/edit/report-meta";
 
 export const dynamic = "force-dynamic";
 
@@ -87,59 +94,94 @@ export default async function CornellHomePage({
     </form>
   );
 
-  if (!row) {
+  // Reports granted to this eppn (PARTNER_REPORT_KEYS only; report 8 = Article
+  // count, 9 = High-impact publications).
+  const eppn = `${netid}@cornell.edu`;
+  const meta = await loadReportMeta();
+  const reports = (
+    await Promise.all(
+      (
+        [
+          [ARTICLE_COUNT_REPORT, "8"],
+          [HIGH_IMPACT_PUBS_REPORT, "9"],
+        ] as const
+      ).map(async ([key, n]) =>
+        PARTNER_REPORT_KEYS.has(key) && (await loadReportScopesForCwid(eppn, key)).size > 0
+          ? meta.get(n) ?? null
+          : null,
+      ),
+    )
+  ).filter((m) => m !== null);
+
+  if (!row && reports.length === 0) {
     return (
       <Shell>
-        <p>Your Cornell account ({netid}@cornell.edu) isn&apos;t set up for Scholars.</p>
+        <p>Your Cornell account ({eppn}) isn&apos;t set up for Scholars.</p>
         {signOut}
       </Shell>
     );
   }
 
-  const authenticated = row.orcidConfirmMethod === "authenticated";
+  const authenticated = row?.orcidConfirmMethod === "authenticated";
   return (
     <Shell>
       <p>
-        Signed in as <strong>{row.preferredName}</strong> ({netid}@cornell.edu)
+        Signed in as <strong>{row?.preferredName ?? netid}</strong> ({eppn})
       </p>
-      <section className="border-apollo-border-strong space-y-3 rounded-lg border p-4">
-        <h2 className="text-lg font-semibold">Your ORCID iD</h2>
-        {row.orcid ? (
-          <p className="flex items-center gap-2">
-            <OrcidIdIcon />
+      {reports.length > 0 && (
+        <section className="border-apollo-border-strong space-y-3 rounded-lg border p-4">
+          <h2 className="text-lg font-semibold">Your reports</h2>
+          <ul className="list-disc space-y-1 pl-5">
+            {reports.map((r) => (
+              <li key={r.slug}>
+                <Link className="underline" href={`/edit/reports/${r.slug}`}>
+                  {r.name}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {row && (
+        <section className="border-apollo-border-strong space-y-3 rounded-lg border p-4">
+          <h2 className="text-lg font-semibold">Your ORCID iD</h2>
+          {row.orcid ? (
+            <p className="flex items-center gap-2">
+              <OrcidIdIcon />
+              <a
+                className="font-mono underline"
+                href={`https://orcid.org/${row.orcid}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {row.orcid}
+              </a>
+              <span className="text-muted-foreground text-sm">
+                {authenticated ? "Authenticated" : "On file, not yet verified by you"}
+              </span>
+            </p>
+          ) : (
+            <p className="text-muted-foreground">No ORCID iD on file.</p>
+          )}
+          {outcome && (
+            <p role="status" className={outcome.error ? "text-destructive" : undefined}>
+              {outcome.text}
+            </p>
+          )}
+          {isOrcidConnectEnabled() && !authenticated && (
+            // A full navigation, not <Link>: a prefetch would start the OAuth flow.
+            // eslint-disable-next-line @next/next/no-html-link-for-pages
             <a
-              className="font-mono underline"
-              href={`https://orcid.org/${row.orcid}`}
-              target="_blank"
-              rel="noreferrer"
+              href="/api/edit/orcid/connect"
+              className={`${buttonVariants({ variant: "apollo", size: "sm" })} gap-2`}
+              data-testid="orcid-connect"
             >
-              {row.orcid}
+              <OrcidIdIcon />
+              {row.orcid ? "Sign in to ORCID to verify" : "Connect your ORCID iD"}
             </a>
-            <span className="text-muted-foreground text-sm">
-              {authenticated ? "Authenticated" : "On file, not yet verified by you"}
-            </span>
-          </p>
-        ) : (
-          <p className="text-muted-foreground">No ORCID iD on file.</p>
-        )}
-        {outcome && (
-          <p role="status" className={outcome.error ? "text-destructive" : undefined}>
-            {outcome.text}
-          </p>
-        )}
-        {isOrcidConnectEnabled() && !authenticated && (
-          // A full navigation, not <Link>: a prefetch would start the OAuth flow.
-          // eslint-disable-next-line @next/next/no-html-link-for-pages
-          <a
-            href="/api/edit/orcid/connect"
-            className={`${buttonVariants({ variant: "apollo", size: "sm" })} gap-2`}
-            data-testid="orcid-connect"
-          >
-            <OrcidIdIcon />
-            {row.orcid ? "Sign in to ORCID to verify" : "Connect your ORCID iD"}
-          </a>
-        )}
-      </section>
+          )}
+        </section>
+      )}
       {signOut}
     </Shell>
   );

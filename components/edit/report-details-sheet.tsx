@@ -386,11 +386,13 @@ function PersonAccessList({
   audience,
   note,
   onChange,
+  cornellGrantable = false,
 }: ReportAccessPopoverPersonProps & { onChange: () => void }) {
   const scoped = scopeOptions.length > 1;
   const labelFor = React.useMemo(() => new Map(scopeOptions), [scopeOptions]);
   const { rows, busy, error, post } = useReportAccessRows(reportKey, initialRows, onChange);
   const [person, setPerson] = React.useState<DirectoryValue | null>(null);
+  const [source, setSource] = React.useState<"wcm" | "cornell">("wcm");
   const [scope, setScope] = React.useState(scopeOptions[0]?.[0] ?? "*");
 
   const row = "border-apollo-border flex items-center justify-between gap-2.5 border-b px-3 py-2.5 last:border-b-0";
@@ -429,13 +431,44 @@ function PersonAccessList({
       </ul>
       {canManage && (
         <div className="flex flex-wrap items-end gap-2" data-testid="report-details-add">
+          {cornellGrantable && (
+            <div
+              className="border-apollo-border flex w-fit overflow-hidden rounded-md border"
+              role="group"
+              aria-label="Directory source"
+            >
+              {(
+                [
+                  ["wcm", "WCM"],
+                  ["cornell", "Cornell"],
+                ] as ReadonlyArray<readonly ["wcm" | "cornell", string]>
+              ).map(([value, label], i) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setSource(value);
+                    setPerson(null);
+                  }}
+                  aria-pressed={source === value}
+                  className={`px-3 py-1 text-sm font-medium transition-colors ${i > 0 ? "border-apollo-border border-l" : ""} ${
+                    source === value ? "bg-apollo-maroon text-white" : "text-muted-foreground hover:bg-accent"
+                  }`}
+                  data-testid={`report-details-source-${value}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="min-w-[14rem] flex-1">
             <DirectoryPeopleTypeahead
               value={person}
               onChange={setPerson}
-              placeholder="Add a person by name or CWID"
+              placeholder={source === "cornell" ? "Add a Cornell person by name or NetID" : "Add a person by name or CWID"}
               disabled={busy}
               idPrefix="report-details-access"
+              source={cornellGrantable ? source : "wcm"}
             />
           </div>
           {scoped && (
@@ -462,7 +495,14 @@ function PersonAccessList({
             disabled={busy || person === null}
             onClick={() => {
               if (!person) return;
-              void post("grant", scope, { cwid: person.cwid, name: person.name }).then((ok) => {
+              // A Cornell pick who also holds a WCM identity is granted on the
+              // CWID (they sign in as it, Ithaca login step 2); otherwise on
+              // their NetID eppn.
+              const cwid =
+                person.netid === undefined
+                  ? person.cwid
+                  : (person.wcmMatch ?? `${person.netid.toLowerCase()}@cornell.edu`);
+              void post("grant", scope, { cwid, name: person.name }).then((ok) => {
                 if (ok) setPerson(null);
               });
             }}

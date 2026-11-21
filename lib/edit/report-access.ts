@@ -115,6 +115,20 @@ export const REPORT_ACCESS_SCOPE_OPTIONS: Readonly<Record<string, ReadonlyArray<
   [GRANT_ATTRIBUTION_REPORT]: WHOLE_REPORT_SCOPE_OPTIONS,
 };
 
+/**
+ * The reports a Cornell Ithaca partner (`netid@cornell.edu`, ITHACA_LOGIN) may
+ * be granted and run: read-only, no learner data. Never Mentored publications
+ * (FERPA) and never Grant attribution (it has write actions). The report page,
+ * the two data routes and the grant route all read this one list.
+ */
+export const PARTNER_REPORT_KEYS: ReadonlySet<string> = new Set([
+  ARTICLE_COUNT_REPORT,
+  HIGH_IMPACT_PUBS_REPORT,
+]);
+
+/** A partner grantee key: `netid@cornell.edu`, NetID-shaped local part. */
+export const PARTNER_GRANTEE_PATTERN = /^[a-z][a-z0-9]{1,11}@cornell\.edu$/;
+
 /** Whether `reportKey` is a report a `report_access` row can still grant — a
  *  key of {@link REPORT_ACCESS_SCOPE_OPTIONS}. False for a retired report's
  *  leftover rows. */
