@@ -22,6 +22,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
+  mockPartnerSession: vi.fn(),
   mockNotFound: vi.fn(() => {
     throw new Error("__NOT_FOUND__");
   }),
@@ -47,6 +48,10 @@ vi.mock("next/navigation", () => ({
   permanentRedirect: h.mockPermanentRedirect,
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockGetEditSession }));
+vi.mock("@/lib/auth/partner-login", () => ({
+  getPartnerReportSession: h.mockPartnerSession,
+  PARTNER_HOME: "/edit/cornell",
+}));
 vi.mock("@/lib/db", () => ({
   db: { read: { reportMeta: { findMany: h.mockReportMetaFindMany } }, write: {} },
 }));
@@ -185,6 +190,7 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   h.mockGetEditSession.mockResolvedValue(OWNER);
+  h.mockPartnerSession.mockResolvedValue(null);
   h.mockReportMetaFindMany.mockResolvedValue([]);
   h.mockResolveNumbered.mockResolvedValue({ code: "meyer", kind: "center" });
   h.mockLoadReportsContext.mockResolvedValue({ unit: { name: "Meyer Cancer Center" } });
@@ -385,5 +391,43 @@ describe("/edit/reports/[report] — generateMetadata", () => {
       title: "Reports — Scholars Console",
       robots: { index: false, follow: false },
     });
+  });
+});
+
+describe("/edit/reports/[report] — Cornell Ithaca partner session", () => {
+  const PARTNER = { cwid: "zq99@cornell.edu", isSuperuser: false, isCommsSteward: false };
+  beforeEach(() => {
+    h.mockGetEditSession.mockResolvedValue(null);
+    h.mockPartnerSession.mockResolvedValue(PARTNER);
+  });
+
+  it("404s every report outside PARTNER_REPORT_KEYS before its gate runs (7 is learner data)", async () => {
+    for (const slug of ["mentors-and-mentees", "grant-attribution", "optimize-membership"]) {
+      await expect(page(slug)).rejects.toThrow("__NOT_FOUND__");
+    }
+    expect(h.mockGetReportScopes).not.toHaveBeenCalled();
+    expect(h.mockResolveNumbered).not.toHaveBeenCalled();
+  });
+
+  it("runs report 9 on the partner session, without the console shell or the grantee list", async () => {
+    // The body (unresolved here) needs a DB; the page tree is the contract.
+    const tree = (await EditReportPage({
+      params: Promise.resolve({ report: "high-impact-publications" }),
+      searchParams: Promise.resolve({}),
+    })) as React.ReactElement<{ children: React.ReactElement<{ children: React.ReactElement[] }> }>;
+    expect(h.mockGetReportScopes).toHaveBeenCalledWith(PARTNER, "high-impact-publications");
+    expect(h.mockListReportAccess).not.toHaveBeenCalled();
+    expect(tree.type).toBe("main"); // not ConsoleShell
+    const back = tree.props.children.props.children[0] as React.ReactElement<{ href: string }>;
+    expect(back.props.href).toBe("/edit/cornell");
+  });
+
+  it("a WCM session never takes the partner path", async () => {
+    h.mockGetEditSession.mockResolvedValue(OWNER);
+    await EditReportPage({
+      params: Promise.resolve({ report: "high-impact-publications" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(h.mockPartnerSession).not.toHaveBeenCalled();
   });
 });

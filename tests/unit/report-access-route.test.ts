@@ -11,7 +11,7 @@
  * is the reader replica (the read-your-writes race, `core-client` PR #2620).
  */
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   mockGetEffectiveEditSession: vi.fn(),
@@ -293,3 +293,46 @@ describe("POST /api/edit/report-access — unit scopes", () => {
   });
 });
 
+
+describe("Cornell Ithaca NetID grantees (ITHACA_LOGIN, PARTNER_REPORT_KEYS)", () => {
+  const EPPN = "zq99@cornell.edu";
+  beforeEach(() => {
+    vi.stubEnv("ITHACA_LOGIN", "on");
+    asGenuine(ADMIN, { isSuperuser: true });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("grants a NetID eppn on the read-only reports 8 and 9", async () => {
+    for (const reportKey of ["article-count", "high-impact-publications"]) {
+      const res = await POST(post({ op: "grant", reportKey, scopeKey: "*", cwid: EPPN }));
+      expect(res.status).toBe(200);
+      expect(h.mockGrant).toHaveBeenLastCalledWith(expect.objectContaining({ cwid: EPPN, reportKey }));
+    }
+  });
+
+  it("never grants a NetID eppn learner data (report 7) or a write report (14)", async () => {
+    for (const [reportKey, scopeKey] of [
+      ["mentored-publications", "md"],
+      ["grant-attribution", "*"],
+    ]) {
+      const res = await POST(post({ op: "grant", reportKey, scopeKey, cwid: EPPN }));
+      expect(res.status).toBe(400);
+    }
+    expect(h.mockGrant).not.toHaveBeenCalled();
+  });
+
+  it("refuses a new NetID grant with ITHACA_LOGIN off, but still lets one be revoked", async () => {
+    vi.stubEnv("ITHACA_LOGIN", "off");
+    const base = { reportKey: "article-count", scopeKey: "*", cwid: EPPN };
+    expect((await POST(post({ op: "grant", ...base }))).status).toBe(400);
+    expect((await POST(post({ op: "revoke", ...base }))).status).toBe(200);
+    expect(h.mockRevoke).toHaveBeenCalledWith(expect.objectContaining({ cwid: EPPN }));
+  });
+
+  it("refuses other domains and malformed eppns", async () => {
+    for (const cwid of ["zq99@nyp.org", "zq99@evil-cornell.edu", "@cornell.edu", "zq99@cornell.edu.evil"]) {
+      const res = await POST(post({ op: "grant", reportKey: "article-count", scopeKey: "*", cwid }));
+      expect(res.status).toBe(400);
+    }
+  });
+});

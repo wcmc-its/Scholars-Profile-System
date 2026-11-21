@@ -14,6 +14,7 @@ import {
   MENTORED_PUBS_REPORT,
   REPORT_ACCESS_SCOPE_OPTIONS,
   WHOLE_REPORT_SCOPE_OPTIONS,
+  PARTNER_REPORT_KEYS,
 } from "@/lib/edit/report-access";
 
 /** Report 7's unit scope options (`isUnitScopeKey`): every center, department
@@ -56,5 +57,6 @@ export async function loadReportAccessPopoverProps(
     // never manages access; the write route refuses it regardless.
     canManage: canManageReportAccess(session) && session.isContentEditor !== true,
     note,
+    cornellGrantable: process.env.ITHACA_LOGIN === "on" && PARTNER_REPORT_KEYS.has(reportKey),
   };
 }
