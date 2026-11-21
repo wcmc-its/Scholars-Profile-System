@@ -80,6 +80,7 @@ type EditContextReadClient = Pick<
   | "fieldOverride"
   | "appointment"
   | "education"
+  | "training"
   | "grant"
   | "department"
   | "coiActivity"
@@ -218,6 +219,21 @@ export type EditContextEducation = {
   institution: string;
   field: string | null;
   year: number | null;
+  state: Exclude<EditEntityState, "locked">;
+  suppressionId: string | null;
+};
+
+/** Postgraduate training — ASMS rows plus scholar-entered ones (`source`
+ *  SELF / CURATOR). Hidden through the `education` suppression type, keyed on
+ *  `externalId`; only scholar-entered rows can be removed outright. */
+export type EditContextTraining = {
+  externalId: string;
+  type: string;
+  institution: string;
+  specialty: string | null;
+  yearFrom: number | null;
+  yearTo: number | null;
+  source: string;
   state: Exclude<EditEntityState, "locked">;
   suppressionId: string | null;
 };
@@ -722,6 +738,7 @@ export type EditContext = {
   /** #1323 — historical appointments, reveal-to-show (curator / comms_steward). */
   historicalAppointments: ReadonlyArray<EditContextHistoricalAppointment>;
   educations: ReadonlyArray<EditContextEducation>;
+  trainings: ReadonlyArray<EditContextTraining>;
   grants: ReadonlyArray<EditContextGrant>;
   /** Read-only COI disclosures (the Weill Research Gateway is the SOR). */
   coiDisclosures: ReadonlyArray<EditContextCoiDisclosure>;
@@ -1031,6 +1048,7 @@ export async function loadEditContext(
     appointmentRows,
     historicalAppointmentRows,
     educationRows,
+    trainingRows,
     grantRows,
     coiRows,
     chairedDept,
@@ -1103,6 +1121,19 @@ export async function loadEditContext(
       where: { cwid },
       select: { externalId: true, degree: true, institution: true, field: true, year: true },
       orderBy: [{ year: "desc" }],
+    }),
+    client.training.findMany({
+      where: { cwid },
+      select: {
+        externalId: true,
+        type: true,
+        institution: true,
+        specialty: true,
+        yearFrom: true,
+        yearTo: true,
+        source: true,
+      },
+      orderBy: [{ yearFrom: "desc" }, { yearTo: "desc" }],
     }),
     client.grant.findMany({
       where: { cwid },
@@ -2014,6 +2045,8 @@ export async function loadEditContext(
   const entityExternalIds = [
     ...appointmentRows.map((a) => a.externalId),
     ...educationRows.map((e) => e.externalId),
+    // Training rows hide under the `education` suppression type.
+    ...trainingRows.map((t) => t.externalId),
     ...grantRows.map((g) => g.externalId),
   ];
   // `${entityType}:${entityId}` → the active hide. Absent key = "shown".
@@ -2080,6 +2113,15 @@ export async function loadEditContext(
       institution: e.institution,
       field: e.field,
       year: e.year,
+      state: hide ? hide.state : "shown",
+      suppressionId: hide ? hide.suppressionId : null,
+    };
+  });
+
+  const trainings: EditContextTraining[] = trainingRows.map((t) => {
+    const hide = entityHide.get(`education:${t.externalId}`);
+    return {
+      ...t,
       state: hide ? hide.state : "shown",
       suppressionId: hide ? hide.suppressionId : null,
     };
@@ -2153,6 +2195,7 @@ export async function loadEditContext(
       appointments,
       historicalAppointments,
       educations,
+      trainings,
       grants,
       coiDisclosures,
       technologies,
@@ -2344,6 +2387,7 @@ export async function loadEditContext(
     appointments,
     historicalAppointments,
     educations,
+    trainings,
     grants,
     coiDisclosures,
     technologies,

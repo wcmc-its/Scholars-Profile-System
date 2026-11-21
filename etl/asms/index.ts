@@ -21,6 +21,7 @@ import { db } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeAsmsPool, getAsmsPool } from "@/lib/sources/mssql-asms";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { TRAINING_TYPES } from "@/lib/edit/training";
 
 type EducationRow = {
   cwid: string;
@@ -41,15 +42,6 @@ type TrainingRow = {
   asms_training_id: number;
 };
 
-// ASMS `fc_doctoral_training_type` titles we show. "Other" and untyped rows are
-// left out by decision (2026-11-19).
-const TRAINING_TYPES = [
-  "Internship",
-  "Residency",
-  "Fellowship",
-  "Postdoctoral",
-  "Internship and Residency",
-];
 
 const IN_BATCH = 500;
 const INSERT_BATCH = 1000;

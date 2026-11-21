@@ -346,6 +346,12 @@ export type AuditAction =
    *  `{ orcid, unconfirmed?, undismissed? }`. ENUM extended in
    *  scripts/sql/audit-log.sql. */
   | "orcid_librarian_undo"
+  /** A scholar / curator added or removed a scholar-entered postgraduate
+   *  training row on /edit (`/api/edit/training`). `targetEntityType='training'`,
+   *  `targetEntityId` the row `externalId`. ENUM extended in
+   *  scripts/sql/audit-log.sql. */
+  | "training_create"
+  | "training_delete"
   /** One "Confirm remaining N" on a band whose review sample passed; each
    *  scholar it confirmed also gets an `orcid_librarian_confirm` row.
    *  `targetEntityType='orcid_queue_sample'`, `targetEntityId` the sample id;
@@ -506,7 +512,10 @@ export type AuditEntityType =
   | "matcha_ask"
   /** the `feedback_submission` table as a whole; `targetEntityId` is `export`.
    *  Only `feedback_export` uses it. ENUM extended in scripts/sql/audit-log.sql. */
-  | "feedback_submission";
+  | "feedback_submission"
+  /** a scholar-entered `training` row; `targetEntityId` is its `externalId`.
+   *  ENUM extended in scripts/sql/audit-log.sql. */
+  | "training";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
