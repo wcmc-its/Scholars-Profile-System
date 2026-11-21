@@ -26,7 +26,7 @@ const SKIP_DIRS = new Set(["generated", "node_modules", "__tests__"]);
 const SOURCE_EXT = /\.(ts|tsx)$/;
 
 const ALLOWLIST: Record<string, string> = {
-  "app/api/health/route.ts": "ALB target-group health check; 503 keeps a cold task out of rotation",
+  "app/api/health/route.ts": "ALB health check; 503 keeps a cold or near-OOM task out of rotation",
   "app/readiness/route.ts": "deep readiness probe; status-only machine consumer",
 };
 

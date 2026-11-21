@@ -3984,8 +3984,10 @@ export class AppStack extends Stack {
       // latch; self-bounded by WARMUP_BUDGET_MS ~15s). Give ECS a grace window
       // comfortably larger than that budget + the 2x30s ALB healthy threshold
       // so it never treats a still-warming task as failed and trips the circuit
-      // breaker above into a deploy rollback. Steady-state liveness is
-      // unaffected: the latch is one-way, so once warm the check stays 200.
+      // breaker above into a deploy rollback. The latch is one-way, so once
+      // warm the check stays 200 unless the task's own V8 heap passes
+      // HEAP_UNHEALTHY_RATIO (lib/heap-health.ts): then it 503s so the ALB
+      // drains it and ECS replaces it before it OOMs.
       healthCheckGracePeriod: Duration.seconds(120),
       enableExecuteCommand: false,
     });

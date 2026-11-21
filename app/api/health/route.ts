@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { HEAP_UNHEALTHY_RATIO, heapUsedRatio } from "@/lib/heap-health";
 import { isWarmed } from "@/lib/warmup-state";
 
 export const dynamic = "force-dynamic";
+// The heap check reads node:v8, a Node API.
+export const runtime = "nodejs";
 
 /**
  * ALB target-group health check. Shallow by design — it reads ONE in-memory
@@ -18,6 +21,11 @@ export const dynamic = "force-dynamic";
  * a later DB / OpenSearch blip never flips it back — once warm this stays a
  * cheap, non-flapping liveness signal, exactly like the old shallow check.
  *
+ * The one exception is heap pressure ({@link HEAP_UNHEALTHY_RATIO}): a warm
+ * task whose V8 heap is nearly full is about to crash on its own, so it 503s
+ * to leave the rotation and be replaced instead. That is this task's own
+ * state, read in-process, never a dependency.
+ *
  * The warm-up self-bounds (WARMUP_BUDGET_MS ~15s and always latches), so this
  * can report 503 for at most that window after a task starts — well inside the
  * ECS health-check grace period (cdk/lib/app-stack.ts) and the deployment
@@ -28,5 +36,13 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(): Promise<NextResponse> {
   const warmed = isWarmed();
-  return NextResponse.json({ ok: warmed, warmed }, { status: warmed ? 200 : 503 });
+  if (!warmed) return NextResponse.json({ ok: false, warmed }, { status: 503 });
+  const heap = heapUsedRatio();
+  if (heap > HEAP_UNHEALTHY_RATIO) {
+    return NextResponse.json(
+      { ok: false, warmed, reason: "heap", heapUsedRatio: Number(heap.toFixed(3)) },
+      { status: 503 },
+    );
+  }
+  return NextResponse.json({ ok: true, warmed }, { status: 200 });
 }
