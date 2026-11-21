@@ -89,11 +89,18 @@ describe("bulkEligible: Cornell Ithaca", () => {
     const ith = (c: Parameters<typeof cand>[0] = {}) =>
       summary({
         campus: "ithaca",
-        candidates: [cand({ shared: 0, worksTotal: 12, sources: [], ...c })],
+        candidates: [cand({ shared: 0, worksTotal: 12, sources: ["cornell_affiliation_manager"], ...c })],
       });
     expect(bulkEligible(ith(), r)).toBe(true);
     expect(bulkEligible(ith({ band: "moderate" }), r)).toBe(false);
     expect(bulkEligible(ith({ competitor: true }), r)).toBe(false);
     expect(bulkEligible(ith({ nameAgrees: false }), r)).toBe(false);
+  });
+  it("refuses a Strong web-page inference without an Affiliation Manager source", () => {
+    const r = ORCID_BULK_RULE_DEFAULT;
+    const ith = (sources: OrcidQueueSummary["candidates"][number]["sources"]) =>
+      summary({ campus: "ithaca", candidates: [cand({ shared: 0, worksTotal: 12, sources })] });
+    expect(bulkEligible(ith(["web_page_seed"]), r)).toBe(false);
+    expect(bulkEligible(ith(["web_page_seed", "cornell_affiliation_manager"]), r)).toBe(true);
   });
 });
