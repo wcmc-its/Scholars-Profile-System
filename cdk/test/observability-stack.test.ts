@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { type SpsEnvConfig } from "../lib/config";
 import { AppStack } from "../lib/app-stack";
@@ -146,8 +148,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 23 CloudWatch alarms (13 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 23);
+    it("creates exactly 27 CloudWatch alarms (13 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge + 4 app task crash)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 27);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -155,7 +157,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(23);
+      expect(names).toHaveLength(27);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
@@ -172,6 +174,10 @@ describe("SpsObservabilityStack", () => {
           "sps-alb-5xx-rate-prod",
           "sps-alb-latency-p99-prod",
           "sps-alb-unhealthy-hosts-prod",
+          "sps-app-heap-oom-prod",
+          "sps-app-isr-s3-errors-prod",
+          "sps-app-memory-high-prod",
+          "sps-app-task-crash-prod",
           "sps-aurora-acu-prod",
           "sps-aurora-connections-prod",
           "sps-aurora-cpu-prod",
@@ -377,6 +383,14 @@ describe("SpsObservabilityStack", () => {
         // ADR-017 -- the surge rule firing means visitors are being
         // challenged, not that the site is down: warn tier.
         "sps-search-challenge-surge-prod": warnId,
+        // 2026-11 OOM incident -- a crash fails in-flight requests: page in
+        // prod, once, via the task-crash alarm. The OOM alarm names the cause
+        // of that same crash, so it warns rather than paging a second time.
+        // The S3 error rate and memory pressure come before it: warn.
+        "sps-app-heap-oom-prod": warnId,
+        "sps-app-task-crash-prod": pageId,
+        "sps-app-isr-s3-errors-prod": warnId,
+        "sps-app-memory-high-prod": warnId,
         "sps-alb-5xx-rate-prod": undefined,
         "sps-alb-unhealthy-hosts-prod": undefined,
         "sps-ecs-task-shortfall-prod": undefined,
@@ -403,8 +417,8 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      // 23 in prod; staging is 22 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(23);
+      // 27 in prod; staging is 26 — it gets no ACU alarm (see the note above).
+      expect(seen).toBe(27);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -648,7 +662,7 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("creates the B02 edit_authz_denied metric filter on the app log group", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 7);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 9);
       const filters = template.findResources("AWS::Logs::MetricFilter", {
         Properties: { FilterName: "sps-edit-authz-denied-prod" },
       });
@@ -780,6 +794,159 @@ describe("SpsObservabilityStack", () => {
       expect(props?.Namespace).toBe("SPS/Auth/prod");
       expect(props?.MetricName).toBe("RoleCheckFailed");
       expect(props?.TreatMissingData).toBe("notBreaching");
+    });
+
+    // --------------------------------------------------------------------
+    // 2026-11 OOM incident -- app task crash alarms. ECS replaced each
+    // crashed task before the serving alarms could see it; ALB p99 latency
+    // was the only signal.
+    // --------------------------------------------------------------------
+    const filterOn = (filterName: string): unknown =>
+      Object.values(
+        template.findResources("AWS::Logs::MetricFilter", {
+          Properties: { FilterName: filterName },
+        }),
+      )[0]?.Properties?.LogGroupName;
+
+    it("alarms on the first JavaScript heap OOM in the app log", () => {
+      template.hasResourceProperties("AWS::Logs::MetricFilter", {
+        FilterName: "sps-app-heap-oom-prod",
+        FilterPattern: '"JavaScript heap out of memory"',
+        MetricTransformations: [
+          Match.objectLike({
+            MetricNamespace: "SPS/App/prod",
+            MetricName: "HeapOutOfMemory",
+            MetricValue: "1",
+            DefaultValue: 0,
+          }),
+        ],
+      });
+      // Same (app) log group as the edit_authz_denied filter.
+      expect(filterOn("sps-app-heap-oom-prod")).toEqual(filterOn("sps-edit-authz-denied-prod"));
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-app-heap-oom-prod",
+        Namespace: "SPS/App/prod",
+        MetricName: "HeapOutOfMemory",
+        Statistic: "Sum",
+        Period: 300,
+        Threshold: 1,
+        EvaluationPeriods: 1,
+        DatapointsToAlarm: 1,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+        TreatMissingData: "notBreaching",
+      });
+    });
+
+    it("warns when ISR cache S3 errors reach 150 per 5 minutes for two windows", () => {
+      template.hasResourceProperties("AWS::Logs::MetricFilter", {
+        FilterName: "sps-app-isr-s3-errors-prod",
+        FilterPattern: '{ $.event = "isr_cache_s3_error" }',
+        MetricTransformations: [
+          Match.objectLike({
+            MetricNamespace: "SPS/App/prod",
+            MetricName: "IsrCacheS3Error",
+            MetricValue: "1",
+            DefaultValue: 0,
+          }),
+        ],
+      });
+      expect(filterOn("sps-app-isr-s3-errors-prod")).toEqual(
+        filterOn("sps-edit-authz-denied-prod"),
+      );
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-app-isr-s3-errors-prod",
+        Namespace: "SPS/App/prod",
+        MetricName: "IsrCacheS3Error",
+        Statistic: "Sum",
+        Period: 300,
+        Threshold: 150,
+        EvaluationPeriods: 2,
+        DatapointsToAlarm: 2,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+        TreatMissingData: "notBreaching",
+      });
+      // The filter keys on the event name the cache handler logs; a rename
+      // there would silently stop the metric.
+      const handler = fs.readFileSync(
+        path.resolve(__dirname, "../../lib/cache/s3-cache-handler.js"),
+        "utf8",
+      );
+      expect(handler).toContain('event: "isr_cache_s3_error"');
+    });
+
+    it("counts app task crashes with an EventBridge rule that skips deploys and scale-in", () => {
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-app-task-crash-prod",
+        State: "ENABLED",
+        EventPattern: {
+          source: ["aws.ecs"],
+          "detail-type": ["ECS Task State Change"],
+          detail: {
+            lastStatus: ["STOPPED"],
+            group: ["service:sps-app-prod"],
+            // Deploys and scale-in stop tasks with ServiceSchedulerInitiated.
+            stopCode: ["EssentialContainerExited"],
+          },
+        },
+        Targets: [Match.objectLike({ Arn: Match.anyValue() })],
+      });
+      // The target keeps each stopped-task event for 14 days, after ECS has
+      // forgotten the task.
+      template.hasResourceProperties("AWS::SQS::Queue", {
+        QueueName: "sps-app-task-crashes-prod",
+        MessageRetentionPeriod: 1209600,
+        SqsManagedSseEnabled: true,
+      });
+      // Alarmed on the rule's own metric, by its literal name: the relay
+      // would render a raw event as an ETL Step Functions card.
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-app-task-crash-prod",
+        Namespace: "AWS/Events",
+        MetricName: "MatchedEvents",
+        Dimensions: [{ Name: "RuleName", Value: "sps-app-task-crash-prod" }],
+        Statistic: "Sum",
+        Period: 300,
+        Threshold: 1,
+        EvaluationPeriods: 1,
+        DatapointsToAlarm: 1,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+        TreatMissingData: "notBreaching",
+      });
+    });
+
+    it("warns when the fullest app task stays above 85% memory for 15 minutes", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-app-memory-high-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.Namespace).toBe("AWS/ECS");
+      expect(props?.MetricName).toBe("MemoryUtilization");
+      // Maximum = the single fullest task; Average would dilute it.
+      expect(props?.Statistic).toBe("Maximum");
+      expect(props?.Period).toBe(300);
+      expect(props?.Threshold).toBe(85);
+      expect(props?.EvaluationPeriods).toBe(3);
+      expect(props?.DatapointsToAlarm).toBe(3);
+      expect(props?.ComparisonOperator).toBe("GreaterThanThreshold");
+      expect(props?.TreatMissingData).toBe("notBreaching");
+      const dims = (props?.Dimensions ?? []) as Array<{ Name: string }>;
+      expect(dims.map((d) => d.Name).sort()).toEqual(["ClusterName", "ServiceName"]);
+    });
+
+    it("keeps the task crash alarms out of the app-unavailable composite", () => {
+      // The composite means public serving is down. A crash that ECS replaced
+      // is not that, and a child in ALARM would hold the composite there and
+      // swallow the page for a real outage that starts meanwhile.
+      const composites = template.findResources("AWS::CloudWatch::CompositeAlarm");
+      const rule = JSON.stringify(Object.values(composites)[0]?.Properties?.AlarmRule as unknown);
+      for (const id of [
+        "AppHeapOomAlarm",
+        "AppIsrS3ErrorAlarm",
+        "AppTaskCrashAlarm",
+        "AppMemoryHighAlarm",
+      ]) {
+        expect(rule).not.toContain(id);
+      }
     });
 
     // --------------------------------------------------------------------
@@ -1314,8 +1481,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 22 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 22);
+    it("creates exactly 26 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge + 4 app task crash)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 26);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -1323,7 +1490,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(22);
+      expect(names).toHaveLength(26);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -1420,6 +1587,12 @@ describe("SpsObservabilityStack", () => {
         "sps-edge-probe-stalled-staging": warnId,
         "sps-edge-origin-latency-p99-staging": warnId,
         "sps-search-challenge-surge-staging": warnId,
+        // The two crash alarms follow latency: prod pages, staging warns --
+        // nobody is waiting on a staging response.
+        "sps-app-heap-oom-staging": warnId,
+        "sps-app-task-crash-staging": warnId,
+        "sps-app-isr-s3-errors-staging": warnId,
+        "sps-app-memory-high-staging": warnId,
         "sps-alb-5xx-rate-staging": undefined,
         "sps-alb-unhealthy-hosts-staging": undefined,
         "sps-ecs-task-shortfall-staging": undefined,
@@ -1444,7 +1617,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(22);
+      expect(seen).toBe(26);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
@@ -1531,7 +1704,7 @@ describe("SpsObservabilityStack", () => {
     // log-group-scoped (per-env) rather than account-wide. They must ship in
     // both envs so staging traffic exercises the binding before prod.
     it("creates the B02 edit_authz_denied metric filter in staging (not prod-only)", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 7);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 9);
       template.hasResourceProperties("AWS::Logs::MetricFilter", {
         FilterPattern: '{ $.event = "edit_authz_denied" }',
       });
@@ -1541,6 +1714,20 @@ describe("SpsObservabilityStack", () => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "sps-role-check-failed-staging",
         Namespace: "SPS/Auth/staging",
+      });
+    });
+
+    it("the staging task crash rule matches only the staging app service", () => {
+      // A prod group here would have staging's alarm counting prod crashes.
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-app-task-crash-staging",
+        EventPattern: Match.objectLike({
+          detail: Match.objectLike({ group: ["service:sps-app-staging"] }),
+        }),
+      });
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-app-task-crash-staging",
+        Dimensions: [{ Name: "RuleName", Value: "sps-app-task-crash-staging" }],
       });
     });
 
@@ -1686,8 +1873,8 @@ describe("SpsObservabilityStack", () => {
     it("every MetricFilter namespace carries its env literal", () => {
       const prodNs = namespaces(prod, "AWS::Logs::MetricFilter");
       const stagingNs = namespaces(staging, "AWS::Logs::MetricFilter");
-      expect(prodNs).toHaveLength(7);
-      expect(stagingNs).toHaveLength(7);
+      expect(prodNs).toHaveLength(9);
+      expect(stagingNs).toHaveLength(9);
       for (const n of prodNs) expect(n).toMatch(/\/prod$/);
       for (const n of stagingNs) expect(n).toMatch(/\/staging$/);
     });
@@ -1706,10 +1893,10 @@ describe("SpsObservabilityStack", () => {
       ] as const) {
         const written = new Set(namespaces(t, "AWS::Logs::MetricFilter"));
         const read = namespaces(t, "AWS::CloudWatch::Alarm");
-        // Ten alarms live under SPS/: the log-derived ones (MetricFilter; three
+        // Twelve alarms live under SPS/: the log-derived ones (MetricFilter; three
         // of them the ETL heartbeat warns) plus the #1934 edge alarms. The rest key on AWS/* namespaces and
         // are filtered out above.
-        expect(read).toHaveLength(10);
+        expect(read).toHaveLength(12);
         for (const n of read) {
           // The invariant that matters in BOTH cases: the namespace carries
           // this env's literal, so one env can never read the other's signal.

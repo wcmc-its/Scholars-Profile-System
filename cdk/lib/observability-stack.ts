@@ -498,6 +498,168 @@ export class SpsObservabilityStack extends Stack {
     // No direct action -- folded into the app-unavailable composite below.
 
     // ------------------------------------------------------------------
+    // App task crash alarms (4) -- the 2026-11-20/21 OOM incident
+    // ------------------------------------------------------------------
+    // A scraper botnet drove prod app tasks into repeated heap OOMs (cause
+    // fixed in #3505: ISR S3 calls not aborted on timeout). Prod logged 9 heap
+    // OOMs on 11-12, 3 on 11-17, 3 on 11-18, 19 on 11-19 and 14 on 11-20, yet
+    // from 11-11 to 11-21 the 5xx, unhealthy-hosts and task-shortfall alarms
+    // and the composite below never went to ALARM: the other tasks kept
+    // serving while ECS replaced each crashed one. ALB p99 latency was the
+    // only signal.
+    //
+    // None of these is an app-unavailable composite child. That composite
+    // means "public serving is down", which one replaced task is not, and a
+    // child that is in ALARM holds the composite there, so a real outage that
+    // starts meanwhile would not page.
+    //
+    // Tiering follows the latency alarm: a crash fails every request in flight
+    // on that task, so it pages in prod and warns in staging, where nobody is
+    // waiting on a response. The S3 error rate and memory pressure come before
+    // a crash: warn in both envs. A heap OOM fires both the OOM and the crash
+    // alarm on purpose: the first names the cause, the second also catches
+    // crashes that log nothing (a container memory-limit kill, exit 137).
+    const crashAction = env === "prod" ? snsAction : warnAction;
+
+    // (4a) Node heap OOM. V8 prints "FATAL ERROR: ... JavaScript heap out of
+    // memory" as the process dies; the quoted phrase is an exact substring
+    // match. Zero on a healthy day, so alarm on the first.
+    new logs.MetricFilter(this, "AppHeapOomMetricFilter", {
+      logGroup: appStack.appLogGroup,
+      filterName: `sps-app-heap-oom-${env}`,
+      filterPattern: logs.FilterPattern.literal('"JavaScript heap out of memory"'),
+      metricNamespace: `SPS/App/${env}`, // env-scoped -- see (6b)
+      metricName: "HeapOutOfMemory",
+      metricValue: "1",
+      defaultValue: 0,
+    });
+    new cloudwatch.Alarm(this, "AppHeapOomAlarm", {
+      alarmName: `sps-app-heap-oom-${env}`,
+      alarmDescription: `An app task ran out of JavaScript heap and crashed (${env}); every request in flight on it failed. ECS replaces the task, so the serving alarms stay OK. Next: check sps-app-isr-s3-errors-${env} and sps-app-memory-high-${env} (the 2026-11 OOMs were ISR S3 calls piling up under a scraper crawl, #3505), then the ALB request count and the edge WAF logs for a crawl.`,
+      metric: new cloudwatch.Metric({
+        namespace: `SPS/App/${env}`,
+        metricName: "HeapOutOfMemory",
+        statistic: "Sum",
+        period: Duration.minutes(5),
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(warnAction); // P2 -- the same crash already pages via (4c)
+
+    // (4b) ISR cache S3 errors running hot -- the lead-up to (4a). The handler
+    // logs one JSON line per failed or timed-out S3 op (lib/cache/
+    // s3-cache-handler.js, structured for this filter). Prod, Logs Insights,
+    // 11-09 to 11-21: healthy days log 6-465 a day and at most 37 in any 5
+    // minutes; crash days peak at 591-2455 in 5 minutes. 150 in each of two
+    // consecutive 5-minute windows sits 4x over the healthy worst, and replayed
+    // against that history it fires on all six crash days and no other day.
+    new logs.MetricFilter(this, "AppIsrS3ErrorMetricFilter", {
+      logGroup: appStack.appLogGroup,
+      filterName: `sps-app-isr-s3-errors-${env}`,
+      filterPattern: logs.FilterPattern.stringValue("$.event", "=", "isr_cache_s3_error"),
+      metricNamespace: `SPS/App/${env}`, // env-scoped -- see (6b)
+      metricName: "IsrCacheS3Error",
+      metricValue: "1",
+      defaultValue: 0,
+    });
+    new cloudwatch.Alarm(this, "AppIsrS3ErrorAlarm", {
+      alarmName: `sps-app-isr-s3-errors-${env}`,
+      alarmDescription: `The ISR page cache is failing S3 calls at >= 150 per 5 minutes for 10 minutes (${env}); a healthy day logs at most a few dozen per 5 minutes. Pages still render (the cache falls open), but this is how the 2026-11 heap OOMs started. Next: in /aws/ecs/sps-app-${env}, filter { $.event = "isr_cache_s3_error" } and group by op + error; s3-timeout under heavy traffic means a crawl is outrunning the cache, so check the ALB request count and the edge WAF logs.`,
+      metric: new cloudwatch.Metric({
+        namespace: `SPS/App/${env}`,
+        metricName: "IsrCacheS3Error",
+        statistic: "Sum",
+        period: Duration.minutes(5),
+      }),
+      threshold: 150,
+      evaluationPeriods: 2,
+      datapointsToAlarm: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(warnAction); // P2 -- pages still render
+
+    // (4c) Any app task crash, whatever the cause. An essential container
+    // exiting on its own stops the task with stopCode EssentialContainerExited;
+    // deploys and scale-in stop tasks with ServiceSchedulerInitiated, so they
+    // do not match.
+    //
+    // Alarmed through the rule's MatchedEvents metric rather than by sending
+    // the event to the alarm topic: the relay renders any non-alarm payload
+    // as an ETL Step Functions card ("SPS ETL step ... failed", Step Functions
+    // link), so a direct event would need a new formatter, and it would post
+    // one card per crash where an alarm posts one per 5-minute window.
+    //
+    // The SQS target is there for two reasons. AWS documents the rule metrics
+    // but not whether a rule with no target emits them, and an alarm on a
+    // metric that never arrives is silent. It also keeps the evidence: ECS
+    // forgets a stopped task about an hour later, while the queue holds each
+    // event (stop reason, container exit codes) for 14 days. A CloudWatch Logs
+    // target would be easier to read but needs a custom-resource Lambda and an
+    // account-wide log resource policy.
+    const appTaskCrashRuleName = `sps-app-task-crash-${env}`;
+    const appTaskCrashQueue = new sqs.Queue(this, "AppTaskCrashQueue", {
+      queueName: `sps-app-task-crashes-${env}`,
+      retentionPeriod: Duration.days(14),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+    });
+    new events.Rule(this, "AppTaskCrashRule", {
+      ruleName: appTaskCrashRuleName,
+      description: `SPS ${env}: an sps-app-${env} task stopped because an essential container exited (crash or OOM kill), not a deploy or scale-in.`,
+      eventPattern: {
+        source: ["aws.ecs"],
+        detailType: ["ECS Task State Change"],
+        detail: {
+          lastStatus: ["STOPPED"],
+          group: [`service:sps-app-${env}`],
+          stopCode: ["EssentialContainerExited"],
+        },
+      },
+      targets: [new eventsTargets.SqsQueue(appTaskCrashQueue)],
+    });
+    new cloudwatch.Alarm(this, "AppTaskCrashAlarm", {
+      alarmName: `sps-app-task-crash-${env}`,
+      alarmDescription: `An sps-app-${env} task crashed: an essential container exited on its own (${env}). Every request in flight on it failed; ECS replaces the task, so the serving alarms stay OK. Next: read the stopped-task events in the SQS queue sps-app-task-crashes-${env} (kept 14 days; stoppedReason and containers[].exitCode/reason). "OutOfMemoryError: Container killed due to memory usage" or exit 137 is the task memory limit; exit 134 with sps-app-heap-oom-${env} also firing is a JavaScript heap OOM.`,
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/Events",
+        metricName: "MatchedEvents",
+        dimensionsMap: { RuleName: appTaskCrashRuleName },
+        statistic: "Sum",
+        period: Duration.minutes(5),
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(crashAction);
+
+    // (4d) Task memory high. Maximum, not Average: on a service metric,
+    // Maximum is the single fullest task, and one task climbing is what comes
+    // before a crash. Prod daily peaks (5-minute Maximum): 16-64% from 11-06
+    // to 11-16, then 91.8-93.1% every day from 11-17 to 11-21. 3 of 3 windows
+    // over 85% would first have fired on 11-19, and 5 times through 11-21.
+    // Staging never passed 45% in the same two weeks.
+    // NODE_OPTIONS caps the heap at 75% of task memory (app-stack.ts), so
+    // sustained use above 85% means the heap is at or near its cap.
+    new cloudwatch.Alarm(this, "AppMemoryHighAlarm", {
+      alarmName: `sps-app-memory-high-${env}`,
+      alarmDescription: `An sps-app-${env} task has used > 85% of its memory for 15 minutes (${env}). The Node heap is capped at 75% of task memory, so this task is close to a heap OOM. Next: check sps-app-isr-s3-errors-${env} and the ALB request count for a crawl; if one task stays high on normal traffic, look for a leak since the last deploy.`,
+      metric: appStack.ecsService.metricMemoryUtilization({
+        statistic: "Maximum",
+        period: Duration.minutes(5),
+      }),
+      threshold: 85,
+      evaluationPeriods: 3,
+      datapointsToAlarm: 3,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    }).addAlarmAction(warnAction); // P2 -- leading indicator
+
+    // ------------------------------------------------------------------
     // Edge origin-leg probe (#1934) -- the detector for the failure the
     // 2026-07-25 NetScaler cutover made single-point.
     // ------------------------------------------------------------------
