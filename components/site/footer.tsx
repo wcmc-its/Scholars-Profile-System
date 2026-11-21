@@ -9,6 +9,7 @@ export function SiteFooter() {
         <div className="flex items-center gap-4">
           <Link
             href="/about"
+            prefetch={false} // on every public page; see SiteHeader
             className="text-white hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           >
             Help &amp; support

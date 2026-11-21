@@ -50,6 +50,7 @@ export function MobileNav() {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false} // site chrome never prefetches; see SiteHeader
               onClick={() => setOpen(false)}
               aria-current={pathname === item.href ? "page" : undefined}
               className="border-border border-b py-3 text-[15px] font-medium no-underline last:border-b-0 aria-[current=page]:text-[#7d1c1c]"
