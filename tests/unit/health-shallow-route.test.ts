@@ -68,7 +68,12 @@ describe("GET /api/health (ALB readiness latch)", () => {
 
   it("treats the threshold itself as healthy and recovers when the heap drops", async () => {
     markWarmed();
-    setHeapRatio(HEAP_UNHEALTHY_RATIO);
+    // Exactly at the threshold: 85/100 is the same double as 0.85, so this
+    // fails if the comparison ever becomes >= (a rounded LIMIT * ratio lands
+    // just under 0.85 and could not tell the two apart).
+    heapStats.heap_size_limit = 100;
+    heapStats.used_heap_size = 100 * HEAP_UNHEALTHY_RATIO;
+    expect(heapStats.used_heap_size / heapStats.heap_size_limit).toBe(HEAP_UNHEALTHY_RATIO);
     expect((await GET()).status).toBe(200);
     setHeapRatio(0.86);
     expect((await GET()).status).toBe(503);
