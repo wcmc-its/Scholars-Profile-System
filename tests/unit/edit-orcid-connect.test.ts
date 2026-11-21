@@ -20,7 +20,13 @@ const {
   mockTxAuthFindUnique,
   mockTxExecuteRaw,
   mockReflectOverviewEdit,
+  mockPartnerNetid,
+  mockIthacaScholar,
+  mockAssertOrcidFree,
 } = vi.hoisted(() => ({
+  mockPartnerNetid: vi.fn(),
+  mockIthacaScholar: vi.fn(),
+  mockAssertOrcidFree: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockImpersonationActive: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -44,7 +50,16 @@ vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
   impersonationActive: mockImpersonationActive,
 }));
+vi.mock("@/lib/auth/partner-login", () => ({
+  PARTNER_HOME: "/edit/cornell",
+  ithacaScholar: mockIthacaScholar,
+}));
+vi.mock("@/lib/edit/orcid-queue.server", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/edit/orcid-queue.server")>()),
+  assertOrcidFree: mockAssertOrcidFree,
+}));
 vi.mock("@/lib/auth/session-server", () => ({
+  getPartnerNetid: mockPartnerNetid,
   getSession: vi.fn(async () => {
     const s = await mockGetEditSession();
     return s ? { cwid: s.cwid, iat: 0, exp: 0, impersonating: { targetCwid: "other9" } } : null;
@@ -123,6 +138,8 @@ beforeEach(() => {
   mockTxCandidateFindMany.mockResolvedValue([{ orcid: OLD_ID }]);
   mockTxExecuteRaw.mockResolvedValue(1);
   mockTxAuthFindUnique.mockResolvedValue(null);
+  mockPartnerNetid.mockResolvedValue(null);
+  mockAssertOrcidFree.mockResolvedValue(undefined);
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => tokenOk()),
@@ -305,5 +322,59 @@ describe("revokeStoredTokens", () => {
     ).resolves.toBeUndefined();
     expect(f).toHaveBeenCalledTimes(1);
     expect(console.warn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Cornell Ithaca partner session (ITHACA_LOGIN)", () => {
+  beforeEach(() => {
+    mockPartnerNetid.mockResolvedValue("zq99");
+    mockIthacaScholar.mockResolvedValue({ cwid: "zq99", slug: "ithaca-zq99" });
+    mockGetEditSession.mockResolvedValue(null); // every WCM reader sees a partner as signed out
+  });
+
+  it("connect: redirects to ORCID for a NetID with an Ithaca row", async () => {
+    const res = await CONNECT();
+    expect(res.status).toBe(302);
+    expect(mockIthacaScholar).toHaveBeenCalledWith("zq99");
+  });
+
+  it("connect: 403 without an Ithaca row", async () => {
+    mockIthacaScholar.mockResolvedValue(null);
+    expect((await CONNECT()).status).toBe(403);
+  });
+
+  it("callback: writes the Ithaca row as the NetID, checks the iD is free, returns to /edit/cornell", async () => {
+    const res = await CALLBACK(callback("code=c&state=s1"));
+    expect(res.headers.get("location")).toBe(
+      "https://scholars.example.edu/edit/cornell?orcid=connected",
+    );
+    expect(mockAssertOrcidFree).toHaveBeenCalledWith(fakeTx, "zq99", ID);
+    expect(mockTxScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "zq99" },
+      data: expect.objectContaining({ orcid: ID, orcidConfirmedBy: "zq99" }),
+    });
+    expect(mockTxExecuteRaw).toHaveBeenCalled(); // audit row
+  });
+
+  it("callback: an iD another row holds is refused as held, and nothing is written", async () => {
+    const { OrcidQueueRefused } = await import("@/lib/edit/orcid-queue.server");
+    mockAssertOrcidFree.mockRejectedValue(new OrcidQueueRefused(409, "on_linked_record"));
+    const res = await CALLBACK(callback("code=c&state=s1"));
+    expect(res.headers.get("location")).toBe("https://scholars.example.edu/edit/cornell?orcid=held");
+    expect(mockTxScholarUpdate).not.toHaveBeenCalled();
+  });
+
+  it("callback: a denied grant returns to /edit/cornell", async () => {
+    const res = await CALLBACK(callback("error=access_denied&state=s1"));
+    expect(res.headers.get("location")).toBe(
+      "https://scholars.example.edu/edit/cornell?orcid=denied",
+    );
+  });
+
+  it("WCM self-connect never runs the Ithaca iD check", async () => {
+    mockPartnerNetid.mockResolvedValue(null);
+    mockGetEditSession.mockResolvedValue({ cwid: "self01", isSuperuser: false, isCommsSteward: false });
+    await CALLBACK(callback("code=c&state=s1"));
+    expect(mockAssertOrcidFree).not.toHaveBeenCalled();
   });
 });

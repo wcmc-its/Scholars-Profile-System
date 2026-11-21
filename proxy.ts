@@ -101,6 +101,17 @@ function withSecurityHeaders(response: NextResponse): NextResponse {
 }
 
 /**
+ * The exact gated paths a Cornell Ithaca partner session may reach. Each one
+ * reads the session through `getPartnerNetid` (lib/auth/session-server.ts);
+ * every other reader treats a partner as signed out.
+ */
+const PARTNER_PATHS: ReadonlySet<string> = new Set([
+  "/edit/cornell",
+  "/api/edit/orcid/connect",
+  "/api/edit/orcid/callback",
+]);
+
+/**
  * The path prefixes the SSO gate + legacy-redirect logic below acts on — the
  * original `config.matcher` set. The matcher is now broadened to every
  * non-static request so the CSP covers every document, which means this
@@ -296,11 +307,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     // "unauthenticated" so the gate stays closed rather than 500ing the page.
     session = null;
   }
-  // Partner sessions (ITHACA_LOGIN) reach no gated path yet: 403, never the
-  // SSO redirect — the IdP would just re-sign them in and loop. ponytail: no
-  // partner allowlist until a partner surface ships (plan steps 3-5).
+  // Partner sessions (ITHACA_LOGIN) reach only PARTNER_PATHS; anything else
+  // gated is a 403, never the SSO redirect (the IdP would re-sign them in and loop).
   if (session && isPartnerCwid(session.cwid)) {
-    return withSecurityHeaders(new NextResponse(null, { status: 403 }));
+    if (!PARTNER_PATHS.has(request.nextUrl.pathname)) {
+      return withSecurityHeaders(new NextResponse(null, { status: 403 }));
+    }
+    return withSecurityHeaders(await idleRefreshed(request, session));
   }
   if (session) return withSecurityHeaders(await idleRefreshed(request, session));
 

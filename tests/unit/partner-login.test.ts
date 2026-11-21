@@ -98,9 +98,17 @@ describe("proxy", () => {
   }
 
   it("403s a partner session on gated paths, never redirecting to SSO", async () => {
-    for (const path of ["/edit", "/edit/scholar/zq99", "/api/edit/field"]) {
+    for (const path of ["/edit", "/edit/scholar/zq99", "/edit/cornellx", "/api/edit/field", "/api/edit/orcid"]) {
       const res = await proxy(await partnerRequest(path));
       expect(res.status).toBe(403);
+      expect(res.headers.get("location")).toBeNull();
+    }
+  });
+
+  it("lets a partner session reach exactly its allowlisted paths", async () => {
+    for (const path of ["/edit/cornell", "/api/edit/orcid/connect", "/api/edit/orcid/callback"]) {
+      const res = await proxy(await partnerRequest(path));
+      expect(res.status).not.toBe(403);
       expect(res.headers.get("location")).toBeNull();
     }
   });
@@ -127,11 +135,11 @@ describe("SAML callback", () => {
     );
   }
 
-  it("admits a NetID with a live Ithaca roster row and lands on /", async () => {
+  it("admits a NetID with a live Ithaca roster row and lands on /edit/cornell", async () => {
     vi.mocked(db.read.scholar.count).mockResolvedValue(1);
     const res = await callback();
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("location")).toBe("/edit/cornell");
     expect(await sessionCwidOf(res)).toBe("zq99@cornell.edu");
     expect(db.read.scholar.count).toHaveBeenCalledWith({
       where: { cwid: "zq99", campus: "ithaca", deletedAt: null },
@@ -166,7 +174,7 @@ describe("SAML callback", () => {
     ] as never);
     vi.mocked(db.read.scholar.count).mockResolvedValue(1);
     const res = await callback();
-    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("location")).toBe("/edit/cornell");
     expect(await sessionCwidOf(res)).toBe("zq99@cornell.edu");
   });
 

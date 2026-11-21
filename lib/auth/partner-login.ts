@@ -15,6 +15,17 @@
  */
 import { db } from "@/lib/db";
 
+/** Where a partner session lands after sign-in (on the proxy's PARTNER_PATHS). */
+export const PARTNER_HOME = "/edit/cornell";
+
+/** The live Ithaca roster row a partner NetID signs in to, or null. */
+export async function ithacaScholar(netid: string) {
+  return db.read.scholar.findFirst({
+    where: { cwid: netid, campus: "ithaca", deletedAt: null },
+    select: { cwid: true, slug: true, preferredName: true, orcid: true, orcidConfirmMethod: true },
+  });
+}
+
 export async function resolvePartnerLogin(eppn: string): Promise<string | null> {
   const netid = eppn.slice(0, eppn.indexOf("@"));
 

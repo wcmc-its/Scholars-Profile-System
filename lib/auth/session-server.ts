@@ -12,7 +12,7 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { getSessionConfig } from "@/lib/auth/config";
-import { readSessionValue, type SessionData } from "@/lib/auth/session";
+import { isPartnerCwid, readSessionValue, type SessionData } from "@/lib/auth/session";
 
 /**
  * The current session, or `null` when unauthenticated. Safe to call from any
@@ -31,3 +31,17 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
 });
 
 export type { SessionData };
+
+/**
+ * The NetID of a Cornell Ithaca partner session (`netid@cornell.edu`), or null
+ * for no session, a WCM session, or `ITHACA_LOGIN` off. The ONLY server reader
+ * that sees partner sessions: call it only from a surface on the proxy's partner
+ * allowlist (`PARTNER_PATHS`, proxy.ts).
+ */
+export const getPartnerNetid = cache(async (): Promise<string | null> => {
+  if (process.env.ITHACA_LOGIN !== "on") return null;
+  const cfg = getSessionConfig();
+  const store = await cookies();
+  const s = await readSessionValue(store.get(cfg.cookieName)?.value, { allowPartner: true });
+  return s && isPartnerCwid(s.cwid) ? s.cwid.slice(0, s.cwid.indexOf("@")) : null;
+});

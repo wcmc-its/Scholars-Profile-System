@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getDefaultReturnPath } from "@/lib/auth/config";
 import { safeReturnPath } from "@/lib/auth/return-path";
 import { createSessionCookie, isPartnerCwid } from "@/lib/auth/session";
-import { resolvePartnerLogin } from "@/lib/auth/partner-login";
+import { PARTNER_HOME, resolvePartnerLogin } from "@/lib/auth/partner-login";
 import { validateSamlResponse, type SamlValidationResult } from "@/lib/auth/saml";
 import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
 
@@ -149,9 +149,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // Partner login (ITHACA_LOGIN): a joint-appointment NetID becomes its WCM
   // CWID; otherwise only NetIDs with a live Ithaca roster row are admitted
-  // (lib/auth/partner-login.ts). A partner session lands on the home page — no
-  // gated path takes one yet, so a RelayState of /edit would 403. Fail closed
-  // on a DB error.
+  // (lib/auth/partner-login.ts). A partner session lands on its home,
+  // /edit/cornell, whatever the RelayState. Fail closed on a DB error.
   let sessionCwid = result.cwid;
   if (isPartnerCwid(result.cwid)) {
     let resolved: string | null;
@@ -170,7 +169,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const dest = isPartnerCwid(sessionCwid)
-    ? "/"
+    ? PARTNER_HOME
     : safeReturnPath(form.get("RelayState"), getDefaultReturnPath());
   // Relative Location, NOT new URL(dest, request.url): behind CloudFront -> ALB
   // -> Fargate, request.url is the container's internal address
