@@ -12,7 +12,12 @@ vi.mock("@/lib/auth/saml-assertion-store", () => ({
   markAssertionConsumed: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
-  db: { read: { scholar: { count: vi.fn() } } },
+  db: {
+    read: {
+      scholar: { count: vi.fn() },
+      scholarIdentityLink: { findMany: vi.fn() },
+    },
+  },
 }));
 
 import type { Profile } from "@node-saml/node-saml";
@@ -21,6 +26,7 @@ import { extractPartnerEppn, validateSamlResponse } from "@/lib/auth/saml";
 import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
 import { createSessionCookie, readSessionValue } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { readSessionValue as readAny } from "@/lib/auth/session";
 import { proxy } from "@/proxy";
 import { POST as callbackPOST } from "@/app/api/auth/saml/callback/route";
 
@@ -36,6 +42,7 @@ beforeEach(() => {
   vi.stubEnv("ITHACA_LOGIN", "on");
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.mocked(markAssertionConsumed).mockResolvedValue({ duplicate: false });
+  vi.mocked(db.read.scholarIdentityLink.findMany).mockResolvedValue([]);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -125,9 +132,51 @@ describe("SAML callback", () => {
     const res = await callback();
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
+    expect(await sessionCwidOf(res)).toBe("zq99@cornell.edu");
     expect(db.read.scholar.count).toHaveBeenCalledWith({
       where: { cwid: "zq99", campus: "ithaca", deletedAt: null },
     });
+  });
+
+  async function sessionCwidOf(res: Response): Promise<string | undefined> {
+    const raw = res.headers.get("set-cookie")!.split(";")[0];
+    const value = raw.slice(raw.indexOf("=") + 1);
+    return (await readAny(value, { allowPartner: true }))?.cwid;
+  }
+
+  it("signs a joint-appointment NetID in as its known WCM CWID, honoring RelayState", async () => {
+    vi.mocked(db.read.scholarIdentityLink.findMany).mockResolvedValue([
+      { cwid: "abc1234" },
+    ] as never);
+    const res = await callback();
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/edit");
+    expect(await sessionCwidOf(res)).toBe("abc1234");
+    expect(db.read.scholarIdentityLink.findMany).toHaveBeenCalledWith({
+      where: { netid: "zq99", band: "known" },
+      select: { cwid: true },
+    });
+    expect(db.read.scholar.count).not.toHaveBeenCalled();
+  });
+
+  it("never guesses between two known CWIDs: falls back to the Ithaca session", async () => {
+    vi.mocked(db.read.scholarIdentityLink.findMany).mockResolvedValue([
+      { cwid: "abc1234" },
+      { cwid: "def5678" },
+    ] as never);
+    vi.mocked(db.read.scholar.count).mockResolvedValue(1);
+    const res = await callback();
+    expect(res.headers.get("location")).toBe("/");
+    expect(await sessionCwidOf(res)).toBe("zq99@cornell.edu");
+  });
+
+  it("refuses ambiguity with no Ithaca row", async () => {
+    vi.mocked(db.read.scholarIdentityLink.findMany).mockResolvedValue([
+      { cwid: "abc1234" },
+      { cwid: "def5678" },
+    ] as never);
+    vi.mocked(db.read.scholar.count).mockResolvedValue(0);
+    expect((await callback()).status).toBe(403);
   });
 
   it("refuses a NetID without one, and mints no cookie", async () => {
