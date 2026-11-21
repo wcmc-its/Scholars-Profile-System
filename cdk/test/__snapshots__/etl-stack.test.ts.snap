@@ -2262,6 +2262,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "off",
+              },
+              {
                 "Name": "RESEARCH_SECURITY_ETL",
                 "Value": "off",
               },
@@ -3017,6 +3021,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "off",
+              },
+              {
                 "Name": "RESEARCH_SECURITY_ETL",
                 "Value": "off",
               },
@@ -3709,6 +3717,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "off",
+              },
+              {
                 "Name": "RESEARCH_SECURITY_ETL",
                 "Value": "off",
               },
@@ -4330,6 +4342,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ITHACA_ORCID_CURATION",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "off",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -5392,6 +5408,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ITHACA_ORCID_CURATION",
                 "Value": "on",
+              },
+              {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "off",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -14998,6 +15018,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "on",
+              },
+              {
                 "Name": "RESEARCH_SECURITY_ETL",
                 "Value": "on",
               },
@@ -15753,6 +15777,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "on",
+              },
+              {
                 "Name": "RESEARCH_SECURITY_ETL",
                 "Value": "on",
               },
@@ -16445,6 +16473,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ITHACA_WEB_SEED_ORCID",
+                "Value": "on",
+              },
+              {
                 "Name": "RESEARCH_SECURITY_ETL",
                 "Value": "on",
               },
@@ -17065,6 +17097,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_WEB_SEED_ORCID",
                 "Value": "on",
               },
               {
@@ -18127,6 +18163,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_ORCID_CURATION",
+                "Value": "on",
+              },
+              {
+                "Name": "ITHACA_WEB_SEED_ORCID",
                 "Value": "on",
               },
               {

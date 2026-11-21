@@ -11,6 +11,10 @@
  *     map) → `source = 'cornell_affiliation_manager'` on Cornell Ithaca rows only,
  *     when ITHACA_ORCID_CURATION is "on" (Ithaca ORCID plan, step 2). Off, the
  *     source reads empty and the delete pass removes its rows.
+ *   - `pubsource_web_orcid_inference` live rows (Cornell web-page inferences, ReCiterDB
+ *     webPageOrcid.py) → `source = 'web_page_seed'` on Cornell Ithaca rows only, with
+ *     `articles_accepted` = the inference's votes, when ITHACA_WEB_SEED_ORCID is also "on"
+ *     (Ithaca ORCID plan, step 5).
  *   - `admin_orcid` → `source = 'rpm_admin'` (hand-entered by an RPM admin;
  *     frozen since RPM stopped writing it 2026-04-05, and SPS never writes it).
  *     A row SPS's Remove deleted comes back here every morning; readers drop
@@ -44,14 +48,18 @@ import { assertSourceVolume } from "@/lib/etl-guard";
 const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 const BATCH = 500;
 /** The source values this mirror owns; the delete pass never touches any other. */
-const RPM_SOURCES = ["rpm_inferred", "rpm_admin", "cornell_affiliation_manager"];
+const RPM_SOURCES = ["rpm_inferred", "rpm_admin", "cornell_affiliation_manager", "web_page_seed"];
+/** Ithaca sources: matched to `campus = 'ithaca'` rows only. */
+const ITHACA_SOURCES = new Set<string>(["cornell_affiliation_manager", "web_page_seed"]);
+/** 370 live inferences on the 2026-11-21 dry run; a short read would silently drop them. */
+const WEB_SEED_FLOOR = 200;
 /** 6,620 NetID rows on 2026-11-16; a short read would silently drop Ithaca seeds. */
 const AFFILIATION_MANAGER_FLOOR = 5_000;
 
 export type SourceRow = {
   cwid: string;
   orcid: string;
-  source: "rpm_inferred" | "rpm_admin" | "cornell_affiliation_manager";
+  source: "rpm_inferred" | "rpm_admin" | "cornell_affiliation_manager" | "web_page_seed";
   articlesAccepted: number;
   articlesRejected: number;
   sourceUpdatedAt: Date | null;
@@ -66,12 +74,15 @@ export type InferredRow = {
 };
 export type AdminRow = { personIdentifier: string; orcid: string | null };
 export type NetidRow = { personIdentifier: string; orcid: string | null; updated_at: Date | string | null };
+/** A live `pubsource_web_orcid_inference` row (ReCiterDB webPageOrcid.py). */
+export type WebSeedRow = { netid: string; orcid: string | null; votes: number; inferred_at: Date | string | null };
 
 /** Source rows → candidate rows: trims, lowercases the cwid, drops malformed ORCIDs. Pure. */
 export function toCandidates(
   inferred: InferredRow[],
   admin: AdminRow[],
   affiliationManager: NetidRow[] = [],
+  webSeed: WebSeedRow[] = [],
 ): { rows: SourceRow[]; invalid: number } {
   const rows: SourceRow[] = [];
   let invalid = 0;
@@ -120,6 +131,22 @@ export function toCandidates(
       sourceUpdatedAt: r.updated_at ? new Date(r.updated_at) : null,
     });
   }
+  for (const r of webSeed) {
+    const orcid = String(r.orcid ?? "").trim();
+    if (!ORCID_PATTERN.test(orcid)) {
+      invalid++;
+      continue;
+    }
+    rows.push({
+      cwid: String(r.netid).trim().toLowerCase(),
+      orcid,
+      source: "web_page_seed",
+      // The papers on the person's Cornell page that carry the iD (the inference's votes).
+      articlesAccepted: Number(r.votes ?? 0),
+      articlesRejected: 0,
+      sourceUpdatedAt: r.inferred_at ? new Date(r.inferred_at) : null,
+    });
+  }
   return { rows, invalid };
 }
 
@@ -135,7 +162,7 @@ export function mergeForScholars(
   for (const r of rows) {
     // Each source matches its own campus: a NetID that equals some WCM CWID must
     // never land on the WCM row.
-    if (!(r.source === "cornell_affiliation_manager" ? ithaca : scholars).has(r.cwid)) {
+    if (!(ITHACA_SOURCES.has(r.source) ? ithaca : scholars).has(r.cwid)) {
       noScholar++;
       continue;
     }
@@ -169,7 +196,23 @@ async function main(): Promise<number> {
         floor: AFFILIATION_MANAGER_FLOOR,
       });
     }
-    read = toCandidates(inferred, admin, netid);
+    // Ithaca ORCID plan, step 5: web-page inferences, a separate switch so they can
+    // stay off in prod until the hand-check (plan M3). Off, the source reads empty
+    // and the delete pass removes its rows.
+    const webSeedOn = ithacaOn && process.env.ITHACA_WEB_SEED_ORCID === "on";
+    const webSeed = webSeedOn
+      ? ((await conn.query(
+          `SELECT netid, orcid, votes, inferred_at FROM pubsource_web_orcid_inference
+           WHERE superseded_at IS NULL`,
+        )) as WebSeedRow[])
+      : [];
+    if (webSeedOn) {
+      assertSourceVolume("orcid-candidates-web-page-seed", {
+        incoming: webSeed.length,
+        floor: WEB_SEED_FLOOR,
+      });
+    }
+    read = toCandidates(inferred, admin, netid, webSeed);
   });
   console.log(
     `ReciterDB: ${read.rows.length} candidate rows (${read.invalid} skipped: malformed ORCID).`,

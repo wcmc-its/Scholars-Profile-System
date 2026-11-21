@@ -985,10 +985,15 @@ export function substituteDeprecated(
 const isAffiliationManagerPair = (sources: readonly string[] | undefined) =>
   !!sources?.includes("cornell_affiliation_manager");
 
+/** Ithaca sources that make a pair a strong suggestion: the Affiliation Manager map,
+ *  and a web-page inference (papers on the person's own Cornell page). Only the
+ *  first also keeps a name-mismatched pair and qualifies for bulk confirm. */
+const ITHACA_STRONG_SOURCES = ["cornell_affiliation_manager", "web_page_seed"];
+
 /**
  * Ithaca ORCID plan, step 2: a Cornell Affiliation Manager pair (the library's
- * NetID→ORCID map) is a strong suggestion when no other scholar claims the iD and
- * the record's name agrees. Ithaca rows have no SPS publications, so the shared-paper
+ * NetID→ORCID map), or a web-page inference (step 5), is a strong suggestion when
+ * no other scholar claims the iD and the record's name agrees. Ithaca rows have no SPS publications, so the shared-paper
  * rule could never get them there. Never above `email_verified`. Pure.
  */
 export function affiliationManagerBand(
@@ -996,7 +1001,8 @@ export function affiliationManagerBand(
   e: { competitor: boolean; nameAgrees: boolean },
   sources: readonly string[] | undefined,
 ): Band {
-  if (!isAffiliationManagerPair(sources) || e.competitor || !e.nameAgrees) return band;
+  if (!ITHACA_STRONG_SOURCES.some((x) => sources?.includes(x)) || e.competitor || !e.nameAgrees)
+    return band;
   return band === "email_verified" || band === "strong" ? band : "strong";
 }
 

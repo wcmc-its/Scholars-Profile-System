@@ -1635,7 +1635,7 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     const cards = Array.from({ length: 102 }, (_, i) => {
       const cwid = `ith${String(i).padStart(4, "0")}`;
       return CARD({ cwid, name: `Scholar ${cwid}` }, [
-        { ...ROW, cwid, orcid: ORCID, shared: 0, worksTotal: 9, newWorks: 9, sources: [] },
+        { ...ROW, cwid, orcid: ORCID, shared: 0, worksTotal: 9, newWorks: 9, sources: ["cornell_affiliation_manager"] },
       ]);
     });
     const { posts } = mountWith(

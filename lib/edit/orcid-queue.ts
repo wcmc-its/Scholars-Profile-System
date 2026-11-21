@@ -143,6 +143,7 @@ export const ORCID_CANDIDATE_SOURCES = [
   "infoed_biosketch",
   "infoed_biosketch_name",
   "cornell_affiliation_manager",
+  "web_page_seed",
 ] as const;
 export type OrcidCandidateSource = (typeof ORCID_CANDIDATE_SOURCES)[number];
 
@@ -157,6 +158,7 @@ export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
   infoed_biosketch: "NIH biosketch",
   infoed_biosketch_name: "NIH biosketch (name match)",
   cornell_affiliation_manager: "Cornell Affiliation Manager",
+  web_page_seed: "Cornell web page publications",
 };
 
 /** `scholar.campus`: WCM, or Cornell Ithaca (Ithaca ORCID plan). */
@@ -685,9 +687,10 @@ export function bulkEligible(s: OrcidQueueSummary, rule: OrcidBulkRule): boolean
   const c = s.candidates[0]!;
   if (c.band !== "strong" || c.competitor || !c.nameAgrees) return false;
   // Cornell Ithaca: no SPS publications, so the work/source thresholds can't
-  // apply; Strong there means an Affiliation Manager pair (`affiliationManagerBand`).
-  // The server floor does the rest; at most ORCID_BULK_ITHACA_MAX per batch.
-  if (s.campus === "ithaca") return true;
+  // apply; only an Affiliation Manager pair qualifies (a web-page inference is
+  // Strong too but is confirmed one at a time). The server floor does the rest;
+  // at most ORCID_BULK_ITHACA_MAX per batch.
+  if (s.campus === "ithaca") return c.sources.includes("cornell_affiliation_manager");
   return (
     c.shared >= rule.minShared &&
     onlyOnOrcid(c) <= rule.maxOnlyOrcid &&
