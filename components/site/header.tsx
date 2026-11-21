@@ -43,7 +43,12 @@ export function SiteHeader({
       {/* #1902 — tighter gutter and gap below `sm`; every px counts at the 320px
           reflow floor, where the wordmark alone is ~157px. */}
       <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:gap-6 sm:px-6">
-        <Link href="/" className="flex shrink-0 flex-col gap-[4px] no-underline">
+        {/* Site-chrome links (here, the mobile sheet and the footer) never
+            prefetch. They render on every public page, so viewport prefetch
+            fetched the /, /about and /search RSC payloads on every view:
+            ~810k requests/day from one scraper fleet on 2026-11-20. /search is
+            uncached at the edge, so each of those reached the origin. */}
+        <Link href="/" prefetch={false} className="flex shrink-0 flex-col gap-[4px] no-underline">
           {/* #760 — badge shares the wordmark's top row so it centers on the
               "Scholars" cap height via items-center (no magic vertical offset);
               the subtitle drops to the row below. */}
@@ -89,12 +94,14 @@ export function SiteHeader({
         <nav aria-label="Primary" className="ml-auto flex shrink-0 items-center gap-1 sm:gap-6">
           <Link
             href="/search"
+            prefetch={false}
             className="hidden text-sm font-medium text-white/85 transition-colors hover:text-white sm:inline"
           >
             Browse
           </Link>
           <Link
             href="/about"
+            prefetch={false}
             className="hidden text-sm font-medium text-white/85 transition-colors hover:text-white sm:inline"
           >
             About
@@ -102,6 +109,7 @@ export function SiteHeader({
           {showSearch ? (
             <Link
               href="/search"
+              prefetch={false}
               aria-label="Search"
               className="flex h-9 w-9 items-center justify-center rounded-md text-white/85 transition-colors hover:text-white sm:hidden"
             >
