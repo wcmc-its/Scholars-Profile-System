@@ -76,6 +76,254 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CE::AnomalySubscription",
     },
+    "AppHeapOomAlarmCBC076B8": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "An app task ran out of JavaScript heap and crashed (prod); every request in flight on it failed. ECS replaces the task, so the serving alarms stay OK. Next: check sps-app-isr-s3-errors-prod and sps-app-memory-high-prod (the 2026-11 OOMs were ISR S3 calls piling up under a scraper crawl, #3505), then the ALB request count and the edge WAF logs for a crawl.",
+        "AlarmName": "sps-app-heap-oom-prod",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "HeapOutOfMemory",
+        "Namespace": "SPS/App/prod",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppHeapOomMetricFilterF67FA2B3": {
+      "Properties": {
+        "FilterName": "sps-app-heap-oom-prod",
+        "FilterPattern": ""JavaScript heap out of memory"",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "HeapOutOfMemory",
+            "MetricNamespace": "SPS/App/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "AppIsrS3ErrorAlarm2F2ECF33": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The ISR page cache is failing S3 calls at >= 150 per 5 minutes for 10 minutes (prod); a healthy day logs at most a few dozen per 5 minutes. Pages still render (the cache falls open), but this is how the 2026-11 heap OOMs started. Next: in /aws/ecs/sps-app-prod, filter { $.event = "isr_cache_s3_error" } and group by op + error; s3-timeout under heavy traffic means a crawl is outrunning the cache, so check the ALB request count and the edge WAF logs.",
+        "AlarmName": "sps-app-isr-s3-errors-prod",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 2,
+        "EvaluationPeriods": 2,
+        "MetricName": "IsrCacheS3Error",
+        "Namespace": "SPS/App/prod",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 150,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppIsrS3ErrorMetricFilter35D05FB5": {
+      "Properties": {
+        "FilterName": "sps-app-isr-s3-errors-prod",
+        "FilterPattern": "{ $.event = "isr_cache_s3_error" }",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "IsrCacheS3Error",
+            "MetricNamespace": "SPS/App/prod",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "AppMemoryHighAlarm363BDF1D": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An sps-app-prod task has used > 85% of its memory for 15 minutes (prod). The Node heap is capped at 75% of task memory, so this task is close to a heap OOM. Next: check sps-app-isr-s3-errors-prod and the ALB request count for a crawl; if one task stays high on normal traffic, look for a leak since the last deploy.",
+        "AlarmName": "sps-app-memory-high-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "ClusterName",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
+            },
+          },
+          {
+            "Name": "ServiceName",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "MemoryUtilization",
+        "Namespace": "AWS/ECS",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 85,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppTaskCrashAlarmE826DE80": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "An sps-app-prod task crashed: an essential container exited on its own (prod). Every request in flight on it failed; ECS replaces the task, so the serving alarms stay OK. Next: read the stopped-task events in the SQS queue sps-app-task-crashes-prod (kept 14 days; stoppedReason and containers[].exitCode/reason). "OutOfMemoryError: Container killed due to memory usage" or exit 137 is the task memory limit; exit 134 with sps-app-heap-oom-prod also firing is a JavaScript heap OOM.",
+        "AlarmName": "sps-app-task-crash-prod",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "RuleName",
+            "Value": "sps-app-task-crash-prod",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "MatchedEvents",
+        "Namespace": "AWS/Events",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppTaskCrashQueue98DD4EE9": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "QueueName": "sps-app-task-crashes-prod",
+        "SqsManagedSseEnabled": true,
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AppTaskCrashQueuePolicyF092E2D7": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AppTaskCrashQueue98DD4EE9",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "sqs:SendMessage",
+                "sqs:GetQueueAttributes",
+                "sqs:GetQueueUrl",
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Fn::GetAtt": [
+                      "AppTaskCrashRuleE0CB947F",
+                      "Arn",
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AppTaskCrashQueue98DD4EE9",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Queues": [
+          {
+            "Ref": "AppTaskCrashQueue98DD4EE9",
+          },
+        ],
+      },
+      "Type": "AWS::SQS::QueuePolicy",
+    },
+    "AppTaskCrashRuleE0CB947F": {
+      "Properties": {
+        "Description": "SPS prod: an sps-app-prod task stopped because an essential container exited (crash or OOM kill), not a deploy or scale-in.",
+        "EventPattern": {
+          "detail": {
+            "group": [
+              "service:sps-app-prod",
+            ],
+            "lastStatus": [
+              "STOPPED",
+            ],
+            "stopCode": [
+              "EssentialContainerExited",
+            ],
+          },
+          "detail-type": [
+            "ECS Task State Change",
+          ],
+          "source": [
+            "aws.ecs",
+          ],
+        },
+        "Name": "sps-app-task-crash-prod",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "AppTaskCrashQueue98DD4EE9",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
     "AppUnavailableAlarm128C3206": {
       "Properties": {
         "AlarmActions": [
@@ -1823,6 +2071,254 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "TopicName": "sps-alarms-staging",
       },
       "Type": "AWS::SNS::Topic",
+    },
+    "AppHeapOomAlarmCBC076B8": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An app task ran out of JavaScript heap and crashed (staging); every request in flight on it failed. ECS replaces the task, so the serving alarms stay OK. Next: check sps-app-isr-s3-errors-staging and sps-app-memory-high-staging (the 2026-11 OOMs were ISR S3 calls piling up under a scraper crawl, #3505), then the ALB request count and the edge WAF logs for a crawl.",
+        "AlarmName": "sps-app-heap-oom-staging",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "HeapOutOfMemory",
+        "Namespace": "SPS/App/staging",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppHeapOomMetricFilterF67FA2B3": {
+      "Properties": {
+        "FilterName": "sps-app-heap-oom-staging",
+        "FilterPattern": ""JavaScript heap out of memory"",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "HeapOutOfMemory",
+            "MetricNamespace": "SPS/App/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "AppIsrS3ErrorAlarm2F2ECF33": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The ISR page cache is failing S3 calls at >= 150 per 5 minutes for 10 minutes (staging); a healthy day logs at most a few dozen per 5 minutes. Pages still render (the cache falls open), but this is how the 2026-11 heap OOMs started. Next: in /aws/ecs/sps-app-staging, filter { $.event = "isr_cache_s3_error" } and group by op + error; s3-timeout under heavy traffic means a crawl is outrunning the cache, so check the ALB request count and the edge WAF logs.",
+        "AlarmName": "sps-app-isr-s3-errors-staging",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 2,
+        "EvaluationPeriods": 2,
+        "MetricName": "IsrCacheS3Error",
+        "Namespace": "SPS/App/staging",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 150,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppIsrS3ErrorMetricFilter35D05FB5": {
+      "Properties": {
+        "FilterName": "sps-app-isr-s3-errors-staging",
+        "FilterPattern": "{ $.event = "isr_cache_s3_error" }",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "IsrCacheS3Error",
+            "MetricNamespace": "SPS/App/staging",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "AppMemoryHighAlarm363BDF1D": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An sps-app-staging task has used > 85% of its memory for 15 minutes (staging). The Node heap is capped at 75% of task memory, so this task is close to a heap OOM. Next: check sps-app-isr-s3-errors-staging and the ALB request count for a crawl; if one task stays high on normal traffic, look for a leak since the last deploy.",
+        "AlarmName": "sps-app-memory-high-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "ClusterName",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
+            },
+          },
+          {
+            "Name": "ServiceName",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "MemoryUtilization",
+        "Namespace": "AWS/ECS",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 85,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppTaskCrashAlarmE826DE80": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "An sps-app-staging task crashed: an essential container exited on its own (staging). Every request in flight on it failed; ECS replaces the task, so the serving alarms stay OK. Next: read the stopped-task events in the SQS queue sps-app-task-crashes-staging (kept 14 days; stoppedReason and containers[].exitCode/reason). "OutOfMemoryError: Container killed due to memory usage" or exit 137 is the task memory limit; exit 134 with sps-app-heap-oom-staging also firing is a JavaScript heap OOM.",
+        "AlarmName": "sps-app-task-crash-staging",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "RuleName",
+            "Value": "sps-app-task-crash-staging",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "MatchedEvents",
+        "Namespace": "AWS/Events",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AppTaskCrashQueue98DD4EE9": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "QueueName": "sps-app-task-crashes-staging",
+        "SqsManagedSseEnabled": true,
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AppTaskCrashQueuePolicyF092E2D7": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AppTaskCrashQueue98DD4EE9",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "sqs:SendMessage",
+                "sqs:GetQueueAttributes",
+                "sqs:GetQueueUrl",
+              ],
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Fn::GetAtt": [
+                      "AppTaskCrashRuleE0CB947F",
+                      "Arn",
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AppTaskCrashQueue98DD4EE9",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Queues": [
+          {
+            "Ref": "AppTaskCrashQueue98DD4EE9",
+          },
+        ],
+      },
+      "Type": "AWS::SQS::QueuePolicy",
+    },
+    "AppTaskCrashRuleE0CB947F": {
+      "Properties": {
+        "Description": "SPS staging: an sps-app-staging task stopped because an essential container exited (crash or OOM kill), not a deploy or scale-in.",
+        "EventPattern": {
+          "detail": {
+            "group": [
+              "service:sps-app-staging",
+            ],
+            "lastStatus": [
+              "STOPPED",
+            ],
+            "stopCode": [
+              "EssentialContainerExited",
+            ],
+          },
+          "detail-type": [
+            "ECS Task State Change",
+          ],
+          "source": [
+            "aws.ecs",
+          ],
+        },
+        "Name": "sps-app-task-crash-staging",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "AppTaskCrashQueue98DD4EE9",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
     },
     "AppUnavailableAlarm128C3206": {
       "Properties": {
