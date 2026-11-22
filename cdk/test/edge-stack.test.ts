@@ -2073,6 +2073,32 @@ describe("EdgeStack", () => {
           expect(Number(rule?.Priority)).toBeGreaterThan(Number(targeted?.Priority));
         });
 
+        it("blocks off-campus /search per TARGETED browser fingerprint, after Bot Control", () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const rule = rules.find((r) => r.Name === "search-fingerprint-rate-limit") as any;
+          expect(rule?.Action).toHaveProperty("Block");
+          const rate = rule?.Statement.RateBasedStatement;
+          expect(rate?.AggregateKeyType).toBe("CUSTOM_KEYS");
+          expect(rate?.CustomKeys).toEqual([
+            {
+              LabelNamespace: { Namespace: "awswaf:managed:token:fingerprint:" },
+            },
+          ]);
+          expect(rate?.Limit).toBe(100);
+          expect(rate?.EvaluationWindowSec).toBe(300);
+          const stmts = rate?.ScopeDownStatement.AndStatement.Statements ?? [];
+          expect(JSON.stringify(stmts)).toContain('"SearchString":"/search"');
+          expect(stmts).toContainEqual({
+            NotStatement: {
+              Statement: {
+                IPSetReferenceStatement: { Arn: expect.anything() },
+              },
+            },
+          });
+          // The fingerprint label exists only once TARGETED has run.
+          expect(Number(rule?.Priority)).toBeGreaterThan(Number(targeted?.Priority));
+        });
+
         it("sets a 4h challenge immunity so search sessions are not re-challenged every 5 min", () => {
           expect(acl.ChallengeConfig).toEqual({
             ImmunityTimeProperty: { ImmunityTime: 14400 },
