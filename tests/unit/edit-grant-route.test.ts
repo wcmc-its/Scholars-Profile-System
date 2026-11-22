@@ -18,7 +18,7 @@
  *  - Superuser action on an ED row → 403 ed_locked (read-only for everyone).
  *  - Non-ED ("manual") row is unaffected (regression).
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const {
@@ -656,5 +656,55 @@ describe("/api/edit/grant", () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ ok: false, error: "unit_not_found" });
     });
+  });
+});
+
+describe("/api/edit/grant — Cornell Ithaca NetID grantee (login step 4)", () => {
+  const EPPN = "zq99@cornell.edu";
+  const base = { entityType: "center", entityId: "MEYER", cwid: EPPN, role: "curator", action: "grant" };
+  beforeEach(() => {
+    vi.stubEnv("ITHACA_LOGIN", "on");
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("a superuser grants a center curator, storing the directory name", async () => {
+    const res = await POST(post({ ...base, name: "Zed Quill" }));
+    expect(res.status).toBe(200);
+    expect(mockTxUnitAdminUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ cwid: EPPN, role: "curator", granteeName: "Zed Quill" }),
+      }),
+    );
+  });
+
+  it("a comms steward may too", async () => {
+    mockGetEditSession.mockResolvedValue(STEWARD);
+    expect((await POST(post(base))).status).toBe(200);
+  });
+
+  it("never as owner, never on a non-center unit", async () => {
+    expect((await POST(post({ ...base, role: "owner" }))).status).toBe(400);
+    expect((await POST(post({ ...base, entityType: "department", entityId: "MED" }))).status).toBe(400);
+    expect(mockTxUnitAdminUpsert).not.toHaveBeenCalled();
+  });
+
+  it("a center owner who is not a superuser or steward can't grant one", async () => {
+    mockGetEditSession.mockResolvedValue(OWNER);
+    mockUnitAdminFindMany.mockResolvedValue([{ entityType: "center", entityId: "MEYER", role: "owner" }]);
+    expect((await POST(post(base))).status).toBe(403);
+    expect(mockTxUnitAdminUpsert).not.toHaveBeenCalled();
+  });
+
+  it("with ITHACA_LOGIN off a new grant is refused but a revoke still lands", async () => {
+    vi.stubEnv("ITHACA_LOGIN", "off");
+    expect((await POST(post(base))).status).toBe(400);
+    mockUnitAdminFindUnique.mockResolvedValue({ role: "curator", grantedBy: "sup001", source: "manual" });
+    expect((await POST(post({ ...base, action: "revoke" }))).status).toBe(200);
+    expect(mockTxUnitAdminDelete).toHaveBeenCalled();
+  });
+
+  it("refuses other domains", async () => {
+    expect((await POST(post({ ...base, cwid: "zq99@nyp.org" }))).status).toBe(400);
   });
 });

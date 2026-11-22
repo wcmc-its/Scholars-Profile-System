@@ -540,6 +540,12 @@ function unitSections(
           actorCwid={ctx.actorCwid}
           headingId="access-heading"
           readOnly={ctx.accessReadOnly === true}
+          cornellGrantable={
+            unitType === "center" &&
+            process.env.ITHACA_LOGIN === "on" &&
+            isCornellDirectoryMembersEnabled() &&
+            ctx.actorGrantsPartners === true
+          }
         />
       ),
     });
@@ -608,7 +614,9 @@ function UnitDivisionsList({
 
 /** The full-width Members page (`?attr=roster`). Every other attribute now
  *  lives on the single-scroll sections page. */
-function renderRoster(ctx: UnitEditContext) {
+/** The unit's Members roster on its own — also the whole page an Ithaca
+ *  center curator gets (`app/edit/center/[code]/page.tsx`, login step 4). */
+export function renderRoster(ctx: UnitEditContext) {
   // Retired read-through (edge 11): read-only while the unit is retired.
   if (ctx.unit.suppression !== null) return <RetiredNotice />;
   // A center gets the rich #552 §6.1 table (Member/Type/Program/Diseases/

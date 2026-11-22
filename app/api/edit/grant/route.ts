@@ -47,6 +47,7 @@ import {
   type UnitRef,
 } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { PARTNER_GRANTEE_PATTERN } from "@/lib/edit/report-access";
 import { reflectUnitChange } from "@/lib/edit/revalidation";
 import { INSTITUTIONS } from "@/lib/institutions";
 import {
@@ -77,9 +78,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof entityId !== "string" || entityId.length === 0) {
     return editError(400, "invalid_entity_id", "entityId");
   }
-  if (typeof cwid !== "string" || !CWID_PATTERN.test(cwid)) {
+  // A Cornell Ithaca NetID grantee (`netid@cornell.edu`, Ithaca login step 4):
+  // a center CURATOR only (an Owner manages access), granted by a superuser or
+  // comms steward, and a new grant needs ITHACA_LOGIN. Revoke always works.
+  const partnerGrantee = typeof cwid === "string" && PARTNER_GRANTEE_PATTERN.test(cwid);
+  if (typeof cwid !== "string" || (!CWID_PATTERN.test(cwid) && !partnerGrantee)) {
     return editError(400, "invalid_cwid", "cwid");
   }
+  if (partnerGrantee) {
+    if (entityType !== "center") return editError(400, "partner_center_only", "entityType");
+    if (action === "grant") {
+      if (role !== "curator") return editError(400, "partner_curator_only", "role");
+      if (process.env.ITHACA_LOGIN !== "on") return editError(400, "invalid_cwid", "cwid");
+      if (!session.isSuperuser && !session.isCommsSteward) {
+        return editError(403, "partner_grant_requires_superuser");
+      }
+    }
+  }
+  // The grantee's directory name for a partner grant (no Scholar row to read it
+  // from, and the runtime can't reach LDAP) — the report_access precedent.
+  const granteeName =
+    partnerGrantee && typeof body.name === "string" && body.name.trim()
+      ? body.name.trim().slice(0, 255)
+      : null;
   if (typeof role !== "string" || !isUnitAdminRole(role)) {
     return editError(400, "invalid_role", "role");
   }
@@ -218,10 +239,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             cwid,
             role,
             grantedBy: session.cwid,
+            ...(granteeName ? { granteeName } : {}),
           },
           update: {
             role,
             grantedBy: session.cwid,
+            ...(granteeName ? { granteeName } : {}),
           },
         });
       } else {

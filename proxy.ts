@@ -111,7 +111,12 @@ const PARTNER_PATHS: ReadonlySet<string> = new Set([
   "/api/edit/orcid/callback",
   "/api/edit/reports/article-count",
   "/api/edit/reports/high-impact-publications",
+  "/api/edit/roster",
 ]);
+
+/** A center's edit page (`/edit/center/<code>`, not its `/history`): a partner
+ *  curator gets that center's roster there (login step 4). */
+const PARTNER_CENTER_PAGE = /^\/edit\/center\/[^/]+$/;
 
 /**
  * Report pages, one dispatcher (`app/edit/reports/[report]/page.tsx`), which
@@ -321,7 +326,11 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // gated is a 403, never the SSO redirect (the IdP would re-sign them in and loop).
   if (session && isPartnerCwid(session.cwid)) {
     const p = request.nextUrl.pathname;
-    if (!PARTNER_PATHS.has(p) && !p.startsWith(PARTNER_REPORT_PAGE_PREFIX)) {
+    if (
+      !PARTNER_PATHS.has(p) &&
+      !p.startsWith(PARTNER_REPORT_PAGE_PREFIX) &&
+      !PARTNER_CENTER_PAGE.test(p)
+    ) {
       return withSecurityHeaders(new NextResponse(null, { status: 403 }));
     }
     return withSecurityHeaders(await idleRefreshed(request, session));

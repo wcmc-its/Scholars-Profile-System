@@ -275,6 +275,9 @@ export type UnitEditContext = {
   diseaseAutoPublish: boolean | null;
   /** The actor's effective role on THIS unit (drives client-side rail filtering). */
   actorRole: UnitActorRole;
+  /** Superuser or comms steward: may grant a Cornell Ithaca NetID access
+   *  (Ithaca login step 4, `/api/edit/grant`). */
+  actorGrantsPartners?: boolean;
   /** The acting session's CWID — the access card disables Remove on this row
    *  (the self-revoke footgun guard, mirrored from `/api/edit/grant`). */
   actorCwid: string;
@@ -689,7 +692,7 @@ export async function loadUnitEditContext(
   const accessRows = canManageAccess
     ? await client.unitAdmin.findMany({
         where: { entityType: unitType, entityId: code },
-        select: { cwid: true, role: true, source: true, grantedBy: true, createdAt: true },
+        select: { cwid: true, role: true, source: true, grantedBy: true, createdAt: true, granteeName: true },
         orderBy: { createdAt: "asc" },
       })
     : [];
@@ -1028,7 +1031,7 @@ export async function loadUnitEditContext(
   const access = canManageAccess
     ? accessRows.map((r) => ({
         cwid: r.cwid,
-        name: nameMap.get(r.cwid)?.name ?? directoryName(r.cwid) ?? r.cwid,
+        name: nameMap.get(r.cwid)?.name ?? directoryName(r.cwid) ?? r.granteeName ?? r.cwid,
         title: nameMap.get(r.cwid)?.title ?? null,
         role: r.role,
         source: r.source,
@@ -1229,6 +1232,7 @@ export async function loadUnitEditContext(
     diseaseOptions,
     diseaseAutoPublish: hasProgramTaxonomy ? centerDiseaseAutoPublish : null,
     actorRole,
+    actorGrantsPartners: session.isSuperuser || session.isCommsSteward,
     actorCwid: session.cwid,
   };
 }

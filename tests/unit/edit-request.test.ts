@@ -18,6 +18,8 @@ vi.mock("@/lib/auth/effective-identity", () => ({
   impersonationActive: mockImpersonationActive,
 }));
 vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
+const mockPartner = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth/partner-login", () => ({ getPartnerEditSession: mockPartner }));
 
 import { editError, editOk, readEditRequest } from "@/lib/edit/request";
 
@@ -117,5 +119,41 @@ describe("readEditRequest", () => {
       expect(r.ctx.body).toEqual({ fieldName: "overview" });
       expect(r.ctx.requestId).toMatch(/^[0-9a-f-]{36}$/);
     }
+  });
+});
+
+describe("readEditRequest — allowPartner (Ithaca login step 4)", () => {
+  const PARTNER = { cwid: "zq99@cornell.edu", isSuperuser: false, isCommsSteward: false };
+  beforeEach(() => {
+    mockGetEffectiveEditSession.mockResolvedValue(null);
+    mockGetSession.mockResolvedValue(null);
+    mockPartner.mockResolvedValue(PARTNER);
+  });
+
+  it("a partner session stands in only when the route opts in", async () => {
+    const res = await readEditRequest(makeRequest({}), { allowPartner: true });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.ctx.realCwid).toBe("zq99@cornell.edu");
+      expect(res.ctx.impersonatedCwid).toBeNull();
+      expect(res.ctx.session.isSuperuser).toBe(false);
+    }
+    const closed = await readEditRequest(makeRequest({}));
+    expect(closed.ok).toBe(false);
+    if (!closed.ok) expect(closed.response.status).toBe(401);
+  });
+
+  it("no partner session: still 401", async () => {
+    mockPartner.mockResolvedValue(null);
+    const res = await readEditRequest(makeRequest({}), { allowPartner: true });
+    expect(res.ok).toBe(false);
+  });
+
+  it("a WCM session always wins", async () => {
+    mockGetEffectiveEditSession.mockResolvedValue({ cwid: "usr01", isSuperuser: false });
+    mockGetSession.mockResolvedValue({ cwid: "usr01", iat: 0, exp: 0 });
+    const res = await readEditRequest(makeRequest({}), { allowPartner: true });
+    expect(res.ok && res.ctx.realCwid).toBe("usr01");
+    expect(mockPartner).not.toHaveBeenCalled();
   });
 });

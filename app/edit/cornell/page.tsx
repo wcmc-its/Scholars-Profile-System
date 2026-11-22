@@ -4,7 +4,8 @@
  * session through `getPartnerNetid` itself; every other `/edit` page sees a
  * partner as signed out.
  *
- * The reports granted to the person's eppn (step 3; PARTNER_REPORT_KEYS only),
+ * The centers whose members the person curates (step 4), the reports granted
+ * to their eppn (step 3; PARTNER_REPORT_KEYS only),
  * and, for someone with an Ithaca roster row, their own ORCID iD with "Connect
  * your ORCID iD" (the shared `/api/edit/orcid/connect` flow, which returns here).
  */
@@ -14,6 +15,7 @@ import { notFound } from "next/navigation";
 import { OrcidIdIcon } from "@/components/scholar/orcid-id-icon";
 import { buttonVariants } from "@/components/ui/button";
 import { ithacaScholar } from "@/lib/auth/partner-login";
+import { db } from "@/lib/db";
 import { getPartnerNetid, getSession } from "@/lib/auth/session-server";
 import { isOrcidConnectEnabled } from "@/lib/edit/orcid-connect";
 import {
@@ -113,7 +115,21 @@ export default async function CornellHomePage({
     )
   ).filter((m) => m !== null);
 
-  if (!row && reports.length === 0) {
+  // Centers this eppn curates (login step 4; center grants only).
+  const centerGrants = await db.read.unitAdmin.findMany({
+    where: { cwid: eppn, entityType: "center" },
+    select: { entityId: true },
+  });
+  const centers =
+    centerGrants.length === 0
+      ? []
+      : await db.read.center.findMany({
+          where: { code: { in: centerGrants.map((g) => g.entityId) } },
+          select: { code: true, name: true },
+          orderBy: { name: "asc" },
+        });
+
+  if (!row && reports.length === 0 && centers.length === 0) {
     return (
       <Shell>
         <p>Your Cornell account ({eppn}) isn&apos;t set up for Scholars.</p>
@@ -128,6 +144,21 @@ export default async function CornellHomePage({
       <p>
         Signed in as <strong>{row?.preferredName ?? netid}</strong> ({eppn})
       </p>
+      {centers.length > 0 && (
+        <section className="border-apollo-border-strong space-y-3 rounded-lg border p-4">
+          <h2 className="text-lg font-semibold">Your centers</h2>
+          <ul className="list-disc space-y-1 pl-5">
+            {centers.map((c) => (
+              <li key={c.code}>
+                <Link className="underline" href={`/edit/center/${encodeURIComponent(c.code)}`}>
+                  {c.name}
+                </Link>{" "}
+                <span className="text-muted-foreground text-sm">members</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {reports.length > 0 && (
         <section className="border-apollo-border-strong space-y-3 rounded-lg border p-4">
           <h2 className="text-lg font-semibold">Your reports</h2>

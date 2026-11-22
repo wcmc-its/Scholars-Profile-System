@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { getPartnerReportSession } from "@/lib/auth/partner-login";
+import { getPartnerEditSession } from "@/lib/auth/partner-login";
 import { db } from "@/lib/db";
 import { unitLabels } from "@/lib/edit/article-count-report";
 import {
@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   // A Cornell Ithaca partner runs it on a narrow all-false session; its
   // grant to the eppn is what the gate below reads (PARTNER_REPORT_KEYS).
-  const session = (await getEffectiveEditSession()) ?? (await getPartnerReportSession());
+  const session = (await getEffectiveEditSession()) ?? (await getPartnerEditSession());
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
   if ((await getReportScopes(session, HIGH_IMPACT_PUBS_REPORT)).size === 0) {
     return new NextResponse("Forbidden", { status: 403 });

@@ -73,6 +73,10 @@ export type UnitAccessCardProps = {
   headingId?: string;
   /** A content editor reads the access list but never grants or removes. */
   readOnly?: boolean;
+  /** Ithaca login step 4: a center, ITHACA_LOGIN on, and a superuser or comms
+   *  steward viewing — the Grant row offers a Cornell (Ithaca) NetID, granted
+   *  as a curator on `netid@cornell.edu`. */
+  cornellGrantable?: boolean;
 };
 
 const CASCADE_HINT: Record<UnitAccessCardProps["entityType"], string | null> = {
@@ -89,6 +93,7 @@ export function UnitAccessCard({
   actorCwid,
   headingId,
   readOnly = false,
+  cornellGrantable = false,
 }: UnitAccessCardProps) {
   // Defensive: the rail only mounts this panel for Owner/Superuser, where
   // `access` is non-null. A null slips through ⇒ render nothing.
@@ -98,6 +103,18 @@ export function UnitAccessCard({
   );
   const [addValue, setAddValue] = React.useState<DirectoryValue | null>(null);
   const [addRole, setAddRole] = React.useState<"owner" | "curator">("curator");
+  const [addSource, setAddSource] = React.useState<"wcm" | "cornell">("wcm");
+  // A Cornell pick with a WCM identity is granted on that CWID (they sign in
+  // as it, Ithaca login step 2); any other Cornell pick on its NetID eppn, as
+  // a curator only.
+  const addCwid =
+    addValue === null
+      ? null
+      : addValue.netid === undefined
+        ? addValue.cwid
+        : (addValue.wcmMatch ?? `${addValue.netid.toLowerCase()}@cornell.edu`);
+  const partnerPick = addCwid !== null && addCwid.endsWith("@cornell.edu");
+  const effectiveRole = partnerPick ? "curator" : addRole;
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = React.useState<AccessRow | null>(null);
@@ -148,9 +165,10 @@ export function UnitAccessCard({
         body: JSON.stringify({
           entityType,
           entityId,
-          cwid: addValue.cwid,
-          role: addRole,
+          cwid: addCwid,
+          role: effectiveRole,
           action: "grant",
+          ...(partnerPick ? { name: addValue.name } : {}),
         }),
       });
       const data = (await res.json()) as { ok: boolean; error?: string };
@@ -165,14 +183,14 @@ export function UnitAccessCard({
         rows.find((r) => r.cwid === actorCwid && r.name !== r.cwid)?.name ??
         null;
       setRows((prev) => {
-        const without = prev.filter((r) => r.cwid !== addValue.cwid);
+        const without = prev.filter((r) => r.cwid !== addCwid);
         return [
           ...without,
           {
-            cwid: addValue.cwid,
+            cwid: addCwid!,
             name: addValue.name,
             title: addValue.title,
-            role: addRole,
+            role: effectiveRole,
             grantedBy: actorCwid,
             grantedByName: actorName,
             grantedAt: new Date(0), // placeholder; refreshed on next page load
@@ -311,16 +329,51 @@ export function UnitAccessCard({
             data-slot="unit-access-add"
           >
             <span className="text-[13px] font-medium">Grant</span>
+            {cornellGrantable && (
+              <div
+                className="border-apollo-border flex w-fit overflow-hidden rounded-md border"
+                role="group"
+                aria-label="Directory source"
+              >
+                {(
+                  [
+                    ["wcm", "WCM"],
+                    ["cornell", "Cornell"],
+                  ] as ReadonlyArray<readonly ["wcm" | "cornell", string]>
+                ).map(([value, label], i) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setAddSource(value);
+                      setAddValue(null);
+                    }}
+                    aria-pressed={addSource === value}
+                    className={`px-2.5 py-[3px] text-[13px] font-medium transition-colors ${i > 0 ? "border-apollo-border border-l" : ""} ${
+                      addSource === value ? "bg-apollo-maroon text-white" : "text-muted-foreground hover:bg-accent"
+                    }`}
+                    data-testid={`grant-source-${value}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="min-w-[180px] flex-1">
-              <DirectoryPeopleTypeahead idPrefix="grant" value={addValue} onChange={setAddValue} />
+              <DirectoryPeopleTypeahead
+                idPrefix="grant"
+                value={addValue}
+                onChange={setAddValue}
+                source={cornellGrantable ? addSource : "wcm"}
+              />
             </div>
             <RadioGroup
-              value={addRole}
+              value={effectiveRole}
               onValueChange={(v) => setAddRole(v as "owner" | "curator")}
               aria-label="Role"
               className="bg-apollo-surface-2 border-apollo-border flex gap-0.5 rounded-[7px] border p-0.5"
             >
-              {(["curator", "owner"] as const).map((r) => (
+              {(partnerPick ? (["curator"] as const) : (["curator", "owner"] as const)).map((r) => (
                 <label
                   key={r}
                   className={cn(

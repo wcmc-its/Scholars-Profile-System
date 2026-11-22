@@ -49,7 +49,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: h.mockGetEditSession }));
 vi.mock("@/lib/auth/partner-login", () => ({
-  getPartnerReportSession: h.mockPartnerSession,
+  getPartnerEditSession: h.mockPartnerSession,
   PARTNER_HOME: "/edit/cornell",
 }));
 vi.mock("@/lib/db", () => ({
