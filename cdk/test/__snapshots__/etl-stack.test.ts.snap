@@ -2263,7 +2263,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_WEB_SEED_ORCID",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -3022,7 +3022,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_WEB_SEED_ORCID",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -3718,7 +3718,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_WEB_SEED_ORCID",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -4345,7 +4345,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_WEB_SEED_ORCID",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",
@@ -5411,7 +5411,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ITHACA_WEB_SEED_ORCID",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RESEARCH_SECURITY_ETL",

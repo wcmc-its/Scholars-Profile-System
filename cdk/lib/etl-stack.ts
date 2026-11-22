@@ -1105,9 +1105,10 @@ export class EtlStack extends Stack {
       // Ithaca ORCID plan, step 5 — etl:orcid-candidates mirrors ReCiterDB's web-page
       // ORCID inferences (pubsource_web_orcid_inference) as source web_page_seed, only
       // when this AND ITHACA_ORCID_CURATION are exactly "on". Strong suggestions,
-      // confirmed one at a time, never bulk. OFF in prod until the plan's M3 hand-check.
+      // confirmed one at a time, never bulk. On in both envs since 2026-11-22: the M3
+      // hand-check passed and the staging queue (367 candidates) was reviewed.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      ITHACA_WEB_SEED_ORCID: env === "prod" ? "off" : "on",
+      ITHACA_WEB_SEED_ORCID: "on",
       // Research security dashboard — etl:research-security copies reciterdb's
       // watch-list screen (sensitive, per-person) into research_security_* only
       // when this is exactly "on"; otherwise the step reads and writes nothing.
