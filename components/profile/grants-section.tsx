@@ -258,7 +258,7 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search this list…"
-          className="border-border-strong ml-auto h-7 w-[220px] rounded-full border bg-muted px-3 text-sm focus:border-[var(--color-accent-slate)] focus:bg-background focus:outline-none"
+          className="border-border-strong ml-auto h-7 w-[220px] min-w-0 max-w-full rounded-full border bg-muted px-3 text-sm focus:border-[var(--color-accent-slate)] focus:bg-background focus:outline-none"
         />
       </div>
 
