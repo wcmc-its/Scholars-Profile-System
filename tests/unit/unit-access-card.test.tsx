@@ -86,15 +86,19 @@ describe("UnitAccessCard", () => {
     expect(screen.getByTestId("unit-access-remove-cur001").hasAttribute("disabled")).toBe(false);
   });
 
-  it("disables Remove on an ED-sourced row (ed-locked guard) with a managed-in-ED tooltip", () => {
+  it("shows no Remove on an ED-sourced row, only the managed-in-Web-Directory note", () => {
     const edRows = [
       { cwid: "cur001", name: "Casey Curator", title: null, role: "curator" as const, grantedBy: "own001", grantedAt: new Date("2026-05-02"), source: "manual" },
       { cwid: "edx001", name: "Ed Imported", title: null, role: "owner" as const, grantedBy: "ED-ETL", grantedAt: new Date("2026-05-03"), source: "ED:DA" },
     ];
     render(<UnitAccessCard {...base} access={edRows} />);
-    const edRemove = screen.getByTestId("unit-access-remove-edx001");
-    expect(edRemove.hasAttribute("disabled")).toBe(true);
-    expect(edRemove.getAttribute("title")).toMatch(/Enterprise Directory/i);
+    expect(screen.queryByTestId("unit-access-remove-edx001")).toBeNull();
+    const note = screen.getByTestId("unit-access-ed-locked-note-edx001");
+    expect(note.textContent).toMatch(/Managed in Web Directory/);
+    expect(note.getAttribute("title")).toMatch(/Only a Department Administrator/);
+    expect(note.getAttribute("href")).toBe(
+      `https://directory.weill.cornell.edu/orgunits/${base.entityId}/edit`,
+    );
     // A manual row in the same table stays removable.
     expect(screen.getByTestId("unit-access-remove-cur001").hasAttribute("disabled")).toBe(false);
   });

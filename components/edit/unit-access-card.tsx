@@ -17,7 +17,7 @@
  * Web Directory (Enterprise Directory) import — `source` LIKE `ED:%` — is
  * read-only here for EVERYONE (superusers included); the role is changed at the
  * source, not here. The `/api/edit/grant` route enforces this server-side and
- * returns `ed_locked`; we mirror it by disabling Remove on those rows.
+ * returns `ed_locked`; we mirror it by hiding Remove on those rows.
  */
 "use client";
 
@@ -56,7 +56,14 @@ function isEdLocked(row: AccessRow): boolean {
 }
 
 const ED_LOCKED_HINT =
-  "This access is managed in the Enterprise Directory and can't be removed here.";
+  "This access comes from Web Directory, which is the source of record. Only a Department Administrator can change or remove it there; Scholars picks up the change overnight.";
+
+/** The Web Directory org-unit editor. ED grants only ever land on a unit whose
+ *  Scholars code IS the ED N-code (etl/ed-admins `resolveUnit`), so the code is
+ *  safe to put in the path. */
+function webDirectoryEditUrl(code: string): string {
+  return `https://directory.weill.cornell.edu/orgunits/${encodeURIComponent(code)}/edit`;
+}
 
 export type UnitAccessCardProps = {
   /** Cores-as-org-units P3: `"core"` reuses this card as-is — the component
@@ -252,11 +259,7 @@ export function UnitAccessCard({
             {rows.map((row) => {
               const isSelf = row.cwid === actorCwid;
               const edLocked = isEdLocked(row);
-              const removeTitle = isSelf
-                ? "You can't remove your own access."
-                : edLocked
-                  ? ED_LOCKED_HINT
-                  : undefined;
+              const removeTitle = isSelf ? "You can't remove your own access." : undefined;
               const shown = displayName(row);
               return (
                 <li
@@ -294,20 +297,27 @@ export function UnitAccessCard({
                       lock + text, no hue. `title` stays for the self-removal case. */}
                   <div className="col-start-2 row-start-1 flex items-center justify-end gap-2 md:col-start-4">
                     {edLocked && (
-                      <span
-                        className="text-muted-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap"
+                      <a
+                        href={webDirectoryEditUrl(entityId)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={ED_LOCKED_HINT}
+                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap underline-offset-2 hover:underline"
                         data-testid={`unit-access-ed-locked-note-${row.cwid}`}
                       >
                         <Lock className="size-3" aria-hidden />
-                        Managed in the Enterprise Directory
-                      </span>
+                        Managed in Web Directory
+                        <span className="sr-only">. {ED_LOCKED_HINT} (opens in a new tab)</span>
+                      </a>
                     )}
-                    {readOnly ? null : (
+                    {/* No Remove on an ED row: Web Directory is authoritative, so a
+                        disabled button only reads as broken. */}
+                    {readOnly || edLocked ? null : (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        disabled={isSelf || edLocked || busy}
+                        disabled={isSelf || busy}
                         title={removeTitle}
                         onClick={() => setRevokeTarget(row)}
                         className="text-destructive hover:text-destructive"
