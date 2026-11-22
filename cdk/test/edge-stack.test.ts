@@ -2084,7 +2084,7 @@ describe("EdgeStack", () => {
               LabelNamespace: { Namespace: "awswaf:managed:token:fingerprint:" },
             },
           ]);
-          expect(rate?.Limit).toBe(100);
+          expect(rate?.Limit).toBe(300);
           expect(rate?.EvaluationWindowSec).toBe(300);
           const stmts = rate?.ScopeDownStatement.AndStatement.Statements ?? [];
           expect(JSON.stringify(stmts)).toContain('"SearchString":"/search"');

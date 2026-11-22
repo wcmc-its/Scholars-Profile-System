@@ -2058,13 +2058,15 @@ export class EdgeStack extends Stack {
           // requests, so per-IP limits never fired, but the IPs shared a few
           // browser fingerprints. Counts /search per TARGETED fingerprint label;
           // a request without the label is not counted (must run after TARGETED).
+          // Fingerprints can be shared by ordinary browsers, so the limit sits
+          // above the busiest fingerprint on a normal day and far below the farm.
           {
             name: "search-fingerprint-rate-limit",
             priority: managedGroups.length + 13,
             action: { block: {} },
             statement: {
               rateBasedStatement: {
-                limit: 100,
+                limit: 300,
                 evaluationWindowSec: 300,
                 aggregateKeyType: "CUSTOM_KEYS",
                 customKeys: [

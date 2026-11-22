@@ -2638,7 +2638,7 @@ a{color:var(--slate)}
                   },
                 ],
                 "EvaluationWindowSec": 300,
-                "Limit": 100,
+                "Limit": 300,
                 "ScopeDownStatement": {
                   "AndStatement": {
                     "Statements": [
@@ -5495,7 +5495,7 @@ a{color:var(--slate)}
                   },
                 ],
                 "EvaluationWindowSec": 300,
-                "Limit": 100,
+                "Limit": 300,
                 "ScopeDownStatement": {
                   "AndStatement": {
                     "Statements": [
