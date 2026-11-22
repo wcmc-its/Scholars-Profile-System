@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
+import { clearedSignedInHint, signedInHintFor, type SessionData } from "@/lib/auth/session";
 import { isContentEditor } from "@/lib/auth/content-editor";
 import { isObserver } from "@/lib/auth/observer";
 import { isSuperuser } from "@/lib/auth/superuser";
@@ -84,12 +85,29 @@ async function directoryName(cwid: string): Promise<string | null> {
   return full || person.name || null;
 }
 
+/**
+ * Mirror this answer onto the signed-in hint (`lib/auth/session.ts`): set it
+ * for a valid session, clear it otherwise, so a browser holding a stale hint
+ * (an idled-out session) stops probing. The hint grants nothing and is never
+ * read server-side. Fail-soft: without session config there is no session to
+ * mirror, and the probe answer must still go out.
+ */
+function withSignedInHint(res: NextResponse, session: SessionData | null): NextResponse {
+  try {
+    const hint = session ? signedInHintFor(session) : clearedSignedInHint();
+    res.cookies.set(hint.name, hint.value, hint.options);
+  } catch {
+    /* misconfigured session secret: no hint */
+  }
+  return res;
+}
+
 export async function GET(): Promise<NextResponse> {
   const session = await getSession().catch(() => null);
   const noStore = { "cache-control": "no-store" };
 
   if (!session) {
-    return NextResponse.json(
+    const res = NextResponse.json(
       {
         authenticated: false,
         scholar: null,
@@ -101,6 +119,7 @@ export async function GET(): Promise<NextResponse> {
       },
       { headers: noStore },
     );
+    return withSignedInHint(res, null);
   }
 
   // The real signed-in scholar (always the real `cwid`, never the effective
@@ -347,7 +366,7 @@ export async function GET(): Promise<NextResponse> {
     // null, exactly as before.
   }
 
-  return NextResponse.json(
+  const res = NextResponse.json(
     {
       authenticated: true,
       // The REAL signed-in cwid (never the View-as target): the account menu's
@@ -366,4 +385,5 @@ export async function GET(): Promise<NextResponse> {
     },
     { headers: noStore },
   );
+  return withSignedInHint(res, session);
 }

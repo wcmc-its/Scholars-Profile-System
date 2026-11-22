@@ -20,10 +20,11 @@
  * cached for the session).
  *
  * Edge-safe: this module imports only iron-session, the config, and the
- * `NextRequest` *type*. The `next/headers`-based `getSession()` for Server
- * Components lives in `session-server.ts`, which middleware must not import.
+ * `NextRequest` / `NextResponse` *types*. The `next/headers`-based
+ * `getSession()` for Server Components lives in `session-server.ts`, which
+ * middleware must not import.
  */
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { sealData, unsealData } from "iron-session";
 import { getSessionConfig } from "@/lib/auth/config";
 
@@ -208,6 +209,78 @@ export function clearedSessionCookie(): SerializedSessionCookie {
       maxAge: 0,
     },
   };
+}
+
+/**
+ * The signed-in hint: a cookie the browser's JS CAN read (the session cookie is
+ * httpOnly), valued "1" and carrying no identity, that rides beside the session
+ * cookie with the same attributes and lifetime. Its only job is to let the
+ * client skip the `/api/auth/session` probe when it is certainly signed out.
+ *
+ * It grants NOTHING and proves nothing: anyone can set it. Never read it
+ * server-side for authorization or any other decision; the sealed session
+ * cookie is the only proof of a session.
+ */
+export interface SerializedHintCookie {
+  name: string;
+  value: string;
+  options: Omit<SerializedSessionCookie["options"], "httpOnly"> & { httpOnly: false };
+}
+
+/** `__Host-sps_signed_in` beside a `__Host-` session cookie, else `sps_signed_in` (local http). */
+export function signedInHintName(sessionCookieName: string): string {
+  return sessionCookieName.startsWith("__Host-") ? "__Host-sps_signed_in" : "sps_signed_in";
+}
+
+function hintCookie(
+  sessionCookieName: string,
+  options: SerializedSessionCookie["options"],
+): SerializedHintCookie {
+  const live = options.maxAge > 0;
+  return {
+    name: signedInHintName(sessionCookieName),
+    value: live ? "1" : "",
+    options: { ...options, httpOnly: false },
+  };
+}
+
+/**
+ * Write a session cookie AND its signed-in hint (same Secure / SameSite / Path /
+ * Domain / maxAge; a clear clears both). Every session-cookie write goes
+ * through here, so the hint can never drift from the session it mirrors. Call
+ * it only on responses served by a CachingDisabled edge behavior (`/api/auth/*`,
+ * `/api/impersonation*`, `/edit*`, `/api/edit*` in cdk/lib/edge-stack.ts), as the
+ * session cookie already is, so the Set-Cookie never lands in an edge cache.
+ */
+export function applySessionCookie(
+  response: Pick<NextResponse, "cookies">,
+  cookie: SerializedSessionCookie,
+): void {
+  response.cookies.set(cookie.name, cookie.value, cookie.options);
+  const hint = hintCookie(cookie.name, cookie.options);
+  response.cookies.set(hint.name, hint.value, hint.options);
+}
+
+/**
+ * The hint for a session validated on this request (`GET /api/auth/session`):
+ * it expires with the session's own `exp`, as the session cookie does.
+ */
+export function signedInHintFor(session: SessionData): SerializedHintCookie {
+  const cfg = getSessionConfig();
+  return hintCookie(cfg.cookieName, {
+    httpOnly: true,
+    secure: cfg.cookieSecure,
+    sameSite: "lax",
+    path: "/",
+    domain: cfg.cookieDomain,
+    maxAge: Math.max(session.exp - nowSeconds(), 1),
+  });
+}
+
+/** The hint cleared, matching {@link clearedSessionCookie}. */
+export function clearedSignedInHint(): SerializedHintCookie {
+  const cleared = clearedSessionCookie();
+  return hintCookie(cleared.name, cleared.options);
 }
 
 /**

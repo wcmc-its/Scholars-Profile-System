@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { clearedSessionCookie } from "@/lib/auth/session";
+import { applySessionCookie, clearedSessionCookie } from "@/lib/auth/session";
 
 /**
  * POST /api/auth/logout — end the session (B01 #100).
@@ -20,7 +20,8 @@ export function POST(): NextResponse {
     headers: { Location: "/" },
   });
   const cookie = clearedSessionCookie();
-  response.cookies.set(cookie.name, cookie.value, cookie.options);
+  // Clears the signed-in hint too.
+  applySessionCookie(response, cookie);
   // The pre-`__Host-` session cookie (renamed for ASVS 5.0 V3.3.3) is no longer
   // read, but a browser can still hold an unexpired one (8h cap). Expire it too
   // so a rollback to an image that reads the old name can't revive a session
