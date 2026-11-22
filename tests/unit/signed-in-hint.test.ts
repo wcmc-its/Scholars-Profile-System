@@ -49,8 +49,10 @@ import {
   applySessionCookie,
   clearedSessionCookie,
   createSessionCookie,
+  signedInHintName,
   withImpersonation,
 } from "@/lib/auth/session";
+import { SIGNED_IN_HINT_NAMES, SIGNED_OUT } from "@/components/site/session-probe";
 import { GET as sessionGET } from "@/app/api/auth/session/route";
 import {
   DELETE as impersonationDELETE,
@@ -180,5 +182,21 @@ describe("/api/impersonation", () => {
     expect(res.status).toBe(204);
     expect(res.cookies.get(HINT)?.value).toBe("1");
     expect(res.cookies.get(HINT)?.maxAge).toBe(CAP - 600);
+  });
+});
+
+// The client gate (components/site/session-probe.ts) cannot import the server
+// module, so it restates both of these; a drift would show signed-in users as
+// signed out (wrong names) or change what a signed-out page renders (wrong body).
+describe("client gate parity", () => {
+  it("looks for exactly the hint names the server writes", () => {
+    expect(SIGNED_IN_HINT_NAMES).toEqual([
+      signedInHintName("__Host-sps_session"),
+      signedInHintName("sps_session"),
+    ]);
+  });
+
+  it("answers signed-out exactly as GET /api/auth/session does", async () => {
+    expect(await (await sessionGET()).json()).toEqual(SIGNED_OUT);
   });
 });
