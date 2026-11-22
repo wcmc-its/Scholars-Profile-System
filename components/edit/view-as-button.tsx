@@ -25,6 +25,7 @@ import { Eye } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { Button } from "@/components/ui/button";
+import { invalidateSessionProbe } from "@/components/site/session-probe";
 
 export type ViewAsButtonProps = {
   targetCwid: string;
@@ -82,6 +83,7 @@ export function ViewAsButton({
     if (res.ok) {
       // 204 + Set-Cookie; reload so the overlay + banner take effect.
       setOpen(false);
+      invalidateSessionProbe();
       (onStarted ?? (() => window.location.reload()))();
       return;
     }

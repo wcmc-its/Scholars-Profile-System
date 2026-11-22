@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { AccountMenu } from "./account-menu";
+import { probeSession } from "./session-probe";
 
 /**
  * The header's auth area — a thin client island so the Sign-in link can
@@ -67,22 +68,12 @@ export function HeaderAuthSlot({ isAuthenticated, scholar }: HeaderAuthSlotProps
     // for a genuinely signed-in user.
     if (isAuthenticated) return;
     let active = true;
-    fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          data: {
-            authenticated?: boolean;
-            scholar?: ScholarLite | null;
-          } | null,
-        ) => {
-          if (!active || !data?.authenticated) return;
-          setAuth({ isAuthenticated: true, scholar: data.scholar ?? null });
-        },
-      )
-      .catch(() => {
-        /* leave the server-prop default — header stays as "Sign in" */
-      });
+    // The page's shared probe (`session-probe.ts`). On failure it resolves
+    // `null`: leave the server-prop default, the header stays "Sign in".
+    void probeSession().then((data) => {
+      if (!active || !data?.authenticated) return;
+      setAuth({ isAuthenticated: true, scholar: data.scholar ?? null });
+    });
     return () => {
       active = false;
     };

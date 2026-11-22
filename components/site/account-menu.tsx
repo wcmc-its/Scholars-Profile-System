@@ -152,8 +152,9 @@ export function AccountMenu({
   const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   // Probe on mount, not on open: deferring it made the console rows and
   // "View as…" pop in a beat after the menu opened. The root-layout
-  // ImpersonationBanner already probes /api/auth/session on every page, so
-  // this adds no new kind of request, only a second one for signed-in viewers.
+  // ImpersonationBanner already probes /api/auth/session on every page, and
+  // the probe is shared per page load (`session-probe.ts`), so this adds no
+  // request.
   const probe = useImpersonationProbe();
   const canImpersonate = probe?.canImpersonate ?? false;
   // The role-aware console destinations the viewer may open (Manage profiles /

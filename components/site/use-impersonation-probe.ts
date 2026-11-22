@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { ConsoleLink } from "@/lib/auth/console-links";
+import { probeSession } from "@/components/site/session-probe";
 
 /**
  * Shared client hook for the impersonation state carried by the
@@ -79,9 +80,9 @@ export type ImpersonationProbe = {
 };
 
 /**
- * Probe `/api/auth/session` once. Returns `null` while in flight and on any
- * network error (treat as "no impersonation state" — fail closed to a quiet UI).
- * Never throws.
+ * Read the page's shared `/api/auth/session` probe (`session-probe.ts`).
+ * Returns `null` while in flight and on any network error (treat as "no
+ * impersonation state" — fail closed to a quiet UI). Never throws.
  *
  * `enabled` (default `true`) gates whether the probe fires. The always-mounted
  * banner leaves it `true` so it can render on any surface; the account-menu
@@ -97,29 +98,23 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
   useEffect(() => {
     if (!enabled) return;
     let active = true;
-    // `fetch` may be absent or a non-thenable stub in some environments; guard
-    // the `.then` chain so a missing/garbage return value fails closed to a
-    // quiet UI rather than throwing on `undefined.then`.
-    const pending = fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
-    Promise.resolve(pending)
-      .then((r) => (r && r.ok ? (r.json() as Promise<Partial<ImpersonationProbe>>) : null))
-      .then((data) => {
-        if (!active || !data) return;
-        setProbe({
-          authenticated: data.authenticated ?? false,
-          cwid: data.cwid ?? null,
-          scholar: data.scholar ?? null,
-          displayName: data.displayName ?? null,
-          impersonating: data.impersonating ?? null,
-          canImpersonate: data.canImpersonate ?? false,
-          isSuperuser: data.isSuperuser ?? false,
-          isContentEditor: data.isContentEditor ?? false,
-          consoleLinks: data.consoleLinks ?? [],
-        });
-      })
-      .catch(() => {
-        /* leave `null` — the banner and switcher stay hidden */
+    // Shared with every other auth island on the page (`session-probe.ts`), so
+    // the banner and account menu add no request of their own. A failed probe
+    // resolves `null`: leave `null`, the banner and switcher stay hidden.
+    void probeSession().then((data) => {
+      if (!active || !data) return;
+      setProbe({
+        authenticated: data.authenticated ?? false,
+        cwid: data.cwid ?? null,
+        scholar: data.scholar ?? null,
+        displayName: data.displayName ?? null,
+        impersonating: data.impersonating ?? null,
+        canImpersonate: data.canImpersonate ?? false,
+        isSuperuser: data.isSuperuser ?? false,
+        isContentEditor: data.isContentEditor ?? false,
+        consoleLinks: data.consoleLinks ?? [],
       });
+    });
     return () => {
       active = false;
     };

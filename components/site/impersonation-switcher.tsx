@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { mapStartError } from "@/components/edit/view-as-button";
+import { invalidateSessionProbe } from "@/components/site/session-probe";
 
 /**
  * The "View as" switcher (#637, impersonation-spec.md §8). A panel opened from
@@ -350,6 +351,7 @@ export function ViewAsConfirmDialog({
       if (res.ok) {
         // Reload so every surface re-renders through the effective seam and the
         // banner mounts.
+        invalidateSessionProbe();
         window.location.reload();
         return;
       }
