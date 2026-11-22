@@ -482,10 +482,12 @@ describe("buildTrafficInsert (daily_traffic)", () => {
   });
 
   describe("traffic totals", () => {
-    it("unpivots hits / pageviews / visitors from one scan over every request", () => {
+    it("unpivots hits / pageviews / visitors / engaged_visitors from one scan over every request", () => {
       expect(traffic).toContain("SELECT COUNT(*) AS hits,");
-      expect(traffic).toContain("ARRAY['hits', 'pageviews', 'visitors'],");
-      expect(traffic).toContain("ARRAY[totals.hits, totals.pageviews, totals.visitors]");
+      expect(traffic).toContain("ARRAY['hits', 'pageviews', 'visitors', 'engaged_visitors'],");
+      expect(traffic).toContain(
+        "ARRAY[totals.hits, totals.pageviews, totals.visitors, totals.engaged_visitors]",
+      );
       expect(traffic).toContain(") AS t (dimension, cnt)");
       // hits = every request: the scan's only WHERE is the day.
       expect(traffic).toContain(`    WHERE "date" = DATE '2026-11-16'\n  ) totals\n  CROSS JOIN UNNEST(`);
@@ -510,9 +512,37 @@ describe("buildTrafficInsert (daily_traffic)", () => {
       expect(traffic).toMatch(
         /approx_distinct\(CASE WHEN cs_method = 'GET' AND sc_status = 200[\s\S]*THEN c_ip \|\| '\|' \|\| cs_user_agent END\) AS visitors/,
       );
-      // c_ip appears only inside approx_distinct; x_forwarded_for never.
-      expect(sql.match(/c_ip/g)).toHaveLength(1);
+      // c_ip appears only inside the two approx_distinct estimates; x_forwarded_for never.
+      expect(sql.match(/c_ip/g)).toHaveLength(2);
+      expect(
+        sql.match(
+          /approx_distinct\(CASE WHEN [\s\S]*?THEN c_ip \|\| '\|' \|\| cs_user_agent END\)/g,
+        ),
+      ).toHaveLength(2);
       expect(sql).not.toContain("x_forwarded_for");
+    });
+
+    it("estimates engaged_visitors as approx_distinct(ip|UA) over accepted non-bot /api/analytics beacons", () => {
+      const start = traffic.indexOf("AS visitors,\n") + "AS visitors,\n".length;
+      const engaged = traffic.slice(
+        start,
+        traffic.indexOf(" AS engaged_visitors") + " AS engaged_visitors".length,
+      );
+      expect(engaged.trimStart().startsWith("approx_distinct(CASE WHEN ")).toBe(true);
+      expect(engaged).toContain("cs_method = 'POST' AND cs_uri_stem = '/api/analytics'");
+      // The route answers 204; a 400 (bad payload) is not an accepted beacon.
+      expect(engaged).toContain("sc_status BETWEEN 200 AND 299");
+      expect(engaged).toContain("x_edge_result_type <> 'Error'");
+      expect(engaged).toContain(NOT_BOT);
+      expect(engaged).toContain(`'${KNOWN_SCRAPER_UAS[0]}'`);
+      expect(engaged).toMatch(/THEN c_ip \|\| '\|' \|\| cs_user_agent END\) AS engaged_visitors$/);
+      // Its own predicate, not PAGE_OK: a GET-only, /api/-excluding filter would match nothing.
+      expect(engaged).not.toContain("cs_method = 'GET'");
+      expect(engaged).not.toContain("starts_with(cs_uri_stem, '/api/')");
+      // Lands in metric 'traffic' under dimension 'engaged_visitors'.
+      expect(traffic).toContain(
+        "  SELECT 'traffic' AS metric, t.dimension, t.cnt, '2026-11-16' AS dt",
+      );
     });
   });
 
