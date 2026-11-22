@@ -915,6 +915,23 @@ describe("bulk-confirm", () => {
     expect(h.reflectOverviewEdit).not.toHaveBeenCalled();
   });
 
+  it("dryRun checks pairs without a transaction and keeps their order across chunks", async () => {
+    const { db } = await import("@/lib/db");
+    vi.mocked(db.write.$transaction).mockClear();
+    const ids = ["a1", "b2", "c3", "d4", "e5", "f6"];
+    h.state.evidence = ids.map((cwid, i) => ({
+      cwid,
+      orcid: ORCID,
+      band: i % 2 ? "weak" : "strong",
+    }));
+    const res = await bulkConfirm(
+      req({ dryRun: true, pairs: ids.map((cwid) => ({ cwid, orcid: ORCID })), rule: RULE }),
+    );
+    const { results } = (await res.json()) as { results: Array<{ cwid: string }> };
+    expect(results.map((r) => r.cwid)).toEqual(ids);
+    expect(db.write.$transaction).not.toHaveBeenCalled();
+  });
+
   it("400 on a bad body: no pairs, a repeated scholar, a bad iD, or a missing rule", async () => {
     for (const body of [
       { pairs: [], rule: RULE },
