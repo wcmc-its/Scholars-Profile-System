@@ -36,6 +36,9 @@ export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/orcid-queue/bulk-confirm";
 const RULE_KEYS = ["minShared", "maxOnlyOrcid", "minSources"] as const;
+/** Dry-run pairs checked at once: with Bulk review's 3 requests in flight, 12 queries,
+ *  under the 15-connection pool. */
+const DRY_RUN_CONCURRENCY = 4;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidLibrarianQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -85,20 +88,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ts = new Date();
   const meta = { actor: realCwid, impersonatedCwid, requestId, ts, bulkRule: rule };
   const results: Array<{ cwid: string; orcid: string; ok: boolean; code?: string }> = [];
-  for (const pair of pairs) {
+  const refusedOrFailed = (pair: { cwid: string; orcid: string }, err: unknown) => {
+    if (err instanceof OrcidQueueRefused) return { ...pair, ok: false, code: err.code };
+    logEditFailure(PATH, err);
+    return { ...pair, ok: false, code: "write_failed" };
+  };
+  if (dryRun) {
+    // Read-only, so no transaction, and a few pairs at a time: one-by-one in a
+    // transaction each took ~23ms a pair, and Bulk review checks ~3,000 pairs.
+    for (let i = 0; i < pairs.length; i += DRY_RUN_CONCURRENCY) {
+      const chunk = pairs.slice(i, i + DRY_RUN_CONCURRENCY);
+      results.push(
+        ...(await Promise.all(
+          chunk.map((pair) =>
+            assertBulkConfirmable(db.write, pair).then(
+              () => ({ ...pair, ok: true }),
+              (err: unknown) => refusedOrFailed(pair, err),
+            ),
+          ),
+        )),
+      );
+    }
+  }
+  for (const pair of dryRun ? [] : pairs) {
     try {
       await db.write.$transaction(async (tx) => {
         await assertBulkConfirmable(tx, pair);
-        if (!dryRun) await confirmPair(tx, pair, meta);
+        await confirmPair(tx, pair, meta);
       });
       results.push({ ...pair, ok: true });
     } catch (err) {
-      if (err instanceof OrcidQueueRefused) {
-        results.push({ ...pair, ok: false, code: err.code });
-        continue;
-      }
-      logEditFailure(PATH, err);
-      results.push({ ...pair, ok: false, code: "write_failed" });
+      results.push(refusedOrFailed(pair, err));
     }
   }
 

@@ -41,6 +41,8 @@ type Facts = { orcidName: string | null; verifiedEmail: boolean };
 type DryResult = Result & Partial<Facts>;
 
 const PAGE = 100;
+/** Dry-run batches in flight at once (the server checks 4 pairs at a time each). */
+const DRY_RUN_IN_FLIGHT = 3;
 /** The fixed client floor only: the adjustable rule at its loosest. */
 const ANY_RULE: OrcidBulkRule = { minShared: 0, maxOnlyOrcid: 10_000, minSources: 0 };
 const keyOf = (s: OrcidQueueSummary) => `${s.cwid}|${s.candidates[0]!.orcid}`;
@@ -92,24 +94,36 @@ export function OrcidBulkReview({
     (async () => {
       const pairs = floorKeys ? floorKeys.split(",").map((k) => k.split("|")) : [];
       const ok = new Map<string, Facts>();
-      for (let i = 0; i < pairs.length; i += ORCID_BULK_MAX) {
-        const r = await postBatch<DryResult>("/api/edit/orcid-queue/bulk-confirm", {
-          dryRun: true,
-          pairs: pairs.slice(i, i + ORCID_BULK_MAX).map(([cwid, orcid]) => ({ cwid, orcid })),
-          rule: ANY_RULE,
-        });
-        if (!live) return;
-        if (!r.ok) {
-          onError(r.message);
-          break;
+      const batches: string[][][] = [];
+      for (let i = 0; i < pairs.length; i += ORCID_BULK_MAX)
+        batches.push(pairs.slice(i, i + ORCID_BULK_MAX));
+      // A few batches in flight at once (~30 batches of 100 in prod); the first
+      // failure stops the rest.
+      let next = 0;
+      let failed = false;
+      const worker = async () => {
+        while (live && !failed && next < batches.length) {
+          const batch = batches[next++]!;
+          const r = await postBatch<DryResult>("/api/edit/orcid-queue/bulk-confirm", {
+            dryRun: true,
+            pairs: batch.map(([cwid, orcid]) => ({ cwid, orcid })),
+            rule: ANY_RULE,
+          });
+          if (!live || failed) return;
+          if (!r.ok) {
+            failed = true;
+            onError(r.message);
+            return;
+          }
+          for (const x of r.results)
+            if (x.ok)
+              ok.set(`${x.cwid}|${x.orcid}`, {
+                orcidName: x.orcidName ?? null,
+                verifiedEmail: !!x.verifiedEmail,
+              });
         }
-        for (const x of r.results)
-          if (x.ok)
-            ok.set(`${x.cwid}|${x.orcid}`, {
-              orcidName: x.orcidName ?? null,
-              verifiedEmail: !!x.verifiedEmail,
-            });
-      }
+      };
+      await Promise.all(Array.from({ length: DRY_RUN_IN_FLIGHT }, worker));
       if (live) setFloorOk(ok);
     })();
     return () => {
