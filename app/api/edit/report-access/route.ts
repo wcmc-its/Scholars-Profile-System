@@ -43,6 +43,8 @@ import {
   REPORT_ACCESS_SCOPE_OPTIONS,
   revokeReportAccess,
   type ReportAccessWriteResult,
+  PARTNER_GRANTEE_PATTERN,
+  PARTNER_REPORT_KEYS,
 } from "@/lib/edit/report-access";
 
 const PATH = "/api/edit/report-access";
@@ -90,7 +92,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "invalid_scope_key", "scopeKey");
   }
   const cwid = typeof body.cwid === "string" ? body.cwid.trim().toLowerCase() : "";
-  if (!GRANTEE_PATTERN.test(cwid)) {
+  // A Cornell Ithaca NetID grantee (`netid@cornell.edu`), only on the
+  // read-only, learner-free PARTNER_REPORT_KEYS; a new grant needs ITHACA_LOGIN.
+  const partnerGrantee =
+    // Revoke never needs the flag: a grant made while it was on stays removable.
+    (op === "revoke" || process.env.ITHACA_LOGIN === "on") &&
+    PARTNER_REPORT_KEYS.has(reportKey) &&
+    PARTNER_GRANTEE_PATTERN.test(cwid);
+  if (!GRANTEE_PATTERN.test(cwid) && !partnerGrantee) {
     return editError(400, "invalid_cwid", "cwid");
   }
 

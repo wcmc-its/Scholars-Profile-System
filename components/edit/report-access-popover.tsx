@@ -87,6 +87,9 @@ export type ReportAccessPopoverPersonProps = {
   /** The badge's default-audience label ("All unit administrators" for
    *  report 8); defaults to {@link PERSON_AUDIENCE}. */
   audience?: string;
+  /** ITHACA_LOGIN on and a partner-grantable report: the add form offers a
+   *  Cornell (Ithaca) NetID, granted as `netid@cornell.edu`. */
+  cornellGrantable?: boolean;
 };
 
 /** Administrator-gated report (report 8): static rule, any unit administrator. */

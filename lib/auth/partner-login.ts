@@ -8,15 +8,39 @@
  *    2026-11-19). ponytail: trusts the weekly `scholar_identity_link` snapshot;
  *    a wrong Cornell mapping signs the person in as that WCM CWID. Each such
  *    login logs both IDs.
- * 2. Otherwise a live Ithaca roster row → the partner session (`netid@cornell.edu`).
+ * 2. Otherwise a live Ithaca roster row, or a report grant to the eppn → the
+ *    partner session (`netid@cornell.edu`).
  * 3. Otherwise null: refused.
  *
  * Throws on a DB error; the caller fails closed.
  */
+import type { EditSession } from "@/lib/auth/superuser";
+import { getPartnerNetid } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
+import { PARTNER_REPORT_KEYS } from "@/lib/edit/report-access";
 
 /** Where a partner session lands after sign-in (on the proxy's PARTNER_PATHS). */
 export const PARTNER_HOME = "/edit/cornell";
+
+/**
+ * The session a report surface on the proxy's partner allowlist uses for a
+ * Cornell Ithaca sign-in: the full eppn as `cwid`, every role false. It sees
+ * only what a `report_access` / Reporting grant to that eppn names; each
+ * caller also checks `PARTNER_REPORT_KEYS`. Null for anyone else.
+ */
+export async function getPartnerReportSession(): Promise<EditSession | null> {
+  const netid = await getPartnerNetid();
+  return netid ? { cwid: `${netid}@cornell.edu`, isSuperuser: false, isCommsSteward: false } : null;
+}
+
+/** Whether a partner eppn holds a grant on any partner-grantable report. */
+async function hasPartnerReportGrant(eppn: string): Promise<boolean> {
+  const row = await db.read.reportAccess.findFirst({
+    where: { cwid: eppn, reportKey: { in: [...PARTNER_REPORT_KEYS] } },
+    select: { cwid: true },
+  });
+  return row !== null;
+}
 
 /** The live Ithaca roster row a partner NetID signs in to, or null. */
 export async function ithacaScholar(netid: string) {
@@ -47,5 +71,7 @@ export async function resolvePartnerLogin(eppn: string): Promise<string | null> 
   const ithaca = await db.read.scholar.count({
     where: { cwid: netid, campus: "ithaca", deletedAt: null },
   });
-  return ithaca > 0 ? eppn : null;
+  // A report grant also admits (report viewers include Ithaca staff, who
+  // have no roster row).
+  return ithaca > 0 || (await hasPartnerReportGrant(eppn)) ? eppn : null;
 }

@@ -324,6 +324,7 @@ describe("/edit/reports/mentors-and-mentees (7) — wiring", () => {
       initialRows: [{ ...ACCESS_ROW, grantedAt: "2026-09-18T12:00:00.000Z" }],
       scopeOptions: SCOPE_OPTIONS,
       canManage: false,
+      cornellGrantable: false,
     });
     expect(findByTestId(result, "report-access-panel")).toBeNull();
     expect(findByTestId(result, "mentored-pubs-download")?.props.href).toBe(
