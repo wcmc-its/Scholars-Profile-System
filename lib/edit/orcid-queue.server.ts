@@ -536,73 +536,115 @@ export async function assertBulkConfirmable(
   tx: Tx,
   pair: { cwid: string; orcid: string },
 ): Promise<void> {
-  const refuse = () => {
-    throw new OrcidQueueRefused(409, "not_bulk_eligible");
-  };
-  const rows = await tx.orcidCandidateEvidence.findMany({
-    where: { cwid: pair.cwid },
-    select: {
-      orcid: true,
-      band: true,
-      competitor: true,
-      competitorCwids: true,
-      competitorOrcids: true,
-      nameAgrees: true,
-      shared: true,
-      instMatch: true,
-      evidenceDetail: true,
-    },
-  });
-  const { held, dismissed } = await readOnFile(tx, pair.cwid);
-  const open = rows.filter((r) => !dismissed.has(r.orcid));
-  const mine = open.find((r) => r.orcid === pair.orcid);
-  if (!mine) throw new OrcidQueueRefused(404, "not_in_queue");
-  const scholar = await tx.scholar.findUnique({
-    where: { cwid: pair.cwid },
-    select: { campus: true, status: true, deletedAt: true },
-  });
-  const wcm = scholar?.campus === "wcm" && scholar.status === "active";
-  const ithaca = scholar?.campus === "ithaca" && scholar.status === "external";
-  if ((!wcm && !ithaca) || scholar?.deletedAt) refuse();
-  const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
-  if (
-    held.orcid !== null ||
-    dismissed.size > 0 ||
-    open.length !== 1 ||
-    mine.band !== "strong" ||
-    mine.competitor ||
-    !emptyList(mine.competitorCwids) ||
-    !emptyList(mine.competitorOrcids) ||
-    !mine.nameAgrees
-  )
-    refuse();
-  if (wcm) {
-    const work = (
-      mine.evidenceDetail as {
-        workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
-      } | null
-    )?.workStatus;
-    if (
-      mine.shared < 3 ||
-      !mine.instMatch ||
-      work?.reciterRead !== true ||
-      Number(work.counts?.rejected ?? 0) !== 0
-    )
-      refuse();
-  }
-  const [otherCandidates, holders, rejected, amSource] = await Promise.all([
-    tx.orcidCandidateEvidence.count({ where: { orcid: pair.orcid, cwid: { not: pair.cwid } } }),
-    tx.scholar.count({ where: { orcid: pair.orcid } }),
-    tx.orcidCandidate.count({
-      where: { cwid: pair.cwid, orcid: pair.orcid, articlesRejected: { gt: 0 } },
+  const refused = (await bulkConfirmableMany(tx, [pair])).get(`${pair.cwid}|${pair.orcid}`);
+  if (refused) throw refused;
+}
+
+/**
+ * `assertBulkConfirmable` for many pairs in six queries instead of ~7 per pair
+ * (Bulk review dry-runs ~3,000 pairs per page load). Same checks, same order,
+ * same codes: `cwid|orcid` -> null (passes) or the refusal it would throw.
+ */
+export async function bulkConfirmableMany(
+  tx: Tx,
+  pairs: ReadonlyArray<{ cwid: string; orcid: string }>,
+): Promise<Map<string, OrcidQueueRefused | null>> {
+  const cwids = [...new Set(pairs.map((p) => p.cwid))];
+  const orcids = [...new Set(pairs.map((p) => p.orcid))];
+  const [evidence, scholars, dismissals, sameOrcid, holders, candidates] = await Promise.all([
+    tx.orcidCandidateEvidence.findMany({
+      where: { cwid: { in: cwids } },
+      select: {
+        cwid: true,
+        orcid: true,
+        band: true,
+        competitor: true,
+        competitorCwids: true,
+        competitorOrcids: true,
+        nameAgrees: true,
+        shared: true,
+        instMatch: true,
+        evidenceDetail: true,
+      },
     }),
-    ithaca
-      ? tx.orcidCandidate.count({
-          where: { cwid: pair.cwid, orcid: pair.orcid, source: "cornell_affiliation_manager" },
-        })
-      : Promise.resolve(1),
+    tx.scholar.findMany({
+      where: { cwid: { in: cwids } },
+      select: { cwid: true, orcid: true, campus: true, status: true, deletedAt: true },
+    }),
+    tx.orcidDismissal.findMany({
+      where: { cwid: { in: cwids } },
+      select: { cwid: true, orcid: true },
+    }),
+    tx.orcidCandidateEvidence.findMany({
+      where: { orcid: { in: orcids } },
+      select: { cwid: true, orcid: true },
+    }),
+    tx.scholar.findMany({ where: { orcid: { in: orcids } }, select: { orcid: true } }),
+    tx.orcidCandidate.findMany({
+      where: { cwid: { in: cwids }, orcid: { in: orcids } },
+      select: { cwid: true, orcid: true, source: true, articlesRejected: true },
+    }),
   ]);
-  if (otherCandidates > 0 || holders > 0 || rejected > 0 || amSource === 0) refuse();
+  const group = <T>(rows: T[], key: (r: T) => string) => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) m.set(key(r), [...(m.get(key(r)) ?? []), r]);
+    return m;
+  };
+  const evidenceBy = group(evidence, (r) => r.cwid);
+  const scholarBy = new Map(scholars.map((s) => [s.cwid, s]));
+  const dismissedBy = group(dismissals, (r) => r.cwid);
+  const sameOrcidBy = group(sameOrcid, (r) => r.orcid);
+  const heldOrcids = new Set(holders.map((h) => h.orcid));
+  const candidatesBy = group(candidates, (r) => `${r.cwid}|${r.orcid}`);
+  const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
+  const notEligible = () => new OrcidQueueRefused(409, "not_bulk_eligible");
+
+  const verdict = (pair: { cwid: string; orcid: string }): OrcidQueueRefused | null => {
+    const scholar = scholarBy.get(pair.cwid);
+    if (!scholar) return new OrcidQueueRefused(404, "scholar_not_found");
+    const dismissed = new Set((dismissedBy.get(pair.cwid) ?? []).map((d) => d.orcid));
+    const open = (evidenceBy.get(pair.cwid) ?? []).filter((r) => !dismissed.has(r.orcid));
+    const mine = open.find((r) => r.orcid === pair.orcid);
+    if (!mine) return new OrcidQueueRefused(404, "not_in_queue");
+    const wcm = scholar.campus === "wcm" && scholar.status === "active";
+    const ithaca = scholar.campus === "ithaca" && scholar.status === "external";
+    if ((!wcm && !ithaca) || scholar.deletedAt) return notEligible();
+    if (
+      scholar.orcid !== null ||
+      dismissed.size > 0 ||
+      open.length !== 1 ||
+      mine.band !== "strong" ||
+      mine.competitor ||
+      !emptyList(mine.competitorCwids) ||
+      !emptyList(mine.competitorOrcids) ||
+      !mine.nameAgrees
+    )
+      return notEligible();
+    if (wcm) {
+      const work = (
+        mine.evidenceDetail as {
+          workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
+        } | null
+      )?.workStatus;
+      if (
+        mine.shared < 3 ||
+        !mine.instMatch ||
+        work?.reciterRead !== true ||
+        Number(work.counts?.rejected ?? 0) !== 0
+      )
+        return notEligible();
+    }
+    const cands = candidatesBy.get(`${pair.cwid}|${pair.orcid}`) ?? [];
+    if (
+      (sameOrcidBy.get(pair.orcid) ?? []).some((r) => r.cwid !== pair.cwid) ||
+      heldOrcids.has(pair.orcid) ||
+      cands.some((c) => c.articlesRejected > 0) ||
+      (ithaca && !cands.some((c) => c.source === "cornell_affiliation_manager"))
+    )
+      return notEligible();
+    return null;
+  };
+  return new Map(pairs.map((p) => [`${p.cwid}|${p.orcid}`, verdict(p)]));
 }
 
 /**

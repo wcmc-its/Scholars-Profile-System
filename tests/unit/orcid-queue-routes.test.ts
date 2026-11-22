@@ -67,27 +67,36 @@ const h = vi.hoisted(() => {
         );
         return e ? { band: e.band } : null;
       }),
-      findMany: vi.fn(async (args?: { where?: { band?: string; cwid?: string } }) =>
-        h.state.evidence
-          .filter((r) => args?.where?.band === undefined || r.band === args.where.band)
-          .filter((r) => args?.where?.cwid === undefined || r.cwid === args.where.cwid)
-          .map((r) => ({
-            cwid: r.cwid,
-            orcid: r.orcid,
-            band: r.band,
-            shared: 5,
-            nameAgrees: r.nameAgrees ?? true,
-            competitor: r.competitor ?? false,
-            competitorCwids: r.competitorCwids ?? [],
-            competitorOrcids: [],
-            instMatch: r.instMatch ?? true,
-            evidenceDetail: {
-              workStatus: {
-                reciterRead: r.reciterRead ?? true,
-                counts: { rejected: r.rejected ?? 0 },
+      findMany: vi.fn(
+        async (args?: {
+          where?: { band?: string; cwid?: string | { in: string[] }; orcid?: { in: string[] } };
+        }) =>
+          h.state.evidence
+            .filter((r) => args?.where?.band === undefined || r.band === args.where.band)
+            .filter((r) => {
+              const c = args?.where?.cwid;
+              return (
+                c === undefined || (typeof c === "string" ? r.cwid === c : c.in.includes(r.cwid))
+              );
+            })
+            .filter((r) => !args?.where?.orcid || args.where.orcid.in.includes(r.orcid))
+            .map((r) => ({
+              cwid: r.cwid,
+              orcid: r.orcid,
+              band: r.band,
+              shared: 5,
+              nameAgrees: r.nameAgrees ?? true,
+              competitor: r.competitor ?? false,
+              competitorCwids: r.competitorCwids ?? [],
+              competitorOrcids: [],
+              instMatch: r.instMatch ?? true,
+              evidenceDetail: {
+                workStatus: {
+                  reciterRead: r.reciterRead ?? true,
+                  counts: { rejected: r.rejected ?? 0 },
+                },
               },
-            },
-          })),
+            })),
       ),
       count: vi.fn(
         async ({ where }: { where: { orcid: string; cwid: { not: string } } }) =>
@@ -111,15 +120,30 @@ const h = vi.hoisted(() => {
             ? 1
             : 0,
       ),
-      findMany: vi.fn(async ({ where }: { where: { cwid: { in: string[] }; source?: string } }) =>
-        [
-          ...h.state.admins.map((a) => ({ ...a, source: "rpm_admin" })),
-          ...h.state.sources.map((x) => ({ ...x })),
-        ].filter(
-          (a) =>
-            where.cwid.in.includes(a.cwid) &&
-            (where.source === undefined || a.source === where.source),
-        ),
+      findMany: vi.fn(
+        async ({
+          where,
+        }: {
+          where: { cwid: { in: string[] }; orcid?: { in: string[] }; source?: string };
+        }) =>
+          [
+            ...h.state.admins.map((a) => ({ ...a, source: "rpm_admin", articlesRejected: 0 })),
+            ...h.state.sources.map((x) => ({ ...x, articlesRejected: 0 })),
+            // bulkConfirmableMany reads rejected RPM pairs as rows.
+            ...(where.orcid
+              ? [...h.state.rpmRejected].map((key) => ({
+                  cwid: key.split("|")[0]!,
+                  orcid: key.split("|")[1]!,
+                  source: "rpm_inferred",
+                  articlesRejected: 1,
+                }))
+              : []),
+          ].filter(
+            (a) =>
+              where.cwid.in.includes(a.cwid) &&
+              (!where.orcid || where.orcid.in.includes(a.orcid)) &&
+              (where.source === undefined || a.source === where.source),
+          ),
       ),
     },
     division: {
@@ -150,18 +174,22 @@ const h = vi.hoisted(() => {
           where,
         }: {
           where: {
-            cwid: { in?: string[]; not?: string };
-            orcid?: string;
+            cwid?: { in?: string[]; not?: string };
+            orcid?: string | { in: string[] };
             roleCategory?: { in: string[] };
             AND?: Array<{ OR?: Array<Record<string, { in: string[] }>> }>;
           };
         }) =>
-          // No `cwid.in`: assertOrcidFree's lookup of OTHER rows holding the iD.
+          // No `cwid.in`: assertOrcidFree's lookup of OTHER rows holding the iD, or
+          // bulkConfirmableMany's holders of any of the iDs (`orcid.in`).
           (
-            where.cwid.in ??
-            [...h.state.scholars.keys()].filter(
-              (c) => h.state.scholars.get(c)!.orcid === where.orcid && c !== where.cwid.not,
-            )
+            where.cwid?.in ??
+            [...h.state.scholars.keys()].filter((c) => {
+              const o = h.state.scholars.get(c)!.orcid;
+              return typeof where.orcid === "object"
+                ? o !== null && where.orcid.in.includes(o)
+                : o === where.orcid && c !== where.cwid?.not;
+            })
           )
             .filter((c) => h.state.scholars.has(c))
             .filter(
@@ -182,10 +210,11 @@ const h = vi.hoisted(() => {
               ),
             )
             .map((c) => ({
-              cwid: c,
-              orcid: h.state.scholars.get(c)!.orcid,
+              campus: "wcm",
               status: "active",
               deletedAt: null,
+              ...h.state.scholars.get(c)!,
+              cwid: c,
             })),
       ),
       updateMany: h.scholarUpdateMany,
@@ -918,6 +947,7 @@ describe("bulk-confirm", () => {
   it("dryRun checks pairs without a transaction and keeps their order across chunks", async () => {
     const { db } = await import("@/lib/db");
     vi.mocked(db.write.$transaction).mockClear();
+    vi.mocked(db.write.orcidCandidateEvidence.findMany).mockClear();
     const ids = ["a1", "b2", "c3", "d4", "e5", "f6"];
     h.state.evidence = ids.map((cwid, i) => ({
       cwid,
@@ -930,6 +960,8 @@ describe("bulk-confirm", () => {
     const { results } = (await res.json()) as { results: Array<{ cwid: string }> };
     expect(results.map((r) => r.cwid)).toEqual(ids);
     expect(db.write.$transaction).not.toHaveBeenCalled();
+    // Six queries for the whole batch, however many pairs (two on the evidence table).
+    expect(vi.mocked(db.write.orcidCandidateEvidence.findMany)).toHaveBeenCalledTimes(2);
   });
 
   it("400 on a bad body: no pairs, a repeated scholar, a bad iD, or a missing rule", async () => {

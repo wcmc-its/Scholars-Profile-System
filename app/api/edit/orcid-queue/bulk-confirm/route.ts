@@ -25,6 +25,7 @@ import { normalizeOrcid } from "@/lib/edit/orcid";
 import { isOrcidLibrarianQueueEnabled, ORCID_BULK_MAX } from "@/lib/edit/orcid-queue";
 import {
   assertBulkConfirmable,
+  bulkConfirmableMany,
   bulkPairFacts,
   confirmPair,
   OrcidQueueRefused,
@@ -36,9 +37,6 @@ export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/orcid-queue/bulk-confirm";
 const RULE_KEYS = ["minShared", "maxOnlyOrcid", "minSources"] as const;
-/** Dry-run pairs checked at once: with Bulk review's 3 requests in flight, 12 queries,
- *  under the 15-connection pool. */
-const DRY_RUN_CONCURRENCY = 4;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidLibrarianQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -94,20 +92,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return { ...pair, ok: false, code: "write_failed" };
   };
   if (dryRun) {
-    // Read-only, so no transaction, and a few pairs at a time: one-by-one in a
-    // transaction each took ~23ms a pair, and Bulk review checks ~3,000 pairs.
-    for (let i = 0; i < pairs.length; i += DRY_RUN_CONCURRENCY) {
-      const chunk = pairs.slice(i, i + DRY_RUN_CONCURRENCY);
-      results.push(
-        ...(await Promise.all(
-          chunk.map((pair) =>
-            assertBulkConfirmable(db.write, pair).then(
-              () => ({ ...pair, ok: true }),
-              (err: unknown) => refusedOrFailed(pair, err),
-            ),
-          ),
-        )),
-      );
+    // Read-only: the whole batch in a handful of queries (Bulk review checks ~3,000 pairs).
+    const verdicts = await bulkConfirmableMany(db.write, pairs);
+    for (const pair of pairs) {
+      const refused = verdicts.get(`${pair.cwid}|${pair.orcid}`);
+      results.push(refused ? refusedOrFailed(pair, refused) : { ...pair, ok: true });
     }
   }
   for (const pair of dryRun ? [] : pairs) {
