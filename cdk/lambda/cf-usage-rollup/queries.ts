@@ -12,7 +12,7 @@
 //
 // The rollup emits aggregates ONLY (counts by dimension). The daily_usage
 // builder never selects c_ip / x_forwarded_for; the daily_traffic builder reads
-// c_ip only inside approx_distinct (the per-day visitor estimate), so no raw
+// c_ip only inside approx_distinct (the per-day visitor estimates), so no raw
 // client IP is ever written to either table.
 
 /** Strict ISO calendar-date shape; the only event-derived value in any SQL. */
@@ -593,6 +593,22 @@ const PAGE_OK = [
 const PAGE_HUMAN = `${PAGE_OK}\n    AND ${NOT_BOT_UA}`;
 
 /**
+ * An interaction beacon the app accepted: a POST to /api/analytics (the route
+ * answers 204) from a non-bot UA. The page's JS sends one, nearly always on a
+ * click or a popover open (search_click, person_popover_open, ...; not_found
+ * fires on a 404 render), so a scraper that only fetches pages never does: in
+ * the 7 days to 2026-11-21 the edge saw ~12.6k of them from ~5.3k IPs, and 103
+ * from the JS-running botnet of 2026-11-20. Not a page request, so it is
+ * matched on its own rather than via PAGE_OK.
+ */
+const ENGAGED_BEACON = [
+  "cs_method = 'POST' AND cs_uri_stem = '/api/analytics'",
+  "    AND sc_status BETWEEN 200 AND 299",
+  `    AND ${NOT_EDGE_ERROR}`,
+  `    AND ${NOT_BOT_UA}`,
+].join("\n");
+
+/**
  * The request path, url-decoded. try(): url_decode throws on a malformed
  * %-sequence, which would fail the whole INSERT; such a path is kept raw.
  */
@@ -736,7 +752,8 @@ function topNArm(
  *
  * - traffic: 'hits' (every request), 'pageviews' (PAGE_HUMAN), 'visitors'
  *   (approx_distinct of ip|UA over PAGE_HUMAN; a per-day estimate -- only the
- *   count is written, never the key).
+ *   count is written, never the key), 'engaged_visitors' (the same estimate
+ *   over ENGAGED_BEACON).
  * - referrer_page: external referring page (host + path), PAGE_HUMAN. Top N.
  * - landing: '<referrer host>|<path>' for PAGE_HUMAN with an external referrer. Top N.
  * - page: decoded path, PAGE_HUMAN. Top N.
@@ -759,18 +776,19 @@ export function buildTrafficInsert(cfg: TrafficConfig, dt: string): string {
     `INSERT INTO ${into}`,
     "SELECT metric, dimension, cnt, dt FROM (",
 
-    // (1) traffic -- three totals from one scan, unpivoted to rows.
+    // (1) traffic -- four totals from one scan, unpivoted to rows.
     `  SELECT 'traffic' AS metric, t.dimension, t.cnt, ${dtLit} AS dt`,
     "  FROM (",
     "    SELECT COUNT(*) AS hits,",
     `      count_if(${PAGE_HUMAN}) AS pageviews,`,
-    `      approx_distinct(CASE WHEN ${PAGE_HUMAN} THEN c_ip || '|' || cs_user_agent END) AS visitors`,
+    `      approx_distinct(CASE WHEN ${PAGE_HUMAN} THEN c_ip || '|' || cs_user_agent END) AS visitors,`,
+    `      approx_distinct(CASE WHEN ${ENGAGED_BEACON} THEN c_ip || '|' || cs_user_agent END) AS engaged_visitors`,
     `    FROM ${from}`,
     `    WHERE ${day}`,
     "  ) totals",
     "  CROSS JOIN UNNEST(",
-    "    ARRAY['hits', 'pageviews', 'visitors'],",
-    "    ARRAY[totals.hits, totals.pageviews, totals.visitors]",
+    "    ARRAY['hits', 'pageviews', 'visitors', 'engaged_visitors'],",
+    "    ARRAY[totals.hits, totals.pageviews, totals.visitors, totals.engaged_visitors]",
     "  ) AS t (dimension, cnt)",
 
     "  UNION ALL",
