@@ -26,6 +26,11 @@ export type TrafficKpi = {
   visitorsAvg: number;
   /** Days the visitor average covers. */
   visitorDays: number;
+  /** Average of the per-day engaged-visitor estimates (days with a row);
+   *  null when no day in range has one (before the rollup wrote them). */
+  engagedAvg: number | null;
+  /** Days the engaged average covers. */
+  engagedDays: number;
 };
 export type SourceDay = { dt: string; category: ReferrerCategory; visits: number };
 export type AiDay = { dt: string; referral: number; fetch: number; crawler: number };
@@ -75,6 +80,8 @@ export function shapeTrafficOverview(
   const kpiRow = (k: string) => rows.kpi.find((r) => r.kind === k);
   const visitors = kpiRow("visitors");
   const visitorDays = num(visitors?.days);
+  const engaged = kpiRow("engaged_visitors");
+  const engagedDays = num(engaged?.days);
   const aiByDt = new Map<string, AiDay>();
   for (const r of rows.aiDaily) {
     const dt = r.dt ?? "";
@@ -96,6 +103,8 @@ export function shapeTrafficOverview(
       pageviews: num(kpiRow("pageviews")?.cnt),
       visitorsAvg: visitorDays > 0 ? Math.round(num(visitors?.cnt) / visitorDays) : 0,
       visitorDays,
+      engagedAvg: engagedDays > 0 ? Math.round(num(engaged?.cnt) / engagedDays) : null,
+      engagedDays,
     },
     sourcesDaily: rows.sourcesDaily.flatMap((r) =>
       ISO.test(r.dt ?? "") && isReferrerCategory(r.category ?? "")

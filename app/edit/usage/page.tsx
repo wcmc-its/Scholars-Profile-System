@@ -6,7 +6,10 @@
  * rollup via a daily-cached loader keyed per range. The traffic sections (hits,
  * pageviews, visitors, where visits come from, referring sites and pages, top
  * and landing pages, AI) read the `daily_traffic` rollup (lib/api/usage-traffic)
- * with their own fail-soft; their client island is ./traffic-widgets.
+ * with their own fail-soft; their client island is ./traffic-widgets. Its
+ * "Edge firewall decisions per day" card reads the edge web ACL's CloudWatch
+ * metrics (lib/api/usage-edge), which fails soft inside its own loader. Dated
+ * events (lib/analytics/usage-events) are marked on the daily charts.
  * The viewer-friendly companion to the Athena console + the `sps-usage-*` saved
  * queries: aggregates only (no PII), no per-URL performance (those read raw logs
  * and stay operator-restricted).
@@ -53,6 +56,7 @@ import { loadEditsByHour, loadEditsByHourUncached } from "@/lib/api/usage-edits"
 import type { EditHour } from "@/lib/api/usage-hourly";
 import { type UsageRange, addDays, resolveUsageRange } from "@/lib/api/usage-range";
 import type { TrafficOverview } from "@/lib/analytics/traffic-view";
+import { type EdgeDecisions, loadEdgeDecisions } from "@/lib/api/usage-edge";
 import { loadTrafficOverview } from "@/lib/api/usage-traffic";
 import {
   type NamedCount,
@@ -634,6 +638,13 @@ export default async function EditUsagePage({
       }),
     );
   }
+  // The edge card sits inside the traffic sections, so it's read only when they
+  // draw their cards. Never throws: a CloudWatch error comes back
+  // "unavailable", uncached.
+  const edge: EdgeDecisions | undefined =
+    traffic && traffic.firstDt !== null && traffic.firstDt <= range.until
+      ? await loadEdgeDecisions({ since: range.since, until: range.until })
+      : undefined;
   const rangeQuery =
     range.key === "custom"
       ? `range=custom&from=${range.since}&to=${range.until}`
@@ -753,7 +764,12 @@ export default async function EditUsagePage({
         )}
 
         {traffic ? (
-          <TrafficSection overview={traffic} rangeQuery={rangeQuery} scoped={!scope.all} />
+          <TrafficSection
+            overview={traffic}
+            rangeQuery={rangeQuery}
+            scoped={!scope.all}
+            edge={edge}
+          />
         ) : (
           <p className="text-muted-foreground" data-testid="usage-traffic-unavailable">
             Traffic and referrer detail is temporarily unavailable.

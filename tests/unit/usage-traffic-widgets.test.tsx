@@ -1,20 +1,29 @@
 /**
  * app/edit/usage/traffic-widgets — the traffic sections' client island: KPI
- * tiles, multi-select source chips (bar totals + caption + referrer filter),
- * Visits/Share, "Show 25 more", search, page-type tabs and "Arrived from".
- * The list route is a mocked fetch.
+ * tiles, the edge firewall chart and its event markers, multi-select source
+ * chips (bar totals + caption + referrer filter), Visits/Share, "Show 25
+ * more", search, page-type tabs and "Arrived from". The list route is a
+ * mocked fetch.
  */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopPages, TrafficSection, isSitePath } from "@/app/edit/usage/traffic-widgets";
 import type { TrafficOverview } from "@/lib/analytics/traffic-view";
+import type { EdgeDecisions } from "@/lib/api/usage-edge";
 
 const OVERVIEW: TrafficOverview = {
   since: "2026-10-17",
   until: "2026-11-15",
   firstDt: "2026-11-02",
-  kpi: { hits: 11_300_000, pageviews: 4_450_000, visitorsAvg: 1234, visitorDays: 14 },
+  kpi: {
+    hits: 11_300_000,
+    pageviews: 4_450_000,
+    visitorsAvg: 1234,
+    visitorDays: 14,
+    engagedAvg: 310,
+    engagedDays: 3,
+  },
   sourcesDaily: [
     { dt: "2026-11-03", category: "WCM", visits: 40 },
     { dt: "2026-11-03", category: "Search engines", visits: 10 },
@@ -73,8 +82,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function renderSection() {
-  render(<TrafficSection overview={OVERVIEW} rangeQuery="range=30" />);
+/** A week of edge decisions holding the 2026-11-11 event, not the 2026-11-21 one. */
+const EDGE: EdgeDecisions = {
+  status: "ok",
+  days: Array.from({ length: 7 }, (_, i) => ({
+    dt: `2026-11-${String(9 + i).padStart(2, "0")}`,
+    allowed: 1000,
+    challenged: i === 6 ? 500 : 0,
+    blocked: 20,
+  })),
+};
+
+async function renderSection(edge?: EdgeDecisions) {
+  render(<TrafficSection overview={OVERVIEW} rangeQuery="range=30" edge={edge} />);
   await waitFor(() =>
     expect(screen.getAllByTestId("traffic-list-count")[0].textContent).toContain("of 30"),
   );
@@ -89,10 +109,73 @@ describe("TrafficSection", () => {
     expect(screen.getByTestId("traffic-hits").textContent).toBe("11.3M");
     expect(screen.getByTestId("traffic-pageviews").textContent).toBe("4.45M");
     expect(screen.getByTestId("traffic-visitors").textContent).toBe("1,234");
-    expect(screen.getByText("Estimate")).toBeTruthy();
+    expect(screen.getAllByText("Estimate")).toHaveLength(2);
     expect(screen.getByTestId("traffic-start-note").textContent).toContain(
       "Traffic detail starts Nov 2.",
     );
+  });
+
+  it("shows engaged visits a day beside visitors a day, as the same kind of tile", async () => {
+    await renderSection();
+    const engaged = screen.getByTestId("traffic-engaged");
+    expect(engaged.textContent).toBe("310");
+    const tile = engaged.parentElement!;
+    expect(tile.previousElementSibling).toBe(screen.getByTestId("traffic-visitors").parentElement);
+    expect(tile.className).toBe(screen.getByTestId("traffic-visitors").parentElement!.className);
+    expect(within(tile).getByText("Engaged visits a day")).toBeTruthy();
+    expect(
+      within(tile).getByText(/clicked a search result or opened a profile preview/),
+    ).toBeTruthy();
+    expect(within(tile).queryByText(/Not recorded/)).toBeNull();
+  });
+
+  it("an engaged tile with no day of data shows a dash and says so", async () => {
+    render(
+      <TrafficSection
+        overview={{ ...OVERVIEW, kpi: { ...OVERVIEW.kpi, engagedAvg: null, engagedDays: 0 } }}
+        rangeQuery="range=30"
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId("traffic-list-count").length).toBe(2));
+    const engaged = screen.getByTestId("traffic-engaged");
+    expect(engaged.textContent).toBe("—");
+    expect(engaged.parentElement!.textContent).toContain("Not recorded for this range yet.");
+  });
+
+  it("draws the edge chart per day under the KPIs, marking only events in its range", async () => {
+    await renderSection(EDGE);
+    const edge = screen.getByTestId("traffic-edge");
+    // Directly after the KPI tiles, before "Where visits come from".
+    expect(edge.previousElementSibling?.contains(screen.getByTestId("traffic-hits"))).toBe(true);
+    expect(edge.nextElementSibling).toBe(screen.getByTestId("traffic-sources"));
+    const card = within(edge);
+    expect(card.getByText("Edge firewall decisions per day")).toBeTruthy();
+    // One stack per day: 7 allowed + 7 blocked + 1 challenged segment.
+    expect(edge.querySelectorAll("svg rect")).toHaveLength(15);
+    expect(card.getByText("Nov 15: Challenged 500 (32.9%)")).toBeTruthy();
+    // Legend totals over the range.
+    expect(card.getByText("7,000")).toBeTruthy();
+    expect(card.getByText("140")).toBeTruthy();
+    expect(card.getByText(/Hits above include them; pageviews and visitors don't\./)).toBeTruthy();
+    // Nov 11 is in the week; Nov 21 is not.
+    const markers = card.getAllByTestId("usage-day-marker");
+    expect(markers.map((m) => m.getAttribute("data-date"))).toEqual(["2026-11-11"]);
+    expect(markers[0].textContent).toBe("VIVO cutover");
+    expect(card.queryByText("Bot block rules, bot filter backfill")).toBeNull();
+    expect(card.getByRole("img").getAttribute("aria-label")).toContain(
+      "marked: Nov 11 VIVO cutover",
+    );
+  });
+
+  it("the edge chart says when CloudWatch is unavailable, and is absent without edge data", async () => {
+    await renderSection({ status: "unavailable" });
+    expect(screen.getByTestId("traffic-edge-unavailable").textContent).toBe(
+      "Edge firewall counts are temporarily unavailable.",
+    );
+    expect(within(screen.getByTestId("traffic-edge")).queryByRole("img")).toBeNull();
+    cleanup();
+    await renderSection();
+    expect(screen.queryByTestId("traffic-edge")).toBeNull();
   });
 
   it("draws one bar per week from the first rollup day, total above each", async () => {

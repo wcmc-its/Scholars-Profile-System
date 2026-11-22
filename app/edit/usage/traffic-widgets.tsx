@@ -2,16 +2,19 @@
 
 /**
  * The Usage dashboard's traffic sections (client island): KPI tiles (hits,
- * pageviews, average daily visitors), "Where visits come from" (stacked bars by
- * week or month with multi-select source chips), "Referring sites and pages"
- * (paged, searchable, filtered by the selected sources), "Top pages" (page-type
- * tabs and an "Arrived from" filter that switches to landing pages), and "AI"
- * (referrals, fetches, crawlers, companies).
+ * pageviews, average daily visitors and engaged visits), "Edge firewall
+ * decisions per day" (stacked daily bars from CloudWatch, with dated event
+ * markers), "Where visits come from" (stacked bars by week or month with
+ * multi-select source chips), "Referring sites and pages" (paged, searchable,
+ * filtered by the selected sources), "Top pages" (page-type tabs and an
+ * "Arrived from" filter that switches to landing pages), and "AI" (referrals,
+ * fetches, crawlers, companies).
  *
- * The overview (KPIs, per-day sources, AI) comes from the server page; the
- * three lists page through `GET /api/edit/usage/traffic` 25 rows at a time,
- * so search and filters cover every row, not just the ones on screen. The
- * Excel link hits `/api/edit/usage/traffic/export` for the same range.
+ * The overview (KPIs, per-day sources, AI) and the edge decisions come from
+ * the server page; the three lists page through `GET /api/edit/usage/traffic`
+ * 25 rows at a time, so search and filters cover every row, not just the ones
+ * on screen. The Excel link hits `/api/edit/usage/traffic/export` for the same
+ * range.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
@@ -32,8 +35,11 @@ import {
   trafficPeriods,
   trafficStart,
 } from "@/lib/analytics/traffic-view";
+import { dayMarkers } from "@/lib/analytics/usage-events";
+import type { EdgeDecisions } from "@/lib/api/usage-edge";
 import { cn } from "@/lib/utils";
 
+import { DayMarkerOverlay, MARKER_ROW_PX, markersLabel } from "./day-markers";
 import { shortDay } from "./usage-format";
 
 const cardClass = "border-apollo-border-strong bg-apollo-surface rounded-[13px] border";
@@ -281,7 +287,132 @@ function KpiTiles({ overview }: { overview: TrafficOverview }) {
           undercounts people; a proxy botnet counts every address as a new visitor.
         </span>
       </div>
+      <div className={cn(cardClass, tile)}>
+        <span className="flex items-center gap-2">
+          <span className="text-[13px] font-medium">Engaged visits a day</span>
+          <span className="border-apollo-amber-tint-border bg-apollo-amber-tint text-foreground rounded-full border px-2 text-xs font-medium">
+            Estimate
+          </span>
+        </span>
+        <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-engaged">
+          {kpi.engagedAvg === null ? "—" : compactCount(kpi.engagedAvg)}
+        </span>
+        <span className="text-muted-foreground text-[13px]">
+          Average of each day&apos;s visitors who clicked a search result or opened a profile
+          preview. Scrapers almost never do, so this is a lower bound.
+          {kpi.engagedAvg === null ? " Not recorded for this range yet." : ""}
+        </span>
+      </div>
     </div>
+  );
+}
+
+/** Edge decision series, bottom to top: served first, then what the edge
+ *  stopped (the hourly chart's served / bot-or-challenged colors). */
+const EDGE_SERIES = [
+  { key: "allowed", name: "Allowed", color: "var(--apollo-slate)" },
+  { key: "challenged", name: "Challenged", color: "var(--apollo-signal-affinity)" },
+  { key: "blocked", name: "Blocked", color: "var(--apollo-signal-none)" },
+] as const;
+
+/** "Edge firewall decisions per day": the web ACL's allowed / challenged /
+ *  blocked requests per UTC day (CloudWatch), stacked like "Where visits come
+ *  from" but one bar per day, with dated events marked. Its own data source,
+ *  so its own "unavailable" state. */
+function EdgeCard({ edge }: { edge: EdgeDecisions }) {
+  const days = useMemo(() => (edge.status === "ok" ? edge.days : []), [edge]);
+  const markers = useMemo(() => dayMarkers(days.map((d) => d.dt)), [days]);
+  const sums = days.map((d) => d.allowed + d.challenged + d.blocked);
+  const maxSum = Math.max(...sums, 1);
+  const all = sums.reduce((a, b) => a + b, 0);
+  const n = days.length;
+  const slot = 1000 / Math.max(n, 1);
+  const bw = slot * 0.62;
+
+  return (
+    <section
+      className={cn(cardClass, "flex flex-col gap-3.5 p-4 sm:p-5")}
+      aria-labelledby="traffic-edge-h"
+      data-testid="traffic-edge"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 id="traffic-edge-h" className="text-[17px] font-semibold">
+          Edge firewall decisions per day
+        </h3>
+        <span className="text-muted-foreground text-[13px]">
+          Requests per day · hover a segment for detail
+        </span>
+      </div>
+      {edge.status === "unavailable" ? (
+        <p className="text-muted-foreground text-sm" data-testid="traffic-edge-unavailable">
+          Edge firewall counts are temporarily unavailable.
+        </p>
+      ) : n === 0 || all === 0 ? (
+        <p className="text-muted-foreground text-sm">No edge firewall data in this range.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">
+            {EDGE_SERIES.map((s) => (
+              <span key={s.key} className="inline-flex items-center gap-1.5">
+                <Swatch color={s.color} />
+                {s.name}
+                <span className="tabular-nums">
+                  {compactCount(days.reduce((a, d) => a + d[s.key], 0))}
+                </span>
+              </span>
+            ))}
+          </div>
+          <div
+            className="relative"
+            style={markers.length ? { marginTop: markers.length * MARKER_ROW_PX } : undefined}
+          >
+            <svg
+              viewBox="0 0 1000 260"
+              role="img"
+              aria-label={`Edge firewall requests per day: allowed, challenged and blocked${markersLabel(markers)}`}
+              className="block h-auto w-full"
+            >
+              <line x1="0" y1="250" x2="1000" y2="250" stroke="var(--apollo-border-strong)" />
+              {days.map((d, i) => {
+                let y = 250;
+                return (
+                  <g key={d.dt}>
+                    {EDGE_SERIES.map((s) => {
+                      const v = d[s.key];
+                      if (!v) return null;
+                      const h = (v / maxSum) * 240;
+                      y -= h;
+                      return (
+                        <rect
+                          key={s.key}
+                          x={i * slot + (slot - bw) / 2}
+                          y={y}
+                          width={bw}
+                          height={Math.max(h, 0.5)}
+                          fill={s.color}
+                        >
+                          <title>{`${shortDay(d.dt)}: ${s.name} ${v.toLocaleString("en-US")} (${sharePct(v, sums[i])})`}</title>
+                        </rect>
+                      );
+                    })}
+                  </g>
+                );
+              })}
+            </svg>
+            {/* The plot box runs 10 of 260 units past the baseline; stop the lines there. */}
+            <DayMarkerOverlay markers={markers} bottom={`${(10 / 260) * 100}%`} />
+          </div>
+          <div className="text-muted-foreground flex justify-between text-xs">
+            <span>{shortDay(days[0].dt)}</span>
+            <span>{shortDay(days[n - 1].dt)}</span>
+          </div>
+        </>
+      )}
+      <p className="text-muted-foreground text-[13px] leading-normal">
+        Blocked and challenged requests are automated traffic stopped at the edge. Hits above
+        include them; pageviews and visitors don&apos;t.
+      </p>
+    </section>
   );
 }
 
@@ -922,11 +1053,14 @@ export function TrafficSection({
   overview,
   rangeQuery,
   scoped = false,
+  edge,
 }: {
   overview: TrafficOverview;
   rangeQuery: string;
   /** A unit-scoped page draws its own Top pages card above the site-wide sections. */
   scoped?: boolean;
+  /** The edge firewall's daily decisions (CloudWatch); omitted, no edge card. */
+  edge?: EdgeDecisions;
 }) {
   const [grain, setGrain] = useState<Grain>("week");
   const [mode, setMode] = useState<"count" | "share">("count");
@@ -992,6 +1126,7 @@ export function TrafficSection({
       ) : (
         <>
           <KpiTiles overview={overview} />
+          {edge ? <EdgeCard edge={edge} /> : null}
           <SourcesCard overview={overview} grain={grain} mode={mode} sel={sel} setSel={setSel} />
           <ReferrerList
             rangeQuery={rangeQuery}

@@ -2,7 +2,9 @@
  * SQL builders for the Usage dashboard's traffic sections, reading the
  * `daily_traffic` Athena rollup (metric / dimension / cnt, one partition per
  * UTC day `dt`). Metrics read here:
- *  - `traffic`: dimension 'hits' | 'pageviews' | 'visitors' (a per-day estimate).
+ *  - `traffic`: dimension 'hits' | 'pageviews' | 'visitors' | 'engaged_visitors'
+ *    (the last two per-day estimates; engaged_visitors only on days rolled up
+ *    after it shipped).
  *  - `referrer_page`: lower(host) || path of an external referrer.
  *  - `landing`: '<referrer host>|<path>' for page views with an external referrer.
  *  - `page`: the path of every human page view.
@@ -140,7 +142,7 @@ const AFTER_PIPE = "substr(dimension, strpos(dimension, '|') + 1)";
 
 /** The overview queries for `[since, until]`, keyed by view-model field. */
 export interface TrafficOverviewQueries {
-  /** kind ('hits' | 'pageviews' | 'visitors'), cnt (range sum), days (days with a row). */
+  /** kind ('hits' | 'pageviews' | 'visitors' | 'engaged_visitors'), cnt (range sum), days (days with a row). */
   readonly kpi: string;
   /** dt, category, visits: external referrals per day and source category. */
   readonly sourcesDaily: string;
