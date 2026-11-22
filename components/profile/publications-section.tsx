@@ -223,7 +223,7 @@ export function PublicationsSection({
             </button>
           );
         })}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
           <PositionMultiSelect
             positions={positions}
             counts={positionCounts}
@@ -234,7 +234,7 @@ export function PublicationsSection({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search this list…"
-            className="border-border-strong h-7 w-[220px] rounded-full border bg-muted px-3 text-sm focus:border-[var(--color-accent-slate)] focus:bg-background focus:outline-none"
+            className="border-border-strong h-7 w-[220px] min-w-0 max-w-full rounded-full border bg-muted px-3 text-sm focus:border-[var(--color-accent-slate)] focus:bg-background focus:outline-none"
           />
         </div>
       </div>
