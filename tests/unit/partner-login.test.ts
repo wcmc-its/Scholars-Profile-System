@@ -17,6 +17,7 @@ vi.mock("@/lib/db", () => ({
       scholar: { count: vi.fn() },
       scholarIdentityLink: { findMany: vi.fn() },
       reportAccess: { findFirst: vi.fn() },
+      unitAdmin: { findFirst: vi.fn() },
     },
   },
 }));
@@ -45,6 +46,7 @@ beforeEach(() => {
   vi.mocked(markAssertionConsumed).mockResolvedValue({ duplicate: false });
   vi.mocked(db.read.scholarIdentityLink.findMany).mockResolvedValue([]);
   vi.mocked(db.read.reportAccess.findFirst).mockResolvedValue(null);
+  vi.mocked(db.read.unitAdmin.findFirst).mockResolvedValue(null);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -110,6 +112,10 @@ describe("proxy", () => {
       "/api/edit/orcid",
       "/api/edit/reports/mentored-publications",
       "/api/edit/reports/article-count/cwid-list",
+      "/edit/center/MEYER/history",
+      "/edit/center",
+      "/api/edit/grant",
+      "/api/edit/center/MEYER/disease-assignments",
     ]) {
       const res = await proxy(await partnerRequest(path));
       expect(res.status).toBe(403);
@@ -126,6 +132,8 @@ describe("proxy", () => {
       "/edit/reports/high-impact-publications",
       "/api/edit/reports/article-count",
       "/api/edit/reports/high-impact-publications",
+      "/edit/center/MEYER",
+      "/api/edit/roster",
     ]) {
       const res = await proxy(await partnerRequest(path));
       expect(res.status).not.toBe(403);
@@ -218,6 +226,17 @@ describe("SAML callback", () => {
         cwid: "zq99@cornell.edu",
         reportKey: { in: ["article-count", "high-impact-publications"] },
       },
+      select: { cwid: true },
+    });
+  });
+
+  it("admits a center curator with no roster row", async () => {
+    vi.mocked(db.read.scholar.count).mockResolvedValue(0);
+    vi.mocked(db.read.unitAdmin.findFirst).mockResolvedValue({ cwid: "zq99@cornell.edu" } as never);
+    const res = await callback();
+    expect(res.status).toBe(302);
+    expect(db.read.unitAdmin.findFirst).toHaveBeenCalledWith({
+      where: { cwid: "zq99@cornell.edu", entityType: "center" },
       select: { cwid: true },
     });
   });

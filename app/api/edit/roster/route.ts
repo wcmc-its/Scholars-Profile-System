@@ -137,7 +137,7 @@ function snapshot(row: {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const req = await readEditRequest(request);
+  const req = await readEditRequest(request, { allowPartner: true });
   if (!req.ok) return req.response;
   const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 

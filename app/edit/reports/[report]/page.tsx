@@ -79,7 +79,7 @@ import type { ReportAccessPopoverProps } from "@/components/edit/report-access-p
 import { ReportHeader } from "@/components/edit/report-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { getPartnerReportSession, PARTNER_HOME } from "@/lib/auth/partner-login";
+import { getPartnerEditSession, PARTNER_HOME } from "@/lib/auth/partner-login";
 import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { db } from "@/lib/db";
@@ -170,7 +170,7 @@ export default async function EditReportPage({
   // A Cornell Ithaca partner (ITHACA_LOGIN) gets a narrow, all-false session
   // here and only the PARTNER_REPORT_KEYS reports below; every other report 404s.
   const wcmSession = await getEffectiveEditSession();
-  const session = wcmSession ?? (await getPartnerReportSession());
+  const session = wcmSession ?? (await getPartnerEditSession());
   const partner = wcmSession === null && session !== null;
   if (!session) {
     redirect(`/api/auth/saml/login?return=/edit/reports/${encodeURIComponent(segment)}`);

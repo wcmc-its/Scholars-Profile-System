@@ -8,8 +8,8 @@
  *    2026-11-19). ponytail: trusts the weekly `scholar_identity_link` snapshot;
  *    a wrong Cornell mapping signs the person in as that WCM CWID. Each such
  *    login logs both IDs.
- * 2. Otherwise a live Ithaca roster row, or a report grant to the eppn → the
- *    partner session (`netid@cornell.edu`).
+ * 2. Otherwise a live Ithaca roster row, or a report or center grant to the
+ *    eppn → the partner session (`netid@cornell.edu`).
  * 3. Otherwise null: refused.
  *
  * Throws on a DB error; the caller fails closed.
@@ -23,12 +23,13 @@ import { PARTNER_REPORT_KEYS } from "@/lib/edit/report-access";
 export const PARTNER_HOME = "/edit/cornell";
 
 /**
- * The session a report surface on the proxy's partner allowlist uses for a
- * Cornell Ithaca sign-in: the full eppn as `cwid`, every role false. It sees
- * only what a `report_access` / Reporting grant to that eppn names; each
- * caller also checks `PARTNER_REPORT_KEYS`. Null for anyone else.
+ * The session a surface on the proxy's partner allowlist uses for a Cornell
+ * Ithaca sign-in: the full eppn as `cwid`, every role false. It sees only what
+ * a grant to that eppn names: a `report_access` row (each report caller also
+ * checks `PARTNER_REPORT_KEYS`) or a center curator `unit_admin` row. Null for
+ * anyone else.
  */
-export async function getPartnerReportSession(): Promise<EditSession | null> {
+export async function getPartnerEditSession(): Promise<EditSession | null> {
   const netid = await getPartnerNetid();
   return netid ? { cwid: `${netid}@cornell.edu`, isSuperuser: false, isCommsSteward: false } : null;
 }
@@ -37,6 +38,15 @@ export async function getPartnerReportSession(): Promise<EditSession | null> {
 async function hasPartnerReportGrant(eppn: string): Promise<boolean> {
   const row = await db.read.reportAccess.findFirst({
     where: { cwid: eppn, reportKey: { in: [...PARTNER_REPORT_KEYS] } },
+    select: { cwid: true },
+  });
+  return row !== null;
+}
+
+/** Whether a partner eppn administers any center (a curator grant, step 4). */
+export async function hasPartnerCenterGrant(eppn: string): Promise<boolean> {
+  const row = await db.read.unitAdmin.findFirst({
+    where: { cwid: eppn, entityType: "center" },
     select: { cwid: true },
   });
   return row !== null;
@@ -71,7 +81,8 @@ export async function resolvePartnerLogin(eppn: string): Promise<string | null> 
   const ithaca = await db.read.scholar.count({
     where: { cwid: netid, campus: "ithaca", deletedAt: null },
   });
-  // A report grant also admits (report viewers include Ithaca staff, who
-  // have no roster row).
-  return ithaca > 0 || (await hasPartnerReportGrant(eppn)) ? eppn : null;
+  // A report or center grant also admits (Ithaca staff have no roster row).
+  return ithaca > 0 || (await hasPartnerReportGrant(eppn)) || (await hasPartnerCenterGrant(eppn))
+    ? eppn
+    : null;
 }

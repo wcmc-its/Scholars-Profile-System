@@ -29,6 +29,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { getPartnerEditSession, hasPartnerCenterGrant } from "@/lib/auth/partner-login";
 import { db } from "@/lib/db";
 import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
 import {
@@ -50,7 +51,13 @@ function jsonError(status: number, error: string): NextResponse {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const session = await getEffectiveEditSession();
+  // A Cornell Ithaca center curator (login step 4) looks people up to add them
+  // to the roster; any other partner session stays out.
+  let session = await getEffectiveEditSession();
+  if (!session) {
+    const partner = await getPartnerEditSession();
+    if (partner && (await hasPartnerCenterGrant(partner.cwid))) session = partner;
+  }
   if (!session) return jsonError(401, "unauthenticated");
 
   const { searchParams } = new URL(request.url);

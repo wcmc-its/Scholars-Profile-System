@@ -19,6 +19,11 @@ vi.mock("@/lib/db", () => ({ db: { read: { scholar: { findMany: mockScholarFindM
 // Resolves identity through the #637 effective-identity seam (#2122) — a "View
 // as" impersonator must be gated as the target, not the real signed-in user.
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
+const { mockPartner, mockCenterGrant } = vi.hoisted(() => ({ mockPartner: vi.fn(), mockCenterGrant: vi.fn() }));
+vi.mock("@/lib/auth/partner-login", () => ({
+  getPartnerEditSession: mockPartner,
+  hasPartnerCenterGrant: mockCenterGrant,
+}));
 vi.mock("@/lib/sources/ldap", () => ({
   searchDirectoryPeopleByName: mockSearchByName,
   fetchDirectoryPeopleByCwid: mockFetchByCwid,
@@ -133,5 +138,25 @@ describe("GET /api/directory/people — failures", () => {
     expect(res.status).toBe(500);
     const json = (await res.json()) as { ok: boolean; error: string };
     expect(json.error).toBe("directory_unavailable");
+  });
+});
+
+describe("Cornell Ithaca partner (login step 4)", () => {
+  const PARTNER = { cwid: "zq99@cornell.edu", isSuperuser: false, isCommsSteward: false };
+  beforeEach(() => {
+    mockGetEditSession.mockResolvedValue(null);
+    mockPartner.mockResolvedValue(PARTNER);
+  });
+
+  it("a center curator may look people up", async () => {
+    mockCenterGrant.mockResolvedValue(true);
+    const res = await get("?q=smith");
+    expect(res.status).toBe(200);
+    expect(mockCenterGrant).toHaveBeenCalledWith("zq99@cornell.edu");
+  });
+
+  it("any other partner session is 401", async () => {
+    mockCenterGrant.mockResolvedValue(false);
+    expect((await get("?q=smith")).status).toBe(401);
   });
 });

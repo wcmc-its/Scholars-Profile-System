@@ -10,6 +10,7 @@
  * (`lib/edit/request.ts` is not in `self-edit-spec.md`'s file map — it is the
  * de-duplicated preamble those three routes would otherwise each repeat.)
  */
+import { getPartnerEditSession } from "@/lib/auth/partner-login";
 import { randomUUID } from "node:crypto";
 
 import { NextResponse, type NextRequest } from "next/server";
@@ -303,7 +304,13 @@ export async function resolveEditIdentityForWrite(): Promise<
 export async function readEditRequest(
   request: NextRequest,
   /** Override the body cap for a route that legitimately posts more (the Matcha export). */
-  opts: { maxBytes?: number } = {},
+  opts: {
+    maxBytes?: number;
+    /** A route on the proxy's partner allowlist: a Cornell Ithaca session
+     *  (`getPartnerEditSession`, every role false) stands in when there is no
+     *  WCM session. The route's own authz then sees only that eppn's grants. */
+    allowPartner?: boolean;
+  } = {},
 ): Promise<EditRequestResult> {
   const maxBytes = opts.maxBytes ?? MAX_BODY_BYTES;
   // Defense in depth beyond SameSite=Lax.
@@ -322,7 +329,13 @@ export async function readEditRequest(
   // R3 view-only refusals (and the observer strip) live in
   // `resolveEditIdentityForWrite`. Placed before the body read so an
   // oversized/garbage body still 403s rather than 413/400.
-  const resolved = await resolveEditIdentityForWrite();
+  let resolved = await resolveEditIdentityForWrite();
+  if (!resolved.ok && opts.allowPartner) {
+    const partner = await getPartnerEditSession();
+    if (partner) {
+      resolved = { ok: true, id: { session: partner, realCwid: partner.cwid, impersonatedCwid: null } };
+    }
+  }
   if (!resolved.ok) return resolved;
   const { session: effective, realCwid, impersonatedCwid } = resolved.id;
 

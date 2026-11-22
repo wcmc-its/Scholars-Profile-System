@@ -19,13 +19,15 @@
  *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  */
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { UnitEditPage } from "@/components/edit/unit-edit-page";
+import { UnitEditPage, renderRoster } from "@/components/edit/unit-edit-page";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { getPartnerEditSession, PARTNER_HOME } from "@/lib/auth/partner-login";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
@@ -49,6 +51,22 @@ export default async function EditCenterPage({
 
   const session = await getEffectiveEditSession();
   if (!session) {
+    // A Cornell Ithaca curator (ITHACA_LOGIN, login step 4) gets this center's
+    // Members roster and nothing else; no grant here reads as no such page.
+    const partner = await getPartnerEditSession();
+    if (partner) {
+      const pctx = await loadUnitEditContext("center", code, partner, db.read);
+      if (pctx === null) notFound();
+      return (
+        <main className="mx-auto max-w-7xl px-4 py-8">
+          <Link href={PARTNER_HOME} className="text-apollo-slate mb-4 inline-block text-sm hover:underline">
+            &larr; Back
+          </Link>
+          <h1 className="mb-6 text-2xl font-semibold">{pctx.unit.name}: members</h1>
+          {renderRoster(pctx)}
+        </main>
+      );
+    }
     redirect(`/api/auth/saml/login?return=/edit/center/${encodeURIComponent(code)}`);
   }
 
