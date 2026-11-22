@@ -21,9 +21,46 @@ export type SessionProbeData = Partial<ImpersonationProbe> & {
   canAccessFundingMatcher?: boolean;
 };
 
+/** What `GET /api/auth/session` answers a signed-out visitor, field for field. */
+export const SIGNED_OUT: SessionProbeData = {
+  authenticated: false,
+  scholar: null,
+  displayName: null,
+  impersonating: null,
+  canImpersonate: false,
+  canAccessFundingMatcher: false,
+  consoleLinks: [],
+};
+
+/**
+ * The signed-in hint's names, as `signedInHintName` in lib/auth/session.ts
+ * writes them (not imported: it would pull iron-session into the client
+ * bundle; signed-in-hint.test.ts pins the two together). `__Host-` in deployed
+ * envs, bare on local http.
+ */
+export const SIGNED_IN_HINT_NAMES = ["__Host-sps_signed_in", "sps_signed_in"];
+
+/**
+ * Whether the browser holds the signed-in hint. Every session-cookie write sets
+ * it with the same lifetime and every clear clears it, so its absence means no
+ * session: the probe can be skipped. Its presence proves nothing; the probe
+ * still decides.
+ */
+function hasSignedInHint(): boolean {
+  if (typeof document === "undefined") return true;
+  return document.cookie.split(";").some((pair) => {
+    const eq = pair.indexOf("=");
+    const name = pair.slice(0, eq).trim();
+    return eq > 0 && SIGNED_IN_HINT_NAMES.includes(name) && pair.slice(eq + 1).trim() !== "";
+  });
+}
+
 let current: Promise<SessionProbeData | null> | null = null;
 
 export function probeSession(): Promise<SessionProbeData | null> {
+  // No hint: certainly signed out, so answer as the route would without asking.
+  // This is what spares the origin the anonymous probe on every public page.
+  if (!hasSignedInHint()) return Promise.resolve(SIGNED_OUT);
   if (current) return current;
   // The executor runs synchronously, so `fetch` fires now; a missing `fetch`
   // or a synchronous throw becomes a rejection, caught below like any failure.
