@@ -62,6 +62,8 @@ const TRAFFIC_CACHE_TTL_SECONDS = 43_200;
 /** Matches traffic-queries' MAX_OFFSET. */
 const MAX_LIST_OFFSET = 1_000_000;
 const CACHE_VERSION = "v1";
+/** "v2": the overview's KPIs gained the engaged-visits average; a v1 entry lacks it. */
+const OVERVIEW_CACHE_VERSION = "v2";
 
 export type TrafficWindow = { since: string; until: string };
 
@@ -82,7 +84,7 @@ async function loadTrafficOverviewUncached(w: TrafficWindow): Promise<TrafficOve
 export function loadTrafficOverview(w: TrafficWindow): Promise<TrafficOverview> {
   return unstable_cache(
     () => loadTrafficOverviewUncached(w),
-    ["usage-traffic-overview", CACHE_VERSION, w.since, w.until],
+    ["usage-traffic-overview", OVERVIEW_CACHE_VERSION, w.since, w.until],
     { revalidate: TRAFFIC_CACHE_TTL_SECONDS, tags: ["usage-traffic"] },
   )();
 }

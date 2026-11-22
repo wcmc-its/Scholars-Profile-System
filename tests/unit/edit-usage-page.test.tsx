@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   mockLoadUsage: vi.fn(),
   mockLoadHealth: vi.fn(),
   mockLoadTraffic: vi.fn(),
+  mockLoadEdge: vi.fn(),
   mockLoadEdits: vi.fn(),
   mockLoadEditsUncached: vi.fn(),
   mockScope: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/lib/edit/dashboard-access", async (importOriginal) => ({
   loadScopeSlugs: h.mockScopeSlugs,
 }));
 vi.mock("@/lib/api/usage-traffic", () => ({ loadTrafficOverview: h.mockLoadTraffic }));
+vi.mock("@/lib/api/usage-edge", () => ({ loadEdgeDecisions: h.mockLoadEdge }));
 vi.mock("@/lib/api/service-health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/service-health")>()),
   loadServiceHealth: h.mockLoadHealth,
@@ -123,7 +125,7 @@ const TRAFFIC_EMPTY = {
   since: "2026-08-26",
   until: "2026-09-24",
   firstDt: null,
-  kpi: { hits: 0, pageviews: 0, visitorsAvg: 0, visitorDays: 0 },
+  kpi: { hits: 0, pageviews: 0, visitorsAvg: 0, visitorDays: 0, engagedAvg: null, engagedDays: 0 },
   sourcesDaily: [],
   referrers: { total: 0, other: 0, siteOnly: 0 },
   aiDaily: [],
@@ -166,6 +168,7 @@ beforeEach(() => {
   // Traffic sections have their own tests (usage-traffic-widgets); here they
   // render their empty state so no list fetch fires.
   h.mockLoadTraffic.mockResolvedValue(TRAFFIC_EMPTY);
+  h.mockLoadEdge.mockResolvedValue({ status: "unavailable" });
   h.mockLoadEdits.mockResolvedValue([]);
   h.mockLoadEditsUncached.mockResolvedValue([]);
   h.mockScope.mockResolvedValue({ all: true });
@@ -324,6 +327,33 @@ describe("/edit/usage", () => {
       "/api/edit/usage/traffic/export?range=7&grain=week",
     );
     expect(h.mockLoadTraffic).toHaveBeenCalledWith({ since: "2026-09-18", until: "2026-09-24" });
+  });
+
+  it("reads the edge firewall chart for the range only when the traffic cards draw", async () => {
+    await renderPage({ range: "7" });
+    // Empty traffic detail: no edge card, so no CloudWatch read.
+    expect(h.mockLoadEdge).not.toHaveBeenCalled();
+    document.body.innerHTML = "";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ rows: [], total: 0 }) }),
+      ),
+    );
+    try {
+      h.mockLoadTraffic.mockResolvedValue({ ...TRAFFIC_EMPTY, firstDt: "2026-09-01" });
+      h.mockLoadEdge.mockResolvedValue({
+        status: "ok",
+        days: [{ dt: "2026-09-20", allowed: 10, challenged: 2, blocked: 1 }],
+      });
+      const root = await renderPage({ range: "7" });
+      expect(h.mockLoadEdge).toHaveBeenCalledWith({ since: "2026-09-18", until: "2026-09-24" });
+      expect(root.getByTestId("traffic-edge")).toBeTruthy();
+      expect(root.getByTestId("traffic-engaged").textContent).toBe("—");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("fails soft when the traffic rollup can't be read", async () => {
@@ -579,6 +609,35 @@ describe("PageviewsChart", () => {
     expect(labelled(90)).toBe(8); // stride 12: i = 0, 12, ..., 84
     document.body.innerHTML = "";
     expect(labelled(7)).toBe(7);
+  });
+});
+
+describe("PageviewsChart event markers", () => {
+  const week = (from: number) =>
+    Array.from({ length: 7 }, (_, i) => ({
+      day: `2026-11-${String(from + i).padStart(2, "0")}`,
+      views: 10,
+    }));
+
+  it("marks an event in its range and leaves out one outside it", () => {
+    const { getByTestId } = render(<PageviewsChart data={week(8)} />);
+    const chart = getByTestId("usage-pageviews-chart");
+    const markers = [...chart.querySelectorAll('[data-testid="usage-day-marker"]')];
+    expect(markers.map((m) => m.getAttribute("data-date"))).toEqual(["2026-11-11"]);
+    expect(markers[0].textContent).toBe("VIVO cutover");
+    expect(chart.textContent).not.toContain("Bot block rules");
+    expect(chart.querySelector('[role="img"]')?.getAttribute("aria-label")).toContain(
+      "; marked: Nov 11 VIVO cutover",
+    );
+    // The overlay sits beside the bars, not among the day slots.
+    expect(chart.querySelector('[role="img"]')?.children).toHaveLength(7);
+  });
+
+  it("draws no markers for a range without events", () => {
+    const { getByTestId } = render(<PageviewsChart data={week(1)} />);
+    const chart = getByTestId("usage-pageviews-chart");
+    expect(chart.querySelectorAll('[data-testid="usage-day-marker"]')).toHaveLength(0);
+    expect(chart.querySelector('[role="img"]')?.getAttribute("aria-label")).not.toContain("marked");
   });
 });
 

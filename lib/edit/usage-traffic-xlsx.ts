@@ -58,6 +58,10 @@ export async function buildUsageTrafficWorkbook(
     ["Hits", kpi.hits],
     ["Pageviews", kpi.pageviews],
     ["Visitors, average per day (estimate)", kpi.visitorsAvg],
+    [
+      "Engaged visits, average per day (estimate)",
+      kpi.engagedAvg ?? "Not recorded for this range yet",
+    ],
     ["External referrals", referrers.total],
     ["Referrals past each day's top 5,000 referrers (not categorized)", referrers.other],
     ["Referrals naming only the site, not the page", referrers.siteOnly],
@@ -69,6 +73,10 @@ export async function buildUsageTrafficWorkbook(
     [
       "About visitors",
       "Distinct network address plus browser per day, averaged over the days in range. Campus NAT undercounts people; a proxy botnet counts every address as a new visitor.",
+    ],
+    [
+      "About engaged visits",
+      "Visitors who clicked a search result or opened a profile preview, averaged over the days in range that record it. Scrapers almost never do, so this is a lower bound.",
     ],
     ["Note", "Counts still include automated traffic the edge firewall let through."],
   ];

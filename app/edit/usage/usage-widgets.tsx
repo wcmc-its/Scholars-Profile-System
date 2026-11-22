@@ -31,9 +31,11 @@ import {
   hourOfDayAverages,
   hourlyTimeline,
 } from "@/lib/api/usage-hourly";
+import { dayMarkers } from "@/lib/analytics/usage-events";
 import { toCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 
+import { DayMarkerOverlay, MARKER_ROW_PX, markersLabel } from "./day-markers";
 import { type ChartDay, isWeekend, niceCeil, shortDay } from "./usage-format";
 
 /** The header's "Range" dropdown: Last 7 / 30 / 90 days, Since launch, or a
@@ -177,9 +179,11 @@ export function UsageRangePicker({
 
 /** Profile pageviews by day — flex bars, weekends lighter, hover (or tap) a bar
  *  for its exact count in the header line. A `null` day (no rollup row) keeps
- *  its slot on the axis but draws no bar: a gap, not a zero. */
+ *  its slot on the axis but draws no bar: a gap, not a zero. Dated events in
+ *  the range are marked over the bars. */
 export function PageviewsChart({ data }: { data: ChartDay[] }) {
   const [hover, setHover] = useState<number | null>(null);
+  const markers = dayMarkers(data.map((d) => d.day));
   const top = niceCeil(Math.max(...data.map((d) => d.views ?? 0), 1));
   const gaps = data.filter((d) => d.views === null).length;
   const ticks = [0, top / 2, top];
@@ -205,7 +209,10 @@ export function PageviewsChart({ data }: { data: ChartDay[] }) {
             : "Hover a bar for the exact count"}
         </span>
       </div>
-      <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-2">
+      <div
+        className="grid grid-cols-[40px_minmax(0,1fr)] gap-2"
+        style={markers.length ? { paddingTop: markers.length * MARKER_ROW_PX } : undefined}
+      >
         <div className="text-muted-foreground relative h-[220px] text-[11.5px] tabular-nums">
           {ticks.map((t) => (
             <span
@@ -232,7 +239,7 @@ export function PageviewsChart({ data }: { data: ChartDay[] }) {
             <div
               className={cn("absolute inset-0 flex items-end", gap)}
               role="img"
-              aria-label={`Profile pageviews per day, ${data.length} days${gaps ? `, ${gaps} with no data` : ""}`}
+              aria-label={`Profile pageviews per day, ${data.length} days${gaps ? `, ${gaps} with no data` : ""}${markersLabel(markers)}`}
               onMouseLeave={() => setHover(null)}
             >
               {data.map((d, i) => (
@@ -260,6 +267,7 @@ export function PageviewsChart({ data }: { data: ChartDay[] }) {
                 </div>
               ))}
             </div>
+            <DayMarkerOverlay markers={markers} />
           </div>
           <div className={cn("text-muted-foreground flex text-[11.5px]", gap)} aria-hidden="true">
             {data.map((d, i) => (

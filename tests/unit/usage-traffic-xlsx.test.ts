@@ -9,7 +9,14 @@ const OVERVIEW: TrafficOverview = {
   since: "2026-11-01",
   until: "2026-11-15",
   firstDt: "2026-11-03",
-  kpi: { hits: 1000, pageviews: 400, visitorsAvg: 30, visitorDays: 13 },
+  kpi: {
+    hits: 1000,
+    pageviews: 400,
+    visitorsAvg: 30,
+    visitorDays: 13,
+    engagedAvg: 4,
+    engagedDays: 2,
+  },
   sourcesDaily: [
     { dt: "2026-11-03", category: "WCM", visits: 4 },
     { dt: "2026-11-10", category: "Search engines", visits: 6 },
@@ -103,6 +110,24 @@ describe("buildUsageTrafficWorkbook", () => {
     summary.eachRow((r) => byLabel.set(String(r.getCell(1).value), r.getCell(2).value));
     expect(byLabel.get("Hits")).toBe(1000);
     expect(byLabel.get("Visitors, average per day (estimate)")).toBe(30);
+    expect(byLabel.get("Engaged visits, average per day (estimate)")).toBe(4);
     expect(byLabel.get("Traffic detail starts")).toBe("2026-11-03");
+  });
+
+  it("says so when no day in range records engaged visits", async () => {
+    const buf = await buildUsageTrafficWorkbook(
+      { ...OVERVIEW, kpi: { ...OVERVIEW.kpi, engagedAvg: null, engagedDays: 0 } },
+      LISTS,
+      "week",
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const byLabel = new Map<string, unknown>();
+    wb.getWorksheet("Summary")!.eachRow((r) =>
+      byLabel.set(String(r.getCell(1).value), r.getCell(2).value),
+    );
+    expect(byLabel.get("Engaged visits, average per day (estimate)")).toBe(
+      "Not recorded for this range yet",
+    );
   });
 });

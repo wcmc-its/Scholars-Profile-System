@@ -37,9 +37,33 @@ describe("shapeTrafficOverview", () => {
       },
       { since: "2026-11-01", until: "2026-11-15" },
     );
-    expect(o.kpi).toEqual({ hits: 1000, pageviews: 400, visitorsAvg: 23, visitorDays: 4 });
+    expect(o.kpi).toEqual({
+      hits: 1000,
+      pageviews: 400,
+      visitorsAvg: 23,
+      visitorDays: 4,
+      engagedAvg: null,
+      engagedDays: 0,
+    });
     expect(o.firstDt).toBe("2026-11-12");
     expect(o.referrers).toEqual({ total: 50, other: 5, siteOnly: 30 });
+  });
+
+  it("averages engaged visitors over the days that have the row, like visitors", () => {
+    const o = shapeTrafficOverview(
+      {
+        ...EMPTY,
+        kpi: [
+          { kind: "visitors", cnt: "90", days: "4" },
+          // Only the last two days were rolled up with engaged visitors.
+          { kind: "engaged_visitors", cnt: "25", days: "2" },
+        ],
+      },
+      { since: "2026-11-01", until: "2026-11-15" },
+    );
+    expect(o.kpi.visitorsAvg).toBe(23);
+    expect(o.kpi.engagedAvg).toBe(13);
+    expect(o.kpi.engagedDays).toBe(2);
   });
 
   it("drops malformed rows and pivots AI series per day", () => {
