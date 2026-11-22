@@ -1234,7 +1234,13 @@ const byCountDesc = (a: DataQualityFacetOption, b: DataQualityFacetOption) =>
  * count because a membership cannot be joined to the scholar's active status in a
  * `groupBy` — a few may point at since-inactivated scholars.
  */
-export async function loadDataQualityFacets(client: DataQualityClient): Promise<DataQualityFacets> {
+export async function loadDataQualityFacets(
+  client: DataQualityClient,
+  /** Also offer Cornell Ithaca person types (`ithaca_*`). Ithaca rows are
+   *  `status = 'external'`, so ACTIVE_WHERE never counts them; only the ORCID pages,
+   *  which list Ithaca scholars, opt in. Every other facet stays WCM-only. */
+  opts: { ithacaRoles?: boolean } = {},
+): Promise<DataQualityFacets> {
   // Same UTC calendar day as the filter (isCurrentCenterMembership), so option counts match results.
   const today = new Date(utcToday());
   const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, instAgg, ctrAgg] =
@@ -1245,7 +1251,13 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
         orderBy: { name: "asc" },
       }),
       client.center.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
-      client.scholar.groupBy({ by: ["roleCategory"], where: ACTIVE_WHERE, _count: { _all: true } }),
+      client.scholar.groupBy({
+        by: ["roleCategory"],
+        where: opts.ithacaRoles
+          ? { deletedAt: null, OR: [{ status: "active" }, { campus: "ithaca", status: "external" }] }
+          : ACTIVE_WHERE,
+        _count: { _all: true },
+      }),
       client.scholar.groupBy({ by: ["deptCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
       client.scholar.groupBy({ by: ["divCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
       client.scholar.groupBy({

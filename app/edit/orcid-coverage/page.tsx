@@ -575,7 +575,7 @@ export default async function EditOrcidCoveragePage({
   // is cached, so a degraded render never outlives this request.
   const [coverageR, facetsR] = await Promise.allSettled([
     loadOrcidCoverage(db.read, params),
-    loadDataQualityFacets(db.read),
+    loadDataQualityFacets(db.read, { ithacaRoles: true }),
   ]);
   const logFailure = (event: string, err: unknown) =>
     console.error(

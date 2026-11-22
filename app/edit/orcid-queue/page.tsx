@@ -98,7 +98,7 @@ export default async function OrcidQueuePage({
     isSlugRequestEnabled() ? countPendingSlugRequests(db.read) : Promise.resolve(null),
     isHonorsQueueTabVisible(session) ? countPendingHonors(db.read) : Promise.resolve(null),
     // Independent of the queue: a facet failure only narrows the filter bar.
-    loadDataQualityFacets(db.read).catch((err: unknown) => {
+    loadDataQualityFacets(db.read, { ithacaRoles: true }).catch((err: unknown) => {
       console.error(
         JSON.stringify({
           event: "orcid_queue_facets_failed",
