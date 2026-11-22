@@ -131,10 +131,12 @@ async function HomeStats() {
   const figure = "font-serif text-[30px] leading-[34px] text-apollo-bar";
   return (
     <div className="mt-10 flex flex-wrap justify-center gap-x-12 gap-y-4">
-      <Link href="/search" className={stat}>
+      {/* No prefetch: /search is uncached at the edge, so a viewport prefetch on
+          every home view is an origin render (same as the site chrome, #3512). */}
+      <Link href="/search" prefetch={false} className={stat}>
         <span className={figure}>{stats.scholarCount.toLocaleString()}</span>scholars
       </Link>
-      <Link href="/search?type=publications" className={stat}>
+      <Link href="/search?type=publications" prefetch={false} className={stat}>
         <span className={figure}>{stats.publicationCount.toLocaleString()}</span>publications
       </Link>
       <a
