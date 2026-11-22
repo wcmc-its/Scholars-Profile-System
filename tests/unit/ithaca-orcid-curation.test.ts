@@ -28,6 +28,26 @@ describe("Affiliation Manager seeds", () => {
   });
 });
 
+describe("web-page ORCID inferences", () => {
+  it("land on Cornell Ithaca rows only, with the votes as accepted", () => {
+    const { rows, invalid } = toCandidates([], [], [], [
+      { netid: "QZ11", orcid: ID, votes: 4, inferred_at: "2026-11-21T00:00:00Z" },
+      { netid: "ov22", orcid: "0000-0002-1825-009", votes: 3, inferred_at: null },
+    ]);
+    expect(invalid).toBe(1);
+    expect(rows.map((r) => [r.cwid, r.source, r.articlesAccepted])).toEqual([["qz11", "web_page_seed", 4]]);
+    expect(mergeForScholars(rows, new Set(["qz11"])).keep).toEqual([]);
+    expect(mergeForScholars(rows, new Set(), new Set(["qz11"])).keep).toHaveLength(1);
+  });
+  it("band strong like an Affiliation Manager pair, and count as strong coverage", () => {
+    const ok = { competitor: false, nameAgrees: true };
+    expect(affiliationManagerBand("moderate", ok, ["web_page_seed"])).toBe("strong");
+    expect(affiliationManagerBand("moderate", { ...ok, nameAgrees: false }, ["web_page_seed"])).toBe("moderate");    expect(
+      orcidVerdict([{ cwid: "qz11", orcid: ID, source: "web_page_seed", articlesAccepted: 3, articlesRejected: 0 }]).tier,
+    ).toBe("strong");
+  });
+});
+
 describe("affiliationManagerBand", () => {
   const am = ["cornell_affiliation_manager"];
   const ok = { competitor: false, nameAgrees: true };

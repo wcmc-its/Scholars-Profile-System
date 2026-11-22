@@ -343,6 +343,10 @@ export function orcidVerdict(
     // Cornell's library mapped the NetID to the iD (Affiliation Manager): an
     // institutional assertion, so the Ithaca person is asked to confirm it.
     r.source === "cornell_affiliation_manager" ||
+    // Cornell Ithaca web-page inference (ReCiterDB webPageOrcid.py): papers on the
+    // person's own Cornell page, their name on each, and at least one publisher-
+    // deposited iD among the votes. Confirmed individually, never bulk.
+    r.source === "web_page_seed" ||
     // Matched to the person by name only, so a namesake's biosketch is possible: strong
     // only when another source names the same iD — not another name-only match, and not
     // an RPM row that also sat on articles the person rejected.
