@@ -2621,6 +2621,67 @@ a{color:var(--slate)}
               "SampledRequestsEnabled": true,
             },
           },
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "search-fingerprint-rate-limit",
+            "Priority": 16,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "CUSTOM_KEYS",
+                "CustomKeys": [
+                  {
+                    "LabelNamespace": {
+                      "Namespace": "awswaf:managed:token:fingerprint:",
+                    },
+                  },
+                ],
+                "EvaluationWindowSec": 300,
+                "Limit": 300,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-search-fingerprint-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
         ],
         "Scope": "CLOUDFRONT",
         "VisibilityConfig": {
@@ -5414,6 +5475,67 @@ a{color:var(--slate)}
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
               "MetricName": "sps-edge-staging-search-challenge-tokenless-surge",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "search-fingerprint-rate-limit",
+            "Priority": 16,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "CUSTOM_KEYS",
+                "CustomKeys": [
+                  {
+                    "LabelNamespace": {
+                      "Namespace": "awswaf:managed:token:fingerprint:",
+                    },
+                  },
+                ],
+                "EvaluationWindowSec": 300,
+                "Limit": 300,
+                "ScopeDownStatement": {
+                  "AndStatement": {
+                    "Statements": [
+                      {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "UriPath": {},
+                          },
+                          "PositionalConstraint": "STARTS_WITH",
+                          "SearchString": "/search",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "LOWERCASE",
+                            },
+                          ],
+                        },
+                      },
+                      {
+                        "NotStatement": {
+                          "Statement": {
+                            "IPSetReferenceStatement": {
+                              "Arn": {
+                                "Fn::GetAtt": [
+                                  "WcmIpAllowSet",
+                                  "Arn",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-search-fingerprint-rate-limit",
               "SampledRequestsEnabled": true,
             },
           },

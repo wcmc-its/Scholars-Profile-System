@@ -2054,6 +2054,39 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // 2026-11-20 farm: each IP solved the challenge and sent ~2 valid-token
+          // requests, so per-IP limits never fired, but the IPs shared a few
+          // browser fingerprints. Counts /search per TARGETED fingerprint label;
+          // a request without the label is not counted (must run after TARGETED).
+          // Fingerprints can be shared by ordinary browsers, so the limit sits
+          // above the busiest fingerprint on a normal day and far below the farm.
+          {
+            name: "search-fingerprint-rate-limit",
+            priority: managedGroups.length + 13,
+            action: { block: {} },
+            statement: {
+              rateBasedStatement: {
+                limit: 300,
+                evaluationWindowSec: 300,
+                aggregateKeyType: "CUSTOM_KEYS",
+                customKeys: [
+                  {
+                    labelNamespace: {
+                      namespace: "awswaf:managed:token:fingerprint:",
+                    },
+                  },
+                ],
+                scopeDownStatement: {
+                  andStatement: { statements: [searchPathMatch, notWcm] },
+                },
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-search-fingerprint-rate-limit`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // #432: public launch drops the gate; everything after it stays.
           // The IPSet also backs the search-rate-limit WCM exemption, so it
           // stays even after block-non-wcm is gone.
