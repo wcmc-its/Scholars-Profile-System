@@ -28,7 +28,7 @@
  */
 import { ArrowLeftRight, Check, ChevronDown, ChevronRight, Lock, Minus } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DecisionStatusBar } from "@/components/edit/news-review-shared";
 import {
@@ -775,100 +775,127 @@ function ScholarList({
         role="listbox"
         aria-label="Scholars"
       >
-        {list.map((s) => {
-          const best = s.candidates[0];
-          const selected = s.cwid === current?.cwid;
-          const resolved = isResolved(s, outcomes);
-          const here = decidedHere(s, outcomes);
-          const confirmedHere = s.candidates.some(
-            (c) => outcomes[pairKey(s.cwid, c.orcid)] === "confirmed",
-          );
-          return (
-            <button
-              key={s.cwid}
-              type="button"
-              role="option"
-              aria-selected={selected}
-              onClick={() => onSelect(s.cwid)}
-              className={cn(
-                "border-apollo-border flex w-full items-start gap-3 border-b border-l-[3px] px-4 py-3 text-left",
-                here && !selected && "bg-apollo-surface-2",
-                selected
-                  ? "border-l-apollo-slate bg-apollo-slate-tint"
-                  : "hover:bg-apollo-surface border-l-transparent",
-              )}
-              data-testid={`orcid-queue-item-${s.cwid}`}
-            >
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="flex items-start justify-between gap-2">
-                  <span
-                    className={cn(
-                      "truncate text-[14px]",
-                      selected ? "font-semibold" : "font-medium",
-                      here && "text-muted-foreground line-through",
-                    )}
-                  >
-                    {s.name}
-                  </span>
-                  {here ? (
-                    <span
-                      className="text-muted-foreground flex shrink-0 items-center gap-1 text-[12px]"
-                      data-testid="orcid-queue-item-outcome"
-                    >
-                      {confirmedHere ? (
-                        <>
-                          <Check className="size-3" aria-hidden /> Confirmed
-                        </>
-                      ) : (
-                        "Not this person"
-                      )}
-                    </span>
-                  ) : best ? (
-                    <span className={cn(CHIP, "shrink-0 border", tierTone(best))}>
-                      {tierLabel(best)}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="text-muted-foreground truncate text-[12.5px]">
-                  {s.department ? `${s.department} · ` : ""}
-                  <span className={MONO}>{s.cwid}</span>
-                </span>
-                <span
-                  className={cn(
-                    "flex flex-wrap items-center gap-1.5 text-[12.5px] tabular-nums",
-                    !resolved && best && weakKind(best) === "conflicting"
-                      ? "text-apollo-coral-foreground"
-                      : "text-muted-foreground",
-                  )}
-                  data-testid="orcid-queue-item-summary"
-                >
-                  {resolved
-                    ? s.autoConfirmed &&
-                      !s.candidates.some((c) => outcomes[pairKey(s.cwid, c.orcid)])
-                      ? "Confirmed by email · automatic"
-                      : "Decided"
-                    : best
-                      ? `${
-                          best.worksTotal === 0
-                            ? "No works on ORCID"
-                            : `${fmt(best.shared)}/${fmt(best.worksTotal)} shared`
-                        } · ${plural(s.candidates.length, "iD")}`
-                      : plural(s.candidates.length, "candidate iD")}
-                  {s.conflict ? (
-                    <span className="border-apollo-border-strong inline-flex items-center gap-1 rounded border px-1.5 text-[11px]">
-                      <Lock className="size-2.5" aria-hidden />
-                      iD on file
-                    </span>
-                  ) : null}
-                </span>
-              </span>
-            </button>
-          );
-        })}
+        {list.map((s) => (
+          <ScholarListRow
+            key={s.cwid}
+            s={s}
+            selected={s.cwid === current?.cwid}
+            resolved={isResolved(s, outcomes)}
+            here={decidedHere(s, outcomes)}
+            confirmedHere={s.candidates.some(
+              (c) => outcomes[pairKey(s.cwid, c.orcid)] === "confirmed",
+            )}
+            decidedSomeHere={s.candidates.some((c) => !!outcomes[pairKey(s.cwid, c.orcid)])}
+            onSelect={onSelect}
+          />
+        ))}
       </div>
     </aside>
   );
 }
+
+/** One list row. Memoized: selecting a scholar or deciding a pair re-renders only the rows
+ *  whose props changed, not the whole queue (6,500+ rows in prod; on 2026-11-22 a selection
+ *  froze the main thread for ~1.1s). Props are primitives plus the summary object, whose
+ *  identity `list` preserves. */
+const ScholarListRow = memo(function ScholarListRow({
+  s,
+  selected,
+  resolved,
+  here,
+  confirmedHere,
+  decidedSomeHere,
+  onSelect,
+}: {
+  s: OrcidQueueSummary;
+  selected: boolean;
+  resolved: boolean;
+  here: boolean;
+  confirmedHere: boolean;
+  decidedSomeHere: boolean;
+  onSelect: (cwid: string) => void;
+}) {
+  const best = s.candidates[0];
+  return (
+    <button
+      key={s.cwid}
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={() => onSelect(s.cwid)}
+      className={cn(
+        // content-visibility: the browser skips layout/paint for off-screen rows (thousands).
+        "border-apollo-border flex w-full items-start gap-3 border-b border-l-[3px] px-4 py-3 text-left [contain-intrinsic-size:auto_84px] [content-visibility:auto]",
+        here && !selected && "bg-apollo-surface-2",
+        selected
+          ? "border-l-apollo-slate bg-apollo-slate-tint"
+          : "hover:bg-apollo-surface border-l-transparent",
+      )}
+      data-testid={`orcid-queue-item-${s.cwid}`}
+    >
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex items-start justify-between gap-2">
+          <span
+            className={cn(
+              "truncate text-[14px]",
+              selected ? "font-semibold" : "font-medium",
+              here && "text-muted-foreground line-through",
+            )}
+          >
+            {s.name}
+          </span>
+          {here ? (
+            <span
+              className="text-muted-foreground flex shrink-0 items-center gap-1 text-[12px]"
+              data-testid="orcid-queue-item-outcome"
+            >
+              {confirmedHere ? (
+                <>
+                  <Check className="size-3" aria-hidden /> Confirmed
+                </>
+              ) : (
+                "Not this person"
+              )}
+            </span>
+          ) : best ? (
+            <span className={cn(CHIP, "shrink-0 border", tierTone(best))}>{tierLabel(best)}</span>
+          ) : null}
+        </span>
+        <span className="text-muted-foreground truncate text-[12.5px]">
+          {s.department ? `${s.department} · ` : ""}
+          <span className={MONO}>{s.cwid}</span>
+        </span>
+        <span
+          className={cn(
+            "flex flex-wrap items-center gap-1.5 text-[12.5px] tabular-nums",
+            !resolved && best && weakKind(best) === "conflicting"
+              ? "text-apollo-coral-foreground"
+              : "text-muted-foreground",
+          )}
+          data-testid="orcid-queue-item-summary"
+        >
+          {resolved
+            ? s.autoConfirmed && !decidedSomeHere
+              ? "Confirmed by email · automatic"
+              : "Decided"
+            : best
+              ? `${
+                  best.worksTotal === 0
+                    ? "No works on ORCID"
+                    : `${fmt(best.shared)}/${fmt(best.worksTotal)} shared`
+                } · ${plural(s.candidates.length, "iD")}`
+              : plural(s.candidates.length, "candidate iD")}
+          {s.conflict ? (
+            <span className="border-apollo-border-strong inline-flex items-center gap-1 rounded border px-1.5 text-[11px]">
+              <Lock className="size-2.5" aria-hidden />
+              iD on file
+            </span>
+          ) : null}
+        </span>
+      </span>
+    </button>
+  );
+});
 
 const INST_LONG = (r: OrcidQueueRow) =>
   r.instMatch && r.historyMatch
