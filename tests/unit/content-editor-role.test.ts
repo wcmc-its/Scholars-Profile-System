@@ -292,6 +292,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   suppress: "allow",
   // #3362 — the pin gate: superuser / comms steward only, never a content editor.
   "title-accept": "deny",
+  training: "allow",
   unit: "allow",
   "unit-leadership": "allow",
 };

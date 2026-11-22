@@ -555,7 +555,7 @@ export async function datasetDepositExists(
 // ---------------------------------------------------------------------------
 
 /** The Prisma surface the whole-entity owner lookup needs. */
-type EntityOwnerClient = Pick<PrismaClient, "grant" | "education" | "appointment">;
+type EntityOwnerClient = Pick<PrismaClient, "grant" | "education" | "training" | "appointment">;
 
 /** Owner cwid (+ title, for the appointment chair guard) of a suppressible
  *  whole entity. */
@@ -594,10 +594,10 @@ export async function findSuppressibleEntityOwner(
     return r ? { ownerCwid: r.cwid, title: null } : null;
   }
   if (entityType === "education") {
-    const r = await client.education.findUnique({
-      where: { externalId },
-      select: { cwid: true },
-    });
+    // Postgraduate training rows hide under the `education` type too.
+    const r =
+      (await client.education.findUnique({ where: { externalId }, select: { cwid: true } })) ??
+      (await client.training.findUnique({ where: { externalId }, select: { cwid: true } }));
     return r ? { ownerCwid: r.cwid, title: null } : null;
   }
   const r = await client.appointment.findUnique({

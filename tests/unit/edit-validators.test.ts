@@ -392,11 +392,13 @@ type OwnerClient = Parameters<typeof findSuppressibleEntityOwner>[2];
 function ownerClient(rows: {
   grant?: unknown;
   education?: unknown;
+  training?: unknown;
   appointment?: unknown;
 }): OwnerClient {
   return {
     grant: { findUnique: vi.fn().mockResolvedValue(rows.grant ?? null) },
     education: { findUnique: vi.fn().mockResolvedValue(rows.education ?? null) },
+    training: { findUnique: vi.fn().mockResolvedValue(rows.training ?? null) },
     appointment: { findUnique: vi.fn().mockResolvedValue(rows.appointment ?? null) },
   } as unknown as OwnerClient;
 }
@@ -420,6 +422,16 @@ describe("findSuppressibleEntityOwner (#160)", () => {
 
   it("returns null when no row carries the externalId (-> 400 at the route)", async () => {
     expect(await findSuppressibleEntityOwner("education", "MISSING", ownerClient({}))).toBeNull();
+  });
+
+  it("resolves a postgraduate training row's owner under the education type", async () => {
+    expect(
+      await findSuppressibleEntityOwner(
+        "education",
+        "ASMS-TRAIN-1",
+        ownerClient({ training: { cwid: "abc1234" } }),
+      ),
+    ).toEqual({ ownerCwid: "abc1234", title: null });
   });
 });
 

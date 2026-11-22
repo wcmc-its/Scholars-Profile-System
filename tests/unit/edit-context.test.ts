@@ -26,6 +26,7 @@ type FakeClient = {
   fieldOverride: { findUnique: AnyMock; findMany: AnyMock };
   appointment: { findMany: AnyMock };
   education: { findMany: AnyMock };
+  training: { findMany: AnyMock };
   grant: { findMany: AnyMock };
   department: { findUnique: AnyMock };
   orgUnitRoleAssignment: { findFirst: AnyMock };
@@ -65,6 +66,7 @@ function fakeClient(): FakeClient {
     // suppression queries (guarded on externalIds.length > 0) and stay green.
     appointment: { findMany: vi.fn().mockResolvedValue([]) },
     education: { findMany: vi.fn().mockResolvedValue([]) },
+    training: { findMany: vi.fn().mockResolvedValue([]) },
     grant: { findMany: vi.fn().mockResolvedValue([]) },
     // #2542 contract A — the chair lock resolves `Department.chairCwid`'s
     // successor, `OrgUnitRoleAssignment`, then the department's name via
