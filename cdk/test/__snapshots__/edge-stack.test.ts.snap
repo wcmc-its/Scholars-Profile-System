@@ -1906,11 +1906,98 @@ a{color:var(--slate)}
             },
           },
           {
+            "Action": {
+              "Count": {},
+            },
+            "Name": "count-chrome-ua-non-browser-tls",
+            "Priority": 7,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "JA4Fingerprint": {
+                          "FallbackBehavior": "NO_MATCH",
+                        },
+                      },
+                      "PositionalConstraint": "EXACTLY",
+                      "SearchString": "t13d131100_f57a46bbacb6_ab7e3b40a677",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "NONE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "SingleHeader": {
+                          "Name": "user-agent",
+                        },
+                      },
+                      "PositionalConstraint": "CONTAINS",
+                      "SearchString": "Chrome/",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "NONE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "SingleHeader": {
+                              "Name": "user-agent",
+                            },
+                          },
+                          "PositionalConstraint": "CONTAINS",
+                          "SearchString": "compatible",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-count-chrome-ua-non-browser-tls",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
             "Name": "AWSManagedRulesBotControlRuleSet",
             "OverrideAction": {
               "Count": {},
             },
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "ManagedRuleGroupStatement": {
                 "ManagedRuleGroupConfigs": [
@@ -1974,7 +2061,7 @@ a{color:var(--slate)}
             "OverrideAction": {
               "None": {},
             },
-            "Priority": 8,
+            "Priority": 9,
             "Statement": {
               "ManagedRuleGroupStatement": {
                 "ManagedRuleGroupConfigs": [
@@ -2169,7 +2256,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-bots",
-            "Priority": 9,
+            "Priority": 10,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -2208,7 +2295,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-scraper-ua",
-            "Priority": 10,
+            "Priority": 11,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -2263,7 +2350,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 11,
+            "Priority": 12,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -2322,7 +2409,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 12,
+            "Priority": 13,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -2350,7 +2437,7 @@ a{color:var(--slate)}
               "Challenge": {},
             },
             "Name": "search-challenge-tokenless",
-            "Priority": 13,
+            "Priority": 14,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -2467,7 +2554,7 @@ a{color:var(--slate)}
               "Challenge": {},
             },
             "Name": "search-challenge-tokenless-surge",
-            "Priority": 14,
+            "Priority": 15,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "CONSTANT",
@@ -4615,11 +4702,98 @@ a{color:var(--slate)}
             },
           },
           {
+            "Action": {
+              "Count": {},
+            },
+            "Name": "count-chrome-ua-non-browser-tls",
+            "Priority": 7,
+            "Statement": {
+              "AndStatement": {
+                "Statements": [
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "JA4Fingerprint": {
+                          "FallbackBehavior": "NO_MATCH",
+                        },
+                      },
+                      "PositionalConstraint": "EXACTLY",
+                      "SearchString": "t13d131100_f57a46bbacb6_ab7e3b40a677",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "NONE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "ByteMatchStatement": {
+                      "FieldToMatch": {
+                        "SingleHeader": {
+                          "Name": "user-agent",
+                        },
+                      },
+                      "PositionalConstraint": "CONTAINS",
+                      "SearchString": "Chrome/",
+                      "TextTransformations": [
+                        {
+                          "Priority": 0,
+                          "Type": "NONE",
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "SingleHeader": {
+                              "Name": "user-agent",
+                            },
+                          },
+                          "PositionalConstraint": "CONTAINS",
+                          "SearchString": "compatible",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "IPSetReferenceStatement": {
+                          "Arn": {
+                            "Fn::GetAtt": [
+                              "WcmIpAllowSet",
+                              "Arn",
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-count-chrome-ua-non-browser-tls",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
             "Name": "AWSManagedRulesBotControlRuleSet",
             "OverrideAction": {
               "Count": {},
             },
-            "Priority": 7,
+            "Priority": 8,
             "Statement": {
               "ManagedRuleGroupStatement": {
                 "ManagedRuleGroupConfigs": [
@@ -4683,7 +4857,7 @@ a{color:var(--slate)}
             "OverrideAction": {
               "None": {},
             },
-            "Priority": 8,
+            "Priority": 9,
             "Statement": {
               "ManagedRuleGroupStatement": {
                 "ManagedRuleGroupConfigs": [
@@ -4878,7 +5052,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-bots",
-            "Priority": 9,
+            "Priority": 10,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -4917,7 +5091,7 @@ a{color:var(--slate)}
               "Block": {},
             },
             "Name": "search-block-scraper-ua",
-            "Priority": 10,
+            "Priority": 11,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -4972,7 +5146,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "search-rate-limit",
-            "Priority": 11,
+            "Priority": 12,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -5031,7 +5205,7 @@ a{color:var(--slate)}
               },
             },
             "Name": "rate-limit",
-            "Priority": 12,
+            "Priority": 13,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
@@ -5059,7 +5233,7 @@ a{color:var(--slate)}
               "Challenge": {},
             },
             "Name": "search-challenge-tokenless",
-            "Priority": 13,
+            "Priority": 14,
             "Statement": {
               "AndStatement": {
                 "Statements": [
@@ -5176,7 +5350,7 @@ a{color:var(--slate)}
               "Challenge": {},
             },
             "Name": "search-challenge-tokenless-surge",
-            "Priority": 14,
+            "Priority": 15,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "CONSTANT",

@@ -1640,6 +1640,48 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // Observation only, for now. 2026-11-21: a second scraper (~860k
+          // requests/day, ~22k IPs, 72% SG / 12% CN) copies Chrome's request
+          // headers -- including Title-Case client hints (`Sec-Ch-Ua`), which
+          // Chrome never sends -- over a non-browser TLS stack: JA4
+          // t13d131100_f57a46bbacb6_ab7e3b40a677 (no ALPN, HTTP/1.1 only).
+          // It cannot solve WAF challenges (0 tokens). Real Chrome has a
+          // different JA4, and the declared crawlers that share this TLS stack
+          // (PetalBot and others, ~14k per 6h) say "compatible", so they are
+          // left out. WAF cannot see header-name case; the JA4 is the tell.
+          // Count first: promote to block once 24h of matches show no real
+          // browsers (e.g. behind a TLS-inspecting proxy with this JA4).
+          {
+            name: "count-chrome-ua-non-browser-tls",
+            priority: managedGroups.length + 4,
+            action: { count: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  {
+                    byteMatchStatement: {
+                      searchString: "t13d131100_f57a46bbacb6_ab7e3b40a677",
+                      fieldToMatch: { ja4Fingerprint: { fallbackBehavior: "NO_MATCH" } },
+                      positionalConstraint: "EXACTLY",
+                      textTransformations: [{ priority: 0, type: "NONE" }],
+                    },
+                  },
+                  headerContains("user-agent", "Chrome/"),
+                  {
+                    notStatement: {
+                      statement: headerContains("user-agent", "compatible"),
+                    },
+                  },
+                  notWcm,
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-count-chrome-ua-non-browser-tls`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // #125 -- Bot Control runs label-only (count override): its
           // `awswaf:managed:aws:bot-control:bot:verified` label exempts
           // verified crawlers/AI fetchers (Googlebot, Bingbot, GPTBot, ...)
@@ -1660,7 +1702,7 @@ export class EdgeStack extends Stack {
           // so /search* is labeled the same way it was under COMMON.
           {
             name: "AWSManagedRulesBotControlRuleSet",
-            priority: managedGroups.length + 4,
+            priority: managedGroups.length + 5,
             overrideAction: { count: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1712,7 +1754,7 @@ export class EdgeStack extends Stack {
           // /search* requests in scope only.
           {
             name: "AWSManagedRulesBotControlRuleSet-Targeted",
-            priority: managedGroups.length + 5,
+            priority: managedGroups.length + 6,
             overrideAction: { none: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1763,7 +1805,7 @@ export class EdgeStack extends Stack {
           // the sitemap.
           {
             name: "search-block-bots",
-            priority: managedGroups.length + 6,
+            priority: managedGroups.length + 7,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1793,7 +1835,7 @@ export class EdgeStack extends Stack {
           // ponytail: one hardcoded UA; promote to a list if a second shows up.
           {
             name: "search-block-scraper-ua",
-            priority: managedGroups.length + 7,
+            priority: managedGroups.length + 8,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1823,7 +1865,7 @@ export class EdgeStack extends Stack {
           // pools legitimately peak ~470/5min on /search alone.
           {
             name: "search-rate-limit",
-            priority: managedGroups.length + 8,
+            priority: managedGroups.length + 9,
             action: {
               block: {
                 customResponse: {
@@ -1861,7 +1903,7 @@ export class EdgeStack extends Stack {
           },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 9,
+            priority: managedGroups.length + 10,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
@@ -1933,7 +1975,7 @@ export class EdgeStack extends Stack {
           //       their first page sees the challenge once.
           {
             name: "search-challenge-tokenless",
-            priority: managedGroups.length + 10,
+            priority: managedGroups.length + 11,
             action: { challenge: {} },
             statement: {
               andStatement: {
@@ -1992,7 +2034,7 @@ export class EdgeStack extends Stack {
           // ponytail: one fixed limit; revisit if the baseline drifts up.
           {
             name: "search-challenge-tokenless-surge",
-            priority: managedGroups.length + 11,
+            priority: managedGroups.length + 12,
             action: { challenge: {} },
             statement: {
               rateBasedStatement: {

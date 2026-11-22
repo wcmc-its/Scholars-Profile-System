@@ -2099,12 +2099,13 @@ describe("EdgeStack", () => {
         const firefox = byName("block-firefox-ua-with-client-hints");
         const chromium = byName("block-chromium146-ua-mismatch");
         const count = byName("count-chrome-ua-without-client-hints");
+        const tls = byName("count-chrome-ua-non-browser-tls");
 
         // Just enough of WAF's evaluator for these three rules. A statement
         // on a header the request lacks does NOT match (AWS WAF developer
         // guide, "Request components"), so an absence test has to be a
         // NotStatement around a presence test.
-        type Req = { campus?: boolean; headers: Record<string, string> };
+        type Req = { campus?: boolean; ja4?: string; headers: Record<string, string> };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const matches = (s: any, req: Req): boolean => {
           if (s.AndStatement)
@@ -2112,6 +2113,11 @@ describe("EdgeStack", () => {
           if (s.NotStatement) return !matches(s.NotStatement.Statement, req);
           if (s.IPSetReferenceStatement) return req.campus === true;
           const st = s.ByteMatchStatement ?? s.SizeConstraintStatement;
+          if (st.FieldToMatch.JA4Fingerprint) {
+            expect(st.FieldToMatch.JA4Fingerprint.FallbackBehavior).toBe("NO_MATCH");
+            expect(st.PositionalConstraint).toBe("EXACTLY");
+            return req.ja4 === st.SearchString;
+          }
           const value = req.headers[st.FieldToMatch.SingleHeader.Name];
           if (value === undefined) return false;
           if (s.SizeConstraintStatement) {
@@ -2122,7 +2128,9 @@ describe("EdgeStack", () => {
           return value.includes(st.SearchString);
         };
         const hits = (req: Req) =>
-          [firefox, chromium, count].filter((r) => matches(r.Statement, req)).map((r) => r.Name);
+          [firefox, chromium, count, tls]
+            .filter((r) => matches(r.Statement, req))
+            .map((r) => r.Name);
         const hints146 = '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"';
         const ua = {
           chrome146:
@@ -2208,10 +2216,49 @@ describe("EdgeStack", () => {
           expect(hits({ campus: true, headers: { "user-agent": ua.chrome120 } })).toEqual([]);
         });
 
+        it("counts (never blocks) a Chrome UA on the 2026-11-21 scraper's non-browser TLS stack", () => {
+          expect(tls?.Action).toEqual({ Count: {} });
+          const scraperJa4 = "t13d131100_f57a46bbacb6_ab7e3b40a677";
+          const chromeJa4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd";
+          const scraperHints = '"Chromium";v="116", "Google Chrome";v="116"';
+          const chrome116 = ua.chrome120.replace("Chrome/120.", "Chrome/116.");
+          // The scraper: Chrome UA with matching hints, but a non-browser JA4.
+          expect(
+            hits({
+              ja4: scraperJa4,
+              headers: { "user-agent": chrome116, "sec-ch-ua": scraperHints },
+            }),
+          ).toEqual(["count-chrome-ua-non-browser-tls"]);
+          // Real Chrome on Chrome's own TLS stack: untouched.
+          expect(
+            hits({
+              ja4: chromeJa4,
+              headers: {
+                "user-agent": ua.chrome146,
+                "sec-ch-ua": '"Chromium";v="146", "Google Chrome";v="146"',
+              },
+            }),
+          ).toEqual([]);
+          // A declared crawler on the same TLS stack ("compatible") is left out.
+          expect(hits({ ja4: scraperJa4, headers: { "user-agent": ua.googlebot } })).toEqual([]);
+          // No JA4 available: NO_MATCH fallback, not counted.
+          expect(hits({ headers: { "user-agent": chrome116, "sec-ch-ua": scraperHints } })).toEqual(
+            [],
+          );
+          // Campus is exempt.
+          expect(
+            hits({
+              campus: true,
+              ja4: scraperJa4,
+              headers: { "user-agent": chrome116, "sec-ch-ua": scraperHints },
+            }),
+          ).toEqual([]);
+        });
+
         it("runs before Bot Control (no inspection billed for a blocked request), after the managed groups", () => {
           const p = (r: { Priority: number } | undefined) => Number(r?.Priority);
           const botCommon = byName("AWSManagedRulesBotControlRuleSet");
-          for (const r of [firefox, chromium, count]) {
+          for (const r of [firefox, chromium, count, tls]) {
             expect(p(r)).toBeLessThan(p(botCommon));
             expect(p(r)).toBeGreaterThan(p(byName("AWSManagedRulesSQLiRuleSet")));
           }
