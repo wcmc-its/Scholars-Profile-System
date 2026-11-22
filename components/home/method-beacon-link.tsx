@@ -17,9 +17,14 @@ type Props = {
 
 /**
  * Fire-and-forget analytics beacon on click, mirroring spotlight-section.tsx.
- * SSR-guarded; never blocks navigation. Uses next/link so client navigation
- * + prefetch behave like every other internal link (hash-only hrefs trigger
- * same-route in-page navigation).
+ * SSR-guarded; never blocks navigation. Uses next/link for client navigation
+ * (hash-only hrefs trigger same-route in-page navigation).
+ *
+ * No viewport prefetch: /methods pages are force-dynamic (#985), so each
+ * prefetch is a full origin render, and the home page shows the "Explore all"
+ * link plus one card per category. On 2026-11-21 that was ~446k uncached
+ * /methods RSC renders from home-page views alone, the largest single source
+ * of slow origin requests. A click still navigates client-side.
  */
 export function MethodBeaconLink({ href, event, slug, className, children, ...rest }: Props) {
   function handleClick() {
@@ -31,7 +36,7 @@ export function MethodBeaconLink({ href, event, slug, className, children, ...re
     );
   }
   return (
-    <Link href={href} className={className} onClick={handleClick} {...rest}>
+    <Link href={href} prefetch={false} className={className} onClick={handleClick} {...rest}>
       {children}
     </Link>
   );
