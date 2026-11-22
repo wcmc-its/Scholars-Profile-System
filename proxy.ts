@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  applySessionCookie,
   getSessionFromRequest,
   isPartnerCwid,
   refreshSessionCookie,
@@ -251,7 +252,7 @@ async function idleRefreshed(
   }
   request.cookies.set(cookie.name, cookie.value);
   const response = NextResponse.next({ request: { headers: request.headers } });
-  response.cookies.set(cookie.name, cookie.value, cookie.options);
+  applySessionCookie(response, cookie);
   return response;
 }
 

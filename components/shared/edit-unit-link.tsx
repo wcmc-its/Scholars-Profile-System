@@ -16,6 +16,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { probeSession } from "@/components/site/session-probe";
 
 export type EditableUnitKind = "department" | "division" | "center";
 
@@ -34,9 +35,10 @@ export function EditUnitLink({
   useEffect(() => {
     let active = true;
     const opts: RequestInit = { cache: "no-store", credentials: "same-origin" };
-    fetch("/api/auth/session", opts)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((session: { authenticated?: boolean } | null) => {
+    // The page's shared probe (`session-probe.ts`), so this adds no request
+    // beside the header's.
+    probeSession()
+      .then((session) => {
         if (!active || !session?.authenticated) return null;
         const qs = new URLSearchParams({ kind, code });
         return fetch(`/api/edit/can-edit-unit?${qs.toString()}`, opts).then((r) =>

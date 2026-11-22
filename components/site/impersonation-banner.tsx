@@ -6,6 +6,7 @@ import { EyeIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
+import { invalidateSessionProbe } from "@/components/site/session-probe";
 
 /**
  * The "View as" impersonation banner (#637, impersonation-spec.md §6/§8, R7/T6).
@@ -190,6 +191,7 @@ export function ImpersonationBanner() {
     } catch {
       /* best-effort — reload regardless so the cleared cookie takes effect */
     }
+    invalidateSessionProbe();
     window.location.reload();
   }
 

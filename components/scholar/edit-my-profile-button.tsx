@@ -28,6 +28,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { probeSession } from "@/components/site/session-probe";
 
 export function EditMyProfileButton({
   profileSlug,
@@ -41,28 +42,17 @@ export function EditMyProfileButton({
 
   useEffect(() => {
     let active = true;
-    fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          data: {
-            authenticated?: boolean;
-            scholar?: { slug?: string } | null;
-            canImpersonate?: boolean;
-          } | null,
-        ) => {
-          if (!active) return;
-          if (data?.authenticated && data.scholar?.slug === profileSlug) {
-            setIsOwner(true);
-          }
-          if (data?.canImpersonate) {
-            setCanImpersonate(true);
-          }
-        },
-      )
-      .catch(() => {
-        /* Never block the page on the probe — leave the button hidden. */
-      });
+    // The page's shared probe (`session-probe.ts`), so this adds no request
+    // beside the header's. A failed probe resolves `null`: the button stays hidden.
+    void probeSession().then((data) => {
+      if (!active) return;
+      if (data?.authenticated && data.scholar?.slug === profileSlug) {
+        setIsOwner(true);
+      }
+      if (data?.canImpersonate) {
+        setCanImpersonate(true);
+      }
+    });
     return () => {
       active = false;
     };

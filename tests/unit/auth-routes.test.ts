@@ -91,6 +91,7 @@ describe("POST /api/auth/saml/callback", () => {
     const res = await callbackPOST(callbackRequest({ SAMLResponse: "garbage" }));
     expect(res.status).toBe(401);
     expect(res.cookies.get("__Host-sps_session")).toBeUndefined();
+    expect(res.cookies.get("__Host-sps_signed_in")).toBeUndefined();
   });
 
   it("mints a session cookie and 302s to the RelayState path on success", async () => {
@@ -104,6 +105,11 @@ describe("POST /api/auth/saml/callback", () => {
     // (ip-...:3000 behind CloudFront -> ALB -> Fargate).
     expect(res.headers.get("location")).toBe("/edit/scholar/abc1234");
     expect(res.cookies.get("__Host-sps_session")?.value).toBeTruthy();
+    // The JS-readable signed-in hint rides beside it, with the same lifetime.
+    expect(res.cookies.get("__Host-sps_signed_in")?.value).toBe("1");
+    expect(res.cookies.get("__Host-sps_signed_in")?.maxAge).toBe(
+      res.cookies.get("__Host-sps_session")?.maxAge,
+    );
     // The assertion is recorded single-use before the session is minted (#1439).
     expect(mockedConsume).toHaveBeenCalledWith(ASSERTION);
   });
@@ -238,6 +244,10 @@ describe("POST /api/auth/logout", () => {
     const cleared = res.cookies.get("__Host-sps_session");
     expect(cleared?.value).toBe("");
     expect(cleared?.maxAge).toBe(0);
+    // The signed-in hint is cleared with it.
+    const hint = res.cookies.get("__Host-sps_signed_in");
+    expect(hint?.value).toBe("");
+    expect(hint?.maxAge).toBe(0);
     // The pre-rename cookie is expired too, so a rollback can't revive it.
     const legacy = res.cookies.get("__Secure-sps_session");
     expect(legacy?.value).toBe("");

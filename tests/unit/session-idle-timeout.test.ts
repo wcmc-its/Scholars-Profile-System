@@ -201,6 +201,7 @@ describe("proxy — idle refresh", () => {
     const res = await proxy(requestWith("/edit", c.value));
     expect(res.status).toBe(200);
     expect(setSessionValue(res)).toBeNull();
+    expect(res.headers.get("set-cookie") ?? "").not.toContain("sps_signed_in");
   });
 
   it("re-seals at the threshold, keeps exp, and forwards the new cookie to the handler", async () => {
@@ -214,6 +215,9 @@ describe("proxy — idle refresh", () => {
     expect(p.lastSeen).toBe(T0 + 300);
     expect(p.exp).toBe(T0 + CAP);
     expect(res.headers.get("set-cookie")).toMatch(/Max-Age=28500/);
+    // The signed-in hint is re-set beside it with the same remaining lifetime.
+    expect(res.cookies.get("__Host-sps_signed_in")?.value).toBe("1");
+    expect(res.cookies.get("__Host-sps_signed_in")?.maxAge).toBe(28500);
     // The downstream request sees the refreshed cookie, not the stale one.
     expect(res.headers.get("x-middleware-request-cookie") ?? "").toContain(next!);
   });

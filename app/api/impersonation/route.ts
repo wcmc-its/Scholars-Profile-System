@@ -29,6 +29,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getSession } from "@/lib/auth/session-server";
 import {
+  applySessionCookie,
   nowSeconds,
   withImpersonation,
   withoutImpersonation,
@@ -58,7 +59,7 @@ function impersonationEnabled(): boolean {
  */
 function noContentWithCookie(cookie: SerializedSessionCookie): NextResponse {
   const response = new NextResponse(null, { status: 204 });
-  response.cookies.set(cookie.name, cookie.value, cookie.options);
+  applySessionCookie(response, cookie);
   return response;
 }
 

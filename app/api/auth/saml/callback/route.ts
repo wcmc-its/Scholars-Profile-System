@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDefaultReturnPath } from "@/lib/auth/config";
 import { safeReturnPath } from "@/lib/auth/return-path";
-import { createSessionCookie, isPartnerCwid } from "@/lib/auth/session";
+import { applySessionCookie, createSessionCookie, isPartnerCwid } from "@/lib/auth/session";
 import { PARTNER_HOME, resolvePartnerLogin } from "@/lib/auth/partner-login";
 import { validateSamlResponse, type SamlValidationResult } from "@/lib/auth/saml";
 import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
@@ -183,7 +183,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     status: 302,
     headers: { Location: dest },
   });
-  const cookie = await createSessionCookie(sessionCwid);
-  response.cookies.set(cookie.name, cookie.value, cookie.options);
+  applySessionCookie(response, await createSessionCookie(sessionCwid));
   return response;
 }
