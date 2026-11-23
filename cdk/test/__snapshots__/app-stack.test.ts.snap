@@ -54,6 +54,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "CloudFrontDistributionId": {
+      "Description": "This env's CloudFront distribution (deploy.yml edge purge)",
+      "Value": "E28NKDFXC7K2ZL",
+    },
     "DeployRoleArn": {
       "Description": "SPS GitHub Actions deploy role ARN",
       "Value": {
@@ -2731,6 +2735,11 @@ service:
               ],
             },
             {
+              "Action": "cloudfront:CreateInvalidation",
+              "Effect": "Allow",
+              "Resource": "arn:aws:cloudfront::123456789012:distribution/E28NKDFXC7K2ZL",
+            },
+            {
               "Action": [
                 "ecs:DescribeTaskDefinition",
                 "ecs:RegisterTaskDefinition",
@@ -5304,6 +5313,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
           ],
         ],
       },
+    },
+    "CloudFrontDistributionId": {
+      "Description": "This env's CloudFront distribution (deploy.yml edge purge)",
+      "Value": "E17NRWINXLP3B3",
     },
     "DeployRoleArn": {
       "Description": "SPS GitHub Actions deploy role ARN",
@@ -8029,6 +8042,11 @@ service:
                   ],
                 },
               ],
+            },
+            {
+              "Action": "cloudfront:CreateInvalidation",
+              "Effect": "Allow",
+              "Resource": "arn:aws:cloudfront::123456789012:distribution/E17NRWINXLP3B3",
             },
             {
               "Action": [

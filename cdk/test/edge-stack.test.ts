@@ -1086,7 +1086,7 @@ describe("EdgeStack", () => {
         expect(params.EnableAcceptEncodingBrotli).toBe(true);
       });
 
-      it("clamps the edge TTL to 60s so HTML cannot outlive a deploy (min 0 / default 60 / max 60)", () => {
+      it("clamps the edge TTL to 6h (min 0 / default 60 / max 6h); deploys purge the edge", () => {
         // The load-bearing change: force-static HTML ships `s-maxage=31536000`,
         // and `MaxTTL` is the ceiling CloudFront honors, so that bogus year
         // collapses to 60s -- a rotated-chunk break self-corrects in <=60s
@@ -1096,7 +1096,17 @@ describe("EdgeStack", () => {
         const cfg = defaultCacheConfig();
         expect(cfg.MinTTL).toBe(0);
         expect(cfg.DefaultTTL).toBe(60);
-        expect(cfg.MaxTTL).toBe(60);
+        expect(cfg.MaxTTL).toBe(21600);
+      });
+
+      it("routes the app origin through Origin Shield in the app's region", () => {
+        const dist = Object.values(template.findResources("AWS::CloudFront::Distribution"))[0]
+          .Properties as { DistributionConfig: { Origins: Array<Record<string, unknown>> } };
+        const app = dist.DistributionConfig.Origins.filter((o) => o.CustomOriginConfig);
+        expect(app.length).toBeGreaterThan(0);
+        for (const o of app) {
+          expect(o.OriginShield).toEqual({ Enabled: true, OriginShieldRegion: "us-east-1" });
+        }
       });
     });
 

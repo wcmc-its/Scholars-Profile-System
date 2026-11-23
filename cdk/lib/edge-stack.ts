@@ -271,10 +271,11 @@ class SdkInjectingWebAcl extends wafv2.CfnWebACL {
  * Implements the behaviors in `docs/cloudfront-cache-spec.md`. Four classes:
  *   1. One cacheable default behavior (custom `sps-default-rsc-*`, mirroring
  *      Managed-CachingOptimized) for the bulk of read-only HTML pages. Its
- *      edge `maxTtl` is clamped to 60s so a force-static page's bogus
- *      `s-maxage=31536000` cannot pin year-stale HTML at the edge (the cause
- *      of the /about "client-side exception": stale HTML -> rotated-out chunk
- *      404 -> dead App Router bootstrap). The default also gets a dedicated
+ *      edge `maxTtl` is clamped to 6h so a force-static page's bogus
+ *      `s-maxage=31536000` cannot pin year-stale HTML at the edge (was 60s,
+ *      against the /about "client-side exception": stale HTML -> rotated-out
+ *      chunk 404 -> dead App Router bootstrap; the additive S3 static origin
+ *      now keeps old chunks resolvable, and deploy.yml purges the edge). The default also gets a dedicated
  *      `sps-html-headers-*` policy overriding viewer `Cache-Control` to
  *      `max-age=0, must-revalidate`.
  *   2. A long-cache behavior for `/_next/static/*` (Managed-CachingOptimized):
@@ -447,12 +448,12 @@ export class EdgeStack extends Stack {
     // bootstrap fails to load -> "Application error: a client-side exception."
     //
     // Two knobs fix this without a deploy-time invalidation:
-    //   1. The default cache policy below clamps the EDGE TTL to 60s (so a bad
-    //      deploy self-corrects in <=60s regardless of the origin's bogus year).
+    //   1. The default cache policy below clamps the EDGE TTL to 6h, and
+    //      deploy.yml purges the edge after every rollout.
     //   2. This policy overrides the VIEWER Cache-Control to `max-age=0,
     //      must-revalidate` so browsers revalidate too. Response-headers
     //      policies are applied to the viewer-facing response AFTER CloudFront's
-    //      own caching decision, so this does NOT affect the 60s edge TTL.
+    //      own caching decision, so this does NOT affect the edge TTL.
     //
     // Carries the same HSTS as `securityHeaders` so HTML keeps the security
     // header. Applied to the DEFAULT behavior only -- `/_next/static/*` keeps
@@ -519,6 +520,11 @@ export class EdgeStack extends Stack {
     // lets the ALB :443 listener land for a NetScaler front, which dials the ALB
     // directly, without dragging CloudFront's origin onto a hostname that does
     // not yet resolve. Seeding only the cert keeps this leg byte-identical.
+    // Origin Shield (2026-11-23): every POP's miss funnels through one
+    // regional cache in the app's region, so a page renders once per edge TTL
+    // instead of once per POP. Scrapers spread across 80+ POPs made nearly
+    // every profile request a cold miss.
+    const ORIGIN_SHIELD_REGION = "us-east-1";
     const originHttps =
       envConfig.edgeOriginCertArn.length > 0 && envConfig.edgeOriginHostname.length > 0;
     const origin = originHttps
@@ -526,6 +532,7 @@ export class EdgeStack extends Stack {
           protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
           httpsPort: 443,
           originSslProtocols: [cloudfront.OriginSslPolicy.TLS_V1_2],
+          originShieldRegion: ORIGIN_SHIELD_REGION,
           customHeaders: {
             "X-Origin-Verify": originVerifyToken,
           },
@@ -538,6 +545,7 @@ export class EdgeStack extends Stack {
           {
             protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
             httpPort: 80,
+            originShieldRegion: ORIGIN_SHIELD_REGION,
             customHeaders: {
               "X-Origin-Verify": originVerifyToken,
             },
@@ -872,9 +880,16 @@ export class EdgeStack extends Stack {
       // long-cache behavior (CachingOptimized) added below. `defaultTtl` 60s
       // bounds header-less responses to the same ceiling; `minTtl` 0 so a
       // `no-store`/`private` page is never force-cached.
+      //
+      // 2026-11-23: raised from 60s to 6h (profile pages, /{slug}, live here
+      // and send `s-maxage=21600`). At 60s, scraper traffic spread over ~8.4k
+      // profiles x 80+ POPs was ~157k origin renders/day and the p99 alarm.
+      // Safe because old chunks stay resolvable (additive S3 static origin),
+      // edits and the nightly ETL purge the edge (cdn_invalidation), and
+      // deploy.yml purges `/*` after each rollout.
       minTtl: Duration.seconds(0),
       defaultTtl: Duration.seconds(60),
-      maxTtl: Duration.seconds(60),
+      maxTtl: Duration.hours(6),
     });
 
     // Each entry: [pathPattern, allowedMethods]. Order matters because

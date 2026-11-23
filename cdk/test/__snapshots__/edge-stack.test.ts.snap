@@ -105,7 +105,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         "CachePolicyConfig": {
           "Comment": "SPS default cache (prod) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.",
           "DefaultTTL": 60,
-          "MaxTTL": 60,
+          "MaxTTL": 21600,
           "MinTTL": 0,
           "Name": "sps-default-rsc-prod",
           "ParametersInCacheKeyAndForwardedToOrigin": {
@@ -1306,6 +1306,10 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                   "HeaderValue": "{{resolve:secretsmanager:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
                 },
               ],
+              "OriginShield": {
+                "Enabled": true,
+                "OriginShieldRegion": "us-east-1",
+              },
             },
             {
               "DomainName": {
@@ -3436,7 +3440,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         "CachePolicyConfig": {
           "Comment": "SPS default cache (staging) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.",
           "DefaultTTL": 60,
-          "MaxTTL": 60,
+          "MaxTTL": 21600,
           "MinTTL": 0,
           "Name": "sps-default-rsc-staging",
           "ParametersInCacheKeyAndForwardedToOrigin": {
@@ -4228,6 +4232,10 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                   "HeaderValue": "{{resolve:secretsmanager:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
                 },
               ],
+              "OriginShield": {
+                "Enabled": true,
+                "OriginShieldRegion": "us-east-1",
+              },
             },
             {
               "DomainName": {
