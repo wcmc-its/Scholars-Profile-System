@@ -1640,7 +1640,7 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
-          // Observation only, for now. 2026-11-21: a second scraper (~860k
+          // Blocked since 2026-11-23 (counted first). 2026-11-21: a second scraper (~860k
           // requests/day, ~22k IPs, 72% SG / 12% CN) copies Chrome's request
           // headers -- including Title-Case client hints (`Sec-Ch-Ua`), which
           // Chrome never sends -- over a non-browser TLS stack: JA4
@@ -1649,12 +1649,13 @@ export class EdgeStack extends Stack {
           // different JA4, and the declared crawlers that share this TLS stack
           // (PetalBot and others, ~14k per 6h) say "compatible", so they are
           // left out. WAF cannot see header-name case; the JA4 is the tell.
-          // Count first: promote to block once 24h of matches show no real
-          // browsers (e.g. behind a TLS-inspecting proxy with this JA4).
+          // 24h of counted matches (2026-11-22/23 prod, 68k from 23k IPs) were
+          // all HTTP/1.1 with bare `gzip` Accept-Encoding and Title-Case or no
+          // hints: no real browser or TLS-inspecting proxy among them.
           {
-            name: "count-chrome-ua-non-browser-tls",
+            name: "block-chrome-ua-non-browser-tls",
             priority: managedGroups.length + 4,
-            action: { count: {} },
+            action: inconsistentClientBlock,
             statement: {
               andStatement: {
                 statements: [
@@ -1678,7 +1679,7 @@ export class EdgeStack extends Stack {
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
-              metricName: `sps-edge-${env}-count-chrome-ua-non-browser-tls`,
+              metricName: `sps-edge-${env}-block-chrome-ua-non-browser-tls`,
               sampledRequestsEnabled: true,
             },
           },

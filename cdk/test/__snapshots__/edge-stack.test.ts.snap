@@ -1907,9 +1907,14 @@ a{color:var(--slate)}
           },
           {
             "Action": {
-              "Count": {},
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "inconsistentClient",
+                  "ResponseCode": 403,
+                },
+              },
             },
-            "Name": "count-chrome-ua-non-browser-tls",
+            "Name": "block-chrome-ua-non-browser-tls",
             "Priority": 7,
             "Statement": {
               "AndStatement": {
@@ -1988,7 +1993,7 @@ a{color:var(--slate)}
             },
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
-              "MetricName": "sps-edge-prod-count-chrome-ua-non-browser-tls",
+              "MetricName": "sps-edge-prod-block-chrome-ua-non-browser-tls",
               "SampledRequestsEnabled": true,
             },
           },
@@ -4764,9 +4769,14 @@ a{color:var(--slate)}
           },
           {
             "Action": {
-              "Count": {},
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "inconsistentClient",
+                  "ResponseCode": 403,
+                },
+              },
             },
-            "Name": "count-chrome-ua-non-browser-tls",
+            "Name": "block-chrome-ua-non-browser-tls",
             "Priority": 7,
             "Statement": {
               "AndStatement": {
@@ -4845,7 +4855,7 @@ a{color:var(--slate)}
             },
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
-              "MetricName": "sps-edge-staging-count-chrome-ua-non-browser-tls",
+              "MetricName": "sps-edge-staging-block-chrome-ua-non-browser-tls",
               "SampledRequestsEnabled": true,
             },
           },
