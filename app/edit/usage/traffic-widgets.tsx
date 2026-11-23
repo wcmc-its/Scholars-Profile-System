@@ -249,44 +249,12 @@ function ListFooter({
   );
 }
 
-function KpiTiles({ overview }: { overview: TrafficOverview }) {
+/** `scoped`: a unit admin; Hits (every request, the most bot-inflated count) is superuser-only. */
+function KpiTiles({ overview, scoped }: { overview: TrafficOverview; scoped: boolean }) {
   const { kpi } = overview;
   const tile = "flex flex-col gap-1.5 px-[18px] py-4";
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(min(240px,100%),1fr))] gap-3.5">
-      <div className={cn(cardClass, tile)}>
-        <span className="text-[13px] font-medium">Hits</span>
-        <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-hits">
-          {compactCount(kpi.hits)}
-        </span>
-        <span className="text-muted-foreground text-[13px]">
-          Every request: pages, images, scripts, bots, blocked ones.
-        </span>
-      </div>
-      <div className={cn(cardClass, tile)}>
-        <span className="text-[13px] font-medium">Pageviews</span>
-        <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-pageviews">
-          {compactCount(kpi.pageviews)}
-        </span>
-        <span className="text-muted-foreground text-[13px]">
-          A page served to a browser that doesn&apos;t call itself a bot.
-        </span>
-      </div>
-      <div className={cn(cardClass, tile)}>
-        <span className="flex items-center gap-2">
-          <span className="text-[13px] font-medium">Visitors a day</span>
-          <span className="border-apollo-amber-tint-border bg-apollo-amber-tint text-foreground rounded-full border px-2 text-xs font-medium">
-            Estimate
-          </span>
-        </span>
-        <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-visitors">
-          {compactCount(kpi.visitorsAvg)}
-        </span>
-        <span className="text-muted-foreground text-[13px]">
-          Average of each day&apos;s count of distinct network address plus browser. Campus NAT
-          undercounts people; a proxy botnet counts every address as a new visitor.
-        </span>
-      </div>
       <div className={cn(cardClass, tile)}>
         <span className="flex items-center gap-2">
           <span className="text-[13px] font-medium">Engaged visits a day</span>
@@ -303,6 +271,41 @@ function KpiTiles({ overview }: { overview: TrafficOverview }) {
           {kpi.engagedAvg === null ? " Not recorded for this range yet." : ""}
         </span>
       </div>
+      <div className={cn(cardClass, tile)}>
+        <span className="text-[13px] font-medium">Pageviews</span>
+        <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-pageviews">
+          {compactCount(kpi.pageviews)}
+        </span>
+        <span className="text-muted-foreground text-[13px]">
+          A page served to a browser that doesn&apos;t call itself a bot.
+        </span>
+      </div>
+      <div className={cn(cardClass, tile)}>
+        <span className="flex items-center gap-2">
+          <span className="text-[13px] font-medium">Visitors a day, incl. undetected bots</span>
+          <span className="border-apollo-amber-tint-border bg-apollo-amber-tint text-foreground rounded-full border px-2 text-xs font-medium">
+            Estimate
+          </span>
+        </span>
+        <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-visitors">
+          {compactCount(kpi.visitorsAvg)}
+        </span>
+        <span className="text-muted-foreground text-[13px]">
+          Average of each day&apos;s count of distinct network address plus browser. Campus NAT
+          undercounts people; a proxy botnet counts every address as a new visitor.
+        </span>
+      </div>
+      {scoped ? null : (
+        <div className={cn(cardClass, tile)}>
+          <span className="text-[13px] font-medium">Hits</span>
+          <span className="text-3xl font-semibold tabular-nums" data-testid="traffic-hits">
+            {compactCount(kpi.hits)}
+          </span>
+          <span className="text-muted-foreground text-[13px]">
+            Every request: pages, images, scripts, bots, blocked ones.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -409,9 +412,23 @@ function EdgeCard({ edge }: { edge: EdgeDecisions }) {
         </>
       )}
       <p className="text-muted-foreground text-[13px] leading-normal">
-        Blocked and challenged requests are automated traffic stopped at the edge. Hits above
-        include them; pageviews and visitors don&apos;t.
+        Blocked and challenged requests are automated traffic stopped at the edge. Pageviews and
+        visitors don&apos;t include them.
       </p>
+      <details className="text-[13px] leading-normal" data-testid="traffic-bot-explainer">
+        <summary className="cursor-pointer font-medium">How bot traffic is handled</summary>
+        <p className="text-muted-foreground mt-2">
+          Since November, automated scrapers have sent 10–20× our normal traffic. Most use thousands
+          of IP addresses at a few requests each, so we can&apos;t block them by address. Instead,
+          the edge firewall looks for clients whose identity doesn&apos;t add up, such as a browser
+          claiming to be one version while its other headers say another. Those requests are{" "}
+          <strong>blocked</strong> before they reach the site and appear only in the chart above.
+          Known bots and crawlers that we allow, including AI agents (we welcome them via{" "}
+          <code>/llms.txt</code>), are filtered out of visitor counts by their User-Agent. Some
+          scrapers imitate real browsers well enough to pass both checks, so &quot;Visitors&quot;
+          overstates real people. <strong>Engaged visits</strong> is the better gauge of human use.
+        </p>
+      </details>
     </section>
   );
 }
@@ -1125,7 +1142,7 @@ export function TrafficSection({
         </p>
       ) : (
         <>
-          <KpiTiles overview={overview} />
+          <KpiTiles overview={overview} scoped={scoped} />
           {edge ? <EdgeCard edge={edge} /> : null}
           <SourcesCard overview={overview} grain={grain} mode={mode} sel={sel} setSel={setSel} />
           <ReferrerList

@@ -10,6 +10,7 @@ export type UsageEvent = { date: string; label: string };
 export const USAGE_EVENTS: readonly UsageEvent[] = [
   { date: "2026-11-11", label: "VIVO cutover" },
   { date: "2026-11-21", label: "Bot block rules, bot filter backfill" },
+  { date: "2026-11-22", label: "Prefetch trimmed, scraper fingerprint rule (count)" },
 ];
 
 /** One marker on a daily chart: the event, its slot index, and the slot's centre as a percent of the plot width. */

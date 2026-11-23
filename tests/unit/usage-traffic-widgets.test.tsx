@@ -115,12 +115,13 @@ describe("TrafficSection", () => {
     );
   });
 
-  it("shows engaged visits a day beside visitors a day, as the same kind of tile", async () => {
+  it("leads the KPI row with engaged visits, the same kind of tile as visitors", async () => {
     await renderSection();
     const engaged = screen.getByTestId("traffic-engaged");
     expect(engaged.textContent).toBe("310");
     const tile = engaged.parentElement!;
-    expect(tile.previousElementSibling).toBe(screen.getByTestId("traffic-visitors").parentElement);
+    expect(tile.previousElementSibling).toBeNull();
+    expect(screen.getByText("Visitors a day, incl. undetected bots")).toBeTruthy();
     expect(tile.className).toBe(screen.getByTestId("traffic-visitors").parentElement!.className);
     expect(within(tile).getByText("Engaged visits a day")).toBeTruthy();
     expect(
@@ -156,7 +157,8 @@ describe("TrafficSection", () => {
     // Legend totals over the range.
     expect(card.getByText("7,000")).toBeTruthy();
     expect(card.getByText("140")).toBeTruthy();
-    expect(card.getByText(/Hits above include them; pageviews and visitors don't\./)).toBeTruthy();
+    expect(card.getByText(/Pageviews and visitors don't include them\./)).toBeTruthy();
+    expect(card.getByText("How bot traffic is handled")).toBeTruthy();
     // Nov 11 is in the week; Nov 21 is not.
     const markers = card.getAllByTestId("usage-day-marker");
     expect(markers.map((m) => m.getAttribute("data-date"))).toEqual(["2026-11-11"]);
@@ -285,6 +287,15 @@ describe("TrafficSection", () => {
         "Showing 2 of 2 matching landing pages, busiest first",
       ),
     );
+  });
+
+  it("a unit-scoped page drops the Hits tile; a superuser's keeps it", async () => {
+    const { unmount } = render(<TrafficSection overview={OVERVIEW} rangeQuery="range=30" scoped />);
+    expect(screen.queryByTestId("traffic-hits")).toBeNull();
+    expect(screen.getByTestId("traffic-engaged")).toBeTruthy();
+    unmount();
+    render(<TrafficSection overview={OVERVIEW} rangeQuery="range=30" />);
+    expect(screen.getByTestId("traffic-hits")).toBeTruthy();
   });
 
   it("a unit-scoped page: the section drops Top pages, which the page draws itself", async () => {

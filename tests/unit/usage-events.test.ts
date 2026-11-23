@@ -12,7 +12,7 @@ describe("dayMarkers", () => {
   });
 
   it("marks every event a range holds, in date order", () => {
-    const days = Array.from({ length: 30 }, (_, i) =>
+    const days = Array.from({ length: 31 }, (_, i) =>
       new Date(Date.UTC(2026, 9, 23 + i)).toISOString().slice(0, 10),
     );
     expect(dayMarkers(days).map((m) => m.date)).toEqual(USAGE_EVENTS.map((e) => e.date));
