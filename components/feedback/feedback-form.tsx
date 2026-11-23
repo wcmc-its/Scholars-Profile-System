@@ -66,6 +66,7 @@ export function FeedbackForm({
   const [accuracy, setAccuracy] = React.useState<number | null>(null);
   const [accuracyNA, setAccuracyNA] = React.useState(false);
   const [oneChange, setOneChange] = React.useState("");
+  const [comment, setComment] = React.useState("");
   const [wouldUseAgain, setWouldUseAgain] = React.useState<number | null>(null);
   const [role, setRole] = React.useState<FeedbackRole | "">(defaultRole ?? "");
   const [roleOther, setRoleOther] = React.useState("");
@@ -126,6 +127,7 @@ export function FeedbackForm({
       what_missing: showWhatMissing ? whatMissing : null,
       accuracy: showAccuracy && !accuracyNA ? accuracy : null,
       one_change: showOneChange ? oneChange : null,
+      comment,
       would_use_again: wouldUseAgain,
       role: role || null,
       role_other: role === FeedbackRole.other ? roleOther : null,
@@ -330,6 +332,19 @@ export function FeedbackForm({
             ["5", "Definitely"],
           ]}
         />
+      </Section>
+
+      {/* Q5b — open comment, always shown */}
+      <Section label="Anything else you'd like to tell us?" optional>
+        <textarea
+          aria-label="Anything else you'd like to tell us?"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          maxLength={1000}
+          rows={4}
+          className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none"
+        />
+        <div className="mt-1 text-right text-[11px] text-muted-foreground">{comment.length} / 1000</div>
       </Section>
 
       {/* Q6 — role */}

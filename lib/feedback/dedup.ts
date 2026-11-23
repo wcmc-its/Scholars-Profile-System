@@ -39,6 +39,7 @@ export interface DedupCandidate {
   whatMissing: string | null;
   oneChange: string | null;
   taskFailureIntent: string | null;
+  comment?: string | null;
 }
 
 /**
@@ -58,6 +59,7 @@ export async function isDuplicateSubmission(
   if (candidate.whatHelped) clauses.push({ whatHelped: candidate.whatHelped });
   if (candidate.whatMissing) clauses.push({ whatMissing: candidate.whatMissing });
   if (candidate.oneChange) clauses.push({ oneChange: candidate.oneChange });
+  if (candidate.comment) clauses.push({ comment: candidate.comment });
   if (candidate.taskFailureIntent) {
     clauses.push({ taskFailureIntent: candidate.taskFailureIntent });
   }

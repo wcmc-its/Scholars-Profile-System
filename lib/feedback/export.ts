@@ -99,6 +99,7 @@ export const FEEDBACK_EXPORT_COLUMNS: ReadonlyArray<readonly [string, keyof Feed
   ["what_missing", "whatMissing"],
   ["accuracy", "accuracy"],
   ["one_change", "oneChange"],
+  ["comment", "comment"],
   ["would_use_again", "wouldUseAgain"],
   ["role", "role"],
   ["role_other", "roleOther"],

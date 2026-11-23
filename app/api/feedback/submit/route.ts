@@ -44,6 +44,7 @@ const BOUND = {
   what_helped: 500,
   what_missing: 500,
   one_change: 500,
+  comment: 1000,
   role_other: 100,
   contact_email: 255,
 } as const;
@@ -145,6 +146,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!whatMissingRaw.ok) return err(400, "bad_text");
   const oneChangeRaw = sanitizeFreeText(body.one_change as string | null | undefined, BOUND.one_change);
   if (!oneChangeRaw.ok) return err(400, "bad_text");
+  const comment = sanitizeFreeText(body.comment as string | null | undefined, BOUND.comment);
+  if (!comment.ok) return err(400, "bad_text");
   const roleOther = sanitizeFreeText(body.role_other as string | null | undefined, BOUND.role_other);
   if (!roleOther.ok) return err(400, "bad_text");
 
@@ -190,6 +193,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     whatMissing,
     oneChange,
     taskFailureIntent,
+    comment: comment.value,
   });
   if (isDuplicate) {
     return NextResponse.json({ ok: true });
@@ -210,6 +214,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       whatMissing,
       accuracy,
       oneChange,
+      comment: comment.value,
       wouldUseAgain,
       role,
       roleOther: roleOther.value,
