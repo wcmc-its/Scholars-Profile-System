@@ -59,7 +59,7 @@ const CELL_PRESS_JOURNALS = [
 
 export const JOURNAL_FAMILIES: readonly JournalFamily[] = [
   { key: "jama", label: "JAMA (all JAMA journals)", abbrevs: ["JAMA"], prefix: "JAMA " },
-  { key: "lancet", label: "The Lancet", abbrevs: ["Lancet"] },
+  { key: "lancet", label: "The Lancet (all Lancet journals)", abbrevs: ["Lancet"], prefix: "Lancet " },
   { key: "nejm", label: "NEJM (all NEJM journals)", abbrevs: ["N Engl J Med"], prefix: "NEJM " },
   { key: "jco", label: "Journal of Clinical Oncology", abbrevs: ["J Clin Oncol"] },
   { key: "stm", label: "Science Translational Medicine", abbrevs: ["Sci Transl Med"] },

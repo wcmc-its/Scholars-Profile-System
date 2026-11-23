@@ -1241,7 +1241,7 @@ exports[`report workbooks (golden) > report 9: above SCHOLAR_EXPORT_CAP the Peop
         "font": undefined,
         "values": [
           "Journals",
-          "JAMA (all JAMA journals); The Lancet; NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science, Science Immunology, Science Robotics; Cell (all Cell journals)",
+          "JAMA (all JAMA journals); The Lancet (all Lancet journals); NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science, Science Immunology, Science Robotics; Cell (all Cell journals)",
         ],
       },
       {
@@ -1391,7 +1391,7 @@ exports[`report workbooks (golden) > report 9: above the list cap People and Pub
         "font": undefined,
         "values": [
           "Journals",
-          "JAMA (all JAMA journals); The Lancet; NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science, Science Immunology, Science Robotics; Cell (all Cell journals)",
+          "JAMA (all JAMA journals); The Lancet (all Lancet journals); NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science, Science Immunology, Science Robotics; Cell (all Cell journals)",
         ],
       },
       {
@@ -1742,7 +1742,7 @@ exports[`report workbooks (golden) > report 9: all three sheets within the caps 
         "font": undefined,
         "values": [
           "Journals",
-          "JAMA (all JAMA journals); The Lancet; NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science, Science Immunology, Science Robotics; Cell (all Cell journals)",
+          "JAMA (all JAMA journals); The Lancet (all Lancet journals); NEJM (all NEJM journals); Journal of Clinical Oncology; Science Translational Medicine; Nature (all Nature journals); Blood; Circulation; Science, Science Immunology, Science Robotics; Cell (all Cell journals)",
         ],
       },
       {
