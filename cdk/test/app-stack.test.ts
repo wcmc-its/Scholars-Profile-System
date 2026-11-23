@@ -915,9 +915,9 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the twelve app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the thirteen app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The twelve ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // The thirteen ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
         // revalidate-token, session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
         // saml/idp-cert (the IdP signing-cert trust anchor, #466),
@@ -928,7 +928,8 @@ describe("AppStack", () => {
         // SCHOLARS_LDAP_* for the SSO-gated /api/directory/people route,
         // #1592/#1595), and directory/cornell-ithaca-ldap (the read-only
         // Cornell (Ithaca) LDAP bind the app injects as SCHOLARS_CORNELL_LDAP_*
-        // for the dark Cornell directory surfaces, #2519 PR 3). ADR-009 moved
+        // for the dark Cornell directory surfaces, #2519 PR 3), and orcid-api
+        // (the ORCID Connect client, #3115). ADR-009 moved
         // db/bootstrap to the deploy execution role and keeps db/migrate off
         // this role entirely (req 4).
         const policies = template.findResources("AWS::IAM::Policy");
@@ -953,7 +954,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(12);
+        expect(resourceList).toHaveLength(13);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -2863,8 +2864,8 @@ describe("AppStack", () => {
 // #2343 -- a manual `cdk deploy Sps-App-<env>` must be able to keep the
 // pipeline's digest pin instead of re-registering the family on :latest.
 describe("AppStack public ALB hardening (#1942)", () => {
-  // #3115 -- the ORCID Connect client secret is wired in staging only (sandbox
-  // client); prod has no secret, and a ref to a missing secret breaks task start.
+  // #3115 -- the ORCID Connect client secret is wired in both envs: staging holds
+  // the sandbox client, prod the production client. Never cross-wired.
   describe("ORCID Connect client secret (#3115)", () => {
     const orcidKeys = [
       "ORCID_CONNECT_CLIENT_ID",
@@ -2886,17 +2887,16 @@ describe("AppStack public ALB hardening (#1942)", () => {
       return (app?.Secrets ?? []).map((x) => x.Name as string);
     }
 
-    it("staging injects the three ORCID_CONNECT_* keys", () => {
-      expect(appSecrets("staging")).toEqual(expect.arrayContaining(orcidKeys));
-    });
-
-    it("prod injects none of them and never references scholars/prod/orcid-api", () => {
-      const secrets = appSecrets("prod");
-      for (const k of orcidKeys) expect(secrets).not.toContain(k);
-      expect(JSON.stringify(buildAppStack("prod").template.toJSON())).not.toContain(
-        "orcid-api",
-      );
-    });
+    it.each(["staging", "prod"] as const)(
+      "%s injects the three ORCID_CONNECT_* keys from its own env's secret",
+      (envName) => {
+        expect(appSecrets(envName)).toEqual(expect.arrayContaining(orcidKeys));
+        const json = JSON.stringify(buildAppStack(envName).template.toJSON());
+        expect(json).toContain(`scholars/${envName}/orcid-api`);
+        const other = envName === "prod" ? "staging" : "prod";
+        expect(json).not.toContain(`scholars/${other}/orcid-api`);
+      },
+    );
   });
 
   describe.each(["staging", "prod"] as const)("%s", (envName) => {

@@ -414,19 +414,17 @@ export class AppStack extends Stack {
     );
     // ORCID member-API client for "Connect your ORCID iD" (#3115): keys
     // ORCID_CONNECT_CLIENT_ID / _CLIENT_SECRET / _TOKEN_KEY (the AES-256 key for
-    // the stored access token). STAGING ONLY: the sandbox client exists, while
-    // the prod client follows ORCID's demo review -- and a reference to a secret
+    // the stored access token). Both envs: staging holds the ORCID sandbox
+    // client, prod the production member client issued after ORCID's
+    // integration review (secret created 2026-11-23). A reference to a secret
     // that does not exist breaks task start. Created out-of-band, like
     // cornellLdapSecret above. The "-api" tail is clear of the random-suffix
     // gotcha.
-    const orcidConnectSecret =
-      env === "staging"
-        ? secretsmanager.Secret.fromSecretNameV2(
-            this,
-            "OrcidConnectSecret",
-            `scholars/${env}/orcid-api`,
-          )
-        : undefined;
+    const orcidConnectSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "OrcidConnectSecret",
+      `scholars/${env}/orcid-api`,
+    );
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -467,8 +465,8 @@ export class AppStack extends Stack {
       // SCHOLARS_CORNELL_LDAP_* into the app container. Same ADR-009 class
       // as edSecret above -- no migrate, no bootstrap.
       cornellLdapSecret.secretArn,
-      // ORCID Connect client (#3115), staging only -- see orcidConnectSecret.
-      ...(orcidConnectSecret ? [orcidConnectSecret.secretArn] : []),
+      // ORCID Connect client (#3115) -- see orcidConnectSecret.
+      orcidConnectSecret.secretArn,
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -1836,10 +1834,10 @@ export class AppStack extends Stack {
         SELF_EDIT_ORCID_SUGGESTION: "on",
         // ORCID_CONNECT (#3115) — "Connect your ORCID iD" (ORCID sign-in,
         // `/authenticate` only) on the scholar's own Identifiers & Profiles card,
-        // and `GET /api/edit/orcid/connect` + `/callback`. ON in staging, against
-        // the ORCID sandbox client (scholars/staging/orcid-api). OFF in prod: no
-        // prod client until ORCID's demo review, and no prod secret is wired.
-        ORCID_CONNECT: envConfig.envName === "staging" ? "on" : "off",
+        // and `GET /api/edit/orcid/connect` + `/callback`. ON both envs: staging
+        // against the ORCID sandbox client, prod against the production client
+        // (scholars/<env>/orcid-api, see orcidConnectSecret).
+        ORCID_CONNECT: "on",
         // LEADER_REPORT_ACCESS — leaders of a department, division, center or
         // core (OrgUnitRoleAssignment in the unit's leadership group, a core's
         // CoreLeader director) VIEW that unit's /edit/reports, and a cancer
@@ -3404,23 +3402,19 @@ export class AppStack extends Stack {
           cornellLdapSecret,
           "SCHOLARS_CORNELL_LDAP_BIND_PASSWORD",
         ),
-        // ORCID Connect client (#3115), staging only; env-var name == JSON key.
-        ...(orcidConnectSecret
-          ? {
-              ORCID_CONNECT_CLIENT_ID: ecs.Secret.fromSecretsManager(
-                orcidConnectSecret,
-                "ORCID_CONNECT_CLIENT_ID",
-              ),
-              ORCID_CONNECT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(
-                orcidConnectSecret,
-                "ORCID_CONNECT_CLIENT_SECRET",
-              ),
-              ORCID_CONNECT_TOKEN_KEY: ecs.Secret.fromSecretsManager(
-                orcidConnectSecret,
-                "ORCID_CONNECT_TOKEN_KEY",
-              ),
-            }
-          : {}),
+        // ORCID Connect client (#3115); env-var name == JSON key.
+        ORCID_CONNECT_CLIENT_ID: ecs.Secret.fromSecretsManager(
+          orcidConnectSecret,
+          "ORCID_CONNECT_CLIENT_ID",
+        ),
+        ORCID_CONNECT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(
+          orcidConnectSecret,
+          "ORCID_CONNECT_CLIENT_SECRET",
+        ),
+        ORCID_CONNECT_TOKEN_KEY: ecs.Secret.fromSecretsManager(
+          orcidConnectSecret,
+          "ORCID_CONNECT_TOKEN_KEY",
+        ),
       },
     });
 
