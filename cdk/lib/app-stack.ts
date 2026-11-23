@@ -4264,6 +4264,20 @@ export class AppStack extends Stack {
         ],
       }),
     );
+    // 2026-11-23 -- deploy.yml purges the edge (`/*`) after each rollout, now
+    // that the default behavior's edge TTL is 6h (edge-stack.ts). Scoped to
+    // this env's distribution only.
+    if (envConfig.cloudFrontDistributionId) {
+      this.deployRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["cloudfront:CreateInvalidation"],
+          resources: [
+            `arn:aws:cloudfront::${Stack.of(this).account}:distribution/${envConfig.cloudFrontDistributionId}`,
+          ],
+        }),
+      );
+    }
     // #2121 -- the deploy workflow clones each family's current active
     // revision, repoints the image to this deploy's immutable digest, and
     // registers it as a new revision before running/serving it. Tried an
@@ -4592,6 +4606,11 @@ export class AppStack extends Stack {
       value: this.searchEvalCanaryTaskDefinition.family,
       description:
         "SPS one-shot post-deploy search-eval canary task family - run after rollout is confirmed healthy (#1444)",
+    });
+    // Read by deploy.yml's post-rollout edge purge.
+    new CfnOutput(this, "CloudFrontDistributionId", {
+      value: envConfig.cloudFrontDistributionId,
+      description: "This env's CloudFront distribution (deploy.yml edge purge)",
     });
     new CfnOutput(this, "PublicAlbDns", {
       value: this.publicAlb.loadBalancerDnsName,

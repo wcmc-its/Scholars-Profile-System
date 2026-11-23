@@ -519,6 +519,32 @@ jobs:
             exit 1
           fi
 
+      # Purge the edge after the rollout (2026-11-23): the default behavior's
+      # edge TTL is 6h (cdk/lib/edge-stack.ts), so without this, cached HTML
+      # from the previous build could be served for up to 6h. Non-blocking:
+      # the image has already rolled. Self-skips until `cdk deploy
+      # Sps-App-<env>` lands the CloudFrontDistributionId output and the
+      # deploy role's cloudfront:CreateInvalidation grant.
+      - name: Purge CloudFront edge cache (non-blocking)
+        continue-on-error: true
+        env:
+          STACK: ${{ steps.target.outputs.stack }}
+        run: |
+          set -euo pipefail
+          dist=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+          if [ -z "$dist" ] || [ "$dist" = "None" ]; then
+            echo "::notice::No CloudFrontDistributionId output yet; skipping the edge purge."
+            exit 0
+          fi
+          if ! out=$(aws cloudfront create-invalidation --distribution-id "$dist" \
+            --paths '/*' --query 'Invalidation.Id' --output text 2>&1); then
+            echo "::warning::Edge purge failed (deploy still succeeded): $out"
+            exit 0
+          fi
+          echo "Edge purge $out requested on $dist."
+
       # Post-deploy drift report (#1765, #1987) -- informational, never fails
       # the deploy (the image has already rolled; a red job here would hide
       # whether the deploy itself succeeded). scripts/release/drift-report.sh
