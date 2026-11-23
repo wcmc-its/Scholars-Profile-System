@@ -273,15 +273,13 @@ describe("highImpactDownloadNote", () => {
 });
 
 describe("describeHighImpactCriteria", () => {
-  it("Science and Cell are whole families, without the look-alike titles", () => {
+  it("Science and Cell: the named journals, not other publishers' look-alike titles", () => {
     const fam = (k: string) => JOURNAL_FAMILIES.find((f) => f.key === k)!.abbrevs;
-    expect(fam("science")).toEqual(expect.arrayContaining(["Science", "Sci Adv", "Sci Immunol"]));
-    expect(fam("cell")).toEqual(expect.arrayContaining(["Cell", "Cancer Cell", "Mol Cell", "Neuron"]));
-    expect([...fam("science"), ...fam("cell")]).not.toEqual(
-      expect.arrayContaining(["Sci Rep"]),
-    );
-    expect(fam("cell")).not.toContain("Cell Death Dis");
-    expect(fam("cell")).not.toContain("Trends Cardiovasc Med");
+    expect(fam("science")).toEqual(["Science", "Sci Immunol", "Sci Robot"]);
+    expect(fam("cell")).toEqual(expect.arrayContaining(["Cell", "Cell Metab", "Cell Stem Cell", "Cell Rep"]));
+    for (const other of ["Sci Rep", "Sci Adv", "Cell Death Dis", "Cell Res", "Heliyon", "iScience"]) {
+      expect([...fam("science"), ...fam("cell")]).not.toContain(other);
+    }
   });
 
   it("names the report, the journals and the year basis; no impact-factor row", () => {
@@ -292,7 +290,7 @@ describe("describeHighImpactCriteria", () => {
       ),
     );
     expect(rows.get("Report")).toBe("9. Top clinical and high-impact journal publications");
-    expect(rows.get("Journals")).toBe("Cell (all Cell Press journals)");
+    expect(rows.get("Journals")).toBe("Cell (all Cell journals)");
     expect(rows.get("Year basis")).toMatch(/^Fiscal year/);
     expect(rows.has("Minimum Journal Impact Factor")).toBe(false);
   });
