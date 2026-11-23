@@ -5025,6 +5025,9 @@ model FeedbackSubmission {
   // Q4a — what to change for accuracy (CONDITIONAL: stored only when accuracy ∈ {1,2,3})
   oneChange String? @map("one_change") @db.VarChar(500)
 
+  // Q6 — open comment, always shown (lca4001 feedback 2026-11-20: no place for a general comment)
+  comment String? @db.VarChar(1000)
+
   // Q5 — would the respondent use Scholars again (1..5 or NULL).
   // Replaces NPS; see SPEC § "The question instrument".
   wouldUseAgain Int? @map("would_use_again") @db.TinyInt

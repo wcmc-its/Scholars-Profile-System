@@ -23,6 +23,7 @@ export type DigestRow = {
   taskFailureIntent: string | null;
   whatMissing: string | null;
   oneChange: string | null;
+  comment: string | null;
   whatHelped: string | null;
 };
 
@@ -122,6 +123,7 @@ export function buildFeedbackDigest({ rows, from, to, baseUrl }: DigestInput): {
       r.taskFailureIntent && `Couldn't do: ${oneLine(r.taskFailureIntent)}`,
       r.whatMissing && `Missing: ${oneLine(r.whatMissing)}`,
       r.oneChange && `Change: ${oneLine(r.oneChange)}`,
+      r.comment && `Comment: ${oneLine(r.comment)}`,
     ])
     .filter((x): x is string => Boolean(x));
   lines.push(`What to fix (${Math.min(actionable.length, DIGEST_VERBATIM_CAP)} of ${actionable.length}, newest first)`);

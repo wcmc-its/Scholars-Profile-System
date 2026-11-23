@@ -2183,6 +2183,13 @@ export class AppStack extends Stack {
           this,
           `/sps/${env}/app/feedback-export-allowlist`,
         ),
+        // Instant email per feedback submission with free text
+        // (lib/feedback/notify.ts). Reuses the weekly digest's recipient list,
+        // which the ETL stack already requires in SSM; a single space disables.
+        FEEDBACK_NOTIFY_RECIPIENT: ssm.StringParameter.valueForStringParameter(
+          this,
+          `/sps/${env}/etl/feedback-digest-recipient`,
+        ),
         // Origin allowlist the submit endpoint validates the request's
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.

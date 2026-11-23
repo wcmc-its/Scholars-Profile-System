@@ -18,6 +18,7 @@
  * (don't tell the bot it failed). Same-origin: `Origin` header must
  * match `FEEDBACK_SITE_ORIGIN` / `NEXT_PUBLIC_SITE_URL`.
  */
+import { notifyFeedback } from "@/lib/feedback/notify";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { apiError } from "@/lib/api/error-response";
@@ -44,6 +45,7 @@ const BOUND = {
   what_helped: 500,
   what_missing: 500,
   one_change: 500,
+  comment: 1000,
   role_other: 100,
   contact_email: 255,
 } as const;
@@ -145,6 +147,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!whatMissingRaw.ok) return err(400, "bad_text");
   const oneChangeRaw = sanitizeFreeText(body.one_change as string | null | undefined, BOUND.one_change);
   if (!oneChangeRaw.ok) return err(400, "bad_text");
+  const comment = sanitizeFreeText(body.comment as string | null | undefined, BOUND.comment);
+  if (!comment.ok) return err(400, "bad_text");
   const roleOther = sanitizeFreeText(body.role_other as string | null | undefined, BOUND.role_other);
   if (!roleOther.ok) return err(400, "bad_text");
 
@@ -190,6 +194,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     whatMissing,
     oneChange,
     taskFailureIntent,
+    comment: comment.value,
   });
   if (isDuplicate) {
     return NextResponse.json({ ok: true });
@@ -210,6 +215,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       whatMissing,
       accuracy,
       oneChange,
+      comment: comment.value,
       wouldUseAgain,
       role,
       roleOther: roleOther.value,
@@ -218,6 +224,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       contactEmail,
       followupOptin,
     },
+  });
+
+  await notifyFeedback({
+    pageUrl,
+    cwid,
+    role,
+    contactEmail,
+    followupOptin,
+    texts: [
+      ["Comment", comment.value],
+      ["Couldn't find", taskFailureIntent],
+      ["Missing", whatMissing],
+      ["Would change", oneChange],
+      ["What worked", whatHelped],
+      ["Purpose (other)", purposeOther.value],
+    ],
   });
 
   return NextResponse.json({ ok: true });

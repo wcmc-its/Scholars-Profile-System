@@ -21,6 +21,7 @@ const row = (over: Partial<DigestRow> = {}): DigestRow => ({
   taskFailureIntent: null,
   whatMissing: null,
   oneChange: null,
+  comment: null,
   whatHelped: null,
   ...over,
 });
@@ -83,6 +84,11 @@ describe("buildFeedbackDigest", () => {
     expect(t).toContain("  - Couldn't do: find a grant number\n  - Change: add ORCID\n  - Missing: missing 11");
     expect(t).not.toContain("missing 2\n");
     expect(t).not.toContain("missing 3\n");
+  });
+
+  it("open comments land in What to fix", () => {
+    const t = build([row({ comment: "my edits don't stick" })]).text;
+    expect(t).toContain("What to fix (1 of 1, newest first)\n  - Comment: my edits don't stick");
   });
 
   it("praise goes in its own What's working section", () => {

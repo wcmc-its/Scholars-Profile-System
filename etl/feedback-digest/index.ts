@@ -30,6 +30,7 @@ runFeedbackDigest({
         taskFailureIntent: true,
         whatMissing: true,
         oneChange: true,
+        comment: true,
         whatHelped: true,
       },
     }),
