@@ -183,23 +183,21 @@ const RATE_LIMITED_HTML = wafPage(
   "Too many requests - Scholars @ Weill Cornell Medicine",
   `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
 <h1>Too many requests</h1>
-<p>Scholars has paused requests from your network because it received an unusually large number of them in a short time. This is automatic and temporary - access resumes on its own within a few minutes.</p>
-<p class="n">If this keeps happening, or you believe it is a mistake, email <a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a>.</p>
+<p>Scholars has paused requests from your network for a few minutes because it received an unusually large number of them. Access resumes on its own.</p>
+<p class="n">If you're running an automated tool, please start from the <a href="/sitemap.xml">sitemap</a> and follow <code>robots.txt</code>. More in <a href="/about#automated-access">Automated access</a>.</p>
 </main></body></html>`,
 );
 
 /**
- * Body for the client-hint mismatch rules (2026-11-20 botnet). A person who
- * sees it is most likely running something that rewrites the User-Agent (an
- * extension, a testing tool), so the page says what to change. No contact
- * line: these are bot requests by the million, and the fix is on the client.
+ * Body for the client-hint mismatch rules. Generic on purpose: the page must
+ * not tell a bot which check failed or what to fix. No contact line.
  */
 const INCONSISTENT_CLIENT_HTML = wafPage(
   "Browser not recognized - Scholars @ Weill Cornell Medicine",
   `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
 <h1>Browser not recognized</h1>
-<p>Scholars could not load this page because your browser's identity headers were inconsistent: it described itself as one browser while reporting the details of another. A browser extension or tool that changes how your browser identifies itself usually causes this.</p>
-<p class="n">Try again in a standard, up-to-date browser, with any such extension turned off.</p>
+<p>Scholars couldn't load this page in your browser. Try again in a standard, up-to-date browser with extensions that change how it identifies itself turned off.</p>
+<p class="n">Automated tools: see <a href="/about#automated-access">Automated access</a>.</p>
 </main></body></html>`,
 );
 
@@ -2101,7 +2099,14 @@ export class EdgeStack extends Stack {
           {
             name: "search-fingerprint-rate-limit",
             priority: managedGroups.length + 14,
-            action: { block: {} },
+            action: {
+              block: {
+                customResponse: {
+                  responseCode: 429,
+                  customResponseBodyKey: "rateLimited",
+                },
+              },
+            },
             statement: {
               rateBasedStatement: {
                 limit: 300,
