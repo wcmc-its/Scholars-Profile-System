@@ -1739,6 +1739,12 @@ describe("EdgeStack", () => {
           '<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>',
         );
         expect(bodies.rateLimited.Content).toContain("#B31B1B");
+        // Routes tools to the sitemap and the about section, not an inbox.
+        expect(bodies.rateLimited.Content).not.toContain("mailto:");
+        expect(bodies.rateLimited.Content).toContain('href="/sitemap.xml"');
+        expect(bodies.rateLimited.Content).toContain(
+          'href="/about#automated-access"',
+        );
 
         // Combined size across every body on one WebACL is capped at 50 KB.
         const total = Object.values(bodies).reduce(
@@ -2086,7 +2092,11 @@ describe("EdgeStack", () => {
         it("blocks off-campus /search per TARGETED browser fingerprint, after Bot Control", () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const rule = rules.find((r) => r.Name === "search-fingerprint-rate-limit") as any;
-          expect(rule?.Action).toHaveProperty("Block");
+          // Same 429 + branded body as the other rate rules, not the AWS 403.
+          expect(rule?.Action?.Block?.CustomResponse).toEqual({
+            ResponseCode: 429,
+            CustomResponseBodyKey: "rateLimited",
+          });
           const rate = rule?.Statement.RateBasedStatement;
           expect(rate?.AggregateKeyType).toBe("CUSTOM_KEYS");
           expect(rate?.CustomKeys).toEqual([
@@ -2201,7 +2211,10 @@ describe("EdgeStack", () => {
           >;
           const body = bodies.inconsistentClient;
           expect(body.ContentType).toBe("TEXT_HTML");
-          expect(body.Content).toContain("inconsistent");
+          expect(body.Content).toContain("Browser not recognized");
+          // Generic on purpose: never names the failed check.
+          expect(body.Content).not.toMatch(/inconsistent|identity headers/i);
+          expect(body.Content).toContain('href="/about#automated-access"');
           expect(Buffer.byteLength(body.Content, "utf8")).toBeLessThanOrEqual(4096);
           expect(body.Content).not.toMatch(/https?:\/\//);
           expect(body.Content).not.toContain("mailto:");
