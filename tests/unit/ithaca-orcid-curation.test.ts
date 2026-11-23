@@ -8,7 +8,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: {} }));
 
-import { mergeForScholars, toCandidates } from "@/etl/orcid-candidates/index";
+import { evidencePageUrls, mergeForScholars, toCandidates, webPageDetail } from "@/etl/orcid-candidates/index";
+import { orcidEvidenceLine } from "@/lib/edit/orcid";
 import { affiliationManagerBand, planAutoConfirm } from "@/etl/orcid-evidence/index";
 import { orcidCoverageQuery, orcidVerdict, parseOrcidCoverageParams } from "@/lib/edit/orcid-coverage";
 import { orcidQueueFilterKey, parseOrcidQueueFilter } from "@/lib/edit/orcid-queue";
@@ -29,6 +30,27 @@ describe("Affiliation Manager seeds", () => {
 });
 
 describe("web-page ORCID inferences", () => {
+  it("say which kinds of page the voting papers were listed on", () => {
+    const ev = JSON.stringify([
+      { doi: "10.1/a", pages: [{ url: "https://x.cornell.edu/people/qz" }, { url: "https://qzlab.example.org/pubs" }] },
+      { doi: "10.1/b", pages: [{ url: "https://qz.example.org/cv.pdf" }, { url: "https://unknown.example.org" }] },
+    ]);
+    const kind = new Map([
+      ["https://x.cornell.edu/people/qz", "profile"],
+      ["https://qzlab.example.org/pubs", "pubs"],
+      ["https://qz.example.org/cv.pdf", "cv"],
+    ]);
+    const { rows } = toCandidates([], [], [], [{ netid: "qz11", orcid: ID, votes: 2, inferred_at: null, evidence_json: ev }], kind);
+    expect(rows[0].sourceDetail).toBe("Cornell profile, lab or personal site and CV");
+    expect(evidencePageUrls("not json")).toEqual([]);
+    expect(webPageDetail(["profile"])).toBe("Cornell profile");
+    expect(webPageDetail(["lab", "lab", "cv"])).toBe("lab site and CV");
+    expect(webPageDetail([null, "weird"])).toBeNull();
+    const line = (detail: string | null) =>
+      orcidEvidenceLine({ source: "web_page_seed", accepted: 3, rejected: 0, detail }, "Quinn");
+    expect(line("Cornell profile and lab site")).toBe("Recorded on 3 papers listed on Quinn's Cornell profile and lab site");
+    expect(line(null)).toBe("Recorded on 3 papers listed on Quinn's web pages");
+  });
   it("land on Cornell Ithaca rows only, with the votes as accepted", () => {
     const { rows, invalid } = toCandidates([], [], [], [
       { netid: "QZ11", orcid: ID, votes: 4, inferred_at: "2026-11-21T00:00:00Z" },

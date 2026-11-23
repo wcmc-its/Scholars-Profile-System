@@ -1907,7 +1907,7 @@ export async function loadEditContext(
     const [candidates, dismissals] = await Promise.all([
       client.orcidCandidate.findMany({
         where: { cwid },
-        select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true },
+        select: { cwid: true, orcid: true, source: true, articlesAccepted: true, articlesRejected: true, sourceDetail: true },
       }),
       client.orcidDismissal.findMany({ where: { cwid }, select: { cwid: true, orcid: true } }),
     ]);
@@ -1918,6 +1918,7 @@ export async function loadEditContext(
       source: r.source,
       accepted: r.articlesAccepted,
       rejected: r.articlesRejected,
+      ...(r.sourceDetail ? { detail: r.sourceDetail } : {}),
     }));
   }
 

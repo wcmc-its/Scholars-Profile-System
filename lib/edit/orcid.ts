@@ -22,7 +22,8 @@ export function normalizeOrcid(input: string): string | null {
 }
 
 /** One `orcid_candidate` row for an iD, minus the cwid: what a source knows. */
-export type OrcidEvidence = { source: string; accepted: number; rejected: number };
+/** `detail`: web_page_seed only, the kinds of page ("Cornell profile and lab site"). */
+export type OrcidEvidence = { source: string; accepted: number; rejected: number; detail?: string | null };
 
 /** The scholar's first name — what a colleague would call them in a sentence
  *  ("Confirm Olivier's ORCID iD"). From `scholar.preferredName`. */
@@ -66,7 +67,7 @@ export function orcidEvidenceLine(e: OrcidEvidence, subject: string | null): str
     case "orcid_name":
       return `The ORCID registry record matches ${whose} name`;
     case "web_page_seed":
-      return `Recorded on ${e.accepted} papers listed on ${whose} Cornell web page`;
+      return `Recorded on ${e.accepted} papers listed on ${whose} ${e.detail ?? "web pages"}`;
     default:
       return e.source;
   }
