@@ -1031,6 +1031,9 @@ model OrcidCandidate {
   source           String    @db.VarChar(32)
   articlesAccepted Int       @default(0) @map("articles_accepted")
   articlesRejected Int       @default(0) @map("articles_rejected")
+  /// web_page_seed only: the kinds of page the evidence was listed on, as display
+  /// words ("Cornell profile, lab site and CV"); null for every other source.
+  sourceDetail     String?   @map("source_detail") @db.VarChar(100)
   /// The source row's own last-update time, so the dashboard can say how stale RPM's view is.
   sourceUpdatedAt  DateTime? @map("source_updated_at")
   syncedAt         DateTime  @default(now()) @map("synced_at")

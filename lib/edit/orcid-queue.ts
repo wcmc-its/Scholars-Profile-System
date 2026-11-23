@@ -158,7 +158,7 @@ export const ORCID_SOURCE_LABEL: Record<OrcidCandidateSource, string> = {
   infoed_biosketch: "NIH biosketch",
   infoed_biosketch_name: "NIH biosketch (name match)",
   cornell_affiliation_manager: "Cornell Affiliation Manager",
-  web_page_seed: "Cornell web page publications",
+  web_page_seed: "Faculty web page publications",
 };
 
 /** `scholar.campus`: WCM, or Cornell Ithaca (Ithaca ORCID plan). */

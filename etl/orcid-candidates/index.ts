@@ -14,7 +14,9 @@
  *   - `pubsource_web_orcid_inference` live rows (Cornell web-page inferences, ReCiterDB
  *     webPageOrcid.py) → `source = 'web_page_seed'` on Cornell Ithaca rows only, with
  *     `articles_accepted` = the inference's votes, when ITHACA_WEB_SEED_ORCID is also "on"
- *     (Ithaca ORCID plan, step 5).
+ *     (Ithaca ORCID plan, step 5). `source_detail` names the kinds of page the voting
+ *     papers were listed on (Cornell profile, lab / personal site, CV), from the
+ *     inference's evidence_json and `pubsource_web_page.kind`.
  *   - `admin_orcid` → `source = 'rpm_admin'` (hand-entered by an RPM admin;
  *     frozen since RPM stopped writing it 2026-04-05, and SPS never writes it).
  *     A row SPS's Remove deleted comes back here every morning; readers drop
@@ -63,6 +65,8 @@ export type SourceRow = {
   articlesAccepted: number;
   articlesRejected: number;
   sourceUpdatedAt: Date | null;
+  /** web_page_seed only (see `webPageDetail`). */
+  sourceDetail?: string | null;
 };
 
 export type InferredRow = {
@@ -75,7 +79,43 @@ export type InferredRow = {
 export type AdminRow = { personIdentifier: string; orcid: string | null };
 export type NetidRow = { personIdentifier: string; orcid: string | null; updated_at: Date | string | null };
 /** A live `pubsource_web_orcid_inference` row (ReCiterDB webPageOrcid.py). */
-export type WebSeedRow = { netid: string; orcid: string | null; votes: number; inferred_at: Date | string | null };
+export type WebSeedRow = {
+  netid: string;
+  orcid: string | null;
+  votes: number;
+  inferred_at: Date | string | null;
+  /** [{doi, pages: [{url}]}] for the papers that voted for this iD. */
+  evidence_json?: string | null;
+};
+
+/** `pubsource_web_page.kind` → the words a reviewer reads. `pubs` is the Publications page
+ *  followed from a lab or personal site (ReCiterDB web seeds step 3). */
+const PAGE_KIND_WORDS: Record<string, string> = {
+  profile: "Cornell profile",
+  lab: "lab site",
+  personal: "personal site",
+  pubs: "lab or personal site",
+  cv: "CV",
+};
+const PAGE_KIND_ORDER = ["profile", "lab", "personal", "pubs", "cv"];
+
+/** Page URLs in an inference's evidence_json; [] when absent or malformed. Pure. */
+export function evidencePageUrls(evidenceJson: string | null | undefined): string[] {
+  try {
+    const ev = JSON.parse(evidenceJson ?? "[]") as Array<{ pages?: Array<{ url?: unknown }> }>;
+    return [...new Set(ev.flatMap((d) => (d.pages ?? []).map((p) => String(p.url ?? ""))).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+/** Page kinds → "Cornell profile, lab site and CV"; null when none are known. Pure. */
+export function webPageDetail(kinds: Iterable<string | null | undefined>): string | null {
+  const have = new Set([...kinds].filter((k): k is string => !!k && k in PAGE_KIND_WORDS));
+  const words = [...new Set(PAGE_KIND_ORDER.filter((k) => have.has(k)).map((k) => PAGE_KIND_WORDS[k]))];
+  if (words.length === 0) return null;
+  return words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
 
 /** Source rows → candidate rows: trims, lowercases the cwid, drops malformed ORCIDs. Pure. */
 export function toCandidates(
@@ -83,6 +123,7 @@ export function toCandidates(
   admin: AdminRow[],
   affiliationManager: NetidRow[] = [],
   webSeed: WebSeedRow[] = [],
+  pageKind: Map<string, string> = new Map(),
 ): { rows: SourceRow[]; invalid: number } {
   const rows: SourceRow[] = [];
   let invalid = 0;
@@ -141,10 +182,11 @@ export function toCandidates(
       cwid: String(r.netid).trim().toLowerCase(),
       orcid,
       source: "web_page_seed",
-      // The papers on the person's Cornell page that carry the iD (the inference's votes).
+      // The papers on the person's own web pages that carry the iD (the inference's votes).
       articlesAccepted: Number(r.votes ?? 0),
       articlesRejected: 0,
       sourceUpdatedAt: r.inferred_at ? new Date(r.inferred_at) : null,
+      sourceDetail: webPageDetail(evidencePageUrls(r.evidence_json).map((u) => pageKind.get(u))),
     });
   }
   return { rows, invalid };
@@ -202,17 +244,27 @@ async function main(): Promise<number> {
     const webSeedOn = ithacaOn && process.env.ITHACA_WEB_SEED_ORCID === "on";
     const webSeed = webSeedOn
       ? ((await conn.query(
-          `SELECT netid, orcid, votes, inferred_at FROM pubsource_web_orcid_inference
+          `SELECT netid, orcid, votes, inferred_at, evidence_json FROM pubsource_web_orcid_inference
            WHERE superseded_at IS NULL`,
         )) as WebSeedRow[])
       : [];
+    const urls = [...new Set(webSeed.flatMap((r) => evidencePageUrls(r.evidence_json)))];
+    const pageKind = new Map<string, string>();
+    for (let i = 0; i < urls.length; i += BATCH) {
+      const part = urls.slice(i, i + BATCH);
+      const kinds = (await conn.query(
+        `SELECT url, kind FROM pubsource_web_page WHERE url IN (${part.map(() => "?").join(",")})`,
+        part,
+      )) as Array<{ url: string; kind: string }>;
+      for (const k of kinds) pageKind.set(k.url, k.kind);
+    }
     if (webSeedOn) {
       assertSourceVolume("orcid-candidates-web-page-seed", {
         incoming: webSeed.length,
         floor: WEB_SEED_FLOOR,
       });
     }
-    read = toCandidates(inferred, admin, netid, webSeed);
+    read = toCandidates(inferred, admin, netid, webSeed, pageKind);
   });
   console.log(
     `ReciterDB: ${read.rows.length} candidate rows (${read.invalid} skipped: malformed ORCID).`,
@@ -248,10 +300,11 @@ async function main(): Promise<number> {
       batch.map((r) =>
         db.write.orcidCandidate.upsert({
           where: { cwid_orcid_source: { cwid: r.cwid, orcid: r.orcid, source: r.source } },
-          create: { ...r, syncedAt: now },
+          create: { ...r, sourceDetail: r.sourceDetail ?? null, syncedAt: now },
           update: {
             articlesAccepted: r.articlesAccepted,
             articlesRejected: r.articlesRejected,
+            sourceDetail: r.sourceDetail ?? null,
             sourceUpdatedAt: r.sourceUpdatedAt,
             syncedAt: now,
           },
