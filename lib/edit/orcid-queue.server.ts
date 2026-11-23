@@ -609,11 +609,15 @@ export async function bulkConfirmableMany(
     const wcm = scholar.campus === "wcm" && scholar.status === "active";
     const ithaca = scholar.campus === "ithaca" && scholar.status === "external";
     if ((!wcm && !ithaca) || scholar.deletedAt) return notEligible();
+    // Cornell Ithaca also takes an email-verified pair (the ORCID record lists the
+    // scholar's verified email): Ithaca is never auto-confirmed, so without this its
+    // strongest evidence could only be confirmed one at a time (Paul, 2026-11-23).
+    const ithacaEmail = ithaca && mine.band === "email_verified";
     if (
       scholar.orcid !== null ||
       dismissed.size > 0 ||
       open.length !== 1 ||
-      mine.band !== "strong" ||
+      (mine.band !== "strong" && !ithacaEmail) ||
       mine.competitor ||
       !emptyList(mine.competitorCwids) ||
       !emptyList(mine.competitorOrcids) ||
@@ -639,7 +643,8 @@ export async function bulkConfirmableMany(
       (sameOrcidBy.get(pair.orcid) ?? []).some((r) => r.cwid !== pair.cwid) ||
       heldOrcids.has(pair.orcid) ||
       cands.some((c) => c.articlesRejected > 0) ||
-      (ithaca && !cands.some((c) => c.source === "cornell_affiliation_manager"))
+      // A Strong Ithaca pair needs Affiliation Manager; an email-verified one stands alone.
+      (ithaca && !ithacaEmail && !cands.some((c) => c.source === "cornell_affiliation_manager"))
     )
       return notEligible();
     return null;

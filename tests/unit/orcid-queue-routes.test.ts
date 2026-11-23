@@ -916,6 +916,36 @@ describe("bulk-confirm", () => {
     });
   });
 
+  it("confirms an email-verified Cornell Ithaca pair without Affiliation Manager; refuses one with a competitor or for WCM", async () => {
+    const ITH = "0000-0001-5109-3700";
+    h.state.evidence = [
+      { cwid: "it0001", orcid: ITH, band: "email_verified", instMatch: false, reciterRead: false },
+      { cwid: "it0002", orcid: OTHER, band: "email_verified", competitorCwids: ["xx0009"] },
+      { cwid: "jd0001", orcid: ORCID, band: "email_verified" },
+    ];
+    h.state.scholars = new Map([
+      ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca", status: "external" }],
+      ["it0002", { orcid: null, orcidConfirmMethod: null, campus: "ithaca", status: "external" }],
+      ["jd0001", { orcid: null, orcidConfirmMethod: null }],
+    ]);
+    const res = await bulkConfirm(
+      req({
+        pairs: [
+          { cwid: "it0001", orcid: ITH },
+          { cwid: "it0002", orcid: OTHER },
+          { cwid: "jd0001", orcid: ORCID },
+        ],
+        rule: RULE,
+      }),
+    );
+    const { results } = (await res.json()) as { results: Array<{ ok: boolean }> };
+    expect(results.map((r) => r.ok)).toEqual([true, false, false]);
+    expect(h.state.scholars.get("it0001")).toMatchObject({
+      orcid: ITH,
+      orcidConfirmMethod: "librarian",
+    });
+  });
+
   it("dryRun reports which pairs pass the floor and writes nothing", async () => {
     h.state.evidence = [
       { cwid: "jd0001", orcid: ORCID, band: "strong" },

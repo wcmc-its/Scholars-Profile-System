@@ -96,6 +96,17 @@ describe("bulkEligible: Cornell Ithaca", () => {
     expect(bulkEligible(ith({ competitor: true }), r)).toBe(false);
     expect(bulkEligible(ith({ nameAgrees: false }), r)).toBe(false);
   });
+  it("takes an email-verified Ithaca pair without Affiliation Manager; never a WCM one", () => {
+    const r = ORCID_BULK_RULE_DEFAULT;
+    const one = (campus: "ithaca" | "wcm") =>
+      summary({
+        campus,
+        candidates: [cand({ band: "email_verified", shared: 0, worksTotal: 3, sources: [] })],
+      });
+    expect(bulkEligible(one("ithaca"), r)).toBe(true);
+    expect(bulkEligible(one("wcm"), r)).toBe(false);
+  });
+
   it("refuses a Strong web-page inference without an Affiliation Manager source", () => {
     const r = ORCID_BULK_RULE_DEFAULT;
     const ith = (sources: OrcidQueueSummary["candidates"][number]["sources"]) =>
