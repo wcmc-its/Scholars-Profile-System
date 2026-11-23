@@ -9,13 +9,25 @@
  * effect in jsdom.
  */
 import { configure } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
 import { invalidateSessionProbe } from "@/components/site/session-probe";
 
 // The client's `/api/auth/session` probe is cached for the page load
 // (components/site/session-probe.ts), and a test file is one long "page load":
 // drop it after each test so one test's stubbed answer never leaks into the next.
 afterEach(() => invalidateSessionProbe());
+
+// That probe is skipped outright when the browser holds no signed-in hint
+// cookie. Default every DOM test to a browser that holds one, so a stubbed
+// probe answer is actually fetched; session-probe.test.tsx covers the gate.
+if (typeof document !== "undefined") {
+  beforeEach(() => {
+    document.cookie = "sps_signed_in=1; path=/";
+  });
+  afterEach(() => {
+    document.cookie = "sps_signed_in=; path=/; max-age=0";
+  });
+}
 
 // Under `pool: "forks"` with maxForks:4, up to four test files run on contended
 // CPU at once. RTL's default 1000ms asyncUtilTimeout can elapse before a render
