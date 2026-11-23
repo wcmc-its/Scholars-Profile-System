@@ -430,6 +430,7 @@ describe("/edit/usage for a unit admin", () => {
     const root = await renderPage();
     expect(root.getByRole("heading", { level: 1 }).textContent).toBe("Usage");
     expect(root.queryByTestId("usage-site-wide")).toBeNull();
+    expect(root.queryByTestId("usage-unit-bot-caveat")).toBeNull();
     expect(h.mockProfileViews).not.toHaveBeenCalled();
     expect(h.mockScope).toHaveBeenCalledWith(ADMIN, "usage");
   });
@@ -449,6 +450,7 @@ describe("/edit/usage for a unit admin", () => {
     expect(root.getByTestId("usage-total-pageviews").textContent).toBe("45");
     expect(root.getByTestId("usage-busiest-day").textContent).toBe("30");
     expect(root.getByTestId("usage-busiest-day").nextElementSibling?.textContent).toBe("Aug 26");
+    expect(root.getByTestId("usage-unit-bot-caveat").textContent).toMatch(/automated traffic since Nov 11/);
     const profiles = within(root.getByTestId("usage-top-profiles"));
     expect(profiles.getByText("Test Person One")).toBeTruthy();
     expect(profiles.getByText("/test-person-2")).toBeTruthy();

@@ -720,6 +720,13 @@ export default async function EditUsagePage({
             {unitSummary ? (
               <>
                 <KpiRow summary={unitSummary} health={null} range={range} part="unit" />
+                <p
+                  className="text-muted-foreground text-[13px]"
+                  data-testid="usage-unit-bot-caveat"
+                >
+                  Includes some automated traffic since Nov 11, 2026 that passes for a real browser.
+                  See &quot;How bot traffic is handled&quot; below.
+                </p>
                 <UsageBody summary={unitSummary} names={names} edits={edits} part="unit" />
               </>
             ) : (
