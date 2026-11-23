@@ -1683,6 +1683,43 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
+          // Observation only, for now. 2026-11-23: the Chrome-without-hints
+          // count above mixes real browsers (Chrome's own JA4, Android phones)
+          // with scrapers. Every scraper cohort in it (a nonexistent
+          // "Chrome/158" from ~610 IPs, a second fleet-2 JA4 variant, Chrome
+          // 48/99 pools) shares one tell: its TLS ClientHello offers no ALPN
+          // (JA4 ALPN field `00`). Chrome always offers h2. Count first;
+          // promote to block once 24h of matches show no real browsers.
+          {
+            name: "count-chrome-ua-no-alpn",
+            priority: managedGroups.length + 5,
+            action: { count: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  {
+                    regexMatchStatement: {
+                      regexString: "^t1[0-9][di][0-9]{4}00_",
+                      fieldToMatch: { ja4Fingerprint: { fallbackBehavior: "NO_MATCH" } },
+                      textTransformations: [{ priority: 0, type: "NONE" }],
+                    },
+                  },
+                  headerContains("user-agent", "Chrome/"),
+                  {
+                    notStatement: {
+                      statement: headerContains("user-agent", "compatible"),
+                    },
+                  },
+                  notWcm,
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-count-chrome-ua-no-alpn`,
+              sampledRequestsEnabled: true,
+            },
+          },
           // #125 -- Bot Control runs label-only (count override): its
           // `awswaf:managed:aws:bot-control:bot:verified` label exempts
           // verified crawlers/AI fetchers (Googlebot, Bingbot, GPTBot, ...)
@@ -1703,7 +1740,7 @@ export class EdgeStack extends Stack {
           // so /search* is labeled the same way it was under COMMON.
           {
             name: "AWSManagedRulesBotControlRuleSet",
-            priority: managedGroups.length + 5,
+            priority: managedGroups.length + 6,
             overrideAction: { count: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1755,7 +1792,7 @@ export class EdgeStack extends Stack {
           // /search* requests in scope only.
           {
             name: "AWSManagedRulesBotControlRuleSet-Targeted",
-            priority: managedGroups.length + 6,
+            priority: managedGroups.length + 7,
             overrideAction: { none: {} },
             statement: {
               managedRuleGroupStatement: {
@@ -1806,7 +1843,7 @@ export class EdgeStack extends Stack {
           // the sitemap.
           {
             name: "search-block-bots",
-            priority: managedGroups.length + 7,
+            priority: managedGroups.length + 8,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1836,7 +1873,7 @@ export class EdgeStack extends Stack {
           // ponytail: one hardcoded UA; promote to a list if a second shows up.
           {
             name: "search-block-scraper-ua",
-            priority: managedGroups.length + 8,
+            priority: managedGroups.length + 9,
             action: { block: {} },
             statement: {
               andStatement: {
@@ -1866,7 +1903,7 @@ export class EdgeStack extends Stack {
           // pools legitimately peak ~470/5min on /search alone.
           {
             name: "search-rate-limit",
-            priority: managedGroups.length + 9,
+            priority: managedGroups.length + 10,
             action: {
               block: {
                 customResponse: {
@@ -1904,7 +1941,7 @@ export class EdgeStack extends Stack {
           },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 10,
+            priority: managedGroups.length + 11,
             // Enforced (#1434): zero rate matches in the count window -- the
             // WCM shared-NAT pooling worry did not materialize at pre-launch
             // volume. Re-check the per-IP aggregation once launch traffic
@@ -1976,7 +2013,7 @@ export class EdgeStack extends Stack {
           //       their first page sees the challenge once.
           {
             name: "search-challenge-tokenless",
-            priority: managedGroups.length + 11,
+            priority: managedGroups.length + 12,
             action: { challenge: {} },
             statement: {
               andStatement: {
@@ -2035,7 +2072,7 @@ export class EdgeStack extends Stack {
           // ponytail: one fixed limit; revisit if the baseline drifts up.
           {
             name: "search-challenge-tokenless-surge",
-            priority: managedGroups.length + 12,
+            priority: managedGroups.length + 13,
             action: { challenge: {} },
             statement: {
               rateBasedStatement: {
@@ -2063,7 +2100,7 @@ export class EdgeStack extends Stack {
           // above the busiest fingerprint on a normal day and far below the farm.
           {
             name: "search-fingerprint-rate-limit",
-            priority: managedGroups.length + 13,
+            priority: managedGroups.length + 14,
             action: { block: {} },
             statement: {
               rateBasedStatement: {
