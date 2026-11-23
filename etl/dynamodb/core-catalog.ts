@@ -24,8 +24,9 @@
  *
  * Cores 15 (Data Core), 16 (High Performance Computing, formerly Scientific
  * Computing Unit), 17 (Electron Microscopy and Histology), 18 (Human Therapeutic
- * Organoid), 19 (Molecular Biophysics), 20 (Cryo-EM) and 21 (Neuro-anatomy
- * Electron Microscopy) are catalog-ONLY: they
+ * Organoid), 19 (Molecular Biophysics), 20 (Cryo-EM), 21 (Neuro-anatomy
+ * Electron Microscopy) and 22 (Biostatistics, the Meyer Cancer Center shared
+ * resource, added 2026-11 so its director can be listed) are catalog-ONLY: they
  * have no `core_dictionary.yaml` entry yet, because that file's loader RAISES on a
  * core with no `aliases:` (pipeline_cores/dictionary.py `_validate`) and validates
  * the WHOLE file on every load — so seeding them upstream without confirmed
@@ -71,4 +72,5 @@ export const CORE_CATALOG: ReadonlyArray<CoreCatalogEntry> = [
   { id: "19", name: "Molecular Biophysics", facility: "Molecular Biophysics Core" },
   { id: "20", name: "Cryo-EM", facility: "Cryo-EM Core" },
   { id: "21", name: "Neuro-anatomy Electron Microscopy", facility: "Neuro-anatomy Electron Microscopy Core" },
+  { id: "22", name: "Biostatistics", facility: "Biostatistics Shared Resource" },
 ];
