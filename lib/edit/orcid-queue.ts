@@ -685,12 +685,18 @@ export const ORCID_BULK_RULE_DEFAULT: OrcidBulkRule = {
 export function bulkEligible(s: OrcidQueueSummary, rule: OrcidBulkRule): boolean {
   if (s.candidates.length !== 1 || s.conflict || s.autoConfirmed || s.decisions) return false;
   const c = s.candidates[0]!;
-  if (c.band !== "strong" || c.competitor || !c.nameAgrees) return false;
+  if (c.competitor || !c.nameAgrees) return false;
   // Cornell Ithaca: no SPS publications, so the work/source thresholds can't
-  // apply; only an Affiliation Manager pair qualifies (a web-page inference is
-  // Strong too but is confirmed one at a time). The server floor does the rest;
-  // at most ORCID_BULK_ITHACA_MAX per batch.
-  if (s.campus === "ithaca") return c.sources.includes("cornell_affiliation_manager");
+  // apply. An email-verified pair qualifies (Ithaca is never auto-confirmed), and a
+  // Strong one only with Affiliation Manager (a web-page inference is Strong too but
+  // is confirmed one at a time). The server floor does the rest; at most
+  // ORCID_BULK_ITHACA_MAX per batch.
+  if (s.campus === "ithaca")
+    return (
+      c.band === "email_verified" ||
+      (c.band === "strong" && c.sources.includes("cornell_affiliation_manager"))
+    );
+  if (c.band !== "strong") return false;
   return (
     c.shared >= rule.minShared &&
     onlyOnOrcid(c) <= rule.maxOnlyOrcid &&
