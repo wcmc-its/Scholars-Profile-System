@@ -70,6 +70,7 @@ const NAV: NavGroup[] = [
       { id: "mentees", label: "Mentees" },
       { id: "profile-url", label: "Your profile URL" },
       { id: "requests", label: "Requesting changes" },
+      { id: "automated-access", label: "Automated access" },
     ],
   },
   { group: "", items: [{ id: "glossary", label: "Glossary" }] },
@@ -1514,6 +1515,49 @@ export default async function DocsPage() {
           feature request: include your stakeholder role, the surface or behavior, what you want, and
           the underlying need, and submit it the same way. A correction opens a prefilled email to
           the office that owns the data, or points you to the tool where you fix it yourself.
+        </p>
+
+        <h2 id="automated-access">Automated access</h2>
+        <p>
+          Scholars @ Weill Cornell Medicine is open to search engines, research tools and other
+          automated clients, within a few ground rules that keep the site fast for everyone.
+        </p>
+        <p>
+          <strong>Start from the sitemap.</strong>{" "}
+          <a href="/sitemap.xml" className={LINK}>
+            <code>/sitemap.xml</code>
+          </a>{" "}
+          lists every scholar, topic, department and center page. These pages are the complete
+          public record and are the right place to start for indexing or research.
+        </p>
+        <p>
+          <strong>
+            Follow <code>robots.txt</code>.
+          </strong>{" "}
+          Search results and internal endpoints are excluded. Every search is computed fresh, so
+          automated searching slows the site for the people using it.
+        </p>
+        <p>
+          <strong>Be gentle and identifiable.</strong> Fetch pages one at a time, at a modest pace,
+          and identify your client with a descriptive user agent that includes a way to reach you.
+        </p>
+        <p>
+          <strong>Publication data comes from PubMed.</strong> Each publication on Scholars carries
+          its PubMed ID. For bibliographic metadata, go to the source through NCBI&apos;s public
+          tools.
+        </p>
+        <p>
+          <strong>Automated traffic is managed automatically.</strong> Clients that send unusually
+          heavy or unusual traffic may be slowed, asked to verify, or paused for a short time. This
+          happens without manual review and lifts on its own.
+        </p>
+        <p>
+          <strong>Questions.</strong> If you have a research or institutional need these options
+          don&apos;t cover,{" "}
+          <Link href="/about/feedback" className={LINK}>
+            tell us through the feedback form
+          </Link>
+          .
         </p>
 
         <hr className="mt-12 border-border" />
