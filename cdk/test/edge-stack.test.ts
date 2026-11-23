@@ -2126,6 +2126,7 @@ describe("EdgeStack", () => {
         const chromium = byName("block-chromium146-ua-mismatch");
         const count = byName("count-chrome-ua-without-client-hints");
         const tls = byName("block-chrome-ua-non-browser-tls");
+        const noAlpn = byName("count-chrome-ua-no-alpn");
 
         // Just enough of WAF's evaluator for these three rules. A statement
         // on a header the request lacks does NOT match (AWS WAF developer
@@ -2138,6 +2139,11 @@ describe("EdgeStack", () => {
             return s.AndStatement.Statements.every((x: unknown) => matches(x, req));
           if (s.NotStatement) return !matches(s.NotStatement.Statement, req);
           if (s.IPSetReferenceStatement) return req.campus === true;
+          if (s.RegexMatchStatement) {
+            const r = s.RegexMatchStatement;
+            expect(r.FieldToMatch.JA4Fingerprint.FallbackBehavior).toBe("NO_MATCH");
+            return req.ja4 !== undefined && new RegExp(r.RegexString).test(req.ja4);
+          }
           const st = s.ByteMatchStatement ?? s.SizeConstraintStatement;
           if (st.FieldToMatch.JA4Fingerprint) {
             expect(st.FieldToMatch.JA4Fingerprint.FallbackBehavior).toBe("NO_MATCH");
@@ -2154,7 +2160,7 @@ describe("EdgeStack", () => {
           return value.includes(st.SearchString);
         };
         const hits = (req: Req) =>
-          [firefox, chromium, count, tls]
+          [firefox, chromium, count, tls, noAlpn]
             .filter((r) => matches(r.Statement, req))
             .map((r) => r.Name);
         const hints146 = '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"';
@@ -2255,7 +2261,8 @@ describe("EdgeStack", () => {
               ja4: scraperJa4,
               headers: { "user-agent": chrome116, "sec-ch-ua": scraperHints },
             }),
-          ).toEqual(["block-chrome-ua-non-browser-tls"]);
+            // The no-ALPN count also matches, but in WAF the earlier block terminates first.
+          ).toEqual(["block-chrome-ua-non-browser-tls", "count-chrome-ua-no-alpn"]);
           // Real Chrome on Chrome's own TLS stack: untouched.
           expect(
             hits({
@@ -2282,10 +2289,43 @@ describe("EdgeStack", () => {
           ).toEqual([]);
         });
 
+        it("counts (never blocks) a Chrome UA whose TLS hello offers no ALPN", () => {
+          expect(noAlpn?.Action).toEqual({ Count: {} });
+          const chrome158 = ua.chrome120.replace("Chrome/120.", "Chrome/158.");
+          const noAlpnJa4 = "t13d181100_85036bcba153_d41ae481755e";
+          const chromeJa4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd";
+          // The Chrome/158 cohort: no ALPN.
+          expect(hits({ ja4: noAlpnJa4, headers: { "user-agent": chrome158 } })).toEqual([
+            "count-chrome-ua-without-client-hints",
+            "count-chrome-ua-no-alpn",
+          ]);
+          // Fleet 2's second JA4 variant (no ALPN), which the exact-JA4 block misses.
+          expect(
+            hits({ ja4: "t13d131100_f57a46bbacb6_f50d94e863eb", headers: { "user-agent": chrome158, "sec-ch-ua": "x" } }),
+          ).toEqual(["count-chrome-ua-no-alpn"]);
+          // Real Chrome (h2 ALPN), with or without hints: untouched by this rule.
+          expect(
+            hits({ ja4: chromeJa4, headers: { "user-agent": ua.chrome146, "sec-ch-ua": hints146 } }),
+          ).toEqual([]);
+          expect(hits({ ja4: chromeJa4, headers: { "user-agent": ua.chrome120 } })).toEqual([
+            "count-chrome-ua-without-client-hints",
+          ]);
+          // HTTP/1.1-only ALPN ("h1") is not "no ALPN".
+          expect(
+            hits({ ja4: "t13d1713h1_ab0a1bf427ad_ecd0401ec68b", headers: { "user-agent": ua.chrome146, "sec-ch-ua": hints146 } }),
+          ).toEqual([]);
+          // Declared crawlers, missing JA4, and campus are left out.
+          expect(hits({ ja4: noAlpnJa4, headers: { "user-agent": ua.googlebot } })).toEqual([]);
+          expect(hits({ headers: { "user-agent": chrome158, "sec-ch-ua": "x" } })).toEqual([]);
+          expect(
+            hits({ campus: true, ja4: noAlpnJa4, headers: { "user-agent": chrome158, "sec-ch-ua": "x" } }),
+          ).toEqual([]);
+        });
+
         it("runs before Bot Control (no inspection billed for a blocked request), after the managed groups", () => {
           const p = (r: { Priority: number } | undefined) => Number(r?.Priority);
           const botCommon = byName("AWSManagedRulesBotControlRuleSet");
-          for (const r of [firefox, chromium, count, tls]) {
+          for (const r of [firefox, chromium, count, tls, noAlpn]) {
             expect(p(r)).toBeLessThan(p(botCommon));
             expect(p(r)).toBeGreaterThan(p(byName("AWSManagedRulesSQLiRuleSet")));
           }
