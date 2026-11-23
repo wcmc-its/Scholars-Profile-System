@@ -1,6 +1,6 @@
 # docs/ADR-016 — ORCID iDs: system of record, authentication levels, scope and display
 
-**Status:** Accepted 2026-11-06. D3/D4 display and confirmation rules ship behind `SELF_EDIT_ORCID_SUGGESTION`, `SELF_EDIT_PROFILE_LINKS` and `ORCID_CONNECT`; `ORCID_CONNECT` stays off in prod until production ORCID credentials are issued.
+**Status:** Accepted 2026-11-06. D3/D4 display and confirmation rules ship behind `SELF_EDIT_ORCID_SUGGESTION`, `SELF_EDIT_PROFILE_LINKS` and `ORCID_CONNECT`; `ORCID_CONNECT` is on in both envs: staging against the ORCID sandbox client, prod against the production client since 2026-11-23 (#3532).
 **Date:** 2026-11-06
 **Revision:** 1
 **Authors:** Scholars Profile System development team
@@ -66,11 +66,10 @@ ORCID's minimum requirements ask integrators to store the access token. SPS stor
 
 ## Consequences
 
-- Public iDs carry two visual levels. Most will be "confirmed" for the foreseeable future.
-- Provenance for older null-method iDs is recovered where evidence exists (RPM admin entry, audit log, email match); the rest stay "origin unknown" but public.
+- The visible public profile shows only authenticated iDs, and only on opt-in (D3). Most iDs will be "confirmed" for the foreseeable future, so most profiles show no ORCID; confirmed iDs still reach JSON-LD `sameAs` and downstream (D5).
+- Provenance for older null-method iDs is recovered from `orcid_set` audit rows by `scripts/backfills/2026-11-10-orcid-confirm-method-from-audit.ts` (`self` when the actor was the scholar, `proxy` otherwise). All 16 in prod matched, so none stay "origin unknown".
 - Any change to `scholar.orcid` must clear the authenticated state.
 
 ## Open
 
 - Key is CWID only. Extending to Cornell Ithaca (NetIDs, no WCM SSO, so no sign-in route) needs its own decision.
-- ORCID's display guidelines answer the old icon question. The green iD icon is for authenticated iDs only. Unauthenticated iDs should get ORCID's separate unauthenticated icon plus an "(unauthenticated)" suffix, not a plain link. SPS shows a plain link today, so this is pending a decision.
