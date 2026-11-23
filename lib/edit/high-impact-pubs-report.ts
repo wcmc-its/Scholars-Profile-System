@@ -46,6 +46,30 @@ type JournalFamily = {
   prefix?: string;
 };
 
+// Science and Cell Press titles share no clean NLM prefix ("Sci Rep", "Cell
+// Death Dis" are other publishers), so both families are explicit lists.
+// Sci Transl Med keeps its own checkbox. Spellings checked against
+// reciterdb person_article.journalTitleISOabbreviation, 2026-11-23.
+const SCIENCE_JOURNALS = [
+  "Science", "Sci Adv", "Sci Immunol", "Sci Signal", "Sci Robot",
+  "Sci STKE", "Sci Aging Knowledge Environ", // AAAS predecessors
+];
+const CELL_PRESS_JOURNALS = [
+  "Cell", "Cancer Cell", "Cell Biomater", "Cell Chem Biol", "Cell Genom", "Cell Host Microbe",
+  "Cell Metab", "Cell Rep", "Cell Rep Med", "Cell Rep Methods", "Cell Rep Phys Sci",
+  "Cell Stem Cell", "Cell Syst", "Curr Biol", "Dev Cell", "Immunity", "Mol Cell", "Neuron",
+  "Structure", "Chem", "Joule", "Matter", "Med", "Device", "iScience", "Heliyon",
+  "Patterns (N Y)", "STAR Protoc",
+  // Society journals Cell Press publishes.
+  "Am J Hum Genet", "Biophys J", "Stem Cell Reports", "Mol Plant", "Mol Ther",
+  "Mol Ther Methods Clin Dev", "Mol Ther Nucleic Acids", "Mol Ther Oncol", "Mol Ther Oncolytics",
+  // Trends journals (not Trends Cardiovasc Med / Trends Hear: other publishers).
+  "Trends Biochem Sci", "Trends Biotechnol", "Trends Cancer", "Trends Cell Biol", "Trends Chem",
+  "Trends Cogn Sci", "Trends Ecol Evol", "Trends Endocrinol Metab", "Trends Genet",
+  "Trends Immunol", "Trends Microbiol", "Trends Mol Med", "Trends Neurosci", "Trends Parasitol",
+  "Trends Pharmacol Sci", "Trends Plant Sci",
+];
+
 export const JOURNAL_FAMILIES: readonly JournalFamily[] = [
   { key: "jama", label: "JAMA (all JAMA journals)", abbrevs: ["JAMA"], prefix: "JAMA " },
   { key: "lancet", label: "The Lancet", abbrevs: ["Lancet"] },
@@ -55,8 +79,8 @@ export const JOURNAL_FAMILIES: readonly JournalFamily[] = [
   { key: "nature", label: "Nature (all Nature journals)", abbrevs: ["Nature"], prefix: "Nat " },
   { key: "blood", label: "Blood", abbrevs: ["Blood"] },
   { key: "circulation", label: "Circulation", abbrevs: ["Circulation"] },
-  { key: "science", label: "Science", abbrevs: ["Science"] },
-  { key: "cell", label: "Cell", abbrevs: ["Cell"] },
+  { key: "science", label: "Science (all Science journals)", abbrevs: SCIENCE_JOURNALS },
+  { key: "cell", label: "Cell (all Cell Press journals)", abbrevs: CELL_PRESS_JOURNALS },
 ];
 
 // ponytail: "Nat " is Nature Portfolio's NLM prefix, but a few other
