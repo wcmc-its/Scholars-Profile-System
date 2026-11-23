@@ -58,13 +58,16 @@ export async function GET() {
   sections.push(
     `- [Sitemap](${BASE}/sitemap.xml): complete list of indexed URLs (every scholar, topic, department, and center).`,
   );
+  sections.push(
+    `- [Automated access](${BASE}/about#automated-access): how to crawl or harvest Scholars politely.`,
+  );
   sections.push("");
 
-
+  // No /search entry: robots.txt disallows /search (app/robots.ts), so an
+  // index for automated clients must not point them at it.
   sections.push("## Navigation");
   sections.push("");
   sections.push(`- [Home](${BASE}/): entry point.`);
-  sections.push(`- [Search](${BASE}/search): full-text search across scholars and publications.`);
   sections.push(`- [Browse](${BASE}/browse): browse by surname, research area, or department.`);
   sections.push("");
 
