@@ -46,17 +46,28 @@ type JournalFamily = {
   prefix?: string;
 };
 
+// Science and Cell are explicit lists: an NLM prefix ("Sci ", "Cell ") also
+// matches other publishers ("Sci Rep", "Cell Death Dis"). Science = the
+// flagship plus Sci Immunol and Sci Robot; Cell = the Cell Press "Cell …"
+// journals. Sci Transl Med keeps its own checkbox. Spellings checked against
+// reciterdb person_article.journalTitleISOabbreviation, 2026-11-23.
+const SCIENCE_JOURNALS = ["Science", "Sci Immunol", "Sci Robot"];
+const CELL_PRESS_JOURNALS = [
+  "Cell", "Cell Biomater", "Cell Chem Biol", "Cell Genom", "Cell Host Microbe", "Cell Metab",
+  "Cell Rep", "Cell Rep Med", "Cell Rep Methods", "Cell Rep Phys Sci", "Cell Stem Cell", "Cell Syst",
+];
+
 export const JOURNAL_FAMILIES: readonly JournalFamily[] = [
   { key: "jama", label: "JAMA (all JAMA journals)", abbrevs: ["JAMA"], prefix: "JAMA " },
-  { key: "lancet", label: "The Lancet", abbrevs: ["Lancet"] },
+  { key: "lancet", label: "The Lancet (all Lancet journals)", abbrevs: ["Lancet"], prefix: "Lancet " },
   { key: "nejm", label: "NEJM (all NEJM journals)", abbrevs: ["N Engl J Med"], prefix: "NEJM " },
   { key: "jco", label: "Journal of Clinical Oncology", abbrevs: ["J Clin Oncol"] },
   { key: "stm", label: "Science Translational Medicine", abbrevs: ["Sci Transl Med"] },
   { key: "nature", label: "Nature (all Nature journals)", abbrevs: ["Nature"], prefix: "Nat " },
   { key: "blood", label: "Blood", abbrevs: ["Blood"] },
   { key: "circulation", label: "Circulation", abbrevs: ["Circulation"] },
-  { key: "science", label: "Science", abbrevs: ["Science"] },
-  { key: "cell", label: "Cell", abbrevs: ["Cell"] },
+  { key: "science", label: "Science, Science Immunology, Science Robotics", abbrevs: SCIENCE_JOURNALS },
+  { key: "cell", label: "Cell (all Cell journals)", abbrevs: CELL_PRESS_JOURNALS },
 ];
 
 // ponytail: "Nat " is Nature Portfolio's NLM prefix, but a few other
