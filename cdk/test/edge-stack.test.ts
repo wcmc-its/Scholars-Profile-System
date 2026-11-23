@@ -2125,7 +2125,7 @@ describe("EdgeStack", () => {
         const firefox = byName("block-firefox-ua-with-client-hints");
         const chromium = byName("block-chromium146-ua-mismatch");
         const count = byName("count-chrome-ua-without-client-hints");
-        const tls = byName("count-chrome-ua-non-browser-tls");
+        const tls = byName("block-chrome-ua-non-browser-tls");
 
         // Just enough of WAF's evaluator for these three rules. A statement
         // on a header the request lacks does NOT match (AWS WAF developer
@@ -2242,8 +2242,9 @@ describe("EdgeStack", () => {
           expect(hits({ campus: true, headers: { "user-agent": ua.chrome120 } })).toEqual([]);
         });
 
-        it("counts (never blocks) a Chrome UA on the 2026-11-21 scraper's non-browser TLS stack", () => {
-          expect(tls?.Action).toEqual({ Count: {} });
+        it("blocks a Chrome UA on the 2026-11-21 scraper's non-browser TLS stack", () => {
+          expect(tls?.Action).toEqual(chromium?.Action);
+          expect(tls?.Action?.Block?.CustomResponse?.ResponseCode).toBe(403);
           const scraperJa4 = "t13d131100_f57a46bbacb6_ab7e3b40a677";
           const chromeJa4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd";
           const scraperHints = '"Chromium";v="116", "Google Chrome";v="116"';
@@ -2254,7 +2255,7 @@ describe("EdgeStack", () => {
               ja4: scraperJa4,
               headers: { "user-agent": chrome116, "sec-ch-ua": scraperHints },
             }),
-          ).toEqual(["count-chrome-ua-non-browser-tls"]);
+          ).toEqual(["block-chrome-ua-non-browser-tls"]);
           // Real Chrome on Chrome's own TLS stack: untouched.
           expect(
             hits({
