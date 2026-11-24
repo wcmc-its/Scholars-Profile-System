@@ -153,6 +153,34 @@ beforeEach(() => {
   mockPersonNihProfileFindFirst.mockReset().mockResolvedValue(null);
 });
 
+describe("getScholarFullProfileBySlug — equal contribution", () => {
+  it("isCo marks a first / last credit held away from the end of the byline", async () => {
+    mockScholarFindFirst.mockResolvedValue(scholarRow());
+    const row = (pmid: string, isFirst: boolean, isLast: boolean, position: number) => ({
+      ...authorship(pmid, null),
+      isFirst,
+      isLast,
+      position,
+      totalAuthors: 5,
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      row("1", true, false, 1),
+      row("2", true, false, 2),
+      row("3", false, true, 4),
+      row("4", false, true, 5),
+      row("5", false, false, 3),
+    ]);
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect(Object.fromEntries((payload?.publications ?? []).map((p) => [p.pmid, p.authorship.isCo]))).toEqual({
+      "1": false,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": false,
+    });
+  });
+});
+
 describe("getScholarFullProfileBySlug — publication suppression", () => {
   it("drops a publication the scholar has hidden from their own publications list", async () => {
     mockScholarFindFirst.mockResolvedValue(scholarRow());

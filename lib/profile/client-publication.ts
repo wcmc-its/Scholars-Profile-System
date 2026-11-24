@@ -45,7 +45,7 @@ export type ProfileClientPublication = {
   doi: string | null;
   pmcid: string | null;
   ecommonsLink: string | null;
-  authorship: { isFirst: boolean; isLast: boolean };
+  authorship: { isFirst: boolean; isLast: boolean; isCo?: boolean };
   /** MeSH descriptor UIs on this publication (Topics filter + facet counts). */
   meshUis: string[];
   hasAbstract: boolean;
@@ -102,8 +102,8 @@ type WirePub = {
   d?: string;
   pm?: string;
   e?: string;
-  /** bit flags: 1 authorship.isFirst, 2 authorship.isLast, 4 hasAbstract —
-   *  omitted when 0 */
+  /** bit flags: 1 authorship.isFirst, 2 authorship.isLast, 4 hasAbstract,
+   *  8 authorship.isCo — omitted when 0 */
   f?: number;
   /** MeSH UIs, as indexes into `strings` — omitted when empty */
   m?: number[];
@@ -124,6 +124,7 @@ export type ClientPublicationWire = {
 const F_FIRST = 1;
 const F_LAST = 2;
 const F_ABSTRACT = 4;
+const F_CO = 8;
 
 /** Build the wire form. Server-side; pure. */
 export function toClientPublicationWire(
@@ -169,7 +170,8 @@ export function toClientPublicationWire(
     const f =
       (p.authorship.isFirst ? F_FIRST : 0) |
       (p.authorship.isLast ? F_LAST : 0) |
-      (p.hasAbstract ? F_ABSTRACT : 0);
+      (p.hasAbstract ? F_ABSTRACT : 0) |
+      (p.authorship.isCo ? F_CO : 0);
     if (f !== 0) w.f = f;
     const seen = new Set<string>();
     const m: number[] = [];
@@ -218,7 +220,11 @@ export function hydrateClientPublications(
       doi: w.d ?? null,
       pmcid: w.pm ?? null,
       ecommonsLink: w.e ?? null,
-      authorship: { isFirst: (f & F_FIRST) !== 0, isLast: (f & F_LAST) !== 0 },
+      authorship: {
+        isFirst: (f & F_FIRST) !== 0,
+        isLast: (f & F_LAST) !== 0,
+        ...((f & F_CO) !== 0 ? { isCo: true } : {}),
+      },
       meshUis: (w.m ?? []).map((i) => strings[i]),
       hasAbstract: (f & F_ABSTRACT) !== 0,
       wcmAuthors: (w.w ?? []).map((packed) => {

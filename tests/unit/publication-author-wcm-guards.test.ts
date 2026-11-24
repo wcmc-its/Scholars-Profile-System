@@ -49,6 +49,18 @@ describe("publication_author WCM-row guards", () => {
   // lib/api/popover-context.ts — the one guard whose OUTPUT changes if a
   // null-cwid row exists: an external byline carrying its own is_first would
   // turn "First author" into "Co-first author" site-wide with nothing failing.
+  it("popover role pill: an equal contributor with no WCM counterpart still counts as co-", async () => {
+    const row = { cwid: "abc1001", is_first: 0, is_last: 0, position: 2, total_authors: 5 };
+    queryRaw.mockResolvedValueOnce([{ ...row, is_first: 1 }]);
+    expect(await fetchAuthorshipOnPub("abc1001", "1")).toMatchObject({ isFirst: true, firstCount: 2, lastCount: 0 });
+    queryRaw.mockResolvedValueOnce([{ ...row, is_last: 1, position: 4 }]);
+    expect(await fetchAuthorshipOnPub("abc1001", "1")).toMatchObject({ isLast: true, firstCount: 0, lastCount: 2 });
+    queryRaw.mockResolvedValueOnce([{ ...row, is_first: 1, position: 1 }]);
+    expect(await fetchAuthorshipOnPub("abc1001", "1")).toMatchObject({ firstCount: 1 });
+    queryRaw.mockResolvedValueOnce([{ ...row, is_last: 1, position: 5 }]);
+    expect(await fetchAuthorshipOnPub("abc1001", "1")).toMatchObject({ lastCount: 1 });
+  });
+
   it("popover role pill: the authorship-count SQL ANDs `cwid IS NOT NULL`", async () => {
     await fetchAuthorshipOnPub("abc1001", "12345678");
 

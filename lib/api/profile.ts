@@ -389,7 +389,8 @@ export type ProfilePublication = ScoredPublication<{
    *  publication is not deposited there. Rendered as an "eCommons" linkout after
    *  DOI in the meta row. */
   ecommonsLink: string | null;
-  authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean };
+  /** `isCo`: credited as first or last without holding that byline position. */
+  authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean; isCo?: boolean };
   isConfirmed: boolean;
   /** MeSH keywords on this publication, used by the profile Topics filter
    *  (#73). Same `{ui, label}` shape as `Publication.meshTerms`; empty when
@@ -1625,6 +1626,7 @@ export const getScholarFullProfileBySlug = cache(
           isFirst: a.isFirst,
           isLast: a.isLast,
           isPenultimate: a.isPenultimate,
+          isCo: (a.isFirst && a.position > 1) || (a.isLast && a.position < a.totalAuthors),
         },
         isConfirmed: a.isConfirmed,
         meshTerms: normalizeMeshTerms(a.publication.meshTerms),

@@ -38,17 +38,18 @@ const SENIOR_VARIANT = new Set<AuthorPositionRole>([
  * Issue #18 introduced the co-first / co-last detection (counts of `isFirst`
  * / `isLast` flags across the WCM author list); issue #72 reuses the same
  * derivation for both the badge and the position filter so the two surfaces
- * never diverge. Returns null for middle-author publications.
+ * never diverge. `isCo` covers an equal contributor not at the end of the byline
+ * whose counterpart is outside WCM. Returns null for middle-author publications.
  */
 export function deriveAuthorPositionRole(
-  authorship: { isFirst: boolean; isLast: boolean },
+  authorship: { isFirst: boolean; isLast: boolean; isCo?: boolean },
   wcmAuthors: ReadonlyArray<{ isFirst: boolean; isLast: boolean }>,
 ): AuthorPositionRole | null {
   const firstCount = wcmAuthors.filter((a) => a.isFirst).length;
   const lastCount = wcmAuthors.filter((a) => a.isLast).length;
   if (authorship.isFirst && authorship.isLast) return "First and senior author";
-  if (authorship.isLast) return lastCount > 1 ? "Co-senior author" : "Senior author";
-  if (authorship.isFirst) return firstCount > 1 ? "Co-first author" : "First author";
+  if (authorship.isLast) return authorship.isCo || lastCount > 1 ? "Co-senior author" : "Senior author";
+  if (authorship.isFirst) return authorship.isCo || firstCount > 1 ? "Co-first author" : "First author";
   return null;
 }
 
