@@ -1115,10 +1115,10 @@ export class EtlStack extends Stack {
       // Staging and prod read the SAME reciterdb, and the step throws (and
       // alarms nightly) if watchlist_match is absent or holds fewer than 1,000
       // rows. ON in staging since reciterdb's first collectAffiliations apply
-      // run finished (2026-11-18, about 99,000 match rows). OFF in prod until the
-      // staging copy is checked against the 2026-10-29 workbook.
+      // run finished (2026-11-18, about 99,000 match rows). ON in prod since
+      // 2026-11-23 (staging copy signed off).
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      RESEARCH_SECURITY_ETL: env === "prod" ? "off" : "on",
+      RESEARCH_SECURITY_ETL: "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
       // the DataStack export. When openSearchNodeFromSecret is on (cutover
       // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
