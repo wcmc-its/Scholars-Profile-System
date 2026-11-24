@@ -123,6 +123,10 @@ export const CURATED_TABLES: readonly string[] = [
   // User-entered and mirrored OUT to ReciterAI, never back in, so nothing
   // upstream can regenerate it.
   "core_staff",
+  // The internal program roster: hand-entered by program staff, no upstream.
+  "roster_program",
+  "roster_entry",
+  "roster_entry_mentor",
 ];
 
 interface ColumnMeta {

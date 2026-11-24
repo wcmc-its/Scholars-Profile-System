@@ -2795,6 +2795,59 @@ model UnitLeadershipRole {
   @@map("unit_leadership_role")
 }
 
+/// An internal trainee program (a summer fellowship, an internship) whose
+/// roster its own staff keep on `/edit`. Internal only: nothing here reaches a
+/// public surface. Hand-entered, no ETL writer.
+model RosterProgram {
+  id          String        @id @default(uuid()) @db.VarChar(64)
+  name        String        @db.VarChar(255)
+  /// The acronym shown in filters ("MARC").
+  shortLabel  String        @unique @map("short_label") @db.VarChar(32)
+  description String?       @db.VarChar(1000)
+  /// Set = closed to new entries; its history stays.
+  retiredAt   DateTime?     @map("retired_at")
+  createdBy   String        @map("created_by") @db.VarChar(32)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  entries     RosterEntry[]
+
+  @@map("roster_program")
+}
+
+/// One person in one program in one year. NO FK to `Scholar` on either CWID: an
+/// intern may have none, and a departure must not delete history. Names are the
+/// directory's at save, so nobody ever shows as a bare CWID.
+model RosterEntry {
+  id              String              @id @default(uuid()) @db.VarChar(64)
+  programId       String              @map("program_id") @db.VarChar(64)
+  /// Restrict: a program is deleted only while empty.
+  program         RosterProgram       @relation(fields: [programId], references: [id], onDelete: Restrict)
+  menteeCwid      String              @map("mentee_cwid") @db.VarChar(32)
+  menteeName      String              @map("mentee_name") @db.VarChar(255)
+  year            Int                 @db.SmallInt
+  researchProgram String?             @map("research_program") @db.VarChar(255)
+  createdBy       String              @map("created_by") @db.VarChar(32)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  /// At least one (enforced on write).
+  mentors         RosterEntryMentor[]
+
+  @@unique([programId, menteeCwid, year])
+  @@index([menteeCwid])
+  @@map("roster_entry")
+}
+
+model RosterEntryMentor {
+  entryId    String      @map("entry_id") @db.VarChar(64)
+  entry      RosterEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  mentorCwid String      @map("mentor_cwid") @db.VarChar(32)
+  mentorName String      @map("mentor_name") @db.VarChar(255)
+
+  @@id([entryId, mentorCwid])
+  @@index([mentorCwid])
+  @@map("roster_entry_mentor")
+}
+
 /// A vocabulary entry's unit allowlist (#2557 Phase E). `research` and
 /// `clinical` are NCI CCSG vocabulary seeded into the SHARED `center`
 /// vocabulary so all 11 centers COULD use them, but only Meyer does — 298

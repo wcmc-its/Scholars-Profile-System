@@ -395,7 +395,15 @@ export type AuditAction =
    *  `targetEntityType='feedback_submission'`, `targetEntityId='export'`;
    *  `afterValues` = `{ from, to, pageRoute, rows }`. ENUM extended in
    *  scripts/sql/audit-log.sql. */
-  | "feedback_export";
+  | "feedback_export"
+  /** a program roster editor created / edited / retired or deleted a program
+   *  (`roster_program`); `targetEntityId` its id; before null = created, after
+   *  null = deleted. ENUM extended in scripts/sql/audit-log.sql. */
+  | "roster_program_change"
+  /** a program roster editor added / edited or removed one person's entry
+   *  (`roster_entry` + its mentors); `targetEntityId` its id. before/after carry
+   *  CWIDs, never names. ENUM extended in scripts/sql/audit-log.sql. */
+  | "roster_entry_change";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -515,7 +523,14 @@ export type AuditEntityType =
   | "feedback_submission"
   /** a scholar-entered `training` row; `targetEntityId` is its `externalId`.
    *  ENUM extended in scripts/sql/audit-log.sql. */
-  | "training";
+  | "training"
+  /** a program on the internal roster; `targetEntityId` is `roster_program.id`.
+   *  Both roster types are left out of /edit/activity
+   *  (lib/api/edit-activity.ts). ENUM extended in scripts/sql/audit-log.sql. */
+  | "roster_program"
+  /** one person's entry on it; `targetEntityId` is `roster_entry.id`. ENUM
+   *  extended in scripts/sql/audit-log.sql. */
+  | "roster_entry";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
