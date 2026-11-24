@@ -1094,9 +1094,9 @@ export class EtlStack extends Stack {
       // to the scholar's name count toward the match strength (two or more are Strong,
       // one is Moderate) only when this is exactly "on". Off: the papers are still
       // written and listed on the card, and the run logs the band moves they would make.
-      // Staging first; prod follows a review of the staging moves.
+      // On in both envs since 2026-11-24, after a review of the staging run.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
-      ORCID_BYLINE_BAND: env === "prod" ? "off" : "on",
+      ORCID_BYLINE_BAND: "on",
       // Ithaca ORCID plan, step 1 — etl:ithaca-roster writes Cornell Ithaca scholar
       // rows only when this is exactly "on"; otherwise it logs the counts it would
       // write. On in both envs since 2026-11-19: the prod dry run matched the
