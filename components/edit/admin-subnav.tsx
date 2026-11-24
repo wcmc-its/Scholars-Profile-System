@@ -47,6 +47,7 @@ export type AdminSubnavActive =
   | "administrators"
   | "methods"
   | "role-vocabulary"
+  | "program-roster"
   | "coi"
   | "data-sharing"
   | "research-security"
@@ -112,6 +113,7 @@ const TAB_GROUP: Record<AdminSubnavActive, GroupId | null> = {
   administrators: "registries",
   methods: "registries",
   "role-vocabulary": "registries",
+  "program-roster": "registries",
   /** Read-only dashboards; no writes. */
   coi: "insights",
   "data-sharing": "insights",
@@ -160,6 +162,7 @@ export function AdminSubnav({
   roleVocabularyTab,
   dataSharingTab,
   researchSecurityTab = false,
+  programRosterTab = false,
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
@@ -230,6 +233,9 @@ export function AdminSubnav({
   /** Shows the "Research security" tab: flag- and role-gated by the
    *  `researchSecurity` predicate (superuser or research_security_viewer). */
   researchSecurityTab?: boolean;
+  /** Shows the "Program roster" tab: the `programRoster` predicate (superuser or
+   *  program_roster_editor, flag on). */
+  programRosterTab?: boolean;
   /** Whether to show the superuser list surfaces (Profile URLs /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).
    *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
@@ -410,6 +416,12 @@ export function AdminSubnav({
         id: "role-vocabulary",
         href: "/edit/roles",
         label: "Role vocabulary",
+      },
+      {
+        show: programRosterTab,
+        id: "program-roster",
+        href: "/edit/program-roster",
+        label: "Program roster",
       },
       // A dedicated tab, not an Insights peer (Reports IA redesign, 2026-08-14 —
       // reverses the 2026-08-12 "/edit/units only" decision). Declared here, right

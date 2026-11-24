@@ -271,6 +271,7 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "overview/generate": "allow",
   "overview/history": "allow",
   "overview/selection": "allow",
+  "program-roster": "deny",
   proxy: "deny",
   reject: "deny",
   "report-access": "deny",

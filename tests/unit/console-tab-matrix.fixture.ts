@@ -61,6 +61,7 @@ export const ALL_TABS: ConsoleTabId[] = [
   "titles",
   "grantAttribution",
   "orcidQueue",
+  "programRoster",
 ];
 
 // --- the matrix --------------------------------------------------------
@@ -256,6 +257,13 @@ export const INTENDED_MATRIX: MatrixRow[] = [
     pins:
       "2026-11 — the role unlocks ONLY the research security dashboard; the comms_steward, " +
       "observer and content editor rows above pin that none of them sees it",
+  },
+  {
+    name: "pure program_roster_editor",
+    session: sess({ isProgramRosterEditor: true }),
+    grants: grants(),
+    expect: ["programRoster"],
+    pins: "2026-11 — the role unlocks ONLY the program roster (trainee records); no other row sees it",
   },
   {
     name: "comms_steward + unit Owner (the Gap 4b monotonicity case)",

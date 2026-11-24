@@ -468,6 +468,7 @@ export default async function EditSelfPage({
             roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
             dataSharingTab={tabs.dataSharing ? 0 : null}
             researchSecurityTab={tabs.researchSecurity}
+            programRosterTab={tabs.programRoster}
             reportsTab={tabs.reports}
             newsTab={tabs.news}
             pendingNews={pendingNews}

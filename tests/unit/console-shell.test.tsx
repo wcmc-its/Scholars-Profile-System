@@ -80,6 +80,7 @@ const NO_TABS: ConsoleTabState = {
   titles: false,
   grantAttribution: false,
   orcidQueue: false,
+  programRoster: false,
 };
 
 function tabs(overrides: Partial<ConsoleTabState>): ConsoleTabState {

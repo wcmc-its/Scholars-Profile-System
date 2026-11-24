@@ -54,6 +54,7 @@ import { isOrgUnitRoleConsoleTabVisible } from "@/lib/edit/org-unit-role-flags";
 import { canReviewTitles } from "@/lib/edit/titles-queue";
 import { isGrantAttributionQueueTabVisible } from "@/lib/edit/grant-attribution-queue";
 import { isOrcidQueueTabVisible } from "@/lib/edit/orcid-queue";
+import { canViewProgramRoster } from "@/lib/edit/program-roster-access";
 
 // ---------------------------------------------------------------------------
 // Tab ids — one per `AdminSubnavActive` entry in `admin-subnav.tsx`, minus
@@ -85,6 +86,7 @@ export const CONSOLE_TAB_IDS = [
   "titles",
   "grantAttribution",
   "orcidQueue",
+  "programRoster",
 ] as const;
 
 export type ConsoleTabId = (typeof CONSOLE_TAB_IDS)[number];
@@ -202,6 +204,9 @@ export const TAB_PREDICATES: Record<ConsoleTabId, TabPredicate> = {
 
   // Superuser or research_security_viewer only (plus an explicit ad hoc grant).
   researchSecurity: (s, g) => dashboardVisible(s, "research-security", g),
+
+  // Superuser or program_roster_editor only: trainee records.
+  programRoster: (s) => canViewProgramRoster(s),
 
   // Gap 4 (usage half): any org-unit UnitAdmin grant (never `institution` —
   // WCM-wide aggregates stay internal), from any page. `canViewUsage`

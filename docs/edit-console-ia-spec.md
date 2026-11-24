@@ -34,6 +34,7 @@ The matrix is `tests/unit/console-tab-matrix.fixture.ts`, not this table. That f
 | Data quality | ✓ (flag) | ✓ | ✗ | ✓ (`manageableUnitCount > 0`) | ✓ same | ✗ |
 | Data sharing | ✓ (flag) | ✓ | ✗ | ✗ (no unit-scoped variant exists — no decision doc cites this yet, unlike Data Quality) | ✗ | ✗ |
 | Research security | ✓ (flag) | ✗ (sensitive: superuser or `research_security_viewer` only) | ✗ | ✗ | ✗ | ✗ |
+| Program roster | ✓ (flag) | ✗ (trainee records: superuser or `program_roster_editor` only) | ✗ | ✗ | ✗ | ✗ |
 | Usage | ✓ | ✗ (`canViewUsage` has no steward carve-out) | ✗ | ✓ any `UnitAdmin` grant, either role | ✓ same | ✗ |
 | ORCID coverage | ✓ | ✗ | ✗ | ✓ same predicate as Usage (`viewerCanViewUsage`) | ✓ same | ✗ |
 | Funding matcher / Matcha | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ (Matcha also flag-gated) |
