@@ -9,8 +9,9 @@
  * three thresholds the librarian sets: shared works, works only on ORCID, and
  * discovery sources. Only pairs that also pass the server's floor
  * (`assertBulkConfirmable`, asked once via a `dryRun` post) are listed. Cornell
- * Ithaca rows (Affiliation Manager pairs) skip the thresholds and are capped at
- * `ORCID_BULK_ITHACA_MAX` per batch: the rest wait, unchecked, for the next one. Each row can be unchecked; a row with any work only on
+ * Ithaca rows (Affiliation Manager and web-page pairs) skip the thresholds and are capped at
+ * `ORCID_BULK_ITHACA_MAX` per batch: the rest wait, unchecked, for the next one. "Why the rest
+ * don't match" counts everyone else in the view by the first check they fail. Each row can be unchecked; a row with any work only on
  * ORCID is tinted so it gets a look first. "Confirm N iDs" asks once more, then
  * posts in chunks of `ORCID_BULK_MAX` to `POST /api/edit/orcid-queue/bulk-confirm`,
  * which re-checks the fixed part per pair and skips anything that no longer
@@ -20,11 +21,16 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  bulkBlocker,
   bulkEligible,
+  inBulkBand,
+  isOrcidBulkBlocker,
   isOrcidCandidateSource,
+  ORCID_BULK_BLOCKER_LABEL,
   ORCID_BULK_ITHACA_MAX,
   ORCID_BULK_MAX,
   ORCID_BULK_RULE_DEFAULT,
+  ORCID_QUEUE_BAND_LABEL,
   ORCID_SOURCE_LABEL,
   onlyOnOrcid,
   type OrcidBulkRule,
@@ -36,9 +42,12 @@ import { postBatch } from "@/components/edit/orcid-queue-api";
 
 type Pair = { cwid: string; orcid: string };
 type Result = Pair & { ok: boolean; code?: string };
-/** A dry run's extras for a pair that passed (`bulkPairFacts`). */
-type Facts = { orcidName: string | null; verifiedEmail: boolean };
-type DryResult = Result & Partial<Facts>;
+/** A dry run's extras: `bulkPairFacts` for a pair that passed, else why it failed. */
+type DryResult = Result & {
+  orcidName?: string | null;
+  verifiedEmail?: boolean;
+  blocker?: string;
+};
 
 const PAGE = 100;
 /** Dry-run batches in flight at once (the server checks 4 pairs at a time each). */
@@ -77,7 +86,7 @@ export function OrcidBulkReview({
   // The server's floor (`assertBulkConfirmable`, the etl:bulk-confirm-strong
   // rule) needs facts the summary doesn't carry, so ask it which pairs pass
   // (dry run, writes nothing) and list only those. null = still checking.
-  const [floorOk, setFloorOk] = useState<ReadonlyMap<string, Facts> | null>(null);
+  const [floor, setFloor] = useState<ReadonlyMap<string, DryResult> | null>(null);
   const floorKeys = useMemo(
     () =>
       list
@@ -90,10 +99,10 @@ export function OrcidBulkReview({
   useEffect(() => {
     if (!canDecide) return;
     let live = true;
-    setFloorOk(null);
+    setFloor(null);
     (async () => {
       const pairs = floorKeys ? floorKeys.split(",").map((k) => k.split("|")) : [];
-      const ok = new Map<string, Facts>();
+      const seen = new Map<string, DryResult>();
       const batches: string[][][] = [];
       for (let i = 0; i < pairs.length; i += ORCID_BULK_MAX)
         batches.push(pairs.slice(i, i + ORCID_BULK_MAX));
@@ -115,16 +124,11 @@ export function OrcidBulkReview({
             onError(r.message);
             return;
           }
-          for (const x of r.results)
-            if (x.ok)
-              ok.set(`${x.cwid}|${x.orcid}`, {
-                orcidName: x.orcidName ?? null,
-                verifiedEmail: !!x.verifiedEmail,
-              });
+          for (const x of r.results) seen.set(`${x.cwid}|${x.orcid}`, x);
         }
       };
       await Promise.all(Array.from({ length: DRY_RUN_IN_FLIGHT }, worker));
-      if (live) setFloorOk(ok);
+      if (live) setFloor(seen);
     })();
     return () => {
       live = false;
@@ -133,22 +137,42 @@ export function OrcidBulkReview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floorKeys, canDecide]);
 
-  const eligible = useMemo(
-    () =>
-      list.filter(
-        (s) =>
-          bulkEligible(s, rule) &&
-          !!floorOk?.has(keyOf(s)) &&
-          (!needEmail || !!floorOk.get(keyOf(s))?.verifiedEmail) &&
-          !s.candidates.some((c) => outcomes[`${s.cwid}|${c.orcid}`]),
-      ),
-    [list, rule, outcomes, floorOk, needEmail],
-  );
+  // Every undecided scholar in the view either matches or is counted once under
+  // the first check they fail: the fixed rule, then the server's floor, then the
+  // boxes the librarian checked.
+  const { eligible, inBand, why } = useMemo(() => {
+    const eligible: OrcidQueueSummary[] = [];
+    const why = new Map<string, number>();
+    let inBand = 0;
+    for (const s of list) {
+      if (s.candidates.some((c) => outcomes[`${s.cwid}|${c.orcid}`])) continue;
+      if (inBulkBand(s)) inBand += 1;
+      const blocker = bulkBlocker(s, ANY_RULE);
+      const f = blocker ? undefined : floor?.get(keyOf(s));
+      if (f?.ok && bulkEligible(s, rule) && (!needEmail || f.verifiedEmail)) {
+        eligible.push(s);
+        continue;
+      }
+      const label =
+        blocker === "band"
+          ? `${ORCID_QUEUE_BAND_LABEL[s.candidates[0]!.band]}: reviewed one at a time`
+          : blocker
+            ? ORCID_BULK_BLOCKER_LABEL[blocker]
+            : f?.ok
+              ? ORCID_BULK_BLOCKER_LABEL.threshold
+              : isOrcidBulkBlocker(f?.blocker)
+                ? ORCID_BULK_BLOCKER_LABEL[f.blocker]
+                : "No longer qualifies: reload the page";
+      why.set(label, (why.get(label) ?? 0) + 1);
+    }
+    return { eligible, inBand, why: [...why].sort((a, b) => b[1] - a[1]) };
+  }, [list, rule, outcomes, floor, needEmail]);
+  const hasIthaca = useMemo(() => list.some((s) => s.campus === "ithaca"), [list]);
   useEffect(() => {
-    if (floorOk) onCount?.(eligible.length);
+    if (floor) onCount?.(eligible.length);
     // onCount is a fresh closure each render; report only when the count moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eligible.length, floorOk]);
+  }, [eligible.length, floor]);
   // Cornell Ithaca: at most ORCID_BULK_ITHACA_MAX per batch; the rest wait.
   const overCap = useMemo(() => {
     const ithaca = eligible.filter((s) => s.campus === "ithaca" && !excluded.has(s.cwid));
@@ -207,7 +231,8 @@ export function OrcidBulkReview({
 
   // A threshold is a checkbox (off = not applied) plus its value.
   const OPTIONS: Record<keyof OrcidBulkRule, number[]> = {
-    minShared: [1, 2, 3, 5, 8, 10, 15, 20],
+    // From 3: the server's floor, so a lower value would change nothing.
+    minShared: [3, 5, 8, 10, 15, 20],
     maxOnlyOrcid: [0, 1, 2, 3, 5, 10],
     minSources: [2, 3],
   };
@@ -246,11 +271,11 @@ export function OrcidBulkReview({
       >
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <span className="text-[15px] font-medium">
-            Confirm Strong matches where every one of these holds
+            Confirm Strong and Email verified matches where every one of these holds
           </span>
           <span className="text-muted-foreground text-[13px]" data-testid="orcid-bulk-count">
             <span className="text-foreground font-semibold">{fmt(eligible.length)}</span> of{" "}
-            {fmt(list.length)} scholars match
+            {fmt(inBand)} Strong or Email verified {inBand === 1 ? "scholar matches" : "scholars match"}
           </span>
         </div>
         <div className="flex flex-wrap gap-2 text-[13px]">
@@ -308,10 +333,35 @@ export function OrcidBulkReview({
         <span className="text-muted-foreground text-[12.5px]">
           Rows with any work only on ORCID are tinted: look at those before confirming. Anything you
           uncheck stays in the one-at-a-time queue.
+          {hasIthaca
+            ? " Sources, shared works and only on ORCID apply to WCM scholars only."
+            : null}
         </span>
+        {floor && why.length > 0 ? (
+          <details
+            key={eligible.length === 0 ? "none" : "some"}
+            open={eligible.length === 0}
+            className="text-[13px]"
+            data-testid="orcid-bulk-why"
+          >
+            <summary className="text-apollo-slate cursor-pointer">
+              Why the other {fmt(why.reduce((n, [, k]) => n + k, 0))} in this view don&rsquo;t match
+            </summary>
+            <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
+              {why.map(([label, n]) => (
+                <li key={label} className="flex gap-3">
+                  <span className="w-14 shrink-0 text-right font-semibold tabular-nums">
+                    {fmt(n)}
+                  </span>
+                  <span className="text-muted-foreground min-w-0">{label}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
       </section>
 
-      {canDecide && floorOk === null ? (
+      {canDecide && floor === null ? (
         <p className="text-muted-foreground m-0 text-[14px]" data-testid="orcid-bulk-checking">
           Checking which scholars qualify…
         </p>
@@ -398,7 +448,7 @@ export function OrcidBulkReview({
                     {c.orcid}
                   </span>
                   <span role="cell" className="min-w-0 truncate">
-                    {floorOk?.get(keyOf(s))?.orcidName ?? (
+                    {floor?.get(keyOf(s))?.orcidName ?? (
                       <span className="text-muted-foreground">Name not public</span>
                     )}
                   </span>

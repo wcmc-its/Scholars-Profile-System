@@ -26,12 +26,14 @@ import { formatPublishedName } from "@/lib/postnominal";
 import {
   compareCandidates,
   EMPTY_ORCID_QUEUE_FILTER,
+  isIthacaBulkSource,
   isOrcidCandidateSource,
   isReciterWorkStatus,
   ORCID_QUEUE_BANDS,
   ORCID_UNDO_WINDOW_MS,
   pairState,
   type OrcidCandidateSource,
+  type OrcidBulkBlocker,
   type OrcidBylineDetail,
   type OrcidEvidenceDetail,
   type OrcidOnFile,
@@ -79,6 +81,8 @@ export class OrcidQueueRefused extends Error {
       | "on_linked_record"
       | "not_bulk_eligible"
       | "undo_expired",
+    /** `not_bulk_eligible` only: the first floor check that failed. */
+    readonly blocker?: OrcidBulkBlocker,
   ) {
     super(code);
   }
@@ -528,7 +532,8 @@ export async function dismissOthers(
  *  - WCM (active): the rest of `etl:bulk-confirm-strong`'s verified rule
  *    (etl/bulk-confirm-strong/sql/orcid.sql): >= 3 shared works, institution
  *    match, a ReCiter read with zero rejected works, no rejected RPM pair.
- *  - Cornell Ithaca (external): a Cornell Affiliation Manager pair. Ithaca rows
+ *  - Cornell Ithaca (external): a Cornell Affiliation Manager or web-page pair
+ *    (`isIthacaBulkSource`), or an email-verified one. Ithaca rows
  *    have no SPS publications, so the work checks can't apply; their iDs are
  *    never pushed to Identity.
  * Anything else is refused (`not_bulk_eligible`) and stays in the queue.
@@ -598,7 +603,8 @@ export async function bulkConfirmableMany(
   const heldOrcids = new Set(holders.map((h) => h.orcid));
   const candidatesBy = group(candidates, (r) => `${r.cwid}|${r.orcid}`);
   const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
-  const notEligible = () => new OrcidQueueRefused(409, "not_bulk_eligible");
+  const notEligible = (blocker?: OrcidBulkBlocker) =>
+    new OrcidQueueRefused(409, "not_bulk_eligible", blocker);
 
   const verdict = (pair: { cwid: string; orcid: string }): OrcidQueueRefused | null => {
     const scholar = scholarBy.get(pair.cwid);
@@ -614,40 +620,38 @@ export async function bulkConfirmableMany(
     // scholar's verified email): Ithaca is never auto-confirmed, so without this its
     // strongest evidence could only be confirmed one at a time (Paul, 2026-11-23).
     const ithacaEmail = ithaca && mine.band === "email_verified";
+    if (mine.band !== "strong" && !ithacaEmail) return notEligible("band");
+    if (scholar.orcid !== null) return notEligible("on_file");
+    if (dismissed.size > 0) return notEligible("decided");
+    if (open.length !== 1) return notEligible("multiple");
     if (
-      scholar.orcid !== null ||
-      dismissed.size > 0 ||
-      open.length !== 1 ||
-      (mine.band !== "strong" && !ithacaEmail) ||
       mine.competitor ||
       !emptyList(mine.competitorCwids) ||
-      !emptyList(mine.competitorOrcids) ||
-      !mine.nameAgrees
+      !emptyList(mine.competitorOrcids)
     )
-      return notEligible();
+      return notEligible("competitor");
+    if (!mine.nameAgrees) return notEligible("name");
     if (wcm) {
       const work = (
         mine.evidenceDetail as {
           workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
         } | null
       )?.workStatus;
-      if (
-        mine.shared < 3 ||
-        !mine.instMatch ||
-        work?.reciterRead !== true ||
-        Number(work.counts?.rejected ?? 0) !== 0
-      )
-        return notEligible();
+      if (mine.shared < 3) return notEligible("shared");
+      if (!mine.instMatch) return notEligible("institution");
+      if (work?.reciterRead !== true) return notEligible("reciter_unread");
+      if (Number(work.counts?.rejected ?? 0) !== 0) return notEligible("reciter_rejected");
     }
     const cands = candidatesBy.get(`${pair.cwid}|${pair.orcid}`) ?? [];
     if (
       (sameOrcidBy.get(pair.orcid) ?? []).some((r) => r.cwid !== pair.cwid) ||
-      heldOrcids.has(pair.orcid) ||
-      cands.some((c) => c.articlesRejected > 0) ||
-      // A Strong Ithaca pair needs Affiliation Manager; an email-verified one stands alone.
-      (ithaca && !ithacaEmail && !cands.some((c) => c.source === "cornell_affiliation_manager"))
+      heldOrcids.has(pair.orcid)
     )
-      return notEligible();
+      return notEligible("other_scholar");
+    if (cands.some((c) => c.articlesRejected > 0)) return notEligible("reciter_rejected");
+    // A Strong Ithaca pair needs a bulk source; an email-verified one stands alone.
+    if (ithaca && !ithacaEmail && !cands.some((c) => isIthacaBulkSource(c.source)))
+      return notEligible("ithaca_source");
     return null;
   };
   return new Map(pairs.map((p) => [`${p.cwid}|${p.orcid}`, verdict(p)]));

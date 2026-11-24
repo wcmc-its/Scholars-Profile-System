@@ -705,28 +705,72 @@ export const ORCID_BULK_RULE_DEFAULT: OrcidBulkRule = {
   minSources: 2,
 };
 
-/** The scholar qualifies for bulk confirm under `rule`. Pure over the
- *  summary; the server re-checks the fixed part (`assertBulkConfirmable`). */
-export function bulkEligible(s: OrcidQueueSummary, rule: OrcidBulkRule): boolean {
-  if (s.candidates.length !== 1 || s.conflict || s.autoConfirmed || s.decisions) return false;
-  const c = s.candidates[0]!;
-  if (c.competitor || !c.nameAgrees) return false;
+/** Cornell Ithaca sources a Strong pair can be bulk-confirmed from: Affiliation
+ *  Manager, and the web-page inference (Paul, 2026-11-24). Shared by the browser
+ *  rule and the server floor. */
+export function isIthacaBulkSource(source: string): boolean {
+  return source === "cornell_affiliation_manager" || source === "web_page_seed";
+}
+
+/** Why a scholar can't be bulk-confirmed. The browser rule (`bulkBlocker`) gives
+ *  the first group, the server floor (`bulkConfirmableMany`) the second too. */
+export const ORCID_BULK_BLOCKER_LABEL = {
+  multiple: "More than one candidate iD",
+  on_file: "An iD is already on file",
+  decided: "Already has a decision",
+  competitor: "Another scholar or iD competes for the same papers",
+  name: "The name on ORCID differs",
+  ithaca_source: "Cornell Ithaca, not from Affiliation Manager or a faculty web page",
+  threshold: "Doesn't meet the boxes checked above",
+  shared: "Fewer than 3 shared works",
+  institution: "No Cornell or WCM affiliation or email on the ORCID record",
+  reciter_unread: "Not yet checked against ReCiter",
+  reciter_rejected: "ReCiter has a rejected paper from this ORCID record",
+  other_scholar: "The iD is on file or suggested for another scholar",
+} as const;
+export type OrcidBulkBlocker = "band" | keyof typeof ORCID_BULK_BLOCKER_LABEL;
+
+export function isOrcidBulkBlocker(v: unknown): v is keyof typeof ORCID_BULK_BLOCKER_LABEL {
+  return typeof v === "string" && Object.hasOwn(ORCID_BULK_BLOCKER_LABEL, v);
+}
+
+/** The scholar's best iD is in a band Bulk review takes: Strong, or (Cornell
+ *  Ithaca, never auto-confirmed) Email verified. Pure. */
+export function inBulkBand(s: OrcidQueueSummary): boolean {
+  const band = s.candidates[0]?.band;
+  return band === "strong" || (band === "email_verified" && s.campus === "ithaca");
+}
+
+/** The first reason the scholar doesn't qualify for bulk confirm under `rule`,
+ *  or null. Pure over the summary; the server re-checks the fixed part
+ *  (`assertBulkConfirmable`). */
+export function bulkBlocker(s: OrcidQueueSummary, rule: OrcidBulkRule): OrcidBulkBlocker | null {
+  const c = s.candidates[0];
+  if (!c) return "decided";
+  if (!inBulkBand(s)) return "band";
+  if (s.conflict || s.autoConfirmed) return "on_file";
+  if (s.candidates.length !== 1) return "multiple";
+  if (s.decisions) return "decided";
+  if (c.competitor) return "competitor";
+  if (!c.nameAgrees) return "name";
   // Cornell Ithaca: no SPS publications, so the work/source thresholds can't
-  // apply. An email-verified pair qualifies (Ithaca is never auto-confirmed), and a
-  // Strong one only with Affiliation Manager (a web-page inference is Strong too but
-  // is confirmed one at a time). The server floor does the rest; at most
-  // ORCID_BULK_ITHACA_MAX per batch.
+  // apply. An email-verified pair qualifies (Ithaca is never auto-confirmed), and
+  // a Strong one from an `isIthacaBulkSource`. The server floor does the rest; at
+  // most ORCID_BULK_ITHACA_MAX per batch.
   if (s.campus === "ithaca")
-    return (
-      c.band === "email_verified" ||
-      (c.band === "strong" && c.sources.includes("cornell_affiliation_manager"))
-    );
-  if (c.band !== "strong") return false;
-  return (
-    c.shared >= rule.minShared &&
+    return c.band === "email_verified" || c.sources.some(isIthacaBulkSource)
+      ? null
+      : "ithaca_source";
+  return c.shared >= rule.minShared &&
     onlyOnOrcid(c) <= rule.maxOnlyOrcid &&
     c.sources.length >= rule.minSources
-  );
+    ? null
+    : "threshold";
+}
+
+/** The scholar qualifies for bulk confirm under `rule`. Pure. */
+export function bulkEligible(s: OrcidQueueSummary, rule: OrcidBulkRule): boolean {
+  return bulkBlocker(s, rule) === null;
 }
 
 /** Works on the ORCID record that are not in ReCiter. Pure. */
