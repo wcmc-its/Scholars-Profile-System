@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bulkBlocker,
   bulkEligible,
   ORCID_BULK_RULE_DEFAULT,
   onlyOnOrcid,
@@ -107,11 +108,30 @@ describe("bulkEligible: Cornell Ithaca", () => {
     expect(bulkEligible(one("wcm"), r)).toBe(false);
   });
 
-  it("refuses a Strong web-page inference without an Affiliation Manager source", () => {
+  it("takes a Strong pair from Affiliation Manager or a faculty web page; refuses any other source", () => {
     const r = ORCID_BULK_RULE_DEFAULT;
     const ith = (sources: OrcidQueueSummary["candidates"][number]["sources"]) =>
       summary({ campus: "ithaca", candidates: [cand({ shared: 0, worksTotal: 12, sources })] });
-    expect(bulkEligible(ith(["web_page_seed"]), r)).toBe(false);
+    expect(bulkEligible(ith(["web_page_seed"]), r)).toBe(true);
+    expect(bulkBlocker(ith(["identity"]), r)).toBe("ithaca_source");
+    expect(bulkBlocker(ith([]), r)).toBe("ithaca_source");
     expect(bulkEligible(ith(["web_page_seed", "cornell_affiliation_manager"]), r)).toBe(true);
+  });
+});
+
+describe("bulkBlocker", () => {
+  it.each([
+    ["band", { candidates: [cand({ band: "moderate" })] }],
+    ["band", { candidates: [cand({ band: "email_verified" })] }],
+    ["multiple", { candidates: [cand(), cand({ orcid: "x" })] }],
+    ["on_file", { conflict: true }],
+    ["decided", { decisions: { byScholar: true, byStaff: false, librarian: false, at: null } }],
+    ["decided", { candidates: [] }],
+    ["competitor", { candidates: [cand({ competitor: true })] }],
+    ["name", { candidates: [cand({ nameAgrees: false })] }],
+    ["threshold", { candidates: [cand({ shared: 4 })] }],
+    [null, {}],
+  ] as Array<[string | null, Partial<OrcidQueueSummary>]>)("%s", (want, over) => {
+    expect(bulkBlocker(summary(over), ORCID_BULK_RULE_DEFAULT)).toBe(want);
   });
 });

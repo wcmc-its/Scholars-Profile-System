@@ -822,8 +822,20 @@ describe("bulk-confirm", () => {
     };
     expect(results).toEqual([
       { cwid: "jd0001", orcid: ORCID, ok: true },
-      { cwid: "js0002", orcid: OTHER, ok: false, code: "not_bulk_eligible" },
-      { cwid: "jt0003", orcid: "0000-0001-5109-3700", ok: false, code: "not_bulk_eligible" },
+      {
+        cwid: "js0002",
+        orcid: OTHER,
+        ok: false,
+        code: "not_bulk_eligible",
+        blocker: "competitor",
+      },
+      {
+        cwid: "jt0003",
+        orcid: "0000-0001-5109-3700",
+        ok: false,
+        code: "not_bulk_eligible",
+        blocker: "band",
+      },
     ]);
     expect(h.state.scholars.get("jd0001")).toMatchObject({
       orcid: ORCID,
@@ -838,7 +850,7 @@ describe("bulk-confirm", () => {
     });
   });
 
-  it("refuses a scholar with a second open iD, and an Ithaca pair Affiliation Manager didn't supply", async () => {
+  it("refuses a scholar with a second open iD, and an Ithaca pair neither Affiliation Manager nor a web page supplied", async () => {
     h.state.evidence = [
       { cwid: "jd0001", orcid: ORCID, band: "strong" },
       { cwid: "jd0001", orcid: OTHER, band: "weak" },
@@ -863,16 +875,18 @@ describe("bulk-confirm", () => {
   });
 
   it.each([
-    ["2 shared works (Strong from byline papers)", { shared: 2 }],
-    ["no institution match", { instMatch: false }],
-    ["ReCiter not read", { reciterRead: false }],
-    ["a work rejected in ReCiter", { rejected: 1 }],
-    ["a competitor cwid listed", { competitorCwids: ["xx0009"] }],
-  ])("refuses a Strong pair with %s (etl:bulk-confirm-strong floor)", async (_, extra) => {
+    ["2 shared works (Strong from byline papers)", { shared: 2 }, "shared"],
+    ["no institution match", { instMatch: false }, "institution"],
+    ["ReCiter not read", { reciterRead: false }, "reciter_unread"],
+    ["a work rejected in ReCiter", { rejected: 1 }, "reciter_rejected"],
+    ["a competitor cwid listed", { competitorCwids: ["xx0009"] }, "competitor"],
+  ])("refuses a Strong pair with %s (etl:bulk-confirm-strong floor)", async (_, extra, blocker) => {
     h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong", ...extra }];
     const res = await bulkConfirm(req({ pairs: [{ cwid: "jd0001", orcid: ORCID }], rule: RULE }));
-    const { results } = (await res.json()) as { results: Array<{ code?: string }> };
-    expect(results[0]!.code).toBe("not_bulk_eligible");
+    const { results } = (await res.json()) as {
+      results: Array<{ code?: string; blocker?: string }>;
+    };
+    expect(results[0]).toMatchObject({ code: "not_bulk_eligible", blocker });
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
   });
 
@@ -899,7 +913,7 @@ describe("bulk-confirm", () => {
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("confirms a Strong Cornell Ithaca Affiliation Manager pair without the WCM work checks", async () => {
+  it.each(["cornell_affiliation_manager", "web_page_seed"])("confirms a Strong Cornell Ithaca %s pair without the WCM work checks", async (source) => {
     const ITH = "0000-0001-5109-3700";
     h.state.evidence = [
       // No SPS publications: not read in ReCiter, no institution match.
@@ -908,7 +922,7 @@ describe("bulk-confirm", () => {
     h.state.scholars = new Map([
       ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca", status: "external" }],
     ]);
-    h.state.sources = [{ cwid: "it0001", orcid: ITH, source: "cornell_affiliation_manager" }];
+    h.state.sources = [{ cwid: "it0001", orcid: ITH, source }];
     const res = await bulkConfirm(req({ pairs: [{ cwid: "it0001", orcid: ITH }], rule: RULE }));
     const { results } = (await res.json()) as { results: Array<{ ok: boolean; code?: string }> };
     expect(results[0]).toMatchObject({ ok: true });

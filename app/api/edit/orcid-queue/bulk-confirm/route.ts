@@ -12,7 +12,8 @@
  * stays in the one-at-a-time queue.
  *
  * `dryRun: true` runs only `assertBulkConfirmable` and writes nothing: the Bulk
- * review list uses it so it shows only pairs the server will confirm.
+ * review list uses it so it shows only pairs the server will confirm, and its
+ * "why not" counts from each refusal's `blocker`.
  *
  * Gates as `decide`: the queue flag (404), the shared preamble, View as (403),
  * `isSuperuser` (403).
@@ -22,7 +23,11 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { normalizeOrcid } from "@/lib/edit/orcid";
-import { isOrcidLibrarianQueueEnabled, ORCID_BULK_MAX } from "@/lib/edit/orcid-queue";
+import {
+  isOrcidLibrarianQueueEnabled,
+  ORCID_BULK_MAX,
+  type OrcidBulkBlocker,
+} from "@/lib/edit/orcid-queue";
 import {
   assertBulkConfirmable,
   bulkConfirmableMany,
@@ -85,9 +90,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const dryRun = body.dryRun === true;
   const ts = new Date();
   const meta = { actor: realCwid, impersonatedCwid, requestId, ts, bulkRule: rule };
-  const results: Array<{ cwid: string; orcid: string; ok: boolean; code?: string }> = [];
+  const results: Array<{
+    cwid: string;
+    orcid: string;
+    ok: boolean;
+    code?: string;
+    blocker?: OrcidBulkBlocker;
+  }> = [];
   const refusedOrFailed = (pair: { cwid: string; orcid: string }, err: unknown) => {
-    if (err instanceof OrcidQueueRefused) return { ...pair, ok: false, code: err.code };
+    if (err instanceof OrcidQueueRefused)
+      return {
+        ...pair,
+        ok: false,
+        code: err.code,
+        ...(err.blocker ? { blocker: err.blocker } : {}),
+      };
     logEditFailure(PATH, err);
     return { ...pair, ok: false, code: "write_failed" };
   };
