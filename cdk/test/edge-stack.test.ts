@@ -2337,6 +2337,24 @@ describe("EdgeStack", () => {
           expect(
             hits({ ja4: "t13d1713h1_ab0a1bf427ad_ecd0401ec68b", headers: { "user-agent": ua.chrome146, "sec-ch-ua": hints146 } }),
           ).toEqual([]);
+          // Real Chrome behind a TLS-inspecting proxy: no ALPN, but Sec-Fetch-Mode.
+          expect(
+            hits({
+              ja4: "t13d260900_6d1bcf7a4624_188c7f576dcd",
+              headers: {
+                "user-agent": ua.chrome146,
+                "sec-ch-ua": hints146,
+                "sec-fetch-mode": "navigate",
+              },
+            }),
+          ).toEqual([]);
+          // The unexplained Chrome/99 cohort is left out by JA4.
+          expect(
+            hits({
+              ja4: "t13d190900_9dc949149365_97f8aa674fd9",
+              headers: { "user-agent": chrome158, "sec-ch-ua": "x" },
+            }),
+          ).toEqual([]);
           // Declared crawlers, missing JA4, and campus are left out.
           expect(hits({ ja4: noAlpnJa4, headers: { "user-agent": ua.googlebot } })).toEqual([]);
           expect(hits({ headers: { "user-agent": chrome158, "sec-ch-ua": "x" } })).toEqual([]);
