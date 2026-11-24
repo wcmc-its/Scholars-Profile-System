@@ -22,8 +22,15 @@ function detailBox() {
   return screen.getByLabelText("What should change, and to what? (optional)") as HTMLTextAreaElement;
 }
 /** Mock `global.fetch` for the route Submit; default = server send succeeds. */
-function mockFetch(response: { ok: boolean; status?: number }) {
-  const fn = vi.fn().mockResolvedValue({ ok: response.ok, status: response.status ?? 200 });
+function mockFetch(response: { ok: boolean; status?: number; body?: unknown }) {
+  const fn = vi.fn().mockResolvedValue({
+    ok: response.ok,
+    status: response.status ?? 200,
+    json: async () => {
+      if (response.body === undefined) throw new SyntaxError("no body");
+      return response.body;
+    },
+  });
   vi.stubGlobal("fetch", fn);
   return fn;
 }
@@ -166,6 +173,16 @@ describe("RequestAChangeDialog", () => {
     expect(window.location.href).toBe("");
     // Receipt opt-out defaults to "send a copy".
     expect(body.noReceipt).toBe(false);
+  });
+
+  it("shows the ServiceNow number when the request was filed as a ticket (#520)", async () => {
+    mockFetch({ ok: true, body: { ok: true, sent: true, ritm: "RITM0000002" } });
+    render(<RequestAChangeDialog attribute="name-title" cwid="abc1001" scholarName="Jane Scholar" />);
+    open();
+    pickIssue("title-wrong");
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+    expect(await screen.findByText("RITM0000002")).toBeTruthy();
+    expect(window.location.href).toBe("");
   });
 
   it("unchecking the receipt sets noReceipt=true in the POST body", async () => {

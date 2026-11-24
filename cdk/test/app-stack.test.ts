@@ -2899,6 +2899,16 @@ describe("AppStack public ALB hardening (#1942)", () => {
     );
   });
 
+  // #520 -- staging only until ServiceNow issues the production client; a ref to a
+  // missing secret breaks task start.
+  it("wires the ServiceNow secret in staging and never in prod (#520)", () => {
+    const json = (e: "staging" | "prod") => JSON.stringify(buildAppStack(e).template.toJSON());
+    for (const k of ["SERVICENOW_BASE", "SERVICENOW_CLIENT_ID", "SERVICENOW_CLIENT_SECRET"]) {
+      expect(json("staging")).toContain(`scholars/staging/servicenow-api:${k}::`);
+    }
+    expect(json("prod")).not.toContain("servicenow-api");
+  });
+
   describe.each(["staging", "prod"] as const)("%s", (envName) => {
     const { template } = buildAppStack(envName);
 

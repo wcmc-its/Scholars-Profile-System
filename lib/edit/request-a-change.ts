@@ -28,10 +28,12 @@
  * not an issue type here — and "not mine" is never Hide (the attribution would
  * persist in ReCiter / leadership reports / the Faculty Review Tool).
  *
- * Constraints (operator, 2026-05-26): no deep-linking to any system; no
- * ServiceNow business service for Scholars yet (route by email, not tickets;
- * the tracked-queue graduation waits on that service). Superusers / org-unit
- * admins can perform these fixes for scholars in their purview.
+ * Constraints (operator, 2026-05-26): no deep-linking to any system. Superusers /
+ * org-unit admins can perform these fixes for scholars in their purview.
+ *
+ * ITS Support routes become ServiceNow tickets when `REQUEST_CHANGE_SERVICENOW`
+ * is on (#520, `lib/edit/servicenow.ts`). Faculty Affairs and OSRA stay on email:
+ * the ServiceNow API takes no assignment group, so it can't reach them.
  */
 
 /** The Web Directory self-service profile editor — the owning tool for name,
@@ -57,10 +59,14 @@ export const ORCID_TAB_URL = "/edit/scholar/{cwid}?attr=identifiers-profiles";
  *  roster mentees (Medical Education, via the ReCiterDB bridge) and postdocs
  *  (Employee Central through the Enterprise Directory). Shared by /edit copy. */
 export const MENTEE_SOURCE_SYSTEMS = "Jenzabar, Medical Education rosters, or Employee Central";
-const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
+export const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
 const FACULTY_AFFAIRS_EMAIL = "facultyaffairs@med.cornell.edu"; // degrees + education (ASMS)
 const OSRA_EMAIL = "osra-operations@med.cornell.edu";
 const OSRA_CC = "scholars@weill.cornell.edu";
+
+/** Longest free-text detail a request may carry. The ServiceNow ticket body caps
+ *  at 4,000 characters including the header lines `composeBody` adds. */
+export const REQUEST_DETAIL_MAX = 2500;
 
 /** The scholar fixes it themselves in the owning tool. */
 export type SelfServiceAction = {

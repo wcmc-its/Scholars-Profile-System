@@ -6,9 +6,9 @@
  *
  *   - `self-service` — primary opens the owning tool (new tab); the callout
  *     gives the precise step. Verb e.g. "Add by PMID", "Update in Web Directory".
- *   - `route` — a free-text box + a verb-named Submit that composes a STRUCTURED
- *     `mailto:` (Phase 1: the user's own client sends; Phase 2 will POST to a
- *     server mailer + issue a receipt). Verb e.g. "Report correction".
+ *   - `route` — a free-text box + a verb-named Submit that POSTs to the server
+ *     (a ServiceNow ticket for ITS Support when that is on, else an email) and
+ *     falls back to a STRUCTURED `mailto:`. Verb e.g. "Report correction".
  *   - `explain` — an honest dead-end: the callout says what WILL happen (e.g.
  *     auto-pickup if later indexed), the verb is "Got it" (no request is filed).
  *     If it carries a fallback, "Still wrong?" reveals a route box.
@@ -41,6 +41,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PubTitle } from "@/components/publication/pub-html";
 import { cn, htmlToPlainText } from "@/lib/utils";
 import {
+  REQUEST_DETAIL_MAX,
   getChangeConfig,
   resolveSelfServiceHref,
   type ChangeAction,
@@ -184,6 +185,8 @@ export function RequestAChangeDialog({
   const [sending, setSending] = React.useState(false);
   /** How the request was sent — drives the confirmation copy. */
   const [sentVia, setSentVia] = React.useState<"server" | "mailto" | null>(null);
+  /** The ServiceNow number, when the request was filed as a ticket (#520). */
+  const [ritm, setRitm] = React.useState<string | null>(null);
   /** Opt-out of the courtesy email receipt (default = receipt sent). */
   const [noReceipt, setNoReceipt] = React.useState(false);
   /** The selected row — scrolled into view when it expands, so a row low in the
@@ -199,6 +202,7 @@ export function RequestAChangeDialog({
       setConfirmDiscard(false);
       setSending(false);
       setSentVia(null);
+      setRitm(null);
       setNoReceipt(false);
     }
   }, [open, initialIssueId]);
@@ -227,6 +231,7 @@ export function RequestAChangeDialog({
     setRevealFallback(false);
     setSubmitted(false);
     setSentVia(null);
+    setRitm(null);
     setNoReceipt(false);
   }
 
@@ -303,6 +308,9 @@ export function RequestAChangeDialog({
         }),
       });
       if (res.ok) {
+        // Already sent: an unreadable body must not fall through to the mailto:.
+        const data = (await res.json().catch(() => null)) as { ritm?: string | null } | null;
+        setRitm(data?.ritm ?? null);
         setSentVia("server");
         setSubmitted(true);
         return;
@@ -404,6 +412,11 @@ export function RequestAChangeDialog({
                       {submitTarget.office ? ` to ${submitTarget.office}` : ""}. They&apos;ll follow
                       up if they need more detail.
                     </p>
+                    {ritm && (
+                      <p className="text-sm">
+                        Your ServiceNow request number is <strong>{ritm}</strong>.
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
@@ -523,6 +536,7 @@ export function RequestAChangeDialog({
                                 <Textarea
                                   id="rac-detail"
                                   value={detail}
+                                  maxLength={REQUEST_DETAIL_MAX}
                                   onChange={(e) => setDetail(e.target.value)}
                                   placeholder={
                                     (a.kind === "route" ? a.placeholder : null) ??

@@ -36,6 +36,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  REQUEST_DETAIL_MAX,
   getChangeConfig,
   type RouteAction,
 } from "@/lib/edit/request-a-change";
@@ -88,6 +89,7 @@ export function RequestNewOrgUnitDialog() {
   const [submitted, setSubmitted] = React.useState(false);
   const [sending, setSending] = React.useState(false);
   const [sentVia, setSentVia] = React.useState<"server" | "mailto" | null>(null);
+  const [ritm, setRitm] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -98,6 +100,7 @@ export function RequestNewOrgUnitDialog() {
       setSubmitted(false);
       setSending(false);
       setSentVia(null);
+      setRitm(null);
     }
   }, [open]);
 
@@ -124,6 +127,9 @@ export function RequestNewOrgUnitDialog() {
         }),
       });
       if (res.ok) {
+        // Already sent: an unreadable body must not fall through to the mailto:.
+        const data = (await res.json().catch(() => null)) as { ritm?: string | null } | null;
+        setRitm(data?.ritm ?? null);
         setSentVia("server");
         setSubmitted(true);
         return;
@@ -176,6 +182,11 @@ export function RequestNewOrgUnitDialog() {
                     We&apos;ve routed your request to {route.office}. They&apos;ll follow up if they
                     need more detail.
                   </p>
+                  {ritm && (
+                    <p className="text-sm">
+                      Your ServiceNow request number is <strong>{ritm}</strong>.
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
@@ -251,6 +262,7 @@ export function RequestNewOrgUnitDialog() {
                   id="rnou-detail"
                   data-testid="rnou-detail"
                   value={justification}
+                  maxLength={REQUEST_DETAIL_MAX}
                   onChange={(e) => setJustification(e.target.value)}
                   placeholder="Why is this unit needed? Any codes or context."
                   rows={3}
