@@ -2515,6 +2515,15 @@ describe("EtlStack", () => {
     });
   });
 
+  // `external: true` only attaches the WCM-network path. Which credentials a step
+  // gets is decided by SOURCES_SCRIPTS: a reciterdb reader missing from it runs on
+  // the base family with no SCHOLARS_RECITERDB_* and fails on its first query.
+  it("PolicyCitationsWeekly runs on the sources family, which carries the reciterdb credentials", () => {
+    const asl = aslFrom(buildEtlStack("staging").template, "scholars-weekly-staging");
+    const params = asl.States.TaskPolicyCitationsWeekly.Parameters as { TaskDefinition: string };
+    expect(params.TaskDefinition).toBe("sps-etl-sources-staging");
+  });
+
   // #2196 -- ack-with-expiry for a continue-tier step failure. Acks are exercised
   // through the `stepAckOverrides` test seam on a real continue-tier step (Asms)
   // so no checked-in StepSpec has to carry one.

@@ -1510,6 +1510,8 @@ export class EtlStack extends Stack {
       // #3348 — exports the mentoring/cited-by bridge products from reciterdb,
       // then imports them (etl/mentoring/refresh.ts).
       "etl:mentoring:refresh",
+      // Reads reciterdb analysis_nih_cites (the citation links).
+      "etl:policy-citations",
     ]);
     // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
     // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
