@@ -21,6 +21,7 @@ export const sess = (over: Partial<EditSession> = {}): EditSession => ({
   isDeveloper: false,
   isDataSharingViewer: false,
   isResearchSecurityViewer: false,
+  isProgramRosterEditor: false,
   ...over,
 });
 

@@ -30,6 +30,7 @@ import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isObserver } from "@/lib/auth/observer";
+import { isProgramRosterEditor } from "@/lib/auth/program-roster-editor";
 import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
 import { getSession } from "@/lib/auth/session-server";
 import { type SessionData, nowSeconds } from "@/lib/auth/session";
@@ -94,7 +95,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   const borrowedByNonSuperuser = cwid !== session.cwid && !(await isSuperuser(session.cwid));
   // #1514 — same concurrent resolve as getEditSession: independent fail-closed
   // checks, one directory round-trip of wall-clock instead of five.
-  const [su, cs, dev, hc, dsv, obs, ce, cd, rsv] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce, cd, rsv, pre] = await Promise.all([
     isSuperuser(cwid),
     isCommsSteward(cwid),
     isDeveloper(cwid),
@@ -106,6 +107,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
     // user's: impersonating a non-director strips it, as for every role here.
     isCoreDirector(cwid),
     isResearchSecurityViewer(cwid),
+    isProgramRosterEditor(cwid),
   ]);
   // Same order as getEditSession: content editor first, then observer.
   return withObserverView(
@@ -125,6 +127,8 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
         // `dash:research-security` grant (`sensitiveDashboardsBlocked`, which
         // the dashboard gate reads before the birthright and the registry).
         isResearchSecurityViewer: rsv && !borrowedByNonSuperuser,
+        // The program roster names trainees: same rule.
+        isProgramRosterEditor: pre && !borrowedByNonSuperuser,
         isCoreDirector: cd,
         ...(borrowedByNonSuperuser ? { sensitiveDashboardsBlocked: true } : {}),
       },

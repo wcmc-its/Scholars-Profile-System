@@ -30,6 +30,7 @@ import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isObserver } from "@/lib/auth/observer";
+import { isProgramRosterEditor } from "@/lib/auth/program-roster-editor";
 import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
 import { withContentEditorView, withObserverView } from "@/lib/auth/observer-view";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
@@ -86,6 +87,12 @@ export interface EditSession {
    * the dashboard gate only ever reads a session from those.
    */
   isResearchSecurityViewer?: boolean;
+  /**
+   * Live `program_roster_editor` verdict; a superuser is a superset of this.
+   * Gates ONLY the internal program roster (`lib/edit/program-roster-access.ts`).
+   * OPTIONAL for the same reason as `isDataSharingViewer`.
+   */
+  isProgramRosterEditor?: boolean;
   /**
    * `true` ONLY on a "View as" session started by a non-superuser (an observer
    * or content editor). The sensitive dashboards (`SENSITIVE_DASHBOARDS`,
@@ -187,10 +194,10 @@ export async function superusersAmong(cwids: readonly string[]): Promise<Set<str
 export async function getEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
-  // #1514 — six independent LDAPS group checks; resolve concurrently so the
-  // wall-clock cost is one directory round-trip, not six. All six are
+  // #1514 — independent LDAPS group checks; resolve concurrently so the
+  // wall-clock cost is one directory round-trip, not one each. All are
   // fail-closed and never throw, so Promise.all cannot reject.
-  const [su, cs, dev, hc, dsv, obs, ce, cd, rsv] = await Promise.all([
+  const [su, cs, dev, hc, dsv, obs, ce, cd, rsv, pre] = await Promise.all([
     isSuperuser(session.cwid),
     isCommsSteward(session.cwid),
     isDeveloper(session.cwid),
@@ -200,6 +207,7 @@ export async function getEditSession(): Promise<EditSession | null> {
     isContentEditor(session.cwid),
     isCoreDirector(session.cwid),
     isResearchSecurityViewer(session.cwid),
+    isProgramRosterEditor(session.cwid),
   ]);
   // Content editor first: its synthetic steward grant then makes the observer
   // view a no-op, so someone in both groups edits rather than viewing only.
@@ -213,6 +221,7 @@ export async function getEditSession(): Promise<EditSession | null> {
         isHonorsCurator: hc,
         isDataSharingViewer: dsv,
         isResearchSecurityViewer: rsv,
+        isProgramRosterEditor: pre,
         isCoreDirector: cd,
       },
       ce,

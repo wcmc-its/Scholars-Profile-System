@@ -210,6 +210,7 @@ describe("getEditSession", () => {
       isHonorsCurator: false,
       isDataSharingViewer: false,
       isResearchSecurityViewer: false,
+      isProgramRosterEditor: false,
       isCoreDirector: false,
     });
   });
@@ -225,6 +226,7 @@ describe("getEditSession", () => {
       isHonorsCurator: false,
       isDataSharingViewer: false,
       isResearchSecurityViewer: false,
+      isProgramRosterEditor: false,
       isCoreDirector: false,
     });
   });

@@ -102,6 +102,15 @@ export const ROLE_CATALOG: readonly RoleCatalogEntry[] = [
     cannot: ["Any edit"],
   },
   {
+    key: "program_roster_editor",
+    label: "Program roster editor",
+    description: "Keeps the internal trainee program roster.",
+    source: "ed_group",
+    groupCn: ED("program-roster-editor"),
+    can: ["Program roster"],
+    cannot: ["Edit profiles"],
+  },
+  {
     key: "reporting",
     label: "Reporting",
     description: "Reports and dashboards, one scope at a time.",

@@ -16,6 +16,9 @@ vi.mock("@/lib/auth/core-director", () => ({ isCoreDirector: vi.fn(async () => f
 vi.mock("@/lib/auth/research-security-viewer", () => ({
   isResearchSecurityViewer: vi.fn(async () => false),
 }));
+vi.mock("@/lib/auth/program-roster-editor", () => ({
+  isProgramRosterEditor: vi.fn(async () => false),
+}));
 vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: vi.fn(async () => false) }));
 
 import { isHonorsCurator } from "@/lib/auth/honors-curator";
@@ -25,6 +28,7 @@ import { isObserver } from "@/lib/auth/observer";
 import { isCoreDirector } from "@/lib/auth/core-director";
 import { isContentEditor } from "@/lib/auth/content-editor";
 import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
+import { isProgramRosterEditor } from "@/lib/auth/program-roster-editor";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { resolveGlobalRole } from "@/lib/auth/global-roles";
 
@@ -37,6 +41,7 @@ describe("resolveGlobalRole", () => {
     vi.mocked(isCoreDirector).mockClear().mockResolvedValue(false);
     vi.mocked(isContentEditor).mockClear().mockResolvedValue(false);
     vi.mocked(isResearchSecurityViewer).mockClear().mockResolvedValue(false);
+    vi.mocked(isProgramRosterEditor).mockClear().mockResolvedValue(false);
     vi.mocked(isSuperuser).mockClear().mockResolvedValue(false);
   });
 
@@ -90,6 +95,16 @@ describe("resolveGlobalRole", () => {
     vi.mocked(isHonorsCurator).mockResolvedValueOnce(true);
     vi.mocked(isDeveloper).mockResolvedValueOnce(true);
     expect(await resolveGlobalRole("both001")).toBe("honors_curator");
+  });
+
+  describe("program_roster_editor", () => {
+    it("resolves for the holder and a superuser, and for nobody else viewing as them", async () => {
+      vi.mocked(isProgramRosterEditor).mockResolvedValue(true);
+      expect(await resolveGlobalRole("pre001")).toBe("program_roster_editor");
+      expect(await resolveGlobalRole("pre001", { viewerCwid: "obs001" })).toBeNull();
+      vi.mocked(isSuperuser).mockResolvedValueOnce(true);
+      expect(await resolveGlobalRole("pre001", { viewerCwid: "su001" })).toBe("program_roster_editor");
+    });
   });
 
   describe("research_security_viewer", () => {

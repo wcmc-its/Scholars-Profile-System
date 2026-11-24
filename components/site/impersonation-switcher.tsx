@@ -64,6 +64,7 @@ type GlobalRoleKey =
   | "honors_curator"
   | "data_sharing_viewer"
   | "research_security_viewer"
+  | "program_roster_editor"
   | "development"
   | "content_editor"
   | "core_director"
@@ -100,6 +101,7 @@ const ROLE_LABEL: Record<CandidateRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   research_security_viewer: "Research Security Viewer",
+  program_roster_editor: "Program Roster Editor",
   development: "Development",
   content_editor: "Content Editor",
   core_director: "Cores director",
