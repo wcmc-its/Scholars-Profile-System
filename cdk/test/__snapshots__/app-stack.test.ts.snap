@@ -695,6 +695,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "20",
               },
               {
+                "Name": "REQUEST_CHANGE_SERVICENOW",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_ADMINISTRATORS_TAB",
                 "Value": "on",
               },
@@ -5937,6 +5941,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "20",
               },
               {
+                "Name": "REQUEST_CHANGE_SERVICENOW",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_ADMINISTRATORS_TAB",
                 "Value": "on",
               },
@@ -7136,6 +7144,51 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api:ORCID_CONNECT_TOKEN_KEY::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SERVICENOW_BASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/servicenow-api:SERVICENOW_BASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SERVICENOW_CLIENT_ID",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/servicenow-api:SERVICENOW_CLIENT_ID::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SERVICENOW_CLIENT_SECRET",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/servicenow-api:SERVICENOW_CLIENT_SECRET::",
                     ],
                   ],
                 },
@@ -9637,6 +9690,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/servicenow-api",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -9963,6 +10028,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/orcid-api-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/servicenow-api-??????",
                   ],
                 ],
               },

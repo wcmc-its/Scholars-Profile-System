@@ -425,6 +425,18 @@ export class AppStack extends Stack {
       "OrcidConnectSecret",
       `scholars/${env}/orcid-api`,
     );
+    // ServiceNow "Scholar Profile Request" API client (#520): keys SERVICENOW_BASE
+    // / _CLIENT_ID / _CLIENT_SECRET. STAGING ONLY until the production client is
+    // issued -- a reference to a secret that does not exist breaks task start.
+    // Created out-of-band, like orcidConnectSecret above.
+    const serviceNowSecret =
+      env === "staging"
+        ? secretsmanager.Secret.fromSecretNameV2(
+            this,
+            "ServiceNowSecret",
+            `scholars/${env}/servicenow-api`,
+          )
+        : undefined;
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -467,6 +479,8 @@ export class AppStack extends Stack {
       cornellLdapSecret.secretArn,
       // ORCID Connect client (#3115) -- see orcidConnectSecret.
       orcidConnectSecret.secretArn,
+      // ServiceNow API client (#520), staging only -- see serviceNowSecret.
+      ...(serviceNowSecret ? [serviceNowSecret.secretArn] : []),
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -1486,6 +1500,12 @@ export class AppStack extends Stack {
         // Surfaced here as an explicit, tunable knob: ratchet from the 429 logs
         // rather than redeploy code to change a number.
         SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT: "20",
+        // REQUEST_CHANGE_SERVICENOW (#520) -- file ITS Support "Request a change"
+        // submissions as ServiceNow tickets (lib/edit/servicenow.ts). OFF both
+        // envs until the dev credentials are tested; prod also needs its own
+        // secret (see serviceNowSecret). ON also emails the filer a copy through
+        // SES, independent of SELF_EDIT_REQUEST_CHANGE_SEND (office emails only).
+        REQUEST_CHANGE_SERVICENOW: "off",
         // #728 -- ED admin-role org-unit managers (the /edit/administrators
         // tab). All three read `=== "on"` exactly.
         //   SELF_EDIT_ADMINISTRATORS_TAB -> the tab (superuser + unit Owners).
@@ -3422,6 +3442,23 @@ export class AppStack extends Stack {
           orcidConnectSecret,
           "ORCID_CONNECT_TOKEN_KEY",
         ),
+        // ServiceNow API client (#520), staging only; env-var name == JSON key.
+        ...(serviceNowSecret
+          ? {
+              SERVICENOW_BASE: ecs.Secret.fromSecretsManager(
+                serviceNowSecret,
+                "SERVICENOW_BASE",
+              ),
+              SERVICENOW_CLIENT_ID: ecs.Secret.fromSecretsManager(
+                serviceNowSecret,
+                "SERVICENOW_CLIENT_ID",
+              ),
+              SERVICENOW_CLIENT_SECRET: ecs.Secret.fromSecretsManager(
+                serviceNowSecret,
+                "SERVICENOW_CLIENT_SECRET",
+              ),
+            }
+          : {}),
       },
     });
 

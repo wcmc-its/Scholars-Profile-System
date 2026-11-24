@@ -15,8 +15,15 @@ function open() {
   fireEvent.click(screen.getByTestId("request-new-org-unit-trigger"));
 }
 
-function mockFetch(response: { ok: boolean; status?: number }) {
-  const fn = vi.fn().mockResolvedValue({ ok: response.ok, status: response.status ?? 200 });
+function mockFetch(response: { ok: boolean; status?: number; body?: unknown }) {
+  const fn = vi.fn().mockResolvedValue({
+    ok: response.ok,
+    status: response.status ?? 200,
+    json: async () => {
+      if (response.body === undefined) throw new SyntaxError("no body");
+      return response.body;
+    },
+  });
   vi.stubGlobal("fetch", fn);
   return fn;
 }
@@ -84,6 +91,15 @@ describe("RequestNewOrgUnitDialog", () => {
     expect("targetCwid" in body).toBe(false);
 
     expect(await screen.findByText("Request sent.")).toBeTruthy();
+  });
+
+  it("shows the ServiceNow number when the request was filed as a ticket (#520)", async () => {
+    mockFetch({ ok: true, body: { ok: true, sent: true, ritm: "RITM0000002" } });
+    render(<RequestNewOrgUnitDialog />);
+    open();
+    fireEvent.change(screen.getByTestId("rnou-name"), { target: { value: "Division of Foo" } });
+    fireEvent.click(screen.getByTestId("rnou-submit"));
+    expect(await screen.findByText("RITM0000002")).toBeTruthy();
   });
 
   it("falls back to a mailto: on a non-2xx (mailer dark) — support@ + structured body", async () => {

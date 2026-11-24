@@ -19,7 +19,14 @@ const {
   mockScholarFindUnique,
   mockRecordAttempt,
   mockResolvePersonNames,
+  mockServiceNowConfig,
+  mockCreateTicket,
+  viewAs,
 } = vi.hoisted(() => ({
+  /** Set to run a test as that superuser viewing as the mocked session. */
+  viewAs: { realCwid: null as string | null },
+  mockServiceNowConfig: vi.fn(),
+  mockCreateTicket: vi.fn(),
   mockResolvePersonNames: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockIsMailerConfigured: vi.fn(),
@@ -30,7 +37,10 @@ const {
   mockRecordAttempt: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/superuser", () => ({
+  getEditSession: mockGetEditSession,
+  isSuperuser: async () => true, // the View-as initiator
+}));
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
 // `mockGetEditSession` stays the single per-test knob: the effective EditSession
 // is whatever it returns, the REAL session mirrors its cwid (non-impersonating,
@@ -38,12 +48,15 @@ vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
 // stays null and `actor_cwid` is this cwid).
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
-  impersonationActive: vi.fn().mockReturnValue(false),
+  impersonationActive: () => viewAs.realCwid !== null,
 }));
 vi.mock("@/lib/auth/session-server", () => ({
   getSession: vi.fn(async () => {
     const s = await mockGetEditSession();
-    return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
+    if (!s) return null;
+    return viewAs.realCwid
+      ? { cwid: viewAs.realCwid, iat: 0, exp: 0, impersonating: { targetCwid: s.cwid } }
+      : { cwid: s.cwid, iat: 0, exp: 0 };
   }),
 }));
 vi.mock("@/lib/edit/mailer", () => ({
@@ -60,7 +73,24 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { POST } from "@/app/api/edit/request-change/route";
+vi.mock("@/lib/edit/servicenow", () => ({
+  serviceNowConfig: mockServiceNowConfig,
+  createScholarProfileRequest: mockCreateTicket,
+}));
+
+// The receipt runs after the response; collect it so POST below can await it.
+const deferred: Promise<void>[] = [];
+vi.mock("@/lib/edit/after-response", () => ({
+  runAfterResponse: (task: () => Promise<void>) => void deferred.push(task()),
+}));
+
+import { POST as routePOST } from "@/app/api/edit/request-change/route";
+
+async function POST(request: NextRequest) {
+  const res = await routePOST(request);
+  await Promise.all(deferred.splice(0));
+  return res;
+}
 
 const SELF = { cwid: "self01", isSuperuser: false };
 const ADMIN = { cwid: "adm001", isSuperuser: true };
@@ -75,10 +105,13 @@ function post(body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  viewAs.realCwid = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   mockGetEditSession.mockResolvedValue(SELF);
   mockIsMailerConfigured.mockReturnValue(true);
+  mockServiceNowConfig.mockReturnValue(null); // flag off by default
+  mockCreateTicket.mockResolvedValue({ request: "REQ0000001", ritm: "RITM0000002" });
   mockSendMail.mockResolvedValue({ messageId: "msg-1" });
   mockResolvePersonNames.mockResolvedValue(new Map());
   mockAppendAuditRow.mockResolvedValue(undefined);
@@ -218,7 +251,7 @@ describe("POST /api/edit/request-change", () => {
 
   it("400 detail_too_long for an oversized note", async () => {
     const res = await POST(
-      post({ attribute: "education", issueId: "education-wrong", detail: "x".repeat(4001) }),
+      post({ attribute: "education", issueId: "education-wrong", detail: "x".repeat(2501) }),
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "detail_too_long" });
@@ -318,6 +351,106 @@ describe("POST /api/edit/request-change", () => {
       expect(res.status).toBe(200);
       expect(mockRecordAttempt).not.toHaveBeenCalled();
       expect(mockSendMail).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("ServiceNow ticketing (#520)", () => {
+    const CFG = { base: "https://x.service-now.com", clientId: "i", clientSecret: "s" };
+    const ITS = { attribute: "name-title", issueId: "title-wrong", detail: "Professor, please" };
+    beforeEach(() => {
+      mockServiceNowConfig.mockReturnValue(CFG);
+      mockIsMailerConfigured.mockReturnValue(false); // the mailer flag is off in both envs
+    });
+
+    it("files an ITS Support request as a ticket and returns the RITM, no office email", async () => {
+      const res = await POST(post(ITS));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ sent: true, ritm: "RITM0000002" });
+      const [cfg, req] = mockCreateTicket.mock.calls[0];
+      expect(cfg).toBe(CFG);
+      expect(req).toMatchObject({ requestor: "self01", watchList: [] });
+      expect(req.details).toContain("Professor, please");
+      expect(mockSendMail).not.toHaveBeenCalled();
+      expect(mockAppendAuditRow.mock.calls[0][1].afterValues).toMatchObject({
+        to: "servicenow",
+        servicenow_request: "REQ0000001",
+        servicenow_ritm: "RITM0000002",
+      });
+    });
+
+    it("filing for someone else: the scholar is the requestor, the filer is on the watch list", async () => {
+      mockGetEditSession.mockResolvedValue(ADMIN);
+      await POST(post({ ...ITS, targetCwid: "other9" }));
+      expect(mockCreateTicket.mock.calls[0][1]).toMatchObject({
+        requestor: "other9",
+        watchList: ["adm001"],
+      });
+    });
+
+    it("a CWID differing only in case is the same person", async () => {
+      await POST(post({ ...ITS, targetCwid: "self01" }));
+      mockGetEditSession.mockResolvedValue({ ...ADMIN, cwid: "ADM001" });
+      await POST(post({ ...ITS, targetCwid: "adm001" }));
+      for (const [, req] of mockCreateTicket.mock.calls) expect(req.watchList).toEqual([]);
+    });
+
+    it("under View as, the ticket and the receipt name the person who acted", async () => {
+      viewAs.realCwid = "real001";
+      mockResolvePersonNames.mockResolvedValue(new Map([["real001", "Rae Real"]]));
+      mockScholarFindUnique.mockImplementation(async ({ where }) => ({
+        email: `${where.cwid}@example.edu`,
+        preferredName: "Pat Persona",
+      }));
+      await POST(post({ ...ITS, targetCwid: "self01" }));
+      const req = mockCreateTicket.mock.calls[0][1];
+      expect(req).toMatchObject({ requestor: "self01", watchList: ["real001"] });
+      expect(req.details).toContain(
+        "by Rae Real (real001) on behalf of Pat Persona (self01).",
+      );
+      expect(mockSendMail.mock.calls[0][0].to).toBe("real001@example.edu");
+    });
+
+    it("under View as, an org-unit request belongs to the person who acted", async () => {
+      viewAs.realCwid = "real001";
+      await POST(post({ attribute: "org-unit", issueId: "request-new-org-unit", itemId: "Foo" }));
+      expect(mockCreateTicket.mock.calls[0][1]).toMatchObject({
+        requestor: "real001",
+        watchList: [],
+      });
+    });
+
+    it("Faculty Affairs and OSRA requests never become tickets", async () => {
+      for (const b of [
+        { attribute: "education", issueId: "education-wrong" },
+        { attribute: "funding", issueId: "funding-active-expired" },
+      ]) {
+        expect(await (await POST(post(b))).json()).toMatchObject({ error: "send_disabled" });
+      }
+      expect(mockCreateTicket).not.toHaveBeenCalled();
+    });
+
+    it("a failed ticket 500s once, with no retry, no server email and no audit row", async () => {
+      mockIsMailerConfigured.mockReturnValue(true);
+      mockCreateTicket.mockRejectedValue(new Error("invalid CWID"));
+      const res = await POST(post(ITS));
+      expect(res.status).toBe(500);
+      expect(await res.json()).toMatchObject({ error: "ticket_failed" });
+      expect(mockCreateTicket).toHaveBeenCalledTimes(1);
+      expect(mockSendMail).not.toHaveBeenCalled();
+      expect(mockAppendAuditRow).not.toHaveBeenCalled();
+    });
+
+    it("is rate-limited like an email send", async () => {
+      mockRecordAttempt.mockResolvedValue({ allowed: false, count: 21, limit: 20, retryAfterSeconds: 9 });
+      expect((await POST(post(ITS))).status).toBe(429);
+      expect(mockCreateTicket).not.toHaveBeenCalled();
+    });
+
+    it("the receipt carries the RITM", async () => {
+      mockScholarFindUnique.mockResolvedValue({ email: "self01@med.cornell.edu" });
+      await POST(post(ITS));
+      expect(mockSendMail).toHaveBeenCalledTimes(1);
+      expect(mockSendMail.mock.calls[0][0].text).toContain("ServiceNow request: RITM0000002");
     });
   });
 

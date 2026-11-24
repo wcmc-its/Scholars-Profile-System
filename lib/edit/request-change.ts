@@ -9,7 +9,7 @@
  * no-fallback `explain` resolves to `no-send` (the UI never POSTs these, so this
  * is defense in depth, not the primary gate).
  */
-import { REQUEST_A_CHANGE, type RequestAttribute } from "@/lib/edit/request-a-change";
+import { REQUEST_A_CHANGE, SUPPORT_EMAIL, type RequestAttribute } from "@/lib/edit/request-a-change";
 import { siteBaseUrl } from "@/lib/site-url";
 import { htmlToPlainText } from "@/lib/utils";
 
@@ -39,6 +39,8 @@ export type ResolvedRoute =
       to: string;
       cc?: string;
       office: string;
+      /** ITS Support owns it, so it can be filed as a ServiceNow ticket (#520). */
+      ticketable: boolean;
       sourceSystem?: string;
       issueLabel: string;
       attributeLabel: string;
@@ -62,6 +64,7 @@ export function resolveRequestChange(attribute: RequestAttribute, issueId: strin
       to: a.email,
       cc: a.cc,
       office: a.office,
+      ticketable: a.email === SUPPORT_EMAIL,
       sourceSystem: a.sourceSystem,
       issueLabel: issue.label,
       attributeLabel,
@@ -72,6 +75,7 @@ export function resolveRequestChange(attribute: RequestAttribute, issueId: strin
       kind: "send",
       to: a.fallbackEmail,
       office: "Scholars support",
+      ticketable: a.fallbackEmail === SUPPORT_EMAIL,
       issueLabel: issue.label,
       attributeLabel,
     };
@@ -151,6 +155,8 @@ export function composeReceiptBody(opts: {
   itemLabel?: string;
   office: string;
   detail?: string;
+  /** ServiceNow number, when the request was filed as a ticket. */
+  ritm?: string;
 }): string {
   const lines = [
     "You submitted a change request from your WCM Scholars profile. Here's a copy for your records.",
@@ -159,6 +165,7 @@ export function composeReceiptBody(opts: {
     `Item: ${opts.itemLabel ? oneLine(opts.itemLabel) : "(whole section)"}`,
     `Routed to: ${oneLine(opts.office)}`,
   ];
+  if (opts.ritm) lines.push(`ServiceNow request: ${opts.ritm}`);
   const detail = (opts.detail ?? "").trim();
   lines.push("", detail.length > 0 ? detail : "(no additional detail provided)", "");
   lines.push(

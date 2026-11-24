@@ -1,13 +1,15 @@
 /**
- * POST /api/edit/request-change — send one "Request a change" email to the
- * office that owns the data (#160 Phase 2,
- * `docs/self-edit-request-change-server-mailer-plan.md`).
+ * POST /api/edit/request-change — send one "Request a change" to the office that
+ * owns the data (#160 Phase 2,
+ * `docs/self-edit-request-change-server-mailer-plan.md`): a ServiceNow ticket for
+ * ITS Support when `REQUEST_CHANGE_SERVICENOW` is on (#520), an email otherwise.
  *
  * Body: `{ attribute, issueId, itemId?, detail?, targetCwid? }`. The recipient
  * is resolved server-side from the trusted `REQUEST_A_CHANGE` config (the client
  * never names an address); only `route` / `fallbackEmail` issues send. Dormant
  * behind `SELF_EDIT_REQUEST_CHANGE_SEND` + `SCHOLARS_MAIL_FROM` — when off it
- * returns `500` and the dialog falls back to the Phase-1 `mailto:` (#494).
+ * returns `500` and the dialog falls back to the Phase-1 `mailto:` (#494). A
+ * failed ticket does the same; it is never retried or re-sent as a server email.
  *
  * Ordering (decision 2026-05-26): **send first, then a best-effort B03 audit
  * row**. The audit INSERT does NOT gate the send — the `scholars_audit` INSERT
@@ -19,10 +21,12 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
+import { runAfterResponse } from "@/lib/edit/after-response";
 import { canAccessScholarEditPage, logEditDenial } from "@/lib/edit/authz";
 import { isMailerConfigured, sendMail } from "@/lib/edit/mailer";
 import { resolvePersonNames } from "@/lib/edit/person-names";
 import { recordRequestChangeAttempt } from "@/lib/edit/rate-limit";
+import { REQUEST_DETAIL_MAX } from "@/lib/edit/request-a-change";
 import {
   editError,
   editOk,
@@ -38,10 +42,9 @@ import {
   resolveRequestChange,
   subjectFor,
 } from "@/lib/edit/request-change";
+import { createScholarProfileRequest, serviceNowConfig } from "@/lib/edit/servicenow";
 
 const PATH = "/api/edit/request-change";
-/** Generous for a free-text correction note; rejects an abusive payload. */
-const MAX_DETAIL = 4000;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (detail !== undefined && detail !== null && typeof detail !== "string") {
     return editError(400, "invalid_detail", "detail");
   }
-  if (typeof detail === "string" && detail.length > MAX_DETAIL) {
+  if (typeof detail === "string" && detail.length > REQUEST_DETAIL_MAX) {
     return editError(400, "detail_too_long", "detail");
   }
   if (noReceipt !== undefined && typeof noReceipt !== "boolean") {
@@ -90,7 +93,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (resolved.kind === "no-send") return editError(400, "not_routable", "issueId");
 
   // --- dormant unless enabled + configured: the client falls back to mailto: ---
-  if (!isMailerConfigured()) return editError(500, "send_disabled");
+  const ticketing = resolved.ticketable ? serviceNowConfig() : null;
+  if (!ticketing && !isMailerConfigured()) return editError(500, "send_disabled");
 
   // --- per-cwid rate limit (SPEC § 5 abuse controls / § 6 threat model). Placed
   //     AFTER the dormant gate so a 500 consumes no quota (no rows accrue until
@@ -117,37 +121,51 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // --- look up the target scholar's name server-side (never client-supplied —
   //     a spoofed name in the office-bound email would be a social-engineering
-  //     vector) so the recipient can identify whose profile this is about. ---
+  //     vector) so the recipient can identify whose profile this is about.
+  //     A request about no scholar (org unit: no targetCwid) is the filer's own. ---
+  const subject = typeof targetCwid === "string" ? target : realCwid;
   const targetScholar = await db.read.scholar.findUnique({
-    where: { cwid: target },
+    where: { cwid: subject },
     select: { preferredName: true },
   });
-  // Actor (and a profile-less target) named via Scholar → WCM directory; never throws.
-  const names = await resolvePersonNames([target, session.cwid]);
+  // The person who acted is always the REAL signed-in user: under "View as" the
+  // ticket, its signature and the receipt must not name the persona. They (and a
+  // profile-less target) are named via Scholar → WCM directory; never throws.
+  const names = await resolvePersonNames([subject, realCwid]);
 
   // --- send (the request fails only if the send itself fails) ---
-  let messageId: string;
+  const text = composeBody({
+    attribute,
+    targetCwid: subject,
+    targetName: targetScholar?.preferredName ?? names.get(subject.toLowerCase()) ?? null,
+    issueLabel: resolved.issueLabel,
+    itemLabel: typeof itemId === "string" ? itemId : undefined,
+    sourceSystem: resolved.sourceSystem,
+    detail: typeof detail === "string" ? detail : undefined,
+    actorCwid: realCwid,
+    actorName: names.get(realCwid.toLowerCase()) ?? null,
+  });
+  let messageId: string | null = null;
+  let ticket: { request: string; ritm: string } | null = null;
   try {
-    const sent = await sendMail({
-      to: resolved.to,
-      cc: resolved.cc,
-      subject: subjectFor(resolved.attributeLabel),
-      text: composeBody({
-        attribute,
-        targetCwid: target,
-        targetName: targetScholar?.preferredName ?? names.get(target.toLowerCase()) ?? null,
-        issueLabel: resolved.issueLabel,
-        itemLabel: typeof itemId === "string" ? itemId : undefined,
-        sourceSystem: resolved.sourceSystem,
-        detail: typeof detail === "string" ? detail : undefined,
-        actorCwid: session.cwid,
-        actorName: names.get(session.cwid.toLowerCase()) ?? null,
-      }),
-    });
-    messageId = sent.messageId;
+    if (ticketing) {
+      ticket = await createScholarProfileRequest(ticketing, {
+        requestor: subject,
+        details: text,
+        watchList: realCwid.toLowerCase() === subject.toLowerCase() ? [] : [realCwid],
+      });
+    } else {
+      const sent = await sendMail({
+        to: resolved.to,
+        cc: resolved.cc,
+        subject: subjectFor(resolved.attributeLabel),
+        text,
+      });
+      messageId = sent.messageId;
+    }
   } catch (err) {
     logEditFailure(PATH, err);
-    return editError(500, "send_failed");
+    return editError(500, ticketing ? "ticket_failed" : "send_failed");
   }
 
   // --- best-effort B03 audit AFTER the send (must not roll back a sent email).
@@ -168,17 +186,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           attribute,
           issue_id: issueId,
           office: resolved.office,
-          to: resolved.to,
+          to: ticket ? "servicenow" : resolved.to,
           source_system: resolved.sourceSystem ?? null,
           item_id: typeof itemId === "string" ? itemId : null,
           message_id: messageId,
+          ...(ticket ? { servicenow_request: ticket.request, servicenow_ritm: ticket.ritm } : {}),
         },
         ts: new Date(),
         requestId,
       });
     });
   } catch (err) {
-    // The mail already went out; an audit gap (e.g. the #493 INSERT grant not
+    // The mail or ticket already went out; an audit gap (e.g. the #493 INSERT grant not
     // yet applied) is logged, never surfaced as a request failure.
     console.error(
       JSON.stringify({
@@ -193,36 +212,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- best-effort courtesy receipt to the submitter (opt-out; default on).
   //     Resolved from the local Scholar record -- always reachable, avoids the
   //     VPC<->WCM LDAP gap. Skipped on opt-out, or when the actor has no email
-  //     (e.g. a superuser not in the scholar table). Never fails the request. ---
+  //     (e.g. a superuser not in the scholar table). Never fails the request, and
+  //     never delays it: past CloudFront's 30s the dialog would open the mailto:
+  //     for a ticket that already exists. A ticket's receipt does not wait on
+  //     SELF_EDIT_REQUEST_CHANGE_SEND, which governs the office emails. ---
   if (noReceipt !== true) {
-    try {
-      const actor = await db.read.scholar.findUnique({
-        where: { cwid: session.cwid },
-        select: { email: true },
-      });
-      if (actor?.email) {
-        await sendMail({
-          to: actor.email,
-          subject: receiptSubjectFor(resolved.attributeLabel),
-          text: composeReceiptBody({
-            issueLabel: resolved.issueLabel,
-            itemLabel: typeof itemId === "string" ? itemId : undefined,
-            office: resolved.office,
-            detail: typeof detail === "string" ? detail : undefined,
-          }),
+    runAfterResponse(async () => {
+      try {
+        const actor = await db.read.scholar.findUnique({
+          where: { cwid: realCwid },
+          select: { email: true },
         });
+        if (actor?.email) {
+          await sendMail({
+            to: actor.email,
+            subject: receiptSubjectFor(resolved.attributeLabel),
+            text: composeReceiptBody({
+              issueLabel: resolved.issueLabel,
+              itemLabel: typeof itemId === "string" ? itemId : undefined,
+              office: resolved.office,
+              detail: typeof detail === "string" ? detail : undefined,
+              ritm: ticket?.ritm,
+            }),
+          });
+        }
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            event: "request_change_receipt_failed",
+            path: PATH,
+            request_id: requestId,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
       }
-    } catch (err) {
-      console.error(
-        JSON.stringify({
-          event: "request_change_receipt_failed",
-          path: PATH,
-          request_id: requestId,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    }
+    });
   }
 
-  return editOk({ sent: true });
+  return editOk({ sent: true, ritm: ticket?.ritm ?? null });
 }

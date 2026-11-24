@@ -143,6 +143,8 @@ The form is the graduated #160 "Request a change" modal. It collects only Route 
 
 ## 5. ServiceNow integration contract — the "ask"
 
+**Settled 2026-11-24 (#519/#520):** ServiceNow delivered a scripted REST endpoint that files a catalog item (RITM) with five fields: `request_type`, `requestor` (requested-for CWID), `requestor_mobile`, `details` (4,000 characters) and `watch_list`. It takes no assignment group, category or attachment, so only ITS Support routes become tickets and everything else stays on email. The client is `lib/edit/servicenow.ts`, behind `REQUEST_CHANGE_SERVICENOW`. The table below is the original ask, kept for history.
+
 What the Scholars server needs from the ServiceNow team to create the ticket:
 
 | Contract item | Decision needed |
