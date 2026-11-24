@@ -1526,8 +1526,8 @@ export class AppStack extends Stack {
         // etl:research-security fills. SENSITIVE, per-person. Read via
         // isResearchSecurityDashboardEnabled() (=== "on"); when off the route and
         // its export 404 and the sub-nav tab is hidden. App-only, no reindex, no
-        // writes. STAGING-FIRST: on in staging, off in prod until sign-off.
-        EDIT_RESEARCH_SECURITY_DASHBOARD: envConfig.envName === "staging" ? "on" : "off",
+        // writes.
+        EDIT_RESEARCH_SECURITY_DASHBOARD: "on", // Prod flipped 2026-11-23 after staging sign-off.
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"

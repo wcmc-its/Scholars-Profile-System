@@ -716,7 +716,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_RESEARCH_SECURITY_DASHBOARD",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RECITER_REJECT_SEND",
