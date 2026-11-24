@@ -150,6 +150,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     if (ticketing) {
       ticket = await createScholarProfileRequest(ticketing, {
+        // A new org unit is not a correction to anyone's profile.
+        requestType: attribute === "org-unit" ? "option_general" : "option_change",
         requestor: subject,
         details: text,
         watchList: realCwid.toLowerCase() === subject.toLowerCase() ? [] : [realCwid],

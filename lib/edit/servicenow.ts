@@ -38,6 +38,8 @@ export function serviceNowConfig(
 }
 
 export type ScholarProfileRequest = {
+  /** Profile change or correction, or general inquiry. */
+  requestType: "option_change" | "option_general";
   /** "Requested for": the scholar the request is about. */
   requestor: string;
   details: string;
@@ -87,7 +89,7 @@ export async function createScholarProfileRequest(
       accept: "application/json",
     },
     body: JSON.stringify({
-      request_type: "option_change",
+      request_type: req.requestType,
       requestor: req.requestor,
       details: req.details,
       ...(req.watchList?.length ? { watch_list: req.watchList.join(",") } : {}),

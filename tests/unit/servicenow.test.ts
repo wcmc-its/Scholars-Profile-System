@@ -12,7 +12,12 @@ const ENV = {
   SERVICENOW_CLIENT_SECRET: "s3cret",
 };
 const CFG = serviceNowConfig(ENV)!;
-const REQ = { requestor: "abc1001", details: "line 1\nline 2", watchList: ["adm001"] };
+const REQ = {
+  requestType: "option_change" as const,
+  requestor: "abc1001",
+  details: "line 1\nline 2",
+  watchList: ["adm001"],
+};
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const TOKEN = () => json(200, { access_token: "tok", expires_in: 1799 });
 const CREATED = { result: { Message: "ok", Request: "REQ0000001", RITM: "RITM0000002" } };
@@ -69,6 +74,12 @@ describe("createScholarProfileRequest", () => {
       details: "line 1\nline 2",
       watch_list: "adm001",
     });
+  });
+
+  it("sends the request type it was given", async () => {
+    const fn = stub(TOKEN(), json(200, CREATED));
+    await createScholarProfileRequest(CFG, { ...REQ, requestType: "option_general" });
+    expect(JSON.parse(fn.mock.calls[1][1]!.body as string).request_type).toBe("option_general");
   });
 
   it("omits watch_list when the scholar files for themselves", async () => {

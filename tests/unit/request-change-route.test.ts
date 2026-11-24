@@ -368,7 +368,11 @@ describe("POST /api/edit/request-change", () => {
       expect(await res.json()).toMatchObject({ sent: true, ritm: "RITM0000002" });
       const [cfg, req] = mockCreateTicket.mock.calls[0];
       expect(cfg).toBe(CFG);
-      expect(req).toMatchObject({ requestor: "self01", watchList: [] });
+      expect(req).toMatchObject({
+        requestType: "option_change",
+        requestor: "self01",
+        watchList: [],
+      });
       expect(req.details).toContain("Professor, please");
       expect(mockSendMail).not.toHaveBeenCalled();
       expect(mockAppendAuditRow.mock.calls[0][1].afterValues).toMatchObject({
@@ -414,6 +418,7 @@ describe("POST /api/edit/request-change", () => {
       viewAs.realCwid = "real001";
       await POST(post({ attribute: "org-unit", issueId: "request-new-org-unit", itemId: "Foo" }));
       expect(mockCreateTicket.mock.calls[0][1]).toMatchObject({
+        requestType: "option_general",
         requestor: "real001",
         watchList: [],
       });
