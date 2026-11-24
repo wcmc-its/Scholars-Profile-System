@@ -33,6 +33,8 @@ const hoisted = vi.hoisted(() => ({
   mockDelete: vi.fn(),
   mockTransaction: vi.fn(),
   mockAppendAuditRow: vi.fn(),
+  mockGetSession: vi.fn(),
+  mockIsSuperuser: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -50,6 +52,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: hoisted.mockAppendAuditRow }));
+vi.mock("@/lib/auth/session-server", () => ({ getSession: hoisted.mockGetSession }));
+vi.mock("@/lib/auth/superuser", () => ({ isSuperuser: hoisted.mockIsSuperuser }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  impersonationActive: (s: { impersonating?: unknown }) => !!s.impersonating,
+}));
 
 import {
   ALL_SCOPES,
@@ -111,6 +118,8 @@ beforeEach(() => {
   }));
   hoisted.mockDelete.mockResolvedValue({});
   hoisted.mockAppendAuditRow.mockResolvedValue(undefined);
+  hoisted.mockGetSession.mockResolvedValue(null);
+  hoisted.mockIsSuperuser.mockResolvedValue(false);
   hoisted.mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
     cb({
       reportAccess: {
@@ -157,6 +166,22 @@ describe("getReportScopes — fail closed", () => {
     expect([...(await getReportScopes(SUPER, MENTORED_PUBS_REPORT))]).toEqual([ALL_SCOPES]);
     expect([...(await getReportScopes(STEWARD, MENTORED_PUBS_REPORT))]).toEqual([ALL_SCOPES]);
     expect(hoisted.mockReadFindMany).not.toHaveBeenCalled();
+  });
+
+  it("FERPA: an observer's synthetic steward view does NOT reach the learner report", async () => {
+    const observer = { ...STEWARD, isObserver: true };
+    expect((await getReportScopes(observer, MENTORED_PUBS_REPORT)).size).toBe(0);
+    // ...but their own rows still count, and other reports keep the steward view.
+    hoisted.mockReadFindMany.mockResolvedValue([{ scopeKey: "md" }]);
+    expect([...(await getReportScopes(observer, MENTORED_PUBS_REPORT))]).toEqual(["md"]);
+    expect([...(await getReportScopes(observer, ARTICLE_COUNT_REPORT))]).toEqual([ALL_SCOPES]);
+  });
+
+  it("FERPA: a View as a non-superuser started gets nothing; a superuser's still works", async () => {
+    hoisted.mockGetSession.mockResolvedValue({ cwid: "obs0001", impersonating: { targetCwid: "abc1234" } });
+    expect((await getReportScopes(STEWARD, MENTORED_PUBS_REPORT)).size).toBe(0);
+    hoisted.mockIsSuperuser.mockResolvedValue(true);
+    expect([...(await getReportScopes(STEWARD, MENTORED_PUBS_REPORT))]).toEqual([ALL_SCOPES]);
   });
 
   it("loadReportScopesForCwid: an empty cwid never touches the table", async () => {

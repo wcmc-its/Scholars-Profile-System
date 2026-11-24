@@ -58,7 +58,10 @@
  */
 import { db } from "@/lib/db";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import type { EditSession } from "@/lib/auth/superuser";
+import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
+import { impersonationActive } from "@/lib/auth/effective-identity";
+import { nowSeconds } from "@/lib/auth/session";
+import { getSession } from "@/lib/auth/session-server";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { registryHasAnyReporting, registryReportScopes } from "@/lib/auth/functional-role-authz";
 import { PROGRAM_LABEL } from "@/lib/edit/mentorship-type";
@@ -215,7 +218,7 @@ export function resolveMentoredPubsAccess(
 
 /** The `EditSession` fields the verdicts read — a structural subset so a test
  *  (or `/edit`'s profile-less fallthrough) can pass a plain object. */
-type ReportSession = Pick<EditSession, "cwid" | "isSuperuser" | "isCommsSteward">;
+type ReportSession = Pick<EditSession, "cwid" | "isSuperuser" | "isCommsSteward" | "isObserver">;
 
 /** Superuser / comms_steward may manage grants (and always pass the view
  *  gate). Same OR `authorizeCommsStewardAction` (`lib/edit/authz.ts`) uses. */
@@ -271,6 +274,17 @@ export async function getReportScopes(
   session: ReportSession,
   reportKey: string,
 ): Promise<ReadonlySet<string>> {
+  if (reportKey === MENTORED_PUBS_REPORT) {
+    // FERPA: this report lists MD / MD-PhD / ECR learners by name. An observer's
+    // synthetic steward READ view must not reach it (their OWN rows / unit roles
+    // still do), and neither may a View as a non-superuser started — it would
+    // borrow the target's scopes.
+    if (session.isObserver) session = { ...session, isCommsSteward: false };
+    const real = await getSession();
+    if (real && impersonationActive(real, nowSeconds()) && !(await isSuperuser(real.cwid))) {
+      return new Set();
+    }
+  }
   if (canManageReportAccess(session)) return new Set([ALL_SCOPES]);
   return loadReportScopesForCwid(session.cwid, reportKey);
 }
