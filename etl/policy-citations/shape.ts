@@ -21,15 +21,18 @@ const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"'
 
 /** NCBI titles carry entities and inline markup ("GeneReviews<sup>&#xAE;</sup>"). */
 export function cleanTitle(raw: string): string {
-  return raw
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
-      e[0] !== "#"
-        ? (ENTITIES[e.toLowerCase()] ?? m)
-        : String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))),
-    )
-    .replace(/<[^>]+>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  let text = raw.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
+    e[0] !== "#"
+      ? (ENTITIES[e.toLowerCase()] ?? m)
+      : String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))),
+  );
+  // Repeat until nothing changes: removing a tag can splice a new one together
+  // ("<scr<i>ipt>"). Only tag-shaped runs go, so "p < 0.05" keeps its sign.
+  for (let prev = ""; prev !== text; ) {
+    prev = text;
+    text = text.replace(/<\/?[a-z][^<>]*>/gi, "");
+  }
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /**

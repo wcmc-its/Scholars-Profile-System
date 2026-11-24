@@ -35,6 +35,9 @@ describe("issuing bodies", () => {
 describe("shape", () => {
   it("cleans entities and markup out of titles", () => {
     expect(cleanTitle("GeneReviews<sup>&#xAE;</sup> &amp;  more&#33;")).toBe("GeneReviews® & more!");
+    // A tag spliced together by removing another one goes too.
+    expect(cleanTitle("a<scr<i>ipt>b</scr</i>ipt>c")).toBe("abc");
+    expect(cleanTitle("Outcomes at p &lt; 0.05 and n > 30")).toBe("Outcomes at p < 0.05 and n > 30");
   });
 
   it("gives the same guideline printed in two journals one key", () => {
