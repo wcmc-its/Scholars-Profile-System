@@ -121,6 +121,15 @@ describe("client publication wire (#2213)", () => {
     expect(roundTrip(pubs)).toEqual(pubs.map(expectedClient));
   });
 
+  it("carries isCo, and omits it when false", () => {
+    const [co, plain] = roundTrip([
+      fullPub({ authorship: { isFirst: true, isLast: false, isPenultimate: false, isCo: true } }),
+      fullPub({ authorship: { isFirst: true, isLast: false, isPenultimate: false, isCo: false } }),
+    ]);
+    expect(co.authorship).toEqual({ isFirst: true, isLast: false, isCo: true });
+    expect(plain.authorship).toEqual({ isFirst: true, isLast: false });
+  });
+
   it("keeps display order and per-row author order/flags", () => {
     const pubs = [
       fullPub({ pmid: "9", wcmAuthors: [author("b", false, false, 2), author("a", true, false, 1)] }),

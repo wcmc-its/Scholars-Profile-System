@@ -96,6 +96,17 @@ describe("deriveAuthorPositionRole", () => {
   });
 });
 
+describe("deriveAuthorPositionRole — equal contributor outside WCM", () => {
+  it("reads co-first / co-senior from isCo when no other WCM author shares the flag", () => {
+    const solo = [{ isFirst: true, isLast: false }];
+    expect(deriveAuthorPositionRole({ isFirst: true, isLast: false, isCo: true }, solo)).toBe("Co-first author");
+    expect(deriveAuthorPositionRole({ isFirst: true, isLast: false, isCo: false }, solo)).toBe("First author");
+    const last = [{ isFirst: false, isLast: true }];
+    expect(deriveAuthorPositionRole({ isFirst: false, isLast: true, isCo: true }, last)).toBe("Co-senior author");
+    expect(deriveAuthorPositionRole({ isFirst: false, isLast: true, isCo: false }, last)).toBe("Senior author");
+  });
+});
+
 describe("matchesPositionFilter", () => {
   it("matches everything for 'all'", () => {
     expect(matchesPositionFilter(null, "all")).toBe(true);

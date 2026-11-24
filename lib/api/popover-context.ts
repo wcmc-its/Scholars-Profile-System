@@ -429,9 +429,9 @@ export async function fetchAuthorshipOnPub(
 } | null> {
   if (!cwid || !pmid) return null;
   const rows = await prisma.$queryRaw<
-    Array<{ cwid: string; is_first: number; is_last: number }>
+    Array<{ cwid: string; is_first: number; is_last: number; position: number; total_authors: number }>
   >`
-    SELECT cwid, is_first, is_last
+    SELECT cwid, is_first, is_last, position, total_authors
       FROM publication_author
      WHERE pmid = ${pmid}
        AND is_confirmed = 1
@@ -446,6 +446,10 @@ export async function fetchAuthorshipOnPub(
     if (r.is_first) firstCount += 1;
     if (r.is_last) lastCount += 1;
   }
+  // Credited without holding the end position: an equal contributor, whose
+  // counterpart may be outside WCM and so have no row here.
+  if (me.is_first && me.position > 1) firstCount = Math.max(firstCount, 2);
+  if (me.is_last && me.position < me.total_authors) lastCount = Math.max(lastCount, 2);
   return {
     isFirst: !!me.is_first,
     isLast: !!me.is_last,
