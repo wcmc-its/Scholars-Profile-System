@@ -733,6 +733,10 @@ export async function loadEditActivitySummary(
   const cutoff = rangeCutoff(range, now);
   // The viewer's scope predicate, or a bound 1 (always true) for the
   // site-wide view. ANDed into every read below.
+  // Program roster rows (trainee and mentor CWIDs, some of them minors) are
+  // never shown here: an Activity grant does not open the roster. A literal in
+  // each read, not a shared `Prisma.sql`, because the client bundle imports
+  // this module.
   const inScope = scopeFilter ?? 1;
 
   // Day buckets in WCM-local (Eastern) time, so they agree with the Eastern
@@ -743,7 +747,7 @@ export async function loadEditActivitySummary(
     client.$queryRaw<RawPerDay[]>`
       SELECT DATE(CONVERT_TZ(ts, '+00:00', ${offset})) AS day, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff} AND (${inScope})
+       WHERE ts >= ${cutoff} AND (${inScope}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
        GROUP BY day
        ORDER BY day DESC`,
     // Grouped by the EFFECTIVE actor (`effectiveActor`): a bulk job's rows
@@ -755,14 +759,14 @@ export async function loadEditActivitySummary(
                AS actor_cwid,
              COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff} AND (${inScope})
+       WHERE ts >= ${cutoff} AND (${inScope}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
        GROUP BY CASE WHEN request_id LIKE 'bulk-%' THEN 'system-bulk-confirm' ELSE actor_cwid END
        ORDER BY edits DESC
        LIMIT 20`,
     client.$queryRaw<RawEntity[]>`
       SELECT target_entity_type, target_entity_id, COUNT(*) AS edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff} AND (${inScope})
+       WHERE ts >= ${cutoff} AND (${inScope}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
        GROUP BY target_entity_type, target_entity_id
        ORDER BY edits DESC
        LIMIT 20`,
@@ -771,7 +775,7 @@ export async function loadEditActivitySummary(
              target_entity_type, target_entity_id, request_id,
              fields_changed, before_values, after_values
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff} AND (${inScope})
+       WHERE ts >= ${cutoff} AND (${inScope}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
        ORDER BY ts DESC, id DESC
        LIMIT 100`,
     // Same effective-actor rule as the top-editors read: a bulk job counts as
@@ -787,7 +791,7 @@ export async function loadEditActivitySummary(
                                     THEN 1 ELSE 0 END), 0)
                AS SIGNED) AS automated_edits
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff} AND (${inScope})`,
+       WHERE ts >= ${cutoff} AND (${inScope}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')`,
     // Every window row, folded in JS. The value blobs are NOT read: only the
     // first few characters of the five "gained content" fields, rebuilt as tiny
     // JSON objects, which is all the empty -> filled test needs. That keeps an
@@ -814,7 +818,7 @@ export async function loadEditActivitySummary(
                'manualMentees', LEFT(JSON_UNQUOTE(JSON_EXTRACT(after_values, '$.manualMentees')), 8)
              ), NULL) AS after_values
         FROM scholars_audit.manual_edit_audit
-       WHERE ts >= ${cutoff} AND (${inScope})
+       WHERE ts >= ${cutoff} AND (${inScope}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
        LIMIT 500000`,
   ]);
 
@@ -880,7 +884,7 @@ export async function loadOlderEdits(
            target_entity_type, target_entity_id, request_id,
            fields_changed, before_values, after_values
       FROM scholars_audit.manual_edit_audit
-     WHERE ts >= ${cutoff} AND (${scopeFilter ?? 1})
+     WHERE ts >= ${cutoff} AND (${scopeFilter ?? 1}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
        AND (ts < ${cursor.ts} OR (ts = ${cursor.ts} AND id < ${cursor.id}))
      ORDER BY ts DESC, id DESC
      LIMIT 101`;
@@ -1009,7 +1013,7 @@ export async function loadEditActivityCsv(
     SELECT id, ts, actor_cwid, impersonated_cwid, action,
            target_entity_type, target_entity_id, request_id, fields_changed
       FROM scholars_audit.manual_edit_audit
-     WHERE ts >= ${cutoff} AND ts <= ${asOf} AND (${scopeFilter ?? 1})
+     WHERE ts >= ${cutoff} AND ts <= ${asOf} AND (${scopeFilter ?? 1}) AND target_entity_type NOT IN ('roster_program', 'roster_entry')
      ORDER BY ts DESC, id DESC
      LIMIT 200000`;
   const edits = rows.map((r) => shapeRecent({ ...r, before_values: null, after_values: null }));
