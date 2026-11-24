@@ -1090,6 +1090,13 @@ export class EtlStack extends Stack {
       // 322 shared_only->strong and 331 weak->moderate, reviewed and approved.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ORCID_HISTORY_BAND: "on",
+      // ORCID queue — etl:orcid-evidence lets the accepted papers that print an iD next
+      // to the scholar's name count toward the match strength (two or more are Strong,
+      // one is Moderate) only when this is exactly "on". Off: the papers are still
+      // written and listed on the card, and the run logs the band moves they would make.
+      // Staging first; prod follows a review of the staging moves.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_BYLINE_BAND: env === "prod" ? "off" : "on",
       // Ithaca ORCID plan, step 1 — etl:ithaca-roster writes Cornell Ithaca scholar
       // rows only when this is exactly "on"; otherwise it logs the counts it would
       // write. On in both envs since 2026-11-19: the prod dry run matched the

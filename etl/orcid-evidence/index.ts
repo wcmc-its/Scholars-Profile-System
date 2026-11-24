@@ -28,6 +28,15 @@
  *                        ≥3 of the record's papers this scholar does not; or
  *                        another candidate iD of this scholar shares ≥3; or the
  *                        same iD is a candidate for another scholar who shares ≥3.
+ *   - byline papers    — the accepted papers that print the iD next to the
+ *                        scholar's own name (PubMed's ORCID on the author entry
+ *                        ReCiter marks as the scholar, `byline.ts`). Always in
+ *                        `evidence_detail.byline`; they count toward the band only
+ *                        when `ORCID_BYLINE_BAND` is exactly "on", otherwise the
+ *                        run logs the moves they would make. None count when a
+ *                        rejected paper carries the iD, another person's accepted
+ *                        byline does (or has it on file), or this scholar's
+ *                        accepted bylines carry a second iD.
  *   - `band`           — `bandOf`, first match wins: email_verified, strong,
  *                        shared_only, moderate, weak. The institutional condition
  *                        is `inst_match OR history_match` (v2, decision C) only
@@ -77,11 +86,12 @@
  * family since v2.1, for its reciterdb credentials — HTTPS to ORCID and NCBI,
  * Aurora, reciterdb, plus the Identity table Scan on the shared task role).
  * Env: `ORCID_CLIENT_ID` / `ORCID_CLIENT_SECRET` (optional, anonymous otherwise),
- * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
+ * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `ORCID_BYLINE_BAND`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
  * Scan, as etl/identity; a failed Scan logs and the run goes on without that
  * source — a missing source can only lower a band, never raise one),
  * `NCBI_API_KEY` (optional, raises the NCBI rate limit), `SCHOLARS_RECITERDB_*`
- * (the ReCiter assertions; unset or unreachable = statuses unknown),
+ * (the ReCiter assertions and byline iDs; unset or unreachable = statuses unknown
+ * and no byline papers),
  * `ORCID_EVIDENCE_DRY_RUN=1`, `ORCID_EVIDENCE_MAX_RECORDS=<n>` (local smoke:
  * truncates the iD list and FORCES a dry run — the delete pass would otherwise
  * remove every row the sample did not cover).
@@ -109,6 +119,8 @@ import {
   type RecordResponse,
 } from "@/etl/orcid-registry/orcid-api";
 import {
+  bylineBandPapers,
+  type OrcidBylineDetail,
   type OrcidEvidenceDetail,
   type OrcidInstitutionPair,
   type OrcidSharedPaper,
@@ -119,6 +131,14 @@ import {
 import { lastNameKey } from "@/lib/last-name-key";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
+import {
+  bylineFactsOf,
+  heldByOrcid,
+  indexBylines,
+  MIN_BYLINE_STRONG,
+  type BylineIndex,
+  type BylineRow,
+} from "./byline";
 import { loadIdentityInstitutions } from "./identity-institutions";
 import {
   historyMatches,
@@ -134,6 +154,10 @@ const RECITER_CWID_BATCH = 200;
 const RECITER_PMID_BATCH = 2000;
 export const MIN_SHARED = 3;
 const NEW_WORKS_SAMPLE = 5;
+const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
+/** 82,430 byline rows on 2026-11-23; half of that is a short read. */
+const BYLINE_ROW_FLOOR = 40_000;
+const BYLINE_QUERY_TIMEOUT_MS = 300_000;
 /** Shared papers kept in `evidence_detail` (the `shared` column has the full count). */
 export const SHARED_DETAIL_CAP = 100;
 /** Same outage rule as the registry's `/works` step. */
@@ -157,19 +181,25 @@ export type BandInput = {
   shared: number;
   competitor: boolean;
   nameAgrees: boolean;
+  /** Accepted papers that print the iD on the scholar's byline (`bylineBandPapers`:
+   *  0 when contested). Absent = 0. */
+  byline?: number;
 };
 
 /** The queue band, first match wins. The institutional condition is
  *  `instMatch OR historyMatch` (v2, decided 2026-10-25), in Strong and in
- *  Moderate's two-of-three alike. Pure. */
+ *  Moderate's two-of-three alike. Byline papers need the name to agree and no
+ *  competitor: two or more are Strong on their own, one is Moderate. Pure. */
 export function bandOf(e: BandInput): Band {
   const papers = e.shared >= MIN_SHARED;
   const inst = e.instMatch || e.historyMatch === true;
   if (e.emailVerified && !e.competitor) return "email_verified";
+  const byline = !e.competitor && e.nameAgrees ? (e.byline ?? 0) : 0;
   if (inst && papers && !e.competitor && e.nameAgrees) return "strong";
+  if (byline >= MIN_BYLINE_STRONG) return "strong";
   if (papers && !e.competitor && e.nameAgrees) return "shared_only";
   if ([inst, papers, !e.competitor].filter(Boolean).length >= 2) return "moderate";
-  return "weak";
+  return byline >= 1 ? "moderate" : "weak";
 }
 
 export type NewWork = {
@@ -750,6 +780,13 @@ export function assembleEvidence(args: {
   /** v2.1: LOWERCASE cwid → PMID → ReCiter assertion, for the records' PMIDs.
    *  Absent = ReCiter was not read: no accepted lift, statuses unknown. */
   reciter?: Map<string, Map<string, ReciterAssertion>>;
+  /** The byline iDs reciterdb holds. Absent = not read: no byline evidence. */
+  bylines?: BylineIndex;
+  /** iD → the scholars who have it on file: a rival claim to the byline papers. */
+  heldBy?: ReadonlyMap<string, readonly string[]>;
+  /** Let byline papers count toward the band (`ORCID_BYLINE_BAND`). Absent =
+   *  false: they are listed but the band ignores them. */
+  bylineBand?: boolean;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
   // A coauthor's iD gets no row and is no rule-2 competitor. On-file iDs stay, and
@@ -861,11 +898,21 @@ export function assembleEvidence(args: {
       recordPmids.has(x),
     ).length;
     const sharedPmids = [...sharedPapers(f.workIds, mine)].sort((a, b) => Number(b) - Number(a));
+    const bf = args.bylines ? bylineFactsOf(args.bylines, p.cwid, p.orcid, args.heldBy?.get(p.orcid)) : null;
+    const byline: OrcidBylineDetail | null = bf && {
+      ...bf,
+      total: bf.papers.length,
+      papers: bf.papers.slice(0, SHARED_DETAIL_CAP).map(barePaper),
+    };
     rows.push({
       cwid: p.cwid,
       orcid: p.orcid,
       band: affiliationManagerBand(
-        bandOf({ ...e, historyMatch: args.historyBand === true && e.historyMatch }),
+        bandOf({
+          ...e,
+          historyMatch: args.historyBand === true && e.historyMatch,
+          byline: args.bylineBand === true ? bylineBandPapers(byline ?? undefined) : 0,
+        }),
         e,
         args.sources?.get(key(p.cwid, p.orcid)),
       ),
@@ -889,9 +936,8 @@ export function assembleEvidence(args: {
         institutions: [...inst.pairs, ...history],
         institutionEmail: inst.email,
         email,
-        shared: sharedPmids
-          .slice(0, SHARED_DETAIL_CAP)
-          .map((pmid) => ({ pmid, doi: null, title: null, year: null, journal: null })),
+        shared: sharedPmids.slice(0, SHARED_DETAIL_CAP).map(barePaper),
+        ...(byline ? { byline } : {}),
         competitors: comp.detail,
         sources: [...(args.sources?.get(key(p.cwid, p.orcid)) ?? [])].sort(),
         worksDropped: f.worksDropped ?? 0,
@@ -911,17 +957,27 @@ export function assembleEvidence(args: {
   return rows;
 }
 
-/** Fills each row's shared papers with title, year, journal and DOI from our
- *  publications (`papers`: pmid → its row). A PMID with no row keeps its id. Pure. */
+const barePaper = (pmid: string): OrcidSharedPaper => ({
+  pmid,
+  doi: null,
+  title: null,
+  year: null,
+  journal: null,
+});
+
+/** Fills each row's shared and byline papers with title, year, journal and DOI from
+ *  our publications (`papers`: pmid → its row). A PMID with no row keeps its id. Pure. */
 export function withSharedPaperDetail(
   rows: EvidenceRow[],
   papers: Map<string, Omit<OrcidSharedPaper, "pmid">>,
 ): EvidenceRow[] {
-  return rows.map((r) => ({
+  const fill = (xs: OrcidSharedPaper[]) => xs.map((p) => ({ ...p, ...(papers.get(p.pmid) ?? {}) }));
+  return rows.map(({ evidenceDetail: d, ...r }) => ({
     ...r,
     evidenceDetail: {
-      ...r.evidenceDetail,
-      shared: r.evidenceDetail.shared.map((p) => ({ ...p, ...(papers.get(p.pmid) ?? {}) })),
+      ...d,
+      shared: fill(d.shared),
+      ...(d.byline ? { byline: { ...d.byline, papers: fill(d.byline.papers) } } : {}),
     },
   }));
 }
@@ -1047,11 +1103,41 @@ export function isHistoryBandEnabled(): boolean {
 
 /** Rows whose band the history term would change, by band after → count.
  *  For the before/after comparison the spec asks for ahead of the switch. Pure. */
-export function historyBandShift(rows: readonly EvidenceRow[]): Record<string, number> {
+export function historyBandShift(
+  rows: readonly EvidenceRow[],
+  bylineBand = false,
+): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of rows) {
-    const off = bandOf({ ...r, historyMatch: false });
-    const on = bandOf({ ...r, historyMatch: r.historyMatch });
+    const byline = bylineBand ? bylineBandPapers(r.evidenceDetail.byline) : 0;
+    const off = bandOf({ ...r, historyMatch: false, byline });
+    const on = bandOf({ ...r, historyMatch: r.historyMatch, byline });
+    if (off !== on) out[`${off}->${on}`] = (out[`${off}->${on}`] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** `ORCID_BYLINE_BAND`: exactly "on" lets byline papers count toward the band. */
+export function isBylineBandEnabled(): boolean {
+  return process.env.ORCID_BYLINE_BAND === "on";
+}
+
+/** Rows whose band the byline papers would change, by band after → count, whatever
+ *  the flag. For the before/after comparison ahead of the switch. Pure. */
+export function bylineBandShift(
+  rows: readonly EvidenceRow[],
+  historyBand: boolean,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const bandWith = (byline: number) =>
+      affiliationManagerBand(
+        bandOf({ ...r, historyMatch: historyBand && r.historyMatch, byline }),
+        r,
+        r.evidenceDetail.sources,
+      );
+    const off = bandWith(0);
+    const on = bandWith(bylineBandPapers(r.evidenceDetail.byline));
     if (off !== on) out[`${off}->${on}`] = (out[`${off}->${on}`] ?? 0) + 1;
   }
   return out;
@@ -1197,6 +1283,57 @@ async function loadReciterAssertions(
     `ReCiter assertions: ${n} (scholar, PMID) rows for ${out.size} of ${cwids.length} scholars`,
   );
   return out;
+}
+
+/** Every iD PubMed prints on the author entry ReCiter marks as the person, with
+ *  ReCiter's assertion on the paper. A paper where ReCiter marks more than one entry
+ *  is left out: the iD could be a same-name coauthor's. One scan of
+ *  `person_article_author` (no index on `orcid`), about 40 s. Null when reciterdb
+ *  cannot be read, or reads short: a missing row can be the rejection or the rival
+ *  claim that contests an iD, so a partial read could RAISE a band. */
+export async function loadBylineRows(floor = BYLINE_ROW_FLOOR): Promise<BylineRow[] | null> {
+  try {
+    // targetAuthor is stored '1' or '1\r' (the importer's CR).
+    const rows = (await withReciterConnection((conn) =>
+      conn.query({
+        sql: `SELECT a.personIdentifier, a.pmid, a.orcid, p.userAssertion
+           FROM person_article_author a
+           JOIN person_article p
+             ON p.personIdentifier = a.personIdentifier AND p.pmid = a.pmid
+          WHERE a.targetAuthor LIKE '1%' AND a.orcid <> ''
+            AND COALESCE(p.targetAuthorCount, 1) <= 1`,
+        timeout: BYLINE_QUERY_TIMEOUT_MS,
+      }),
+    )) as Array<{
+      personIdentifier: string | null;
+      pmid: number | string;
+      orcid: string | null;
+      userAssertion: unknown;
+    }>;
+    const out = rows.flatMap((r) => {
+      const orcid = r.orcid?.trim().toUpperCase() ?? "";
+      const pmid = String(Number(r.pmid));
+      return r.personIdentifier && ORCID_PATTERN.test(orcid) && /^[1-9]\d*$/.test(pmid)
+        ? [
+            {
+              cwid: r.personIdentifier,
+              pmid,
+              orcid,
+              assertion: reciterAssertionOf(r.userAssertion),
+            },
+          ]
+        : [];
+    });
+    console.log(`byline iDs: ${out.length} of ${rows.length} rows read`);
+    if (out.length < floor) {
+      console.warn(`byline iDs: fewer than ${floor} rows, a short read; no byline evidence this run`);
+      return null;
+    }
+    return out;
+  } catch (err) {
+    console.warn(`byline iDs unavailable (${(err as Error).message}); no byline evidence this run`);
+    return null;
+  }
 }
 
 const maxRecords = Number(process.env.ORCID_EVIDENCE_MAX_RECORDS);
@@ -1385,6 +1522,9 @@ async function main(): Promise<number> {
   }
   const reciter = await loadReciterAssertions(pmidsByCwid);
 
+  // 4c. The iDs printed on the scholars' own bylines.
+  const bylineRows = await loadBylineRows();
+
   const scored = assembleEvidence({
     pairs,
     onFile,
@@ -1397,6 +1537,9 @@ async function main(): Promise<number> {
     historyBand: isHistoryBandEnabled(),
     titles,
     reciter: reciter ?? undefined,
+    bylines: bylineRows ? indexBylines(bylineRows, { dismissed, deprecated }) : undefined,
+    heldBy: heldByOrcid(scholars, deprecated),
+    bylineBand: isBylineBandEnabled(),
   });
   const statusTotals: Record<string, number> = {};
   for (const r of scored) {
@@ -1410,9 +1553,13 @@ async function main(): Promise<number> {
   }
   console.log(`new works by ReCiter status (all rows): ${JSON.stringify(statusTotals)}`);
 
-  // 5. Shared papers' title, year, journal and DOI from our publications.
+  // 5. Shared and byline papers' title, year, journal and DOI from our publications.
   const sharedPmids = [
-    ...new Set(scored.flatMap((r) => r.evidenceDetail.shared.map((p) => p.pmid))),
+    ...new Set(
+      scored.flatMap((r) =>
+        [...r.evidenceDetail.shared, ...(r.evidenceDetail.byline?.papers ?? [])].map((p) => p.pmid),
+      ),
+    ),
   ];
   const papers = new Map<
     string,
@@ -1434,7 +1581,11 @@ async function main(): Promise<number> {
     `${rows.length} evidence rows ${JSON.stringify(byBand)}; ${rows.filter((r) => r.historyMatch).length} with history_match (${rows.filter((r) => r.historyMatch && !r.instMatch).length} without inst_match); ${failed} record-fetch failures`,
   );
   console.log(
-    `history band term ${isHistoryBandEnabled() ? "ON" : "off (ORCID_HISTORY_BAND)"}; band moves it makes: ${JSON.stringify(historyBandShift(rows))}`,
+    `history band term ${isHistoryBandEnabled() ? "ON" : "off (ORCID_HISTORY_BAND)"}; band moves it makes: ${JSON.stringify(historyBandShift(rows, isBylineBandEnabled()))}`,
+  );
+  const withByline = rows.filter((r) => (r.evidenceDetail.byline?.total ?? 0) > 0);
+  console.log(
+    `byline papers: ${withByline.length} rows with at least one (${withByline.filter((r) => bylineBandPapers(r.evidenceDetail.byline) === 0).length} contested); byline band term ${isBylineBandEnabled() ? "ON" : "off (ORCID_BYLINE_BAND)"}; band moves it makes: ${JSON.stringify(bylineBandShift(rows, isHistoryBandEnabled()))}`,
   );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
