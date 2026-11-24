@@ -130,7 +130,6 @@ describe("feature flags", () => {
     ["EDIT_DATA_QUALITY_DASHBOARD", ["coi"]],
     ["EDIT_DATA_SHARING_DASHBOARD", ["dataSharing"]],
     ["EDIT_RESEARCH_SECURITY_DASHBOARD", ["researchSecurity"]],
-    ["EDIT_PROGRAM_ROSTER", ["programRoster"]],
     ["CORE_PAGES", ["cores"]],
     ["MATCHA", ["matcha", "grantMatcha"]],
     ["GRANT_MATCHA", ["grantMatcha"]],

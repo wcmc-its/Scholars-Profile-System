@@ -13,6 +13,10 @@
 import { isProgramRosterEnabled } from "@/lib/auth/program-roster-editor";
 import type { EditSession } from "@/lib/auth/superuser";
 
+/** The center whose editor page links the roster. ponytail: one office uses it;
+ *  a center column on `roster_program` when a second one asks. */
+export const PROGRAM_ROSTER_CENTER = "meyer_cancer_center";
+
 type Viewer = Pick<EditSession, "isSuperuser" | "isProgramRosterEditor" | "sensitiveDashboardsBlocked">;
 
 export function canViewProgramRoster(s: Viewer): boolean {

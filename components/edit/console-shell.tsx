@@ -122,7 +122,6 @@ export async function ConsoleShell({
           roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
           dataSharingTab={tabs.dataSharing ? 0 : null}
           researchSecurityTab={tabs.researchSecurity}
-          programRosterTab={tabs.programRoster}
           reportsTab={tabs.reports || reportsTab}
           newsTab={tabs.news}
           pendingNews={newsPill}

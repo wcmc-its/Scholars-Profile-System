@@ -32,6 +32,7 @@ import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { stripObserverView } from "@/lib/auth/observer-view";
+import { canViewProgramRoster, PROGRAM_ROSTER_CENTER } from "@/lib/edit/program-roster-access";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,14 @@ export default async function EditCenterPage({
     session.isObserver === true &&
     (await loadUnitEditContext("center", code, stripObserverView(session), db.read)) === null;
   return (
-    <UnitEditPage ctx={ctx} attr={attr} orgUnitsNavVisible={consoleTabs.units} readOnly={readOnly} />
+    <UnitEditPage
+      ctx={ctx}
+      attr={attr}
+      orgUnitsNavVisible={consoleTabs.units}
+      readOnly={readOnly}
+      programRosterHref={
+        code === PROGRAM_ROSTER_CENTER && canViewProgramRoster(session) ? "/edit/program-roster" : undefined
+      }
+    />
   );
 }

@@ -159,7 +159,9 @@ export default async function EditSelfPage({
       viewerCwid: session.cwid,
       exclude: isResearchSecurityDashboardEnabled() ? [] : ["research_security_viewer"],
     });
-    if (globalRole) {
+    // A program roster editor who also administers a unit lands on the unit
+    // below, which links the roster.
+    if (globalRole && globalRole !== "program_roster_editor") {
       redirect(GLOBAL_ROLE_HOME[globalRole].href);
     }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
@@ -205,6 +207,9 @@ export default async function EditSelfPage({
         ...units.institutions,
       ];
       redirect(all.length === 1 ? all[0].href : "/edit/units");
+    }
+    if (globalRole) {
+      redirect(GLOBAL_ROLE_HOME[globalRole].href);
     }
     // A `report_access` holder (reports 7–9) — staff with no Scholar row, no
     // ED-group role and no proxy grant. Their console entry point is the
@@ -468,7 +473,6 @@ export default async function EditSelfPage({
             roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
             dataSharingTab={tabs.dataSharing ? 0 : null}
             researchSecurityTab={tabs.researchSecurity}
-            programRosterTab={tabs.programRoster}
             reportsTab={tabs.reports}
             newsTab={tabs.news}
             pendingNews={pendingNews}
