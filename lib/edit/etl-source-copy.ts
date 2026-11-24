@@ -359,6 +359,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Journal impact factors used in publication reports.",
     origin: "external", // ReCiterDB JCR snapshot
   },
+  PolicyCitations: {
+    label: "Guideline and Policy Citations",
+    description: "Guidelines, systematic reviews and health-authority documents that cite our publications.",
+    origin: "external", // PubMed + NCBI Bookshelf + ReCiterDB citation links
+  },
   FundableWork: {
     label: "Fundable Work",
     description: "Conference abstracts and preprints scored for private-funding potential.",

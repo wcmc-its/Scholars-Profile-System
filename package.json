@@ -81,6 +81,7 @@
     "etl:reporter": "tsx etl/reporter/index.ts",
     "etl:reporter-grants": "tsx etl/reporter-grants/index.ts",
     "etl:pubmed-retractions": "tsx etl/pubmed-retractions/index.ts",
+    "etl:policy-citations": "tsx etl/policy-citations/index.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
     "etl:nsf": "tsx etl/nsf/index.ts",
     "etl:gates:probe": "tsx etl/gates/probe.ts",
