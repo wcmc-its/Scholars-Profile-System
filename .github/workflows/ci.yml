@@ -46,6 +46,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    # The unit tests are the slowest check by far (six to eight minutes on one
+    # runner), so they are split across three.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
     env:
       # No database behind it: the unit tests never query one. They ran before
       # the migrations when this was one job, against an empty schema.
@@ -63,7 +70,7 @@ jobs:
         run: npm ci
 
       - name: Unit tests
-        run: npm test
+        run: npm test -- --shard=${{ matrix.shard }}/3
 
   app-build:
     runs-on: ubuntu-latest
