@@ -856,12 +856,15 @@ async function main() {
         }
       }
       const rows = [...byCwid.values()];
-      await db.write.$transaction(async (tx) => {
-        await tx.formerFacultyRole.deleteMany({});
-        for (let i = 0; i < rows.length; i += 1000) {
-          await tx.formerFacultyRole.createMany({ data: rows.slice(i, i + 1000) });
-        }
-      });
+      await db.write.$transaction(
+        async (tx) => {
+          await tx.formerFacultyRole.deleteMany({});
+          for (let i = 0; i < rows.length; i += 1000) {
+            await tx.formerFacultyRole.createMany({ data: rows.slice(i, i + 1000) });
+          }
+        },
+        { timeout: 120_000, maxWait: 10_000 },
+      );
       console.log(`former_faculty_role rewritten: ${rows.length} CWIDs.`);
     }
 
