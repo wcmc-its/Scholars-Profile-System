@@ -1123,7 +1123,8 @@ export class EtlStack extends Stack {
       // alarms nightly) if watchlist_match is absent or holds fewer than 1,000
       // rows. ON in staging since reciterdb's first collectAffiliations apply
       // run finished (2026-11-18, about 99,000 match rows). ON in prod since
-      // 2026-11-23 (staging copy signed off).
+      // 2026-11-23. Compared with the 2026-10-29 workbook on 2026-11-24: papers
+      // reconcile; 35 of its 67 funding flags are missing (all non-PubMed, cause open).
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       RESEARCH_SECURITY_ETL: "on",
       // OpenSearch domain endpoint (https://...). Default: plaintext env from
