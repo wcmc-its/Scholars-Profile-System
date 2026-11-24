@@ -29,7 +29,8 @@
  * Three more pair sources (round 4), merged into the same learner map and
  * NOT scope-gated — every `report_access` holder may select them:
  *   - `phd_mentor_relationship` — Jenzabar thesis advisors; grad year =
- *     `conferralYear`, no entry year (Jenzabar carries no start);
+ *     `conferralYear`, entry year = the `startDate` year on the learner's ED
+ *     student record (`student_phd_program`; Jenzabar carries no start);
  *   - `postdoc_mentor_relationship` — ED postdoc appointments; entry =
  *     `startDate` year, grad = `endDate` year, or ONGOING when there is no
  *     end date (the window then has no upper bound);
@@ -205,9 +206,9 @@ export type MentorPair = MentorRef & { mentorship: MentorshipType };
 
 export type MentoredPubsSummaryRow = {
   gradYear: number | null;
-  /** The effective program-entry year: the bridge's `entryYear`, or the
-   *  `gradYear - 4` fallback (see `entryYearSource`). Null only when both
-   *  are unknown. */
+  /** The effective program-entry year: the source's own (pairing sheet, ED
+   *  student / postdoc / volunteer start; `bridge`), or the `gradYear - 4`
+   *  fallback. Null only when both are unknown. */
   entryYear: number | null;
   entryYearSource: "bridge" | "fallback" | null;
   cwid: string;
@@ -232,6 +233,10 @@ export type MentoredPubsSummaryRow = {
   /** Distinct in-window pmids where the learner is author #1 (from the
    *  bridge's per-author CWIDs). */
   firstAuthorInWindow: number | null;
+  /** Time as a postdoc, from every ED postdoc record the learner has (not
+   *  just the selected mentors' or years'). Null = none, or the postdoc type
+   *  is not selected. Optional so fixtures elsewhere need not carry it. */
+  postdoc?: PostdocLength | null;
 };
 
 export type MentoredPubsDetailRow = {
@@ -370,6 +375,53 @@ export function effectiveEntryYear(
   return { entryYear: null, source: null };
 }
 
+export type PostdocLength = {
+  /** One decimal; overlapping records count once, gaps not at all. */
+  years: number;
+  /** Still running at `asOf`: `years` is to date. */
+  ongoing: boolean;
+  /** A stretch starts on `POSTDOC_START_FLOOR`: `years` is a minimum. */
+  atLeast: boolean;
+};
+
+/** 12% of ED postdoc records start on exactly this day (a holiday; every
+ *  nearby day has 1-4) and none is still active, so it reads as a system load
+ *  date, not a hire date: the real start is this day or earlier. */
+export const POSTDOC_START_FLOOR = "2021-01-01";
+
+const DAY_MS = 86_400_000;
+
+/** A person's total time as a postdoc, `asOf` standing in for an open or
+ *  future end. Both dates are inclusive. Null when no record has started. */
+export function postdocLength(
+  rows: ReadonlyArray<{ startDate: Date | null; endDate: Date | null }>,
+  asOf: Date,
+): PostdocLength | null {
+  const today = Math.floor(asOf.getTime() / DAY_MS);
+  const spans = rows
+    .flatMap((r) => {
+      if (!r.startDate) return [];
+      const start = Math.floor(r.startDate.getTime() / DAY_MS);
+      const end = r.endDate ? Math.floor(r.endDate.getTime() / DAY_MS) : Infinity;
+      return start <= today && start <= end ? [{ start, end }] : [];
+    })
+    .sort((a, b) => a.start - b.start);
+  if (spans.length === 0) return null;
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const s of spans) {
+    const last = merged[merged.length - 1];
+    if (last && s.start <= last.end + 1) last.end = Math.max(last.end, s.end);
+    else merged.push({ ...s });
+  }
+  const floor = Date.parse(POSTDOC_START_FLOOR) / DAY_MS;
+  const days = merged.reduce((n, s) => n + Math.min(s.end, today) - s.start + 1, 0);
+  return {
+    years: Math.round((days / 365.25) * 10) / 10,
+    ongoing: merged.some((s) => s.end > today),
+    atLeast: merged.some((s) => s.start === floor),
+  };
+}
+
 function chunks<T>(arr: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -418,6 +470,8 @@ type Learner = {
   /** The roster's own grad year — the only one that earns the `gradYear - 4`
    *  entry fallback (a Jenzabar conferral year merged into `gradYear` must not). */
   rosterGradYear: number | null;
+  /** The roster carries an entry year, so no estimate competes with it. */
+  rosterEntry: boolean;
   /** An ED postdoc appointment with no end date — no window upper bound. */
   ongoing: boolean;
   /** Program keys, or co-author kinds for suggestion-only learners. */
@@ -553,6 +607,7 @@ function mergePair(
       entryYear: null,
       roster: false,
       rosterGradYear: null,
+      rosterEntry: false,
       ongoing: false,
       buckets: new Set(),
       mentors: new Map(),
@@ -573,6 +628,7 @@ function mergePair(
   // ponytail: the window is per learner, not per pair — a PhD-then-postdoc gets one merged window.
   if (r.type.source === "roster") {
     l.roster = true;
+    if (r.entryYear !== null) l.rosterEntry = true;
     if (r.gradYear !== null && (l.rosterGradYear === null || r.gradYear > l.rosterGradYear)) {
       l.rosterGradYear = r.gradYear;
     }
@@ -583,6 +639,17 @@ function mergePair(
   if (l.mentors.has(r.mentorCwid)) return;
   l.mentors.set(r.mentorCwid, r.type);
   l.buckets.add(r.type.program);
+}
+
+/** `effectiveEntryYear` for a learner. An MD learner estimated at `gradYear - 4`
+ *  keeps the estimate when another source's start (a later PhD or postdoc) falls
+ *  after it: that start must not cut the MD years out of the window. */
+function learnerEntryYear(l: Learner): ReturnType<typeof effectiveEntryYear> {
+  const estimate = effectiveEntryYear(null, l.rosterGradYear);
+  if (!l.rosterEntry && l.entryYear !== null && estimate.entryYear !== null && estimate.entryYear < l.entryYear) {
+    return estimate;
+  }
+  return effectiveEntryYear(l.entryYear, l.rosterGradYear);
 }
 
 /** Keep the rows whose program bucket the scope set admits AND whose type
@@ -895,8 +962,19 @@ export async function loadMentoredPublicationsReport({
         },
       })
     : [];
+  // Jenzabar carries no start: the ED student record does. Keyed lowercased,
+  // since the `IN` matches case-insensitively but returns the stored spelling.
+  const phdStart = new Map<string, number>();
+  for (const batch of chunks([...new Set(phdRows.map((r) => r.menteeCwid))], PMID_BATCH)) {
+    const found = await db.read.studentPhdProgram.findMany({
+      where: { cwid: { in: batch }, startDate: { not: null } },
+      select: { cwid: true, startDate: true },
+    });
+    for (const s of found) if (s.startDate) phdStart.set(s.cwid.toLowerCase(), s.startDate.getUTCFullYear());
+  }
   for (const r of phdRows) {
     if (!yearAdmitted(r.conferralYear)) continue;
+    const start = phdStart.get(r.menteeCwid.toLowerCase()) ?? null;
     mergePair(
       learners,
       {
@@ -905,8 +983,8 @@ export async function loadMentoredPublicationsReport({
         firstName: r.menteeFirstName,
         lastName: r.menteeLastName,
         gradYear: r.conferralYear,
-        // ponytail: Jenzabar carries no start; upgrade path = ED student SOR start dates.
-        entryYear: null,
+        // A start after this degree belongs to a later enrollment (ED keeps one row per person).
+        entryYear: start !== null && r.conferralYear !== null && start > r.conferralYear ? null : start,
         type: {
           program: r.programType === "MD-PhD" ? "mdphd" : "phd",
           source: "jenzabar",
@@ -1085,6 +1163,24 @@ export async function loadMentoredPublicationsReport({
     ? (await db.read.aocMenteePublication.findFirst({ select: { pmid: true } })) !== null
     : null;
   if (learners.size === 0) return empty(allPubsLoaded);
+
+  // Time as a postdoc is a fact about the person, so it reads all their
+  // records, not only the selected mentors' or years'.
+  const postdocByLearner = new Map<string, Array<{ startDate: Date | null; endDate: Date | null }>>();
+  if (selected.has("postdoc")) {
+    for (const batch of chunks([...learners.keys()], PMID_BATCH)) {
+      const found = await db.read.postdocMentorRelationship.findMany({
+        where: { menteeCwid: { in: batch } },
+        select: { menteeCwid: true, startDate: true, endDate: true },
+      });
+      for (const r of found) {
+        const key = r.menteeCwid.toLowerCase();
+        const list = postdocByLearner.get(key);
+        if (list) list.push(r);
+        else postdocByLearner.set(key, [r]);
+      }
+    }
+  }
 
   // Every admitted (mentor, learner) pair — the co-pub bridge's key.
   const pairs: Array<{ mentorCwid: string; menteeCwid: string }> = [];
@@ -1432,7 +1528,7 @@ export async function loadMentoredPublicationsReport({
   for (const l of learners.values()) {
     const learnerPubs = pubsByLearner.get(l.cwid);
     if (!learnerPubs) continue;
-    const { entryYear } = effectiveEntryYear(l.entryYear, l.rosterGradYear);
+    const { entryYear } = learnerEntryYear(l);
     const program = programLabel(l.buckets);
     const a: Acc = {
       all: new Set(),
@@ -1535,7 +1631,7 @@ export async function loadMentoredPublicationsReport({
   }
 
   const summary: MentoredPubsSummaryRow[] = [...learners.values()].map((l) => {
-    const { entryYear, source } = effectiveEntryYear(l.entryYear, l.rosterGradYear);
+    const { entryYear, source } = learnerEntryYear(l);
     const a = acc.get(l.cwid);
     // No window to count against → null, not a misleading 0.
     const windowed = (n: number) => (entryYear === null || (l.gradYear === null && !l.ongoing) ? null : n);
@@ -1555,6 +1651,7 @@ export async function loadMentoredPublicationsReport({
       pubsAllTime: a?.all.size ?? 0,
       highImpactInWindow: windowed(a?.highImpact.size ?? 0),
       firstAuthorInWindow: windowed(a?.firstAuthor.size ?? 0),
+      postdoc: postdocLength(postdocByLearner.get(l.cwid.toLowerCase()) ?? [], generatedAt),
     };
   });
 

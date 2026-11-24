@@ -79,6 +79,16 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
         "numFmt": undefined,
         "width": 38,
       },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 25,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
+        "width": 22,
+      },
     ],
     "name": "Summary",
     "rows": [
@@ -104,6 +114,8 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
           "Publications (all years)",
           "High-impact publications in window (Journal Impact Factor ≥ 10)",
           "First-author publications in window",
+          "Postdoc length (years)",
+          "Postdoc length note",
         ],
       },
       {
@@ -502,7 +514,17 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
         },
         "values": [
           "Entry year",
-          "The learner's program entry year from the AOC pairing sheet when present; otherwise graduation year - 4 (4-year MD track). 1 of 1 learner used the fallback.",
+          "The learner's program entry year from the AOC pairing sheet when present; the start year on the Enterprise Directory record for a PhD student, postdoc or volunteer; otherwise, for pairing-sheet learners, graduation year - 4 (4-year MD track). 1 of 1 learner used the fallback.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "Postdoc length",
+          "Total time on Enterprise Directory postdoc records (shown when the Postdoc type is selected): overlapping records count once, gaps are left out, and records with no supervisor are not held. To date = still running on the day generated. At least = a record starts on 2021-01-01, which appears to be a system load date, so the true start may be earlier.",
         ],
       },
       {

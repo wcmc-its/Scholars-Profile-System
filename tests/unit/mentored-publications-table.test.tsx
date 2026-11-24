@@ -213,6 +213,20 @@ describe("MentoredPublicationsTable — learners", () => {
     ]);
   });
 
+  it("the Learner cell shows a known entry year and the time as a postdoc, marked to date / at least", () => {
+    const { getByTestId } = renderTable({
+      summary: [
+        summaryRow({ cwid: "phd0001", lastName: "A", firstName: "A", entryYear: 2018, entryYearSource: "bridge" }),
+        summaryRow({ cwid: "pd0001", lastName: "B", firstName: "B", postdoc: { years: 2, ongoing: true, atLeast: false } }),
+        summaryRow({ cwid: "pd0002", lastName: "C", firstName: "C", postdoc: { years: 1.5, ongoing: false, atLeast: true } }),
+      ],
+    });
+    const cell = (cwid: string) => getByTestId(`mentored-pubs-learner-${cwid}`).querySelector("td")!.textContent;
+    expect(cell("phd0001")).toContain("Entry 2018");
+    expect(cell("pd0001")).toContain("Postdoc 2.0 years to date");
+    expect(cell("pd0002")).toContain("Postdoc at least 1.5 years");
+  });
+
   it("the Learner cell: name, CWID, 'Grad YYYY' (or 'No grad year'), the entry-year estimate; mentors with a type badge and 'Department · Institution'", () => {
     const { getByTestId } = renderTable();
     const row = getByTestId("mentored-pubs-learner-stu0001");
@@ -221,6 +235,7 @@ describe("MentoredPublicationsTable — learners", () => {
     expect(cells[0].textContent).toContain("stu0001");
     expect(cells[0].textContent).toContain("Grad 2025");
     expect(cells[0].textContent).toContain("(entry est. 2021)");
+    expect(cells[0].textContent).not.toContain("Postdoc");
     expect(getByTestId("mentored-pubs-learner-stu0002").querySelector("td")!.textContent).toContain("No grad year");
     // The md+ Mentors column: one block per mentor.
     const mentors = cells[1];

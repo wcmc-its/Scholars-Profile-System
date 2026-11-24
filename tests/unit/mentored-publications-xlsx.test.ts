@@ -323,11 +323,25 @@ describe("buildMentoredPublicationsWorkbook", () => {
         "First-author publications in window",
         "High-impact publications in window (Journal Impact Factor ≥ 10)",
         "Publications (all years)",
+        "Postdoc length (years)",
+        "Postdoc length note",
       ]);
       expect(rowValues(ws, 2)).toEqual([
         2025, 2021, "MD", "stu0001", "Ada", "Learner", "Yan Other; Zed Mentor", "men0002; men0001",
         "—; Medicine", "MSKCC; WCM", "MD-PhD (program office); MD", 3, 1, 2, 1, 5,
       ]);
+    });
+
+    it("Summary: postdoc length and its note end the row in both modes", async () => {
+      const postdoc = { years: 2.4, ongoing: true, atLeast: true };
+      for (const report of [REPORT, ALL]) {
+        const wb = await load(
+          await buildMentoredPublicationsWorkbook({ ...report, summary: [{ ...report.summary[0], postdoc }] }),
+        );
+        const ws = wb.getWorksheet(SUMMARY_SHEET)!;
+        expect(rowValues(ws, 1).slice(-2)).toEqual(["Postdoc length (years)", "Postdoc length note"]);
+        expect(rowValues(ws, 2).slice(-2)).toEqual([2.4, "At least; To date"]);
+      }
     });
 
     it("Raw Data: one row per (learner, pub) with the mentor(s) on the paper, blank when none", async () => {

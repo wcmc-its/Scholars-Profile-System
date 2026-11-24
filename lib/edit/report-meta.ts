@@ -102,7 +102,7 @@ const MENTORED_PUBS_DESCRIPTION_HTML = [
   "<li><strong>MD</strong> — MD students' pairs, recorded by the Areas of Concentration (AOC) program — the MD scholarly-concentration program — in its pairing sheet. Carries the graduation year and, for recent classes, the entry year.</li>",
   "<li><strong>MD-PhD (program office)</strong> — Pairs from the MD-PhD program office's list, loaded with the AOC sheet. No entry or graduation years yet.</li>",
   "<li><strong>ECR</strong> — Early Career Research pairs from the same sheet (classes 2018–2023). Carries the graduation year.</li>",
-  "<li><strong>PhD / MD-PhD thesis advisor</strong> — Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.</li>",
+  "<li><strong>PhD / MD-PhD thesis advisor</strong> — Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year from Jenzabar; start year from the Enterprise Directory student record.</li>",
   "<li><strong>Postdoc supervisor</strong> — The postdoc's reporting manager from the ED appointment record, with appointment start and end dates. For roughly one in seven, the manager on record is a lab administrator rather than the PI.</li>",
   "<li><strong>Likely mentee (from co-authorship)</strong> — Not on any roster: a trainee-type co-author who publishes repeatedly with this faculty member. Inferred, unconfirmed.</li>",
   "<li><strong>Possible mentee (from co-authorship)</strong> — The same inference for research staff or MD alumni, who may be peers rather than trainees. Off by default.</li>",

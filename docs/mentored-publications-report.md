@@ -124,7 +124,7 @@ the program pairings, then the two co-authorship inferences.
 | MD (the AOC pairing sheet) | `aoc_mentee` (mirror of `reporting_students_mentors`, bucket `md`) | Pairs the AOC program records in its pairing sheet; graduation year; entry year for recent classes | Entry year for older classes (see the fallback below) | On, for an `md` or `*` holder | #2664 |
 | MD-PhD (program office) | `aoc_mentee` (bucket `mdphd`) | Pairs from the MD-PhD program office's list, loaded with the AOC sheet | Any year — no entry, no graduation | On, for an `mdphd` or `*` holder | #2664 |
 | ECR | `aoc_mentee` (bucket `ecr`) | Early Career Research pairs, classes 2018–2023; graduation year | Entry year (the fallback below applies) | On, for an `ecr` or `*` holder | #2664 |
-| PhD / MD-PhD thesis advisor | `phd_mentor_relationship` (Jenzabar, MAJSP) | Thesis-advisor pairs; conferral year | Start year | On, for every holder | #2677 |
+| PhD / MD-PhD thesis advisor | `phd_mentor_relationship` (Jenzabar, MAJSP) | Thesis-advisor pairs; conferral year; start year from the learner's ED student record (`student_phd_program`) | A start year for the ~2% with no ED student record | On, for every holder | #2677 |
 | Postdoc supervisor | `postdoc_mentor_relationship` (ED appointment record) | The postdoc's reporting manager; appointment start and end dates (no end = ongoing) | A PI guarantee: roughly one in seven managers on record is a lab administrator (#2633) | On, for every holder | #2677 |
 | Likely mentee (from co-authorship) | `mentee_suggestion`, tier `presumptive` (#2634) | A trainee-type co-author (student, postdoc, fellow, volunteer…) who publishes repeatedly with the faculty member; pubs from the suggestion's own evidence list | Any year; confirmation | Off | #2677 |
 | Possible mentee (from co-authorship) | `mentee_suggestion`, tier `ambiguous` | The same inference for research staff or MD alumni, who may be peers | Any year; confirmation | Off | #2677 |
@@ -219,6 +219,10 @@ download route can never disagree. Malformed input: the route 400s, the page fal
   year) — never to a Jenzabar conferral year or a postdoc end year, whose programs have no fixed
   length. A roster MD-PhD row with no years plus a Jenzabar conferral year still gets no guess:
   the fallback reads the roster's own graduation year.
+  An estimate also wins over a later PhD or postdoc start, which would otherwise cut the MD years
+  out of the window.
+- **Postdoc length.** Every ED postdoc record the learner has, merged (overlaps once, gaps out), to
+  date when open. Page line and the last two Summary columns; only with the Postdoc type selected.
 - **Unknown years are null, never 0.** A learner with no graduation year reads "No grad year";
   every in-window count is `null` (a blank cell in the workbook, "—" on the page). A 0 would read as
   "published nothing".
@@ -272,8 +276,9 @@ download route can never disagree. Malformed input: the route 400s, the page fal
 - MD-PhD program-office rows carry no entry or graduation year, so those learners always sit under
   "No grad year" (reachable only with "Include learners with no graduation year") with null
   in-window counts.
-- Jenzabar carries a conferral year but no start year, so a thesis-advisor pair has no window
-  unless another source supplies an entry year.
+- A current PhD student has no conferral year yet, so their in-window counts stay null.
+- About 12% of ED postdoc records start on exactly 2021-01-01, which looks like a system load date;
+  the postdoc length reads "at least" for them.
 - Roughly 14% of ED postdoc managers on record are lab administrators rather than the PI (#2633).
 - Faculty Review Tool mentees are free-text names. About 30% of internal ones match a WCM person
   by name; the rest count only once the mentor links them on /edit Mentees.

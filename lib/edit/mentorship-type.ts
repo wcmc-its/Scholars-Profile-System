@@ -129,7 +129,7 @@ export const MENTORSHIP_TYPE_DESCRIPTION: Record<MentorshipTypeKey, string> = {
     "Pairs from the MD-PhD program office's list, loaded with the AOC sheet. No entry or graduation years yet.",
   ecr: "Early Career Research pairs from the same sheet (classes 2018–2023).",
   thesis:
-    "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.",
+    "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year from Jenzabar; start year from the Enterprise Directory student record.",
   postdoc:
     "The postdoc's reporting manager from the ED appointment record, with appointment dates. For roughly one in seven, the manager on record is a lab administrator rather than the PI.",
   likely:

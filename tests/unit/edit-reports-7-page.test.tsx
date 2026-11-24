@@ -386,7 +386,7 @@ describe("/edit/reports/mentors-and-mentees (7) — wiring", () => {
     expect(hovers.every((p) => p.wide === true && p.children.type === "span")).toBe(true);
     expect(hovers.map((p) => p.text)).toEqual([
       "MD students' pairs, recorded by the Areas of Concentration (AOC) program — the MD scholarly-concentration program — in its pairing sheet.",
-      "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year known; start year not.",
+      "Thesis-advisor pairs from the Graduate School's Jenzabar records (MAJSP). Conferral year from Jenzabar; start year from the Enterprise Directory student record.",
       expect.stringContaining("reporting manager from the ED appointment record"),
       expect.stringContaining("Added by the mentor on their Scholars profile"),
       expect.stringContaining("annual Faculty Review Tool"),
