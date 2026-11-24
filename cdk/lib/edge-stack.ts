@@ -1373,6 +1373,14 @@ export class EdgeStack extends Stack {
           textTransformations: [{ priority: 0, type: "NONE" }],
         },
       };
+      const hasSecFetchMode = {
+        sizeConstraintStatement: {
+          fieldToMatch: { singleHeader: { Name: "sec-fetch-mode" } },
+          comparisonOperator: "GT",
+          size: 0,
+          textTransformations: [{ priority: 0, type: "NONE" }],
+        },
+      };
       const inconsistentClientBlock = {
         block: {
           customResponse: {
@@ -1701,8 +1709,14 @@ export class EdgeStack extends Stack {
           // with scrapers. Every scraper cohort in it (a nonexistent
           // "Chrome/158" from ~610 IPs, a second fleet-2 JA4 variant, Chrome
           // 48/99 pools) shares one tell: its TLS ClientHello offers no ALPN
-          // (JA4 ALPN field `00`). Chrome always offers h2. Count first;
-          // promote to block once 24h of matches show no real browsers.
+          // (JA4 ALPN field `00`). Chrome always offers h2.
+          // Narrowed 2026-11-24: no-ALPN alone also matched real Chrome behind
+          // TLS-inspecting proxies (57 IPs in 17.5h, sending Sec-Fetch-Mode and
+          // brotli), so a request with Sec-Fetch-Mode is left out; Chrome 76+
+          // sends it on every HTTPS request. That kept 92% of matches. JA4
+          // t13d190900_... (Chrome/99, 58 IPs) is left out too: it runs JS and
+          // sends cookies, and is not yet explained. Promote to block once 24h
+          // of matches from this version show no real browsers.
           {
             name: "count-chrome-ua-no-alpn",
             priority: managedGroups.length + 5,
@@ -1717,6 +1731,19 @@ export class EdgeStack extends Stack {
                       textTransformations: [{ priority: 0, type: "NONE" }],
                     },
                   },
+                  {
+                    notStatement: {
+                      statement: {
+                        byteMatchStatement: {
+                          searchString: "t13d190900_9dc949149365_97f8aa674fd9",
+                          fieldToMatch: { ja4Fingerprint: { fallbackBehavior: "NO_MATCH" } },
+                          positionalConstraint: "EXACTLY",
+                          textTransformations: [{ priority: 0, type: "NONE" }],
+                        },
+                      },
+                    },
+                  },
+                  { notStatement: { statement: hasSecFetchMode } },
                   headerContains("user-agent", "Chrome/"),
                   {
                     notStatement: {

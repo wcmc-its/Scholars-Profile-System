@@ -2027,6 +2027,48 @@ a{color:var(--slate)}
                     },
                   },
                   {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "JA4Fingerprint": {
+                              "FallbackBehavior": "NO_MATCH",
+                            },
+                          },
+                          "PositionalConstraint": "EXACTLY",
+                          "SearchString": "t13d190900_9dc949149365_97f8aa674fd9",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "SizeConstraintStatement": {
+                          "ComparisonOperator": "GT",
+                          "FieldToMatch": {
+                            "SingleHeader": {
+                              "Name": "sec-fetch-mode",
+                            },
+                          },
+                          "Size": 0,
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
                     "ByteMatchStatement": {
                       "FieldToMatch": {
                         "SingleHeader": {
@@ -4981,6 +5023,48 @@ a{color:var(--slate)}
                           "Type": "NONE",
                         },
                       ],
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "JA4Fingerprint": {
+                              "FallbackBehavior": "NO_MATCH",
+                            },
+                          },
+                          "PositionalConstraint": "EXACTLY",
+                          "SearchString": "t13d190900_9dc949149365_97f8aa674fd9",
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "SizeConstraintStatement": {
+                          "ComparisonOperator": "GT",
+                          "FieldToMatch": {
+                            "SingleHeader": {
+                              "Name": "sec-fetch-mode",
+                            },
+                          },
+                          "Size": 0,
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
                     },
                   },
                   {
