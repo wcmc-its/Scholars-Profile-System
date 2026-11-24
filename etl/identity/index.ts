@@ -229,7 +229,9 @@ async function main() {
       data: {
         status: "success",
         completedAt: new Date(),
-        rowsProcessed: keep.length,
+        // The scan size, not keep.length: candidates are a queue that shrinks as
+        // librarians accept iDs (3,072 -> 476 on 2026-11-24 failed etl:integrity).
+        rowsProcessed: rows.length,
       },
     });
   } catch (err) {

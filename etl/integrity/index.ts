@@ -147,6 +147,10 @@ export function staleSources(
 // FundableWork (etl/fundable-work) scores each work once and skips any already in
 // `fundable_work`, so it returns NEWLY scored rows. Staging 2026-11-02: the
 // 1,402-row backfill, then 71 on a normal night, which failed this guard.
+// CdnReconcile (etl/cdn-reconcile) returns pending invalidations it replayed, and is
+// 0 on most runs (which the sampler skips). Prod 2026-11-24: 194, then 1, which
+// failed this guard. SearchReconcile returns the same kind of count. A replay that
+// fails throws on its own.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
@@ -155,6 +159,8 @@ export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "ORCID-push",
   "CenterPubRelevance",
   "FundableWork",
+  "CdnReconcile",
+  "SearchReconcile",
 ]);
 
 /**
