@@ -148,8 +148,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 27 CloudWatch alarms (13 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge + 4 app task crash)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 27);
+    it("creates exactly 28 CloudWatch alarms (13 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge + 1 fingerprint block + 4 app task crash)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 28);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -157,7 +157,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(27);
+      expect(names).toHaveLength(28);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
@@ -198,6 +198,7 @@ describe("SpsObservabilityStack", () => {
           "sps-opensearch-jvm-pressure-prod",
           "sps-oncall-relay-errors-prod",
           "sps-search-challenge-surge-prod",
+          "sps-search-fingerprint-blocks-prod",
         ].sort(),
       );
     });
@@ -383,6 +384,7 @@ describe("SpsObservabilityStack", () => {
         // ADR-017 -- the surge rule firing means visitors are being
         // challenged, not that the site is down: warn tier.
         "sps-search-challenge-surge-prod": warnId,
+        "sps-search-fingerprint-blocks-prod": warnId,
         // 2026-11 OOM incident -- a crash fails in-flight requests: page in
         // prod, once, via the task-crash alarm. The OOM alarm names the cause
         // of that same crash, so it warns rather than paging a second time.
@@ -418,7 +420,7 @@ describe("SpsObservabilityStack", () => {
         }
       }
       // 27 in prod; staging is 26 — it gets no ACU alarm (see the note above).
-      expect(seen).toBe(27);
+      expect(seen).toBe(28);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -1400,6 +1402,20 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
+    it("warns when the fingerprint rate rule blocks anyone", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-search-fingerprint-blocks-prod",
+        Namespace: "AWS/WAFV2",
+        MetricName: "BlockedRequests",
+        Dimensions: Match.arrayWith([
+          { Name: "Rule", Value: "sps-edge-prod-search-fingerprint-rate-limit" },
+          { Name: "WebACL", Value: "sps-edge-prod-wcm-only" },
+        ]),
+        Threshold: 0,
+        TreatMissingData: "notBreaching",
+      });
+    });
+
     it("saves the WAF log queries against this env's log group", () => {
       const defs = Object.values(
         template.findResources("AWS::Logs::QueryDefinition"),
@@ -1481,8 +1497,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 26 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge + 4 app task crash)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 26);
+    it("creates exactly 27 CloudWatch alarms (12 platform + 1 B27 relay-errors + 5 edge + 3 ETL heartbeat warns + 1 /search surge + 1 fingerprint block + 4 app task crash)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 27);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -1490,7 +1506,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(26);
+      expect(names).toHaveLength(27);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -1587,6 +1603,7 @@ describe("SpsObservabilityStack", () => {
         "sps-edge-probe-stalled-staging": warnId,
         "sps-edge-origin-latency-p99-staging": warnId,
         "sps-search-challenge-surge-staging": warnId,
+        "sps-search-fingerprint-blocks-staging": warnId,
         // The two crash alarms follow latency: prod pages, staging warns --
         // nobody is waiting on a staging response.
         "sps-app-heap-oom-staging": warnId,
@@ -1617,7 +1634,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(26);
+      expect(seen).toBe(27);
     });
 
     it("creates the app-unavailable composite in staging too", () => {

@@ -1936,6 +1936,36 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "SearchFingerprintBlockAlarm21301F69": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The /search fingerprint rate rule is blocking (prod): one browser fingerprint sent more than 300 off-campus /search requests in 5 minutes and now gets the Too many requests page. Next: run the saved Logs Insights query "sps-prod/waf/search-by-rule-and-action" and check the search-fingerprint-rate-limit row. Many IPs on one fingerprint with a bot user agent is the headless farm and needs no action. A handful of IPs with ordinary browsers means real people share the fingerprint: raise the limit in cdk/lib/edge-stack.ts.",
+        "AlarmName": "sps-search-fingerprint-blocks-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "Rule",
+            "Value": "sps-edge-prod-search-fingerprint-rate-limit",
+          },
+          {
+            "Name": "WebACL",
+            "Value": "sps-edge-prod-wcm-only",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "BlockedRequests",
+        "Namespace": "AWS/WAFV2",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
     "WafQueryChallengedByReferrer": {
       "Properties": {
         "LogGroupNames": [
@@ -3807,6 +3837,36 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         ],
         "EvaluationPeriods": 1,
         "MetricName": "ChallengeRequests",
+        "Namespace": "AWS/WAFV2",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "SearchFingerprintBlockAlarm21301F69": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "The /search fingerprint rate rule is blocking (staging): one browser fingerprint sent more than 300 off-campus /search requests in 5 minutes and now gets the Too many requests page. Next: run the saved Logs Insights query "sps-staging/waf/search-by-rule-and-action" and check the search-fingerprint-rate-limit row. Many IPs on one fingerprint with a bot user agent is the headless farm and needs no action. A handful of IPs with ordinary browsers means real people share the fingerprint: raise the limit in cdk/lib/edge-stack.ts.",
+        "AlarmName": "sps-search-fingerprint-blocks-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "Rule",
+            "Value": "sps-edge-staging-search-fingerprint-rate-limit",
+          },
+          {
+            "Name": "WebACL",
+            "Value": "sps-edge-staging-wcm-only",
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "BlockedRequests",
         "Namespace": "AWS/WAFV2",
         "Period": 300,
         "Statistic": "Sum",
