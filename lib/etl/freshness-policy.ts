@@ -362,6 +362,7 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   CancerCenterDiseaseAssignment: { cadence: "weekly" }, // CancerCenterDiseaseAssignmentsWeekly
   JournalImpactFactor: { cadence: "weekly" }, // JournalImpactFactorWeekly
   FundableWork: { cadence: "weekly" }, // FundableWorkWeekly
+  PolicyCitations: { cadence: "weekly" }, // PolicyCitationsWeekly
   FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
   // ED email-visibility bridge (export -> S3 -> import). Only the import writes a
   // row; built only where edEmailVisibilityBridgeEnabled (staging today).

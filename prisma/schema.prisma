@@ -854,6 +854,50 @@ model PublicationCiting {
   @@map("publication_citing")
 }
 
+/// A document that cites WCM publications: a clinical practice guideline,
+/// consensus statement or systematic review indexed in PubMed, or a health
+/// authority / national academy document in NCBI Bookshelf. Loaded weekly by
+/// `etl:policy-citations`. `source` + `externalId` is the natural key (a PMID,
+/// or a Bookshelf book accession such as NBK442272).
+model CitingDocument {
+  id          Int     @id @default(autoincrement())
+  /// "pubmed" | "bookshelf"
+  source      String  @db.VarChar(16)
+  externalId  String  @map("external_id") @db.VarChar(32)
+  title       String  @db.Text
+  year        Int?
+  url         String  @db.VarChar(255)
+  /// "authority" | "guideline" | "consensus" | "review"
+  level       String  @db.VarChar(16)
+  /// Health authority that issued it (lib/citations/issuing-bodies.ts); NULL for
+  /// PubMed-indexed documents.
+  issuingBody String? @map("issuing_body") @db.VarChar(64)
+  /// Normalized title + year. The same guideline printed in several journals
+  /// shares a key, and counts once.
+  dedupKey    String  @map("dedup_key") @db.VarChar(191)
+
+  publications PublicationCitingDocument[]
+
+  @@unique([source, externalId])
+  @@index([level])
+  @@map("citing_document")
+}
+
+/// One citation of a WCM publication by a `CitingDocument`. No FK to
+/// Publication (as `PublicationCiting`): the reciter ETL can drop and re-add a
+/// publication, and `firstSeenAt` has to survive that, since it drives "newly
+/// cited".
+model PublicationCitingDocument {
+  pmid             String         @db.VarChar(32)
+  citingDocumentId Int            @map("citing_document_id")
+  firstSeenAt      DateTime       @default(now()) @map("first_seen_at")
+  citingDocument   CitingDocument @relation(fields: [citingDocumentId], references: [id], onDelete: Cascade)
+
+  @@id([pmid, citingDocumentId])
+  @@index([citingDocumentId])
+  @@map("publication_citing_document")
+}
+
 /// GrantRecs Phase 2 — a single funding OPPORTUNITY (not an awarded grant),
 /// projected from ReciterAI's `GRANT#` DynamoDB record by the dynamodb ETL
 /// (`etl/dynamodb/index.ts` → `grant-opportunity-mapper.ts`). MySQL is the
@@ -2095,6 +2139,18 @@ model Publication {
   /// separately so the biosketch can cite the NIH-sourced figure that pairs with
   /// the RCR. NULL until the ETL backfills.
   citedByCount          Int?      @map("cited_by_count")
+  /// Guideline and policy citation rollups, recomputed weekly by
+  /// `etl:policy-citations` from `publication_citing_document` so a publication
+  /// row can render its badges without a join (the RCR columns' precedent).
+  /// `authorityBodies` is `[{ body, count }]` (distinct documents per health
+  /// authority, most documents first), NULL when no authority document cites
+  /// the paper. The two counts are distinct documents after de-duplication.
+  authorityBodies       Json?     @map("authority_bodies")
+  guidelineCount        Int       @default(0) @map("guideline_count")
+  reviewCount           Int       @default(0) @map("review_count")
+  /// When `etl:policy-citations` last asked NCBI Bookshelf which books cite this
+  /// paper. Drives the rolling pass (never-checked first, then oldest).
+  bookshelfCheckedAt    DateTime? @map("bookshelf_checked_at")
   /// Issue #325 — per-paper "top topic" (argmax of the topic-score vector
   /// among topics above the 0.3 floor; deterministic tiebreak upstream).
   /// Sourced from DynamoDB TOPIC# `top_topic_id`. Per-paper, not

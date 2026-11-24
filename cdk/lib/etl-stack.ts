@@ -2454,6 +2454,14 @@ export class EtlStack extends Stack {
       // plus reciterdb for author attribution, so external:true (the Reciter secret);
       // continue-tier (a miss only delays new scores a week).
       { id: "FundableWorkWeekly", npmScript: "etl:fundable-work", external: true, tier: "continue" },
+      // Guideline and policy citations (etl/policy-citations) — which guidelines,
+      // consensus statements, systematic reviews and health-authority documents cite
+      // our publications. Reads citation links from reciterdb, so external:true (the
+      // Reciter secret), plus public NCBI E-utilities over NAT egress. Its Bookshelf
+      // lookup works through the corpus on a 30-minute budget (BOOKSHELF_BUDGET_MIN in
+      // etl/policy-citations/index.ts), so the step runs about 40 minutes every week by design.
+      // `continue` — writes only add rows, so a miss just delays new citations a week.
+      { id: "PolicyCitationsWeekly", npmScript: "etl:policy-citations", external: true, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
@@ -2781,8 +2789,9 @@ export class EtlStack extends Stack {
         // Capped at the CloudWatch max (7d = 604800s); the 7-day cadence
         // leaves no room for grace within the limit.
         cadenceWindow: Duration.days(7),
-        // prod 120d: median 1.50h, p90 1.89h.
-        maxDuration: Duration.hours(3),
+        // prod 120d: median 1.50h, p90 1.89h; the latest full run was 2h 40m,
+        // and PolicyCitationsWeekly adds about 40 minutes on top of that.
+        maxDuration: Duration.hours(4),
         stateMachine: this.weeklyStateMachine,
       },
       {
