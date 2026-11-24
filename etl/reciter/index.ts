@@ -30,7 +30,8 @@
  *   - We insert PublicationAuthor rows only for WCM scholars (where cwid is
  *     known). Profile rendering overlays hyperlinks on matching substrings
  *     in authorsString.
- *   - authorPosition values map to isFirst/isLast/isPenultimate:
+ *   - authorPosition values map to isFirst/isLast/isPenultimate (co-first and
+ *     co-last authors carry 'first' / 'last' too):
  *       'first'                 -> isFirst
  *       'last'                  -> isLast
  *       'first_and_last' / 'sole' -> both
@@ -367,8 +368,10 @@ export function buildAuthorshipRows(
     const rank = rankByPmidCwid.get(`${r.pmid}|${cwid}`);
     const position = rank
       ?? (flags.isFirst ? 1 : flags.isLast ? total : flags.isPenultimate ? Math.max(1, total - 1) : 0);
-    const isFirst = rank !== undefined ? rank === 1 : flags.isFirst;
-    const isLast = rank !== undefined ? rank === total : flags.isLast;
+    // The rank orders the byline; ReCiter's authorPosition also credits equal
+    // contributors contiguous with the first or last author, so either one counts.
+    const isFirst = rank === 1 || flags.isFirst;
+    const isLast = rank === total || flags.isLast;
     const isPenultimate =
       rank !== undefined ? total >= 2 && rank === total - 1 : flags.isPenultimate;
 
