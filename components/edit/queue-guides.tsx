@@ -73,8 +73,7 @@ export function HonorsReadOnlyText() {
 }
 
 /** ORCID. Levels: `bandOf` in `etl/orcid-evidence/index.ts` (MIN_SHARED = 3,
- *  ORCID_HISTORY_BAND on in both envs; ORCID_BYLINE_BAND on in staging only, so the
- *  "iD on byline" copy names the env: change both together); auto-confirm: `planAutoConfirm` there,
+ *  ORCID_HISTORY_BAND and ORCID_BYLINE_BAND on in both envs); auto-confirm: `planAutoConfirm` there,
  *  on only where ORCID_EMAIL_AUTOCONFIRM is (prod today, `cdk/lib/etl-stack.ts`),
  *  so the copy says "may be";
  *  labels: `ORCID_QUEUE_BAND_LABEL`; who decides: `isOrcidQueueTabVisible`. */
@@ -101,11 +100,11 @@ export function OrcidQueueGuide() {
         <QueueTerm term="Weak">Less evidence than Moderate.</QueueTerm>
         <QueueTerm term="iD on byline">
           Accepted papers that print this iD next to the scholar&rsquo;s name in PubMed. The ORCID
-          record can be empty and the papers are still listed on the card. On staging they also
-          count when the names agree and nothing competes: two or more make a match Strong, one
-          makes it at least Moderate. In production they don&rsquo;t count yet. Contested means a
-          rejected paper carries the iD too, someone else has it on their accepted papers or on
-          file, or the scholar&rsquo;s papers carry a second iD.
+          record can be empty and the papers are still listed on the card. They count when the
+          names agree and nothing competes: two or more make a match Strong, one makes it at least
+          Moderate. Contested papers don&rsquo;t count: a rejected paper carries the iD too, someone
+          else has it on their accepted papers or on file, or the scholar&rsquo;s papers carry a
+          second iD.
         </QueueTerm>
         <QueueTerm term="Competing scholar or iD">
           When another scholar, or another iD, has 3 or more of the same papers, the match stays at
