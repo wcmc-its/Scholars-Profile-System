@@ -40,6 +40,7 @@ type OwnHomeSession = {
   isHonorsCurator?: boolean;
   isDataSharingViewer?: boolean;
   isResearchSecurityViewer?: boolean;
+  isProgramRosterEditor?: boolean;
   isDeveloper?: boolean;
 };
 
@@ -91,6 +92,7 @@ function ownDestinations(session?: OwnHomeSession): ReadonlyArray<{ href: string
   if (session?.isHonorsCurator) links.push(GLOBAL_ROLE_HOME.honors_curator);
   if (session?.isDataSharingViewer) links.push(GLOBAL_ROLE_HOME.data_sharing_viewer);
   if (session?.isResearchSecurityViewer) links.push(GLOBAL_ROLE_HOME.research_security_viewer);
+  if (session?.isProgramRosterEditor) links.push(GLOBAL_ROLE_HOME.program_roster_editor);
   if (session?.isDeveloper) links.push(GLOBAL_ROLE_HOME.development);
   return links.length > 0 ? links : [{ href: "/edit", label: "your own console" }];
 }

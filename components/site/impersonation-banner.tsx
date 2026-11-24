@@ -56,6 +56,7 @@ export type SubjectRole =
   | "honors_curator"
   | "data_sharing_viewer"
   | "research_security_viewer"
+  | "program_roster_editor"
   | "development"
   | "content_editor"
   | "core_director"
@@ -70,6 +71,7 @@ const ROLE_LABEL: Record<SubjectRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   research_security_viewer: "Research Security Viewer",
+  program_roster_editor: "Program Roster Editor",
   development: "Development",
   content_editor: "Content Editor",
   core_director: "Cores director",
@@ -109,6 +111,7 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
   research_security_viewer: [{ label: "Research security", href: "/edit/research-security" }],
+  program_roster_editor: [{ label: "Program roster", href: "/edit/program-roster" }],
   development: [
     { label: "Matcha: Open search", href: "/edit/matcha" },
     { label: "Matcha: Grants", href: "/edit/grant-matcha" },

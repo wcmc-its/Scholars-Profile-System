@@ -947,6 +947,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "ITS:Library:Scholars/research-security-viewer-role",
               },
               {
+                "Name": "EDIT_PROGRAM_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/program-roster-editor-role",
+              },
+              {
                 "Name": "OBSERVER_ENABLED",
                 "Value": "on",
               },
@@ -6191,6 +6199,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN",
                 "Value": "ITS:Library:Scholars/research-security-viewer-role",
+              },
+              {
+                "Name": "EDIT_PROGRAM_ROSTER",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
+                "Value": "ITS:Library:Scholars/program-roster-editor-role",
               },
               {
                 "Name": "OBSERVER_ENABLED",

@@ -32,6 +32,7 @@ import { isHonorsCurator } from "@/lib/auth/honors-curator";
 import { isDataSharingViewer } from "@/lib/auth/data-sharing-viewer";
 import { isDeveloper } from "@/lib/auth/development";
 import { isObserver } from "@/lib/auth/observer";
+import { isProgramRosterEditor } from "@/lib/auth/program-roster-editor";
 import { isResearchSecurityViewer } from "@/lib/auth/research-security-viewer";
 import { isSuperuser } from "@/lib/auth/superuser";
 
@@ -42,6 +43,7 @@ export type GlobalRole =
   | "content_editor"
   | "core_director"
   | "research_security_viewer"
+  | "program_roster_editor"
   | "observer";
 
 /** Display label per role — reused by the session route; client components
@@ -50,6 +52,7 @@ export const GLOBAL_ROLE_LABEL: Record<GlobalRole, string> = {
   honors_curator: "Honors Curator",
   data_sharing_viewer: "Data Sharing Viewer",
   research_security_viewer: "Research Security Viewer",
+  program_roster_editor: "Program Roster Editor",
   development: "Development",
   content_editor: "Content Editor",
   core_director: "Cores director",
@@ -70,6 +73,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   research_security_viewer: { href: "/edit/research-security", label: "Research security" },
+  program_roster_editor: { href: "/edit/program-roster", label: "Program roster" },
   // Matcha is the front door; its console nav reaches Grant Matcha too.
   development: { href: "/edit/matcha", label: "Matcha: Open search" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
@@ -88,14 +92,17 @@ const GLOBAL_ROLE_CHECKS: ReadonlyArray<{ role: GlobalRole; check: (cwid: string
   // lands on that work, not on a dashboard that may be dark. See also
   // `SENSITIVE_GLOBAL_ROLES`.
   { role: "research_security_viewer", check: isResearchSecurityViewer },
+  { role: "program_roster_editor", check: isProgramRosterEditor },
   // Last: observer is the broadest read-only role, so any narrower one held alongside it wins.
   { role: "observer", check: isObserver },
 ];
 
-/** Roles whose very membership is not for every "View as" user to learn: who
- *  staffs the research security screen is told to that person and to a
- *  superuser only. */
-const SENSITIVE_GLOBAL_ROLES: ReadonlySet<GlobalRole> = new Set<GlobalRole>(["research_security_viewer"]);
+/** Roles told only to the holder and to a superuser, never to another "View
+ *  as" user, whose overlay cannot open the page anyway. */
+const SENSITIVE_GLOBAL_ROLES: ReadonlySet<GlobalRole> = new Set<GlobalRole>([
+  "research_security_viewer",
+  "program_roster_editor",
+]);
 
 /**
  * The first matching role for `cwid` (table order breaks a multi-role tie —

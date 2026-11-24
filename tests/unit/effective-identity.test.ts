@@ -318,6 +318,7 @@ describe("getEffectiveEditSession", () => {
       isHonorsCurator: false,
       isDataSharingViewer: false,
       isResearchSecurityViewer: false,
+      isProgramRosterEditor: false,
       isCoreDirector: false,
     });
   });
@@ -401,6 +402,48 @@ describe("getEffectiveEditSession", () => {
     });
   });
 
+  describe("program_roster_editor under View as", () => {
+    const EDITOR_CN = "ITS:Library:Scholars/program-roster-editor-role";
+    const EDITOR = ROLE_FIXTURES.scholar;
+
+    beforeEach(() => {
+      process.env.EDIT_PROGRAM_ROSTER = "on";
+      process.env.SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN = EDITOR_CN;
+      const members: Record<string, string[]> = { [GROUP_CN]: [SUPERUSER_FIXTURE], [EDITOR_CN]: [EDITOR] };
+      mockedOpenLdap.mockResolvedValue(
+        asClient(
+          fakeClient(
+            async (_base, options) => {
+              const cn = options.filter.match(/^\(cn=(.+)\)$/)?.[1] ?? "";
+              return { searchEntries: [{ cn, dn: `cn=${cn},ou=Groups` }] };
+            },
+            async (dn, _attr, value) => {
+              const cn = dn.match(/^cn=(.+),ou=Groups$/)?.[1] ?? "";
+              return (members[cn] ?? []).includes(value.match(/^uid=([^,]+),/)?.[1] ?? "");
+            },
+          ),
+        ),
+      );
+    });
+    afterEach(() => {
+      delete process.env.EDIT_PROGRAM_ROSTER;
+      delete process.env.SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN;
+    });
+
+    it("the holder has it; a superuser viewing as them inherits it; an observer does not", async () => {
+      mockedGetSession.mockResolvedValue(sessionAs(EDITOR, { cwid: EDITOR, impersonating: undefined }));
+      expect((await getEffectiveEditSession())?.isProgramRosterEditor).toBe(true);
+      mockedGetSession.mockResolvedValue(sessionAs(EDITOR));
+      expect((await getEffectiveEditSession())?.isProgramRosterEditor).toBe(true);
+      mockedGetSession.mockResolvedValue(sessionAs(EDITOR, { cwid: "obs0001" }));
+      expect(await getEffectiveEditSession()).toMatchObject({
+        cwid: EDITOR,
+        isProgramRosterEditor: false,
+        sensitiveDashboardsBlocked: true,
+      });
+    });
+  });
+
   it("resolves the real cwid when the overlay has expired (read-time TTL)", async () => {
     // Overlay aged out: effective identity collapses back to the real superuser.
     mockedGetSession.mockResolvedValue(
@@ -417,6 +460,7 @@ describe("getEffectiveEditSession", () => {
       isHonorsCurator: false,
       isDataSharingViewer: false,
       isResearchSecurityViewer: false,
+      isProgramRosterEditor: false,
       isCoreDirector: false,
     });
   });
