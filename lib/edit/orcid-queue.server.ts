@@ -733,18 +733,31 @@ export async function undoLibrarianDecision(
 }
 
 /** Bulk review's extra columns for pairs that passed the dry run: the name on
- *  the ORCID record (credit name, else given + family; null = not public) and
- *  whether the record lists the scholar's email as verified. One query. */
+ *  the ORCID record (credit name, else given + family; null = not public),
+ *  whether the record lists the scholar's email as verified, and whether Scholars
+ *  holds any publication of theirs to compare the record's works with. Two queries. */
+type BulkPairFacts = {
+  orcidName: string | null;
+  verifiedEmail: boolean;
+  hasPublications: boolean;
+};
 export async function bulkPairFacts(
   client: ReadClient,
   pairs: Array<{ cwid: string; orcid: string }>,
-): Promise<Map<string, { orcidName: string | null; verifiedEmail: boolean }>> {
-  const out = new Map<string, { orcidName: string | null; verifiedEmail: boolean }>();
+): Promise<Map<string, BulkPairFacts>> {
+  const out = new Map<string, BulkPairFacts>();
   if (pairs.length === 0) return out;
-  const rows = await client.orcidCandidateEvidence.findMany({
-    where: { OR: pairs.map((p) => ({ cwid: p.cwid, orcid: p.orcid })) },
-    select: { cwid: true, orcid: true, evidenceDetail: true },
-  });
+  const [rows, authors] = await Promise.all([
+    client.orcidCandidateEvidence.findMany({
+      where: { OR: pairs.map((p) => ({ cwid: p.cwid, orcid: p.orcid })) },
+      select: { cwid: true, orcid: true, evidenceDetail: true },
+    }),
+    client.publicationAuthor.groupBy({
+      by: ["cwid"],
+      where: { cwid: { in: pairs.map((p) => p.cwid) }, isConfirmed: true },
+    }),
+  ]);
+  const withPublications = new Set(authors.map((a) => a.cwid));
   for (const r of rows) {
     const d = asDetail(r.evidenceDetail);
     const n = d?.names.orcid;
@@ -752,6 +765,7 @@ export async function bulkPairFacts(
     out.set(pairKey(r.cwid, r.orcid), {
       orcidName: n?.credit?.trim() || full || null,
       verifiedEmail: !!d?.email,
+      hasPublications: withPublications.has(r.cwid),
     });
   }
   return out;

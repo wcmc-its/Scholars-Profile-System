@@ -128,7 +128,7 @@ export default async function OrcidQueuePage({
               intro={
                 <>
                   ORCID iDs that may belong to a scholar, with the evidence from each public ORCID
-                  record. A confirmed iD goes on file and reaches WCM Identity overnight.
+                  record. A confirmed iD goes on file; WCM iDs reach WCM Identity overnight.
                 </>
               }
             >

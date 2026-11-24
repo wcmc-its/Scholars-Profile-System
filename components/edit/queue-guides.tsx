@@ -114,8 +114,9 @@ export function OrcidQueueGuide() {
       </QueueHelpSection>
       <QueueHelpSection title="What each action does">
         <QueueTerm term="Confirm">
-          Puts the iD on file for this scholar. It reaches WCM Identity overnight. If a different iD
-          is already on file, the button reads Replace with this iD.
+          Puts the iD on file for this scholar. A WCM iD reaches WCM Identity overnight; a Cornell
+          Ithaca iD stays in Scholars. If a different iD is already on file, the button reads Replace
+          with this iD.
         </QueueTerm>
         <QueueTerm term="Not this person">
           Rules out this iD for this scholar. It won&rsquo;t be suggested for them again.

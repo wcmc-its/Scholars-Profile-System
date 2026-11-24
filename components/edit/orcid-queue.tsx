@@ -233,6 +233,10 @@ export function OrcidQueue({
   /** Bulk review's match count, once it has asked the server. */
   const [bulkCount, setBulkCount] = useState<number | null>(null);
   const canDecide = !readOnly;
+  const isIthaca = useCallback(
+    (cwid: string) => summaries.some((s) => s.cwid === cwid && s.campus === "ithaca"),
+    [summaries],
+  );
 
   const list = useMemo(
     () =>
@@ -395,14 +399,14 @@ export function OrcidQueue({
       setToast(
         opts.shared
           ? opts.shared.belongs
-            ? `Confirmed for ${opts.shared.name}, and ruled out here. Reaches WCM Identity overnight.`
+            ? `Confirmed for ${opts.shared.name}, and ruled out here. ${isIthaca(opts.shared.cwid) ? "It stays in Scholars." : "Reaches WCM Identity overnight."}`
             : "Marked not this person for both scholars. The iD won't be suggested to either again."
           : undone
             ? "Undone. The iD is off file and won't be suggested again."
             : opts.noneOfThese
               ? `Marked ${others.length === 0 ? "the iD" : `all ${others.length + 1} iDs`} not this person. They won't be suggested again.`
               : decision === "confirm"
-                ? `${row.state === "conflict" ? "Replaced" : "Confirmed"}. The iD is on file and reaches WCM Identity overnight.${
+                ? `${row.state === "conflict" ? "Replaced" : "Confirmed"}. The iD is on file and ${isIthaca(row.cwid) ? "stays in Scholars" : "reaches WCM Identity overnight"}.${
                     others.length > 0
                       ? ` ${others.length === 1 ? "The other iD is" : `The other ${others.length} iDs are`} ${opts.retire ? "retired as duplicate records." : "marked not this person."}`
                       : ""
@@ -411,7 +415,7 @@ export function OrcidQueue({
       );
       return true;
     },
-    [canDecide, busy, outcomes],
+    [canDecide, busy, outcomes, isIthaca],
   );
 
   const runUndo = useCallback(async () => {
@@ -554,8 +558,15 @@ export function OrcidQueue({
                 ? { items: pairs.map((x) => ({ cwid: x.cwid, confirmed: x.orcid })) }
                 : null,
             );
+            const ithaca = pairs.filter((x) => isIthaca(x.cwid)).length;
+            const where =
+              ithaca === 0
+                ? "They reach WCM Identity overnight."
+                : ithaca === pairs.length
+                  ? "Cornell Ithaca iDs stay in Scholars."
+                  : "WCM iDs reach WCM Identity overnight; Cornell Ithaca iDs stay in Scholars.";
             setToast(
-              `Confirmed ${plural(pairs.length, "iD")}. They reach WCM Identity overnight.${
+              `Confirmed ${plural(pairs.length, "iD")}.${pairs.length > 0 ? ` ${where}` : ""}${
                 skipped > 0
                   ? ` ${plural(skipped, "scholar")} no longer qualified and stayed in the queue.`
                   : ""
@@ -612,6 +623,7 @@ export function OrcidQueue({
               canDecide={canDecide}
               busy={busy}
               pmBaseUrl={pmBaseUrl}
+              ithaca={isIthaca(card.cwid)}
               hasNext={list.findIndex((s) => s.cwid === card.cwid) < list.length - 1}
               onDecide={(row, decision, opts) => decide(card, row, decision, opts)}
               onNext={moveNext}
@@ -975,6 +987,7 @@ function ScholarDetail({
   canDecide,
   busy,
   pmBaseUrl,
+  ithaca,
   hasNext,
   onDecide,
   onNext,
@@ -984,6 +997,8 @@ function ScholarDetail({
   canDecide: boolean;
   busy: boolean;
   pmBaseUrl: string | null;
+  /** A Cornell Ithaca row: its iD is never sent to WCM Identity. */
+  ithaca: boolean;
   hasNext: boolean;
   onDecide: (
     row: OrcidQueueRow,
@@ -1261,7 +1276,7 @@ function ScholarDetail({
         <div className="border-apollo-border flex flex-wrap items-center gap-3 border-t px-7 py-4 text-[13.5px]">
           <span className="text-muted-foreground min-w-0 flex-1" data-testid="orcid-queue-resolved">
             {confirmed
-              ? `${conflict ? "Replaced with" : "Confirmed"} ${confirmed.orcid}. Reaches WCM Identity overnight.`
+              ? `${conflict ? "Replaced with" : "Confirmed"} ${confirmed.orcid}. ${ithaca ? "Stays in Scholars." : "Reaches WCM Identity overnight."}`
               : auto
                 ? `${auto.orcid} was confirmed automatically from a verified email.`
                 : `All ${plural(rows.length, "candidate iD")} marked Not this person.`}
@@ -2040,13 +2055,15 @@ function Publications({
   const total = onlyOrcid + both + onlyRec;
   const pm = pmCurateHref(pmBaseUrl, card.cwid);
   // "Only on ORCID" is the one count that can point to someone else's record,
-  // so it is the only one that warns (coral) — and only when it is above 0.
+  // so it is the only one that warns (coral) — and only when it is above 0 and
+  // there are publications here to compare with.
+  const warn = onlyOrcid > 0 && card.reciterTotal > 0;
   const tabs: Array<{ k: PubTab; label: string; n: number; swatch: string }> = [
     {
       k: "orcid",
       label: "Only on ORCID",
       n: onlyOrcid,
-      swatch: onlyOrcid > 0 ? "bg-apollo-coral-tint-border" : "bg-apollo-rail-border",
+      swatch: warn ? "bg-apollo-coral-tint-border" : "bg-apollo-rail-border",
     },
     { k: "both", label: "In both", n: both, swatch: "bg-apollo-slate" },
     { k: "rec", label: "Only in ReCiter", n: onlyRec, swatch: "bg-apollo-rail-border" },
@@ -2096,7 +2113,7 @@ function Publications({
               "inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-[13px]",
               tab === t.k
                 ? "bg-apollo-surface-2 border-[#5c574d] font-semibold"
-                : t.k === "orcid" && t.n > 0
+                : t.k === "orcid" && warn
                   ? "border-apollo-coral-tint-border bg-apollo-coral-tint text-apollo-coral-foreground"
                   : "border-apollo-border-strong bg-apollo-surface",
             )}
