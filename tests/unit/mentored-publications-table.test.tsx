@@ -32,6 +32,7 @@ vi.mock("@/components/ui/hover-tooltip", () => ({
 }));
 
 import { MentoredPublicationsTable, pivotMentors } from "@/components/edit/mentored-publications-table";
+import { positionValue } from "@/lib/edit/mentored-publications-facets";
 import type {
   MentoredPubsPublicationRow,
   MentoredPubsSummaryRow,
@@ -68,6 +69,7 @@ const onPub = (cwid: string, lastName: string, authorPosition: number | null, in
   lastName,
   firstAuthor: authorPosition === 1,
   authorPosition,
+  role: positionValue(authorPosition, 3),
   inWindow,
 });
 
@@ -358,6 +360,18 @@ describe("MentoredPublicationsTable — publications", () => {
     expect(three).toContain("Window unknown");
     expect(three).toContain("Volunteer · likely mentee (from co-authorship)");
     expect(getByTestId("mentored-pubs-pub-2").textContent).toContain("last author");
+  });
+
+  it("an equal contributor reads co-1st / co-last", () => {
+    const { getByTestId } = renderTable({
+      view: "publications",
+      publications: [
+        pub({ pmid: "8", learners: [{ ...onPub("stu0001", "Learner", 2, true), role: "first" }] }),
+        pub({ pmid: "9", learners: [{ ...onPub("stu0001", "Learner", 2, true), role: "last" }] }),
+      ],
+    });
+    expect(getByTestId("mentored-pubs-pub-8").textContent).toContain("co-1st author");
+    expect(getByTestId("mentored-pubs-pub-9").textContent).toContain("co-last author");
   });
 
   it("the all set: a paper with no mentor reads 'No mentor co-author'", () => {

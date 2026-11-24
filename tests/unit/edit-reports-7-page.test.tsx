@@ -770,7 +770,7 @@ describe("/edit/reports/mentors-and-mentees (7) — wiring", () => {
       { group: "Window", value: "Entry → grad + 2", removeHref: `${BASE}?years=2024&mtype=aoc&tail=1&pubs=mentored&window=yes&position=first&pubyear=2023&mentor=men0009&withpubs=1` },
       { group: "Publications", value: "Co-authored with a mentor", removeHref: null },
       { group: "In window", value: "In window", removeHref: `${BASE}?years=2024&mtype=aoc&tail=2&pubs=mentored&position=first&pubyear=2023&mentor=men0009&withpubs=1` },
-      { group: "Author position", value: "First author", removeHref: `${BASE}?years=2024&mtype=aoc&tail=2&pubs=mentored&window=yes&pubyear=2023&mentor=men0009&withpubs=1` },
+      { group: "Author position", value: "First or co-first author", removeHref: `${BASE}?years=2024&mtype=aoc&tail=2&pubs=mentored&window=yes&pubyear=2023&mentor=men0009&withpubs=1` },
       { group: "Publication year", value: "2023", removeHref: `${BASE}?years=2024&mtype=aoc&tail=2&pubs=mentored&window=yes&position=first&mentor=men0009&withpubs=1` },
       { group: "Mentor", value: "men0009", removeHref: `${BASE}?years=2024&mtype=aoc&tail=2&pubs=mentored&window=yes&position=first&pubyear=2023&withpubs=1` },
       { group: "Learners", value: "With publications only", removeHref: `${BASE}?years=2024&mtype=aoc&tail=2&pubs=mentored&window=yes&position=first&pubyear=2023&mentor=men0009` },

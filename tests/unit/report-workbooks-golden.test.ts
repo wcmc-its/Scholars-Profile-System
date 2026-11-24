@@ -192,6 +192,7 @@ describe("report workbooks (golden)", () => {
           dateAdded: new Date("2023-05-01T00:00:00Z"),
           citations: 2,
           learnerAuthorPosition: 1,
+          learnerRole: "first",
           authorCount: 3,
           inWindow: true,
         },

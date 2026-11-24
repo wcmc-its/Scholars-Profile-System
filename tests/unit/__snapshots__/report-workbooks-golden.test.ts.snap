@@ -246,6 +246,11 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
       {
         "alignment": undefined,
         "numFmt": undefined,
+        "width": 27,
+      },
+      {
+        "alignment": undefined,
+        "numFmt": undefined,
         "width": 15,
       },
       {
@@ -282,6 +287,7 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
           "Date added to PubMed",
           "Citations (NIH iCite)",
           "Learner author position",
+          "Learner author role",
           "Author count",
           "In program window",
         ],
@@ -311,6 +317,7 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
           2023-05-01T00:00:00.000Z,
           2,
           1,
+          "First or co-first author",
           3,
           "Yes",
         ],
@@ -337,7 +344,7 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
       {
         "alignment": undefined,
         "numFmt": undefined,
-        "width": 37,
+        "width": 43,
       },
       {
         "alignment": undefined,
@@ -576,6 +583,16 @@ exports[`report workbooks (golden) > report 7: Summary, Raw Data and Query & Ass
         "values": [
           "Learner author position",
           "The learner's 1-based position on the byline when their CWID is on the author list; blank when not linked.",
+        ],
+      },
+      {
+        "font": {
+          "name": "Arial",
+          "size": 12,
+        },
+        "values": [
+          "First author counts, learner author role",
+          "First and last include authors marked as equal contributors in an unbroken run from the first or last author (ReCiter). Papers found only through a suggested pairing count byline position alone.",
         ],
       },
     ],

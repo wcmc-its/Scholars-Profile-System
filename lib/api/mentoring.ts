@@ -106,6 +106,9 @@ export type CoPublicationFull = {
    *  many non-research types). */
   abstract: string | null;
   authors: CoPublicationAuthor[];
+  /** ReCiter's `authorPosition` for the mentee: 'first' / 'last' include equal
+   *  contributors. Absent on bridge JSON written before it was exported. */
+  learnerPosition?: string | null;
 };
 
 export type MenteeChip = {

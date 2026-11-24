@@ -149,8 +149,9 @@ import { db } from "@/lib/db";
 import { HIGH_IMPACT_THRESHOLD } from "@/lib/edit/cancer-center-publications-report";
 import { validateManualMentees, type ManualMentee } from "@/lib/edit/manual-mentee";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
+import type { MentoredPubsPosition } from "@/lib/edit/mentored-publications-params";
 import { personFilterSql } from "@/lib/edit/person-filter";
-import type { AppliedMentoredPubsFacets } from "@/lib/edit/mentored-publications-facets";
+import { positionValue, type AppliedMentoredPubsFacets } from "@/lib/edit/mentored-publications-facets";
 import {
   mentorshipKey,
   mentorshipLabel,
@@ -266,6 +267,9 @@ export type MentoredPubsDetailRow = {
   /** The learner's 1-based byline position, null when the bridge's author
    *  list does not carry their CWID. */
   learnerAuthorPosition: number | null;
+  /** First / last / middle, where first and last include ReCiter's equal
+   *  contributors; null as `learnerAuthorPosition` is. */
+  learnerRole: MentoredPubsPosition | null;
   authorCount: number;
   /** `null` = the learner's window is unknowable (see `inProgramWindow`). */
   inWindow: boolean | null;
@@ -279,6 +283,8 @@ export type MentoredPubsLearnerOnPub = {
   firstAuthor: boolean;
   /** 1-based byline rank, null when the byline does not carry their CWID. */
   authorPosition: number | null;
+  /** As `MentoredPubsDetailRow.learnerRole`. */
+  role: MentoredPubsPosition | null;
   inWindow: boolean | null;
 };
 
@@ -1154,7 +1160,8 @@ export async function loadMentoredPublicationsReport({
   // resolved from the local `publication` row by its `id` (the same key).
   const droppedUnresolved = new Set<string>();
   type Evidence = { id: string; menteeRank: number };
-  const evidence: Array<{ mentorCwid: string; menteeCwid: string; pmid: string; menteeRank: number }> = [];
+  type EvidenceRow = { mentorCwid: string; menteeCwid: string; pmid: string; menteeRank: number; learnerPosition?: string | null };
+  const evidence: EvidenceRow[] = [];
   for (const s of [...suggestions, ...facultySuggestions]) {
     // A pair a surer source also claims reads from the bridge instead. A
     // faculty pair reads its evidence too (the same row may arrive twice
@@ -1184,32 +1191,34 @@ export async function loadMentoredPublicationsReport({
     ...facultyPairs.filter((p) => !suggestedPairs.has(pairKey(p))),
     ...frtPairs,
   ];
-  const pmidsByCwid = new Map<string, Map<string, number>>();
+  type LocalAuthorship = { position: number; role: "first" | "last" | null };
+  const pmidsByCwid = new Map<string, Map<string, LocalAuthorship>>();
   const authorCwids = [...new Set(unsuggested.flatMap((p) => [p.mentorCwid, p.menteeCwid]))];
   for (const batch of chunks(authorCwids, PMID_BATCH)) {
     const found = await db.read.publicationAuthor.findMany({
       where: { cwid: { in: batch }, isConfirmed: true },
-      select: { cwid: true, pmid: true, position: true },
+      select: { cwid: true, pmid: true, position: true, isFirst: true, isLast: true },
     });
     for (const r of found) {
       if (!r.cwid) continue;
       const key = r.cwid.toLowerCase();
       let m = pmidsByCwid.get(key);
       if (!m) pmidsByCwid.set(key, (m = new Map()));
-      m.set(r.pmid, r.position);
+      m.set(r.pmid, { position: r.position, role: r.isFirst ? "first" : r.isLast ? "last" : null });
     }
   }
   for (const p of unsuggested) {
     const mentorPmids = pmidsByCwid.get(p.mentorCwid.toLowerCase());
     const menteePmids = pmidsByCwid.get(p.menteeCwid.toLowerCase());
     if (!mentorPmids || !menteePmids) continue;
-    for (const [pmid, position] of menteePmids) {
+    for (const [pmid, { position, role }] of menteePmids) {
       if (!mentorPmids.has(pmid)) continue;
       evidence.push({
         mentorCwid: p.mentorCwid,
         menteeCwid: p.menteeCwid,
         pmid,
         menteeRank: position,
+        learnerPosition: role,
       });
     }
   }
@@ -1245,7 +1254,7 @@ export async function loadMentoredPublicationsReport({
   // "Last FM" byline tokens → authors; the initials are spaced ("F M") so
   // `vancouverAuthorToken` re-joins them to the same "Last FM" text. The
   // learner's CWID goes on their `menteeRank` so `authorPosition` finds it.
-  const evidencePub = (p: LocalPub, e: { pmid: string; menteeCwid: string; menteeRank: number }): CoPublicationFull => {
+  const evidencePub = (p: LocalPub, e: EvidenceRow): CoPublicationFull => {
     const authors: CoPublicationAuthor[] = stripWcmMarkers(p.fullAuthorsString ?? p.authorsString ?? "")
       .split(", ")
       .filter((t) => t.length > 0)
@@ -1275,6 +1284,7 @@ export async function loadMentoredPublicationsReport({
       citationCount: 0,
       abstract: null,
       authors,
+      learnerPosition: e.learnerPosition,
     };
   };
 
@@ -1437,6 +1447,7 @@ export async function loadMentoredPublicationsReport({
       const year = pub.year ?? null;
       const { jif, dateAdded, citations } = enrich(pmid);
       const position = authorPosition(pub, l.cwid);
+      const role = positionValue(position, pub.authors?.length ?? 0, pub.learnerPosition);
       const inWindow = inProgramWindow(year, entryYear, l.gradYear, tail, l.ongoing);
       const paperMentors = paperMentorsFor(l.cwid, pmid);
       const withMentor = paperMentors.length > 0;
@@ -1446,7 +1457,7 @@ export async function loadMentoredPublicationsReport({
         a.inWindow.add(pmid);
         if (withMentor) a.withMentorInWindow.add(pmid);
         if (jif !== null && jif >= HIGH_IMPACT_THRESHOLD) a.highImpact.add(pmid);
-        if (position === 1) a.firstAuthor.add(pmid);
+        if (role === "first") a.firstAuthor.add(pmid);
       }
 
       const base = {
@@ -1466,6 +1477,7 @@ export async function loadMentoredPublicationsReport({
         dateAdded,
         citations,
         learnerAuthorPosition: position,
+        learnerRole: role,
         authorCount: pub.authors?.length ?? 0,
         inWindow,
       };
@@ -1502,8 +1514,9 @@ export async function loadMentoredPublicationsReport({
         cwid: l.cwid,
         firstName: l.firstName,
         lastName: l.lastName,
-        firstAuthor: position === 1,
+        firstAuthor: role === "first",
         authorPosition: position,
+        role,
         inWindow,
       });
       // The mentor once, with the type of every (learner, mentor) pair on it.
