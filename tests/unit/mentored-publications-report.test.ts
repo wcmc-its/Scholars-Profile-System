@@ -9,6 +9,7 @@
  *   - `scholar.findMany`                 (mentor display names)
  *   - `aocMenteePublication.findMany/findFirst` (the learner's full list, "all" mode)
  *   - `phdMentorRelationship.findMany`     (Jenzabar thesis advisors)
+ *   - `studentPhdProgram.findMany`         (ED student records: PhD start)
  *   - `postdocMentorRelationship.findMany` (ED postdoc appointments)
  *   - `menteeSuggestion.findMany`          (co-author-inferred pairs + evidence,
  *                                           and the per-pair read for faculty pairs)
@@ -50,6 +51,7 @@ const hoisted = vi.hoisted(() => ({
   mockLearnerPubFindMany: vi.fn(),
   mockLearnerPubFindFirst: vi.fn(),
   mockPhdFindMany: vi.fn(),
+  mockPhdProgramFindMany: vi.fn(async (): Promise<unknown[]> => []),
   mockPostdocFindMany: vi.fn(),
   mockSuggestionFindMany: vi.fn(),
   mockOverrideFindMany: vi.fn(),
@@ -72,6 +74,7 @@ vi.mock("@/lib/db", () => ({
         findFirst: hoisted.mockLearnerPubFindFirst,
       },
       phdMentorRelationship: { findMany: hoisted.mockPhdFindMany },
+      studentPhdProgram: { findMany: hoisted.mockPhdProgramFindMany },
       postdocMentorRelationship: { findMany: hoisted.mockPostdocFindMany },
       menteeSuggestion: { findMany: hoisted.mockSuggestionFindMany },
       fieldOverride: { findMany: hoisted.mockOverrideFindMany },
@@ -94,6 +97,7 @@ import {
   loadMentoredPublicationsReport,
   loadUnitMentorCwids,
   mentorInstitution,
+  postdocLength,
 } from "@/lib/edit/mentored-publications-report";
 import { MENTORSHIP_TYPE_KEYS } from "@/lib/edit/mentorship-type";
 
@@ -242,6 +246,39 @@ describe("window rule", () => {
     expect(effectiveEntryYear(null, 2025)).toEqual({ entryYear: 2021, source: "fallback" });
     expect(effectiveEntryYear(null, 2025, false)).toEqual({ entryYear: null, source: null });
     expect(effectiveEntryYear(null, null)).toEqual({ entryYear: null, source: null });
+  });
+});
+
+describe("postdocLength", () => {
+  const asOf = new Date("2026-11-24T15:00:00Z");
+  const span = (start: string | null, end: string | null) => ({
+    startDate: start ? new Date(start) : null,
+    endDate: end ? new Date(end) : null,
+  });
+
+  it("a finished appointment, an open one to date, and an end in the future counts only to today", () => {
+    expect(postdocLength([span("2022-07-01", "2024-06-30")], asOf)).toEqual({ years: 2, ongoing: false, atLeast: false });
+    expect(postdocLength([span("2025-11-25", null)], asOf)).toEqual({ years: 1, ongoing: true, atLeast: false });
+    expect(postdocLength([span("2025-11-25", "2027-06-30")], asOf)).toEqual({ years: 1, ongoing: true, atLeast: false });
+  });
+
+  it("overlaps count once, back-to-back records join, gaps are left out", () => {
+    expect(postdocLength([span("2022-07-01", "2024-06-30"), span("2023-01-01", "2023-12-31")], asOf)?.years).toBe(2);
+    expect(postdocLength([span("2023-07-01", "2024-06-30"), span("2022-07-01", "2023-06-30")], asOf)?.years).toBe(2);
+    expect(postdocLength([span("2020-07-01", "2021-06-30"), span("2023-07-01", "2024-06-30")], asOf)?.years).toBe(2);
+  });
+
+  it("a 2021-01-01 start is a minimum, unless an earlier record runs into it", () => {
+    expect(postdocLength([span("2021-01-01", "2022-12-31")], asOf)).toEqual({ years: 2, ongoing: false, atLeast: true });
+    expect(postdocLength([span("2021-01-01", "2022-12-31"), span("2020-07-01", "2020-12-31")], asOf)?.atLeast).toBe(false);
+    expect(postdocLength([span("2021-01-02", "2022-12-31")], asOf)?.atLeast).toBe(false);
+  });
+
+  it("nothing to measure is null, never 0", () => {
+    expect(postdocLength([], asOf)).toBeNull();
+    expect(postdocLength([span(null, "2024-06-30")], asOf)).toBeNull();
+    expect(postdocLength([span("2027-01-01", null)], asOf)).toBeNull();
+    expect(postdocLength([span("2024-01-01", "2023-01-01")], asOf)).toBeNull();
   });
 });
 
@@ -993,6 +1030,63 @@ describe("the other pair sources (Jenzabar, ED postdoc, co-author suggestions)",
       pubsAllTime: 1,
     });
     expect(report.detail[0].inWindow).toBeNull();
+  });
+
+  it("a PhD's entry year is the ED student record's start (any CWID case), so the window opens; a start after conferral is ignored", async () => {
+    hoisted.mockPhdFindMany.mockResolvedValue([
+      phd({ mentorCwid: "men0002", menteeCwid: "PHD0001" }),
+      phd({ mentorCwid: "men0002", menteeCwid: "phd0002", conferralYear: 2023 }),
+    ]);
+    hoisted.mockPhdProgramFindMany.mockResolvedValueOnce([
+      { cwid: "phd0001", startDate: new Date("2018-08-20") },
+      { cwid: "phd0002", startDate: new Date("2025-08-25") },
+    ]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0002", "PHD0001", 1, 2017),
+      copub("men0002", "PHD0001", 2, 2020),
+    ]);
+    const report = await loadMentoredPublicationsReport({ types: ["thesis"], scopes: ["*"] });
+    expect(report.summary.map((x) => [x.cwid, x.entryYear, x.entryYearSource, x.pubsInWindow])).toEqual([
+      ["PHD0001", 2018, "bridge", 1],
+      ["phd0002", null, null, null],
+    ]);
+  });
+
+  it("an MD learner's estimate beats a later PhD start, but not an earlier one", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", graduationYear: 2016 }),
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0002", graduationYear: 2024 }),
+      aoc({ mentorCwid: "men0001", menteeCwid: "stu0003", graduationYear: 2016, entryYear: 2014 }),
+    ]);
+    hoisted.mockPhdFindMany.mockResolvedValue(
+      ["stu0001", "stu0002", "stu0003"].map((menteeCwid) => phd({ mentorCwid: "men0002", menteeCwid, conferralYear: 2024 })),
+    );
+    hoisted.mockPhdProgramFindMany.mockResolvedValueOnce([
+      { cwid: "stu0001", startDate: new Date("2018-08-20") },
+      { cwid: "stu0002", startDate: new Date("2018-08-20") },
+      { cwid: "stu0003", startDate: new Date("2018-08-20") },
+    ]);
+    const report = await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
+    expect(report.summary.map((x) => [x.cwid, x.entryYear, x.entryYearSource]).sort()).toEqual([
+      ["stu0001", 2012, "fallback"],
+      ["stu0002", 2018, "bridge"],
+      ["stu0003", 2014, "bridge"],
+    ]);
+  });
+
+  it("postdoc length reads all the person's records, whichever mentor or year is selected, and only with the postdoc type", async () => {
+    hoisted.mockPostdocFindMany.mockImplementation(async ({ where }: { where: { menteeCwid?: unknown } }) => {
+      const recent = postdoc({ mentorCwid: "men0003", menteeCwid: "pd0001", startDate: new Date("2023-07-01"), endDate: new Date("2024-06-30") });
+      return where.menteeCwid
+        ? [recent, postdoc({ mentorCwid: "men0009", menteeCwid: "pd0001", startDate: new Date("2022-07-01"), endDate: new Date("2023-06-30") })]
+        : [recent];
+    });
+    const one = await loadMentoredPublicationsReport({ types: ["postdoc"], scopes: ["*"], gradYears: [2024], mentorCwids: new Set(["men0003"]) });
+    expect(one.summary.map((x) => [x.cwid, x.postdoc])).toEqual([["pd0001", { years: 2, ongoing: false, atLeast: false }]]);
+    hoisted.mockPhdFindMany.mockResolvedValue([phd({ mentorCwid: "men0002", menteeCwid: "pd0001" })]);
+    const none = await loadMentoredPublicationsReport({ types: ["thesis"], scopes: ["*"] });
+    expect(none.summary[0].postdoc).toBeNull();
+    hoisted.mockPostdocFindMany.mockReset().mockResolvedValue([]);
   });
 
   it("a roster MD-PhD with no years plus a Jenzabar conferral year still gets NO 4-year guess (the fallback reads the roster's own grad year)", async () => {

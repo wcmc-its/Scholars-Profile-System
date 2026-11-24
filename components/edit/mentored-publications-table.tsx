@@ -14,6 +14,7 @@ import type {
   MentoredPubsSummaryRow,
   MentorPair,
   MentorRef,
+  PostdocLength,
 } from "@/lib/edit/mentored-publications-report";
 import {
   MENTORSHIP_TYPE_DESCRIPTION,
@@ -324,6 +325,23 @@ function ariaSort(sort: SortState, key: string): "ascending" | "descending" | "n
   return sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
 }
 
+/** Time as a postdoc: "Postdoc 2.4 years", "at least 2.4", "2.4 years to date". */
+function PostdocSpan({ p }: { p: PostdocLength }) {
+  return (
+    <span
+      title={
+        p.atLeast
+          ? "The directory record starts on 2021-01-01, which appears to be a system load date, so the true start may be earlier"
+          : undefined
+      }
+    >
+      Postdoc {p.atLeast && "at least "}
+      {p.years.toFixed(1)} years
+      {p.ongoing && " to date"}
+    </span>
+  );
+}
+
 /** A count cell's text: "—" for an unknowable window, the number otherwise;
  *  zeros muted, other numbers semibold (the mockup). */
 function Count({ v }: { v: number | null }) {
@@ -471,6 +489,8 @@ function LearnersView({
                                 (entry est. {r.entryYear})
                               </span>
                             )}
+                            {r.entryYearSource === "bridge" && <span>Entry {r.entryYear}</span>}
+                            {r.postdoc && <PostdocSpan p={r.postdoc} />}
                           </div>
                           {/* Below md: the mentors and the numbers stack here. */}
                           <div className="mt-2.5 md:hidden" data-testid="mentored-pubs-stacked">

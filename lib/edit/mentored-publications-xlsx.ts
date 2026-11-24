@@ -34,6 +34,8 @@ import {
   type MentoredPubsSet,
   type MentorPair,
   type MentorRef,
+  POSTDOC_START_FLOOR,
+  type PostdocLength,
 } from "@/lib/edit/mentored-publications-report";
 import { POSITION_FACET_LABEL, WINDOW_FACET_LABEL } from "@/lib/edit/mentored-publications-facets";
 import { MENTORSHIP_TYPE_LABEL, mentorshipLabel } from "@/lib/edit/mentorship-type";
@@ -43,6 +45,9 @@ import { htmlToPlainText } from "@/lib/utils";
 export const SUMMARY_SHEET = "Summary";
 export const RAW_SHEET = "Raw Data";
 export const ASSUMPTIONS_SHEET = "Query & Assumptions";
+
+/** Last, so no column an office already refers to by letter moves. */
+const POSTDOC_HEADERS = ["Postdoc length (years)", "Postdoc length note"] as const;
 
 export const SUMMARY_HEADERS = [
   "Graduation year",
@@ -60,6 +65,7 @@ export const SUMMARY_HEADERS = [
   "Publications (all years)",
   `High-impact publications in window (Journal Impact Factor ≥ ${HIGH_IMPACT_THRESHOLD})`,
   "First-author publications in window",
+  ...POSTDOC_HEADERS,
 ] as const;
 
 /** Summary headers in the "all learner publications" mode. */
@@ -80,6 +86,7 @@ export const SUMMARY_HEADERS_ALL = [
   "First-author publications in window",
   `High-impact publications in window (Journal Impact Factor ≥ ${HIGH_IMPACT_THRESHOLD})`,
   "Publications (all years)",
+  ...POSTDOC_HEADERS,
 ] as const;
 
 const RAW_PUB_HEADERS = [
@@ -214,6 +221,11 @@ function mentorshipTypes(mentors: ReadonlyArray<MentorPair>): string | null {
   return mentors.length > 0 ? mentors.map((m) => mentorshipLabel(m.mentorship)).join("; ") : null;
 }
 
+function postdocNote(p: PostdocLength | null | undefined): string | null {
+  const notes = [p?.atLeast && "At least", p?.ongoing && "To date"].filter(Boolean);
+  return notes.length > 0 ? notes.join("; ") : null;
+}
+
 /** Build the workbook and return it as a `Buffer`. */
 export async function buildMentoredPublicationsWorkbook(
   report: MentoredPublicationsReport,
@@ -236,6 +248,7 @@ export async function buildMentoredPublicationsWorkbook(
       mentorField(r.mentors, (m) => m.institution),
       mentorshipTypes(r.mentors),
     ];
+    const postdoc = [r.postdoc?.years ?? null, postdocNote(r.postdoc)];
     return allMode
       ? [
           ...learner,
@@ -245,6 +258,7 @@ export async function buildMentoredPublicationsWorkbook(
           r.firstAuthorInWindow,
           r.highImpactInWindow,
           r.pubsAllTime,
+          ...postdoc,
         ]
       : [
           ...learner,
@@ -253,6 +267,7 @@ export async function buildMentoredPublicationsWorkbook(
           r.pubsAllTime,
           r.highImpactInWindow,
           r.firstAuthorInWindow,
+          ...postdoc,
         ];
   });
   fillSheet(
@@ -329,7 +344,11 @@ export async function buildMentoredPublicationsWorkbook(
     ],
     [
       "Entry year",
-      `The learner's program entry year from the AOC pairing sheet when present; otherwise graduation year - 4 (4-year MD track). ${fallbackCount} of ${report.summary.length} learner${report.summary.length === 1 ? "" : "s"} used the fallback.`,
+      `The learner's program entry year from the AOC pairing sheet when present; the start year on the Enterprise Directory record for a PhD student, postdoc or volunteer; otherwise, for pairing-sheet learners, graduation year - 4 (4-year MD track). ${fallbackCount} of ${report.summary.length} learner${report.summary.length === 1 ? "" : "s"} used the fallback.`,
+    ],
+    [
+      "Postdoc length",
+      `Total time on Enterprise Directory postdoc records (shown when the Postdoc type is selected): overlapping records count once, gaps are left out, and records with no supervisor are not held. To date = still running on the day generated. At least = a record starts on ${POSTDOC_START_FLOOR}, which appears to be a system load date, so the true start may be earlier.`,
     ],
     [
       "Counting rule",
