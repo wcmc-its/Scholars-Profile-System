@@ -2,11 +2,14 @@
  * Byline evidence for `etl/orcid-evidence`: the papers that print a candidate iD
  * next to the scholar's own name. The rows are reciterdb's: PubMed's ORCID on the
  * author entry ReCiter marks as the person (`person_article_author.targetAuthor`),
- * with ReCiter's assertion on the paper (`person_article.userAssertion`). It is
- * the one evidence an empty ORCID record still has.
+ * or Crossref's for the same entry (`pubsource_article_orcid`), with ReCiter's
+ * assertion on the paper (`person_article.userAssertion`). It is the one evidence
+ * an empty ORCID record still has.
  *
- * Pure: the read is `loadBylineRows` in index.ts.
+ * Pure: the reads are `loadBylineRows` and `loadCrossrefBylineRows` in index.ts.
  */
+import type { OrcidBylineSource } from "@/lib/edit/orcid-queue";
+
 import type { ReciterAssertion } from "./index";
 
 export type BylineRow = {
@@ -14,17 +17,21 @@ export type BylineRow = {
   pmid: string;
   orcid: string;
   assertion: ReciterAssertion;
+  source: OrcidBylineSource;
 };
 
-/** iD → LOWERCASE cwid → PMID → ReCiter's assertion on that paper. */
+/** ReCiter's assertion on a paper, and which sources print the iD on it. */
+type BylinePaper = { assertion: ReciterAssertion; sources: OrcidBylineSource[] };
+
+/** iD → LOWERCASE cwid → PMID → the paper: one vote, whoever prints the iD. */
 export type BylineIndex = {
-  byOrcid: Map<string, Map<string, Map<string, ReciterAssertion>>>;
+  byOrcid: Map<string, Map<string, Map<string, BylinePaper>>>;
   byCwid: Map<string, Set<string>>;
 };
 
 export type BylineFacts = {
   /** Accepted papers that print the iD on the scholar's byline, newest PMID first. */
-  papers: string[];
+  papers: Array<{ pmid: string; sources: OrcidBylineSource[] }>;
   /** Rejected papers that print it there. */
   rejected: number;
   /** Other people with an accepted paper that prints the same iD on THEIR byline,
@@ -59,10 +66,14 @@ export function indexBylines(
     const orcid = opts.deprecated?.get(r.orcid) ?? r.orcid;
     const ruledOut = (o: string) => dismissed.has(`${cwid}|${o}`.toLowerCase());
     if (!cwid || cwid.includes("_") || ruledOut(r.orcid) || ruledOut(orcid)) continue;
-    const people = index.byOrcid.get(orcid) ?? new Map<string, Map<string, ReciterAssertion>>();
-    const papers = people.get(cwid) ?? new Map<string, ReciterAssertion>();
+    const people = index.byOrcid.get(orcid) ?? new Map<string, Map<string, BylinePaper>>();
+    const papers = people.get(cwid) ?? new Map<string, BylinePaper>();
     const prev = papers.get(r.pmid);
-    if (!prev || RANK[r.assertion] < RANK[prev]) papers.set(r.pmid, r.assertion);
+    papers.set(r.pmid, {
+      assertion:
+        prev && RANK[prev.assertion] <= RANK[r.assertion] ? prev.assertion : r.assertion,
+      sources: [...new Set([...(prev?.sources ?? []), r.source])],
+    });
     people.set(cwid, papers);
     index.byOrcid.set(orcid, people);
     index.byCwid.set(cwid, (index.byCwid.get(cwid) ?? new Set()).add(orcid));
@@ -70,8 +81,10 @@ export function indexBylines(
   return index;
 }
 
-const accepted = (papers: Map<string, ReciterAssertion> | undefined) =>
-  [...(papers ?? [])].filter(([, a]) => a === "ACCEPTED").map(([pmid]) => pmid);
+const accepted = (papers: Map<string, BylinePaper> | undefined) =>
+  [...(papers ?? [])].flatMap(([pmid, p]) =>
+    p.assertion === "ACCEPTED" ? [{ pmid, sources: p.sources }] : [],
+  );
 
 /** iD → the people who have it on file, a deprecated iD counted as its primary. Pure. */
 export function heldByOrcid(
@@ -99,8 +112,8 @@ export function bylineFactsOf(
   const people = index.byOrcid.get(orcid);
   const mine = people?.get(me);
   return {
-    papers: accepted(mine).sort((a, b) => Number(b) - Number(a)),
-    rejected: [...(mine?.values() ?? [])].filter((a) => a === "REJECTED").length,
+    papers: accepted(mine).sort((a, b) => Number(b.pmid) - Number(a.pmid)),
+    rejected: [...(mine?.values() ?? [])].filter((p) => p.assertion === "REJECTED").length,
     otherHolders: [
       ...new Set([
         ...[...(people ?? [])].filter(([, ps]) => accepted(ps).length > 0).map(([c]) => c),

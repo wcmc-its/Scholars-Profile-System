@@ -30,13 +30,17 @@
  *                        same iD is a candidate for another scholar who shares ≥3.
  *   - byline papers    — the accepted papers that print the iD next to the
  *                        scholar's own name (PubMed's ORCID on the author entry
- *                        ReCiter marks as the scholar, `byline.ts`). Always in
+ *                        ReCiter marks as the scholar, or Crossref's where PubMed
+ *                        has none, `byline.ts`). Always in
  *                        `evidence_detail.byline`; they count toward the band only
  *                        when `ORCID_BYLINE_BAND` is exactly "on", otherwise the
  *                        run logs the moves they would make. None count when a
  *                        rejected paper carries the iD, another person's accepted
  *                        byline does (or has it on file), or this scholar's
- *                        accepted bylines carry a second iD.
+ *                        accepted bylines carry a second iD. Crossref's part
+ *                        (papers and contests alike) reaches the band only when
+ *                        `ORCID_BYLINE_CROSSREF` is exactly "on"; otherwise its
+ *                        papers are listed and the run logs the moves.
  *   - `band`           — `bandOf`, first match wins: email_verified, strong,
  *                        shared_only, moderate, weak. The institutional condition
  *                        is `inst_match OR history_match` (v2, decision C) only
@@ -86,7 +90,8 @@
  * family since v2.1, for its reciterdb credentials — HTTPS to ORCID and NCBI,
  * Aurora, reciterdb, plus the Identity table Scan on the shared task role).
  * Env: `ORCID_CLIENT_ID` / `ORCID_CLIENT_SECRET` (optional, anonymous otherwise),
- * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `ORCID_BYLINE_BAND`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
+ * `ORCID_EMAIL_AUTOCONFIRM`, `ORCID_HISTORY_BAND`, `ORCID_BYLINE_BAND`,
+ * `ORCID_BYLINE_CROSSREF`, `SCHOLARS_IDENTITY_TABLE` + AWS region (the Identity
  * Scan, as etl/identity; a failed Scan logs and the run goes on without that
  * source — a missing source can only lower a band, never raise one),
  * `NCBI_API_KEY` (optional, raises the NCBI rate limit), `SCHOLARS_RECITERDB_*`
@@ -157,6 +162,10 @@ const NEW_WORKS_SAMPLE = 5;
 const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 /** 82,430 byline rows on 2026-11-23; half of that is a short read. */
 const BYLINE_ROW_FLOOR = 40_000;
+/** Crossref slots ASKED, with or without an iD: about 306,000 when the backfill is
+ *  done. It runs newest PMID first, so a part-filled table can lack the older
+ *  rejected paper that contests an iD. */
+const CROSSREF_ASKED_FLOOR = 280_000;
 const BYLINE_QUERY_TIMEOUT_MS = 300_000;
 /** Shared papers kept in `evidence_detail` (the `shared` column has the full count). */
 export const SHARED_DETAIL_CAP = 100;
@@ -782,11 +791,17 @@ export function assembleEvidence(args: {
   reciter?: Map<string, Map<string, ReciterAssertion>>;
   /** The byline iDs reciterdb holds. Absent = not read: no byline evidence. */
   bylines?: BylineIndex;
+  /** The PubMed and Crossref rows in one index. Absent = Crossref not read: PubMed
+   *  alone. Ignored without `bylines`. */
+  bylinesWithCrossref?: BylineIndex;
   /** iD → the scholars who have it on file: a rival claim to the byline papers. */
   heldBy?: ReadonlyMap<string, readonly string[]>;
   /** Let byline papers count toward the band (`ORCID_BYLINE_BAND`). Absent =
    *  false: they are listed but the band ignores them. */
   bylineBand?: boolean;
+  /** Let Crossref's rows count and contest like PubMed's (`ORCID_BYLINE_CROSSREF`).
+   *  Absent = false: its papers are listed, the rest is PubMed's alone. */
+  bylineCrossref?: boolean;
 }): EvidenceRow[] {
   const key = (cwid: string, orcid: string) => `${cwid}|${orcid}`;
   // A coauthor's iD gets no row and is no rule-2 competitor. On-file iDs stay, and
@@ -898,11 +913,22 @@ export function assembleEvidence(args: {
       recordPmids.has(x),
     ).length;
     const sharedPmids = [...sharedPapers(f.workIds, mine)].sort((a, b) => Number(b) - Number(a));
-    const bf = args.bylines ? bylineFactsOf(args.bylines, p.cwid, p.orcid, args.heldBy?.get(p.orcid)) : null;
+    const factsIn = (index: BylineIndex) =>
+      bylineFactsOf(index, p.cwid, p.orcid, args.heldBy?.get(p.orcid));
+    const pubmed = args.bylines ? factsIn(args.bylines) : null;
+    // Every paper listed, whoever prints the iD; `bf` is what the band reads.
+    const listed =
+      pubmed && args.bylinesWithCrossref ? factsIn(args.bylinesWithCrossref) : pubmed;
+    const bf = args.bylineCrossref === true ? listed : pubmed;
+    const counted = new Set(bf?.papers.map((x) => x.pmid));
+    const uncounted = (listed?.papers ?? []).filter((x) => !counted.has(x.pmid)).length;
     const byline: OrcidBylineDetail | null = bf && {
       ...bf,
       total: bf.papers.length,
-      papers: bf.papers.slice(0, SHARED_DETAIL_CAP).map(barePaper),
+      ...(uncounted > 0 ? { uncounted } : {}),
+      papers: (listed ?? bf).papers
+        .slice(0, SHARED_DETAIL_CAP)
+        .map((x) => ({ ...barePaper(x.pmid), sources: x.sources })),
     };
     rows.push({
       cwid: p.cwid,
@@ -971,7 +997,8 @@ export function withSharedPaperDetail(
   rows: EvidenceRow[],
   papers: Map<string, Omit<OrcidSharedPaper, "pmid">>,
 ): EvidenceRow[] {
-  const fill = (xs: OrcidSharedPaper[]) => xs.map((p) => ({ ...p, ...(papers.get(p.pmid) ?? {}) }));
+  const fill = <T extends OrcidSharedPaper>(xs: T[]) =>
+    xs.map((p) => ({ ...p, ...(papers.get(p.pmid) ?? {}) }));
   return rows.map(({ evidenceDetail: d, ...r }) => ({
     ...r,
     evidenceDetail: {
@@ -1122,6 +1149,19 @@ export function isBylineBandEnabled(): boolean {
   return process.env.ORCID_BYLINE_BAND === "on";
 }
 
+/** `ORCID_BYLINE_CROSSREF`: exactly "on" lets Crossref's byline rows count too. */
+export function isBylineCrossrefEnabled(): boolean {
+  return process.env.ORCID_BYLINE_CROSSREF === "on";
+}
+
+/** The row's band with this many byline papers. Pure. */
+const bandWithByline = (r: EvidenceRow, historyBand: boolean, byline: number) =>
+  affiliationManagerBand(
+    bandOf({ ...r, historyMatch: historyBand && r.historyMatch, byline }),
+    r,
+    r.evidenceDetail.sources,
+  );
+
 /** Rows whose band the byline papers would change, by band after → count, whatever
  *  the flag. For the before/after comparison ahead of the switch. Pure. */
 export function bylineBandShift(
@@ -1130,14 +1170,32 @@ export function bylineBandShift(
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of rows) {
-    const bandWith = (byline: number) =>
-      affiliationManagerBand(
-        bandOf({ ...r, historyMatch: historyBand && r.historyMatch, byline }),
-        r,
-        r.evidenceDetail.sources,
-      );
-    const off = bandWith(0);
-    const on = bandWith(bylineBandPapers(r.evidenceDetail.byline));
+    const off = bandWithByline(r, historyBand, 0);
+    const on = bandWithByline(r, historyBand, bylineBandPapers(r.evidenceDetail.byline));
+    if (off !== on) out[`${off}->${on}`] = (out[`${off}->${on}`] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** Rows whose band Crossref's byline rows would change, beyond PubMed's, by band after
+ *  → count, whatever the flags: up where they add a paper, down where they contest. Pure. */
+export function bylineCrossrefShift(
+  rows: readonly EvidenceRow[],
+  args: Pick<Parameters<typeof assembleEvidence>[0], "heldBy"> & {
+    bylines: BylineIndex;
+    bylinesWithCrossref: BylineIndex;
+  },
+  historyBand: boolean,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const bandIn = (index: BylineIndex) => {
+      const f = bylineFactsOf(index, r.cwid, r.orcid, args.heldBy?.get(r.orcid));
+      const papers = bylineBandPapers({ ...f, total: f.papers.length });
+      return bandWithByline(r, historyBand, papers);
+    };
+    const off = bandIn(args.bylines);
+    const on = bandIn(args.bylinesWithCrossref);
     if (off !== on) out[`${off}->${on}`] = (out[`${off}->${on}`] ?? 0) + 1;
   }
   return out;
@@ -1285,6 +1343,31 @@ async function loadReciterAssertions(
   return out;
 }
 
+type BylineDbRow = {
+  personIdentifier: string | null;
+  pmid: number | string;
+  orcid: string | null;
+  userAssertion: unknown;
+};
+
+/** The rows that carry a usable iD; the others are left out. Pure. */
+const bylineRowsOf = (rows: readonly BylineDbRow[], source: BylineRow["source"]): BylineRow[] =>
+  rows.flatMap((r) => {
+    const orcid = r.orcid?.trim().toUpperCase() ?? "";
+    const pmid = String(Number(r.pmid));
+    return r.personIdentifier && ORCID_PATTERN.test(orcid) && /^[1-9]\d*$/.test(pmid)
+      ? [
+          {
+            cwid: r.personIdentifier,
+            pmid,
+            orcid,
+            assertion: reciterAssertionOf(r.userAssertion),
+            source,
+          },
+        ]
+      : [];
+  });
+
 /** Every iD PubMed prints on the author entry ReCiter marks as the person, with
  *  ReCiter's assertion on the paper. A paper where ReCiter marks more than one entry
  *  is left out: the iD could be a same-name coauthor's. One scan of
@@ -1304,26 +1387,8 @@ export async function loadBylineRows(floor = BYLINE_ROW_FLOOR): Promise<BylineRo
             AND COALESCE(p.targetAuthorCount, 1) <= 1`,
         timeout: BYLINE_QUERY_TIMEOUT_MS,
       }),
-    )) as Array<{
-      personIdentifier: string | null;
-      pmid: number | string;
-      orcid: string | null;
-      userAssertion: unknown;
-    }>;
-    const out = rows.flatMap((r) => {
-      const orcid = r.orcid?.trim().toUpperCase() ?? "";
-      const pmid = String(Number(r.pmid));
-      return r.personIdentifier && ORCID_PATTERN.test(orcid) && /^[1-9]\d*$/.test(pmid)
-        ? [
-            {
-              cwid: r.personIdentifier,
-              pmid,
-              orcid,
-              assertion: reciterAssertionOf(r.userAssertion),
-            },
-          ]
-        : [];
-    });
+    )) as BylineDbRow[];
+    const out = bylineRowsOf(rows, "pubmed");
     console.log(`byline iDs: ${out.length} of ${rows.length} rows read`);
     if (out.length < floor) {
       console.warn(`byline iDs: fewer than ${floor} rows, a short read; no byline evidence this run`);
@@ -1332,6 +1397,43 @@ export async function loadBylineRows(floor = BYLINE_ROW_FLOOR): Promise<BylineRo
     return out;
   } catch (err) {
     console.warn(`byline iDs unavailable (${(err as Error).message}); no byline evidence this run`);
+    return null;
+  }
+}
+
+/** Crossref's iD for the same author entries (`pubsource_article_orcid`: one row per
+ *  slot asked, orcid NULL = none printed; stale rows are never deleted there, hence the
+ *  joins to the live entry). Null, so PubMed alone, when it cannot be read or holds
+ *  fewer than `floor` slots, counted on the slots asked. */
+export async function loadCrossrefBylineRows(
+  floor = CROSSREF_ASKED_FLOOR,
+): Promise<BylineRow[] | null> {
+  try {
+    const rows = (await withReciterConnection((conn) =>
+      conn.query({
+        sql: `SELECT c.personIdentifier, c.pmid, c.orcid, p.userAssertion
+           FROM pubsource_article_orcid c
+           JOIN person_article_author a
+             ON a.personIdentifier = c.personIdentifier AND a.pmid = c.pmid
+            AND a.\`rank\` = c.author_rank
+           JOIN person_article p
+             ON p.personIdentifier = c.personIdentifier AND p.pmid = c.pmid
+          WHERE c.source = 'crossref' AND a.targetAuthor LIKE '1%'
+            AND COALESCE(p.targetAuthorCount, 1) <= 1`,
+        timeout: BYLINE_QUERY_TIMEOUT_MS,
+      }),
+    )) as BylineDbRow[];
+    const out = bylineRowsOf(rows, "crossref");
+    console.log(`Crossref byline iDs: ${out.length} of ${rows.length} slots asked`);
+    if (rows.length < floor) {
+      console.warn(`Crossref byline iDs: fewer than ${floor} slots asked; PubMed alone this run`);
+      return null;
+    }
+    return out;
+  } catch (err) {
+    console.warn(
+      `Crossref byline iDs unavailable (${(err as Error).message}); PubMed alone this run`,
+    );
     return null;
   }
 }
@@ -1524,6 +1626,13 @@ async function main(): Promise<number> {
 
   // 4c. The iDs printed on the scholars' own bylines.
   const bylineRows = await loadBylineRows();
+  const crossrefRows = bylineRows && (await loadCrossrefBylineRows());
+  const bylines = bylineRows ? indexBylines(bylineRows, { dismissed, deprecated }) : undefined;
+  const bylinesWithCrossref =
+    bylineRows && crossrefRows
+      ? indexBylines([...bylineRows, ...crossrefRows], { dismissed, deprecated })
+      : undefined;
+  const heldBy = heldByOrcid(scholars, deprecated);
 
   const scored = assembleEvidence({
     pairs,
@@ -1537,9 +1646,11 @@ async function main(): Promise<number> {
     historyBand: isHistoryBandEnabled(),
     titles,
     reciter: reciter ?? undefined,
-    bylines: bylineRows ? indexBylines(bylineRows, { dismissed, deprecated }) : undefined,
-    heldBy: heldByOrcid(scholars, deprecated),
+    bylines,
+    bylinesWithCrossref,
+    heldBy,
     bylineBand: isBylineBandEnabled(),
+    bylineCrossref: isBylineCrossrefEnabled(),
   });
   const statusTotals: Record<string, number> = {};
   for (const r of scored) {
@@ -1587,6 +1698,10 @@ async function main(): Promise<number> {
   console.log(
     `byline papers: ${withByline.length} rows with at least one (${withByline.filter((r) => bylineBandPapers(r.evidenceDetail.byline) === 0).length} contested); byline band term ${isBylineBandEnabled() ? "ON" : "off (ORCID_BYLINE_BAND)"}; band moves it makes: ${JSON.stringify(bylineBandShift(rows, isHistoryBandEnabled()))}`,
   );
+  if (bylines && bylinesWithCrossref)
+    console.log(
+      `Crossref bylines ${isBylineCrossrefEnabled() ? "ON" : "off (ORCID_BYLINE_CROSSREF)"}; band moves they make beyond PubMed's: ${JSON.stringify(bylineCrossrefShift(rows, { bylines, bylinesWithCrossref, heldBy }, isHistoryBandEnabled()))}`,
+    );
   if (rows.length === 0) throw new Error("0 evidence rows — refusing to mirror an empty set");
 
   // `held` spans every live row, so an iD confirmed on a Cornell Ithaca row blocks a
