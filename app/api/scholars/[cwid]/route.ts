@@ -10,10 +10,8 @@ import { getScholarByCwid } from "@/lib/api/scholars";
  * Mohammad's preliminary preference), the handler lifts cleanly without touching
  * Next.js-specific code. Same shape applies to all forthcoming /api/* routes.
  *
- * email-visibility-spec § Cache-safety: this endpoint is CloudFront-cacheable by
- * path and not in the #866 origin-request policy, so `getScholarByCwid` bakes
- * only the viewer-independent (public) email. Internal callers obtain
- * `institution` emails via the uncacheable /api/profile/[cwid]/contact-email.
+ * Public and edge-cacheable: returns only what resolves a CWID to its profile URL
+ * (`ScholarPayload`), never profile content.
  */
 export async function GET(
   _request: Request,

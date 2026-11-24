@@ -28,9 +28,10 @@ paths:
   /api/scholars/{cwid}:
     get:
       operationId: getScholarByCwid
-      summary: Get scholar profile by CWID
+      summary: Resolve a CWID to a scholar's profile slug
       description: |
-        Returns the full public profile payload for a scholar identified by CWID.
+        Returns the slug and display name for a scholar identified by CWID. The
+        profile URL is `/{slug}`.
         Excludes soft-deleted and suppressed scholars. Returns 404 if the scholar
         is not found, is deleted, or is inactive.
       parameters:
@@ -43,7 +44,7 @@ paths:
             example: "abc1234"
       responses:
         "200":
-          description: Scholar profile found.
+          description: Scholar found.
           content:
             application/json:
               schema:
@@ -242,9 +243,6 @@ components:
         - cwid
         - slug
         - preferredName
-        - fullName
-        - identityImageEndpoint
-        - appointments
       properties:
         cwid:
           type: string
@@ -257,61 +255,6 @@ components:
         preferredName:
           type: string
           description: Scholar's preferred display name.
-        fullName:
-          type: string
-          description: Scholar's full legal name.
-        primaryTitle:
-          type: ["string", "null"]
-          description: Primary academic or clinical title.
-        primaryDepartment:
-          type: ["string", "null"]
-          description: Primary department affiliation.
-        email:
-          type: ["string", "null"]
-          description: Institutional email address.
-        overview:
-          type: ["string", "null"]
-          description: Biographical overview or research summary text.
-        identityImageEndpoint:
-          type: string
-          description: WCM directory headshot URL derived from CWID. Browser falls back to a generic headshot if the URL returns 404.
-        appointments:
-          type: array
-          description: Academic and clinical appointment history.
-          items:
-            $ref: "#/components/schemas/ScholarAppointment"
-
-    ScholarAppointment:
-      type: object
-      required:
-        - title
-        - organization
-        - isPrimary
-        - isInterim
-      properties:
-        title:
-          type: string
-          description: Appointment title.
-        organization:
-          type: string
-          description: Organization or institution name.
-        startDate:
-          type: ["string", "null"]
-          format: date
-          description: Appointment start date (ISO 8601 date).
-        endDate:
-          type: ["string", "null"]
-          format: date
-          description: Appointment end date (ISO 8601 date). Null for current appointments.
-        isPrimary:
-          type: boolean
-          description: True if this is the scholar's primary appointment.
-        isInterim:
-          type: boolean
-          description: True if this is an interim appointment.
-        isActive:
-          type: boolean
-          description: True if this appointment is currently active (endDate is null or in the future).
 
     PeopleHit:
       type: object
