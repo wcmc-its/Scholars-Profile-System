@@ -90,6 +90,28 @@ describe("buildAuthorshipRows (#1052)", () => {
     expect(mentorRow.totalAuthors).toBe(2);
   });
 
+  it("keeps ReCiter's co-first and co-last positions when the rank is known", () => {
+    const rows = buildAuthorshipRows(
+      [
+        { personIdentifier: "aaa0001", pmid: PMID, authorPosition: "first", authors: "" },
+        { personIdentifier: "aaa0002", pmid: PMID, authorPosition: "first", authors: "" },
+        { personIdentifier: "aaa0003", pmid: PMID, authorPosition: null, authors: "" },
+        { personIdentifier: "aaa0004", pmid: PMID, authorPosition: "last", authors: "" },
+        { personIdentifier: "aaa0005", pmid: PMID, authorPosition: "last", authors: "" },
+      ],
+      new Set(["aaa0001", "aaa0002", "aaa0003", "aaa0004", "aaa0005"]),
+      new Map([1, 2, 3, 4, 5].map((n) => [`${PMID}|aaa000${n}`, n])),
+      new Map([[PMID, 5]]),
+    );
+    expect(rows.map((r) => [r.position, r.isFirst, r.isLast])).toEqual([
+      [1, true, false],
+      [2, true, false],
+      [3, false, false],
+      [4, false, true],
+      [5, false, true],
+    ]);
+  });
+
   it("#101 — re-keys an external synthetic pmid to its stable article_id; PubMed passes through", () => {
     const EXT_PMID = -3; // reciterdb synthetic NEGATIVE pmid for an external pub
     const ARTICLE_ID = "SCOPUS:105037533819";
