@@ -215,14 +215,15 @@ const ORIGIN_DOWN_KEY = `${EDGE_ERROR_PREFIX}origin-down.html`;
  * no healthy ECS targets, the ALB itself failing, or an origin timeout. Served
  * from the static S3 bucket because the origin is, by definition, the thing
  * that is down. No IP echo: the visitor's address is irrelevant to an outage
- * and `/edge-ip` should not grow callers. No script, no external fetch.
+ * and `/edge-ip` should not grow callers. No script, no external fetch. No
+ * contact line: the feedback form is on the origin that is down, and the
+ * service desk address does not go on public pages.
  */
 const ORIGIN_DOWN_HTML = wafPage(
   "Temporarily unavailable - Scholars @ Weill Cornell Medicine",
   `<div class="m"><b>Scholars</b><span>Weill Cornell Medicine</span></div>
 <h1>Temporarily unavailable</h1>
 <p>Scholars @ Weill Cornell Medicine cannot be reached right now. This is usually brief - please try again in a few minutes.</p>
-<p class="n">If the problem persists, email <a href="mailto:support@med.cornell.edu">support@med.cornell.edu</a>.</p>
 </main></body></html>`,
 );
 

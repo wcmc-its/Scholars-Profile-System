@@ -1946,6 +1946,37 @@ export class SpsObservabilityStack extends Stack {
     );
     searchSurgeAlarm.addAlarmAction(warnAction);
 
+    // The fingerprint rule (#3518) blocks one browser fingerprint sending
+    // more than 300 off-campus /search requests per 5 minutes: the
+    // 2026-11-20 headless farm. Quiet in normal operation, so any block is
+    // worth a look: it is either the farm back (fine) or a shared
+    // fingerprint catching real people (raise the limit).
+    const fingerprintBlockAlarm = new cloudwatch.Alarm(
+      this,
+      "SearchFingerprintBlockAlarm",
+      {
+        alarmName: `sps-search-fingerprint-blocks-${env}`,
+        alarmDescription: `The /search fingerprint rate rule is blocking (${env}): one browser fingerprint sent more than 300 off-campus /search requests in 5 minutes and now gets the Too many requests page. Next: run the saved Logs Insights query "sps-${env}/waf/search-by-rule-and-action" and check the search-fingerprint-rate-limit row. Many IPs on one fingerprint with a bot user agent is the headless farm and needs no action. A handful of IPs with ordinary browsers means real people share the fingerprint: raise the limit in cdk/lib/edge-stack.ts.`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/WAFV2",
+          metricName: "BlockedRequests",
+          dimensionsMap: {
+            WebACL: wafWebAclName,
+            Rule: `sps-edge-${env}-search-fingerprint-rate-limit`,
+          },
+          statistic: "Sum",
+          period: Duration.minutes(5),
+          region: "us-east-1",
+        }),
+        threshold: 0,
+        evaluationPeriods: 1,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    fingerprintBlockAlarm.addAlarmAction(warnAction);
+
     // Saved Logs Insights queries over the edge WAF logs, for the question
     // the metrics cannot answer: who is this. The log group is created by
     // EdgeStack (`aws-waf-logs-sps-<env>`); a query definition only stores

@@ -889,7 +889,7 @@ describe("EdgeStack", () => {
         const props = JSON.stringify(writer.Properties);
         expect(props).toContain("Temporarily unavailable");
         expect(props).toContain("Weill Cornell Medicine");
-        expect(props).toContain("support@med.cornell.edu");
+        expect(props).not.toContain("support@");
         expect(props).not.toContain("edge-ip");
         expect(props).not.toContain("<script");
       });
