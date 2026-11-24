@@ -32,7 +32,7 @@ one sentence.
 - **Filter rail**, one for both tabs, in this order: Mentorship type (the program pairings), Inferred
   mentorship (likely / possible), Graduation year (from / to plus "Include learners with no graduation
   year"), Counting window (0–3 years after graduation), Publications (with a mentor / all), In window
-  (per publication: in, outside, unknown), Author position (first / last / middle), Publication year,
+  (per publication: in, outside, unknown), Author position (first or co-first / last or co-last / middle), Publication year,
   Mentor's unit (departments and divisions, then centers; searchable), Mentor (searchable), Learners
   shown ("Hide learners with no publications"). Every section is a
   collapsible `<details>`; a collapsed section's inputs still submit. Filters apply on change (the
@@ -49,7 +49,8 @@ one sentence.
 - **Learners (N)** tab: Learner (name, CWID, "Grad YYYY", "(entry est. YYYY)" for the fallback) ·
   Mentors (each mentor's name with the pair's type as a badge, "Department · Institution" under it) ·
   In window · [With a mentor, all-publications set only] · All years · JIF ≥ 10 · First author (With
-  a mentor, JIF ≥ 10 and First author count in-window papers only). Below `md` the mentors and counts stack inside the Learner cell, so a
+  a mentor, JIF ≥ 10 and First author count in-window papers only; First author includes ReCiter's
+  co-first, carried on the bridge JSON as `learnerPosition`). Below `md` the mentors and counts stack inside the Learner cell, so a
   phone never scrolls sideways (the table used to carry separate Grad year, Type, Department and
   Institution columns and scrolled the Learner column out of view). A row with publications opens to
   that learner's papers. "Find a learner or mentor" narrows the rows (name, CWID or mentor), never the

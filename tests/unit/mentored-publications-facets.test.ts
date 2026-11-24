@@ -19,6 +19,7 @@ import {
   applyMentoredPubsFacets,
   mentoredPubsFacetOptions,
   type MentoredPubsFacets,
+  positionValue,
 } from "@/lib/edit/mentored-publications-facets";
 import type {
   MentoredPublicationsReport,
@@ -86,6 +87,7 @@ function row(
     dateAdded: null,
     citations: null,
     learnerAuthorPosition: null,
+    learnerRole: positionValue(o.learnerAuthorPosition ?? null, o.authorCount ?? 3),
     authorCount: 3,
     inWindow: null,
     ...o,
@@ -98,6 +100,7 @@ const onPub = (cwid: string, authorPosition: number | null, inWindow: boolean | 
   lastName: cwid,
   firstAuthor: authorPosition === 1,
   authorPosition,
+  role: positionValue(authorPosition, 3),
   inWindow,
 });
 

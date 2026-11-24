@@ -145,7 +145,7 @@ function copub(
   menteeCwid: string,
   pmid: number | string,
   year: number | null,
-  opts: { position?: number | null; journal?: string; scopus?: number } = {},
+  opts: { position?: number | null; journal?: string; scopus?: number; role?: string } = {},
 ) {
   const position = opts.position === undefined ? 2 : opts.position;
   const authors = [
@@ -171,6 +171,7 @@ function copub(
       citationCount: opts.scopus ?? 999,
       abstract: null,
       authors,
+      ...(opts.role ? { learnerPosition: opts.role } : {}),
     },
   };
 }
@@ -407,6 +408,23 @@ describe("loadMentoredPublicationsReport", () => {
     expect(report.summary[0]).toMatchObject({ pubsInWindow: 1, highImpactInWindow: 1, firstAuthorInWindow: 1 });
   });
 
+  it("ReCiter's co-first counts as first author; a middle author on an older bridge row does not", async () => {
+    hoisted.mockAocFindMany.mockResolvedValue([aoc({ mentorCwid: "men0001", menteeCwid: "stu0001" })]);
+    hoisted.mockCopubFindMany.mockResolvedValue([
+      copub("men0001", "stu0001", 1, 2024, { position: 2, role: "first" }),
+      copub("men0001", "stu0001", 2, 2024, { position: 2 }),
+      copub("men0001", "stu0001", 3, 2024, { position: 2, role: "last" }),
+    ]);
+    const report = await loadMentoredPublicationsReport({ types: ALL, scopes: ["*"] });
+    expect(report.summary[0]).toMatchObject({ pubsInWindow: 3, firstAuthorInWindow: 1 });
+    const roles = report.detail.map((d) => [d.pmid, d.learnerAuthorPosition, d.learnerRole]).sort();
+    expect(roles).toEqual([
+      ["1", 2, "first"],
+      ["2", 2, "middle"],
+      ["3", 2, "last"],
+    ]);
+  });
+
   it("scope filtering keeps only rows whose program bucket is admitted", async () => {
     hoisted.mockAocFindMany.mockResolvedValue([
       aoc({ mentorCwid: "men0001", menteeCwid: "stu0001", programType: "AOC-2025" }),
@@ -617,8 +635,8 @@ describe("loadMentoredPublicationsReport", () => {
     expect(report.publications.map((p) => p.pmid)).toEqual(["5", "4", "6"]);
     const shared = report.publications.find((p) => p.pmid === "5")!;
     expect(shared.learners).toEqual([
-      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, authorPosition: 1, inWindow: true },
-      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, authorPosition: null, inWindow: false },
+      { cwid: "stu0001", firstName: "Ada", lastName: "Adams", firstAuthor: true, authorPosition: 1, role: "first", inWindow: true },
+      { cwid: "stu0002", firstName: "Ada", lastName: "Baker", firstAuthor: false, authorPosition: null, role: null, inWindow: false },
     ]);
     expect(shared.mentors.map((m) => m.cwid)).toEqual(["men0001", "men0002"]);
     // The detail sheet still has one row per (learner, mentor, pub).
@@ -1432,7 +1450,7 @@ describe("faculty-asserted mentees (`manualMentees`)", () => {
     expect(hoisted.mockAuthorFindMany).toHaveBeenCalledTimes(1);
     expect(hoisted.mockAuthorFindMany).toHaveBeenCalledWith({
       where: { cwid: { in: ["men0001", "stu0009"] }, isConfirmed: true },
-      select: { cwid: true, pmid: true, position: true },
+      select: { cwid: true, pmid: true, position: true, isFirst: true, isLast: true },
     });
     expect(report.summary[0]).toMatchObject({ cwid: "stu0009", program: "MD", pubsAllTime: 2 });
     expect(

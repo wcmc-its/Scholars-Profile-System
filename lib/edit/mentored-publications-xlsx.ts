@@ -91,6 +91,7 @@ const RAW_PUB_HEADERS = [
   "Date added to PubMed",
   "Citations (NIH iCite)",
   "Learner author position",
+  "Learner author role",
   "Author count",
   "In program window",
 ] as const;
@@ -278,6 +279,7 @@ export async function buildMentoredPublicationsWorkbook(
     r.dateAdded,
     r.citations,
     r.learnerAuthorPosition,
+    r.learnerRole ? POSITION_FACET_LABEL[r.learnerRole] : null,
     r.authorCount,
     yesNo(r.inWindow),
   ]);
@@ -364,6 +366,10 @@ export async function buildMentoredPublicationsWorkbook(
     [
       "Learner author position",
       "The learner's 1-based position on the byline when their CWID is on the author list; blank when not linked.",
+    ],
+    [
+      "First author counts, learner author role",
+      "First and last include authors marked as equal contributors in an unbroken run from the first or last author (ReCiter). Papers found only through a suggested pairing count byline position alone.",
     ],
   ];
   fillSheet(wb.addWorksheet(ASSUMPTIONS_SHEET), ["Item", "Value"], assumptions);

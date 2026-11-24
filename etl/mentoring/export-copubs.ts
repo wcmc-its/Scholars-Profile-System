@@ -340,6 +340,7 @@ type ArticleRow = {
   pages: string | null;
   citationCount: number | null;
   abstract: string | null;
+  learnerPosition: string | null;
 };
 
 /** The `CoPublicationFull` column list (same columns and aliases as
@@ -357,7 +358,8 @@ const ARTICLE_SELECT = `SELECT a2.personIdentifier AS mentee_cwid,
               art.issue         AS issue,
               art.pages         AS pages,
               art.citationCountScopus AS citationCount,
-              ra.abstractVarchar AS abstract`;
+              ra.abstractVarchar AS abstract,
+              a2.authorPosition AS learnerPosition`;
 
 /** Query B — the full author list for every pmid in `articleRows` (ONE
  *  round-trip), then assemble `CoPublicationFull` per row and group by
@@ -421,6 +423,7 @@ async function hydrateArticles(
       citationCount: r.citationCount ?? 0,
       abstract: r.abstract ?? null,
       authors: authorsByPmid.get(pmid) ?? [],
+      learnerPosition: r.learnerPosition,
     });
     out.set(r.mentee_cwid, list);
   }

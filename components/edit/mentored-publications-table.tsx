@@ -163,9 +163,8 @@ function WindowBadge({ inWindow }: { inWindow: boolean | null }) {
 }
 
 function positionLabel(l: MentoredPubsLearnerOnPub, authorCount: number): string | null {
-  if (l.authorPosition === null) return null;
-  if (l.authorPosition === 1) return "1st author";
-  if (l.authorPosition === authorCount) return "last author";
+  if (l.role === "first") return l.authorPosition === 1 ? "1st author" : "co-1st author";
+  if (l.role === "last") return l.authorPosition === authorCount ? "last author" : "co-last author";
   return null;
 }
 
@@ -394,7 +393,7 @@ function LearnersView({
       title: `In window, in a journal with Journal Impact Factor ≥ ${highImpactThreshold}`,
       get: (r) => r.highImpactInWindow,
     },
-    { col: C.first, label: "First author", title: "In window, learner is first author", get: (r) => r.firstAuthorInWindow },
+    { col: C.first, label: "First author", title: "In window, learner is first or co-first author", get: (r) => r.firstAuthorInWindow },
   ];
   const colSpan = 2 + numCols.length;
 

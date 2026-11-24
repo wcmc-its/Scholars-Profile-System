@@ -77,8 +77,8 @@ export const WINDOW_FACET_LABEL: Record<MentoredPubsWindow, string> = {
 };
 
 export const POSITION_FACET_LABEL: Record<MentoredPubsPosition, string> = {
-  first: "First author",
-  last: "Last author",
+  first: "First or co-first author",
+  last: "Last or co-last author",
   middle: "Middle author",
 };
 
@@ -87,11 +87,15 @@ export function windowValue(inWindow: boolean | null): MentoredPubsWindow {
 }
 
 /** First wins on a one-author paper; null when the byline has no CWID for
- *  the learner. */
-export function positionValue(position: number | null, authorCount: number): MentoredPubsPosition | null {
+ *  the learner. `reciterPosition` adds ReCiter's equal contributors. */
+export function positionValue(
+  position: number | null,
+  authorCount: number,
+  reciterPosition?: string | null,
+): MentoredPubsPosition | null {
   if (position === null) return null;
-  if (position === 1) return "first";
-  if (position === authorCount) return "last";
+  if (position === 1 || reciterPosition === "first") return "first";
+  if (position === authorCount || reciterPosition === "last") return "last";
   return "middle";
 }
 
@@ -125,9 +129,9 @@ function pairsOf(detail: ReadonlyArray<MentoredPubsDetailRow>): Map<string, Pair
         pmid: d.pmid,
         year: d.year,
         window: windowValue(d.inWindow),
-        position: positionValue(d.learnerAuthorPosition, d.authorCount),
+        position: d.learnerRole,
         jif: d.jif,
-        firstAuthor: d.learnerAuthorPosition === 1,
+        firstAuthor: d.learnerRole === "first",
         inWindow: d.inWindow,
         mentors: new Set(d.paperMentors.map((m) => lc(m.cwid))),
         rows: [],

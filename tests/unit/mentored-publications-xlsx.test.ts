@@ -91,6 +91,7 @@ const REPORT: MentoredPublicationsReport = {
       dateAdded: new Date("2023-05-01T00:00:00Z"),
       citations: 12,
       learnerAuthorPosition: 2,
+      learnerRole: "first",
       authorCount: 3,
       inWindow: true,
     },
@@ -116,6 +117,7 @@ const REPORT: MentoredPublicationsReport = {
       dateAdded: null,
       citations: null,
       learnerAuthorPosition: null,
+      learnerRole: null,
       authorCount: 0,
       inWindow: false,
     },
@@ -160,7 +162,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
       },
     });
     expect(set.get("In window filter (per publication)")).toBe("In window, Window unknown");
-    expect(set.get("Author position filter")).toBe("First author");
+    expect(set.get("Author position filter")).toBe("First or co-first author");
     expect(set.get("Publication years filter")).toBe("2023, 2024");
     expect(set.get("Mentor filter")).toBe("Zed Mentor (men0001)");
     expect(set.get("Learners shown")).toBe("Only learners with at least one publication");
@@ -202,10 +204,10 @@ describe("buildMentoredPublicationsWorkbook", () => {
       "7", "A very long title ".repeat(10).trim(), "N Engl J Med", 96.2, 2023,
     ]);
     expect((first[16] as Date).toISOString().slice(0, 10)).toBe("2023-05-01");
-    expect(first.slice(17)).toEqual([12, 2, 3, "Yes"]);
+    expect(first.slice(17)).toEqual([12, 2, "First or co-first author", 3, "Yes"]);
     const second = rowValues(ws, 3);
     expect(second[11]).toBe("SCOPUS:105037533819"); // the key string, Scopus-only row
-    expect(second[20]).toBe("No");
+    expect(second[21]).toBe("No");
     // Nulls are blank cells, not the string "null".
     expect(ws.getCell("N3").value).toBeNull();
     expect(ws.getCell("O3").value).toBeNull();
@@ -262,7 +264,7 @@ describe("buildMentoredPublicationsWorkbook", () => {
     expect(summary.getCell("M2").value).toBe(2);
     expect(summary.getCell("N2").value).toBeNull();
     expect(summary.getCell("O2").value).toBeNull();
-    expect(wb.getWorksheet(RAW_SHEET)!.getCell("U2").value).toBeNull();
+    expect(wb.getWorksheet(RAW_SHEET)!.getCell("V2").value).toBeNull();
     expect(wb.getWorksheet(ASSUMPTIONS_SHEET)!.getRow(3).getCell(2).value).toBe("2025, Unknown");
   });
 
