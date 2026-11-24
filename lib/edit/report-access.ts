@@ -218,7 +218,7 @@ export function resolveMentoredPubsAccess(
 
 /** The `EditSession` fields the verdicts read — a structural subset so a test
  *  (or `/edit`'s profile-less fallthrough) can pass a plain object. */
-type ReportSession = Pick<EditSession, "cwid" | "isSuperuser" | "isCommsSteward" | "isObserver">;
+type ReportSession = Pick<EditSession, "cwid" | "isSuperuser" | "isCommsSteward" | "isObserver" | "isContentEditor">;
 
 /** Superuser / comms_steward may manage grants (and always pass the view
  *  gate). Same OR `authorizeCommsStewardAction` (`lib/edit/authz.ts`) uses. */
@@ -276,10 +276,10 @@ export async function getReportScopes(
 ): Promise<ReadonlySet<string>> {
   if (reportKey === MENTORED_PUBS_REPORT) {
     // FERPA: this report lists MD / MD-PhD / ECR learners by name. An observer's
-    // synthetic steward READ view must not reach it (their OWN rows / unit roles
-    // still do), and neither may a View as a non-superuser started — it would
+    // or content editor's synthetic steward READ view must not reach it (their
+    // OWN rows / unit roles still do), and neither may a View as a non-superuser started — it would
     // borrow the target's scopes.
-    if (session.isObserver) session = { ...session, isCommsSteward: false };
+    if (session.isObserver || session.isContentEditor) session = { ...session, isCommsSteward: false };
     const real = await getSession();
     if (real && impersonationActive(real, nowSeconds()) && !(await isSuperuser(real.cwid))) {
       return new Set();

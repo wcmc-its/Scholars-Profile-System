@@ -177,6 +177,14 @@ describe("getReportScopes — fail closed", () => {
     expect([...(await getReportScopes(observer, ARTICLE_COUNT_REPORT))]).toEqual([ALL_SCOPES]);
   });
 
+  it("FERPA: a content editor's synthetic steward view does NOT reach the learner report", async () => {
+    const contentEditor = { ...STEWARD, isContentEditor: true };
+    expect((await getReportScopes(contentEditor, MENTORED_PUBS_REPORT)).size).toBe(0);
+    hoisted.mockReadFindMany.mockResolvedValue([{ scopeKey: "md" }]);
+    expect([...(await getReportScopes(contentEditor, MENTORED_PUBS_REPORT))]).toEqual(["md"]);
+    expect([...(await getReportScopes(contentEditor, ARTICLE_COUNT_REPORT))]).toEqual([ALL_SCOPES]);
+  });
+
   it("FERPA: a View as a non-superuser started gets nothing; a superuser's still works", async () => {
     hoisted.mockGetSession.mockResolvedValue({ cwid: "obs0001", impersonating: { targetCwid: "abc1234" } });
     expect((await getReportScopes(STEWARD, MENTORED_PUBS_REPORT)).size).toBe(0);

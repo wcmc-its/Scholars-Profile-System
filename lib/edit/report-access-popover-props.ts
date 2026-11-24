@@ -53,7 +53,7 @@ export async function loadReportAccessPopoverProps(
       reportKey === MENTORED_PUBS_REPORT
         ? [...REPORT_ACCESS_SCOPE_OPTIONS[reportKey], ...(await unitScopeOptions())]
         : (REPORT_ACCESS_SCOPE_OPTIONS[reportKey] ?? WHOLE_REPORT_SCOPE_OPTIONS),
-    // A content editor reads every report (its synthetic steward grant) but
+    // A content editor reads reports through its synthetic steward grant but
     // never manages access; the write route refuses it regardless.
     canManage: canManageReportAccess(session) && session.isContentEditor !== true,
     note,
