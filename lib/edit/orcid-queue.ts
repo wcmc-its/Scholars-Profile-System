@@ -205,6 +205,29 @@ export type OrcidSharedPaper = {
   journal: string | null;
 };
 
+/** The accepted papers that print the iD next to the scholar's own name, and what
+ *  on the bylines points the other way (etl/orcid-evidence/byline.ts). */
+export type OrcidBylineDetail = {
+  /** Newest first, capped; `total` is the full count. */
+  papers: OrcidSharedPaper[];
+  total: number;
+  /** Papers ReCiter rejected for the scholar that print it there. */
+  rejected: number;
+  /** Other people (CWID or NetID) whose accepted papers print it on their byline, or
+   *  who have it on file. */
+  otherHolders: string[];
+  /** Other iDs on this scholar's accepted bylines. */
+  otherIds: string[];
+};
+
+/** The accepted byline papers that may count toward the band: all of them, or none
+ *  when anything on the bylines points the other way. Pure. */
+export function bylineBandPapers(
+  b: Omit<OrcidBylineDetail, "papers"> | null | undefined,
+): number {
+  return !b || b.rejected > 0 || b.otherHolders.length > 0 || b.otherIds.length > 0 ? 0 : b.total;
+}
+
 /** `orcid_candidate_evidence.evidence_detail`: the facts behind each chip,
  *  written by etl/orcid-evidence so the page never re-fetches ORCID. */
 export type OrcidEvidenceDetail = {
@@ -221,6 +244,8 @@ export type OrcidEvidenceDetail = {
   email: string | null;
   /** The shared papers (capped; `shared` is the full count). */
   shared: OrcidSharedPaper[];
+  /** Absent on rows an earlier run wrote, or when reciterdb could not be read. */
+  byline?: OrcidBylineDetail;
   competitors: {
     cwids: Array<{ cwid: string; shared: number; reason: "same_surname" | "same_id" }>;
     orcids: Array<{ orcid: string; shared: number | null }>;

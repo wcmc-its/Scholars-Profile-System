@@ -47,6 +47,7 @@ import { ORCID_URL_PREFIX } from "@/lib/edit/orcid";
 import {
   bandLevel,
   compareSummaries,
+  bylineBandPapers,
   COMPETITOR_CAP_LEVEL,
   competitorRules,
   isOrcidCandidateSource,
@@ -65,6 +66,7 @@ import {
   RECITER_WORK_STATUSES,
   workHref,
   type OrcidInstitutionPair,
+  type OrcidBylineDetail,
   type OrcidOnFile,
   type OrcidQueueBand,
   type OrcidQueueCard,
@@ -1154,7 +1156,11 @@ function ScholarDetail({
             <span className="text-[#3a3532]">
               {ranked.length > 1 ? `Best of ${ranked.length} iDs: ` : "From its one iD: "}
               {foundBy(best)}; {fmt(best.shared)} of the {fmt(best.worksTotal)} works on the ORCID
-              record are also in ReCiter; name {best.nameAgrees ? "agrees" : "differs"}.
+              record are also in ReCiter; name {best.nameAgrees ? "agrees" : "differs"}
+              {best.detail?.byline?.total
+                ? `; iD printed on ${fmt(best.detail.byline.total)} accepted ${best.detail.byline.total === 1 ? "paper" : "papers"}${bylineBandPapers(best.detail.byline) === 0 ? " (contested)" : ""}`
+                : ""}
+              .
             </span>
             {card.onFile && !decided ? (
               <span className="text-muted-foreground border-apollo-border border-t pt-2 text-[12.5px]">
@@ -1598,6 +1604,15 @@ function CandidateRow({
           <span className={r.sources.length >= 2 ? "text-apollo-slate font-semibold" : undefined}>
             {foundBy(r)}
           </span>
+          {r.detail?.byline?.total ? (
+            <span
+              className="text-muted-foreground text-[12.5px]"
+              data-testid="orcid-queue-byline-count"
+            >
+              On {fmt(r.detail.byline.total)} {r.detail.byline.total === 1 ? "byline" : "bylines"}
+              {bylineBandPapers(r.detail.byline) === 0 ? " (contested)" : ""}
+            </span>
+          ) : null}
           {r.competitor ? (
             <span
               className={cn(
@@ -1934,7 +1949,7 @@ function NameAndSignals({ card, row: r }: { card: OrcidQueueCard; row: OrcidQueu
   );
 }
 
-type PubTab = "orcid" | "both" | "rec";
+type PubTab = "orcid" | "both" | "rec" | "byline";
 
 const STATUS_TONE: Record<ReciterWorkStatus, string> = {
   accepted: "bg-apollo-slate-tint text-apollo-slate",
@@ -2012,8 +2027,12 @@ function Publications({
 }) {
   const onlyOrcid = r.newWorks;
   const both = r.shared;
+  const byline = r.detail?.byline;
+  const onByline = byline?.total ?? 0;
   // Opens on the first non-empty list.
-  const [tab, setTab] = useState<PubTab>(onlyOrcid > 0 ? "orcid" : both > 0 ? "both" : "rec");
+  const [tab, setTab] = useState<PubTab>(
+    onlyOrcid > 0 ? "orcid" : both > 0 ? "both" : onByline > 0 ? "byline" : "rec",
+  );
   // ponytail: counts, not lists, for "Only in ReCiter": the ETL keeps a capped
   // sample of shared papers, so the exact set of the scholar's papers missing
   // from the record isn't known here. List it when PR B stores the overlap.
@@ -2052,7 +2071,21 @@ function Publications({
         </div>
       ) : null}
       <div className="flex flex-wrap gap-2" role="tablist">
-        {tabs.map((t) => (
+        {[
+          ...tabs,
+          // Not a share of ORCID vs. ReCiter (these papers are in the other lists too),
+          // so it has a tab but no segment in the bar.
+          ...(byline
+            ? [
+                {
+                  k: "byline" as const,
+                  label: "iD on byline",
+                  n: onByline,
+                  swatch: "bg-apollo-amber",
+                },
+              ]
+            : []),
+        ].map((t) => (
           <button
             key={t.k}
             type="button"
@@ -2126,6 +2159,34 @@ function Publications({
             </span>
           ) : null}
         </>
+      ) : tab === "byline" && byline ? (
+        <>
+          <span className="font-semibold">
+            {onByline === 0
+              ? "No accepted paper prints this iD next to the scholar's name in PubMed."
+              : `${fmt(onByline)} accepted ${onByline === 1 ? "paper prints" : "papers print"} this iD next to the scholar's name in PubMed`}
+          </span>
+          {onByline > 0 ? <BylineCaveats byline={byline} /> : null}
+          <ul className="m-0 flex list-none flex-col p-0">
+            {byline.papers.map((p) => (
+              <PubItem
+                key={p.pmid}
+                title={p.title ? <PubTitle value={p.title} /> : `PMID ${p.pmid}`}
+                year={p.year}
+                meta={p.journal ? <PubJournal as="span" value={p.journal} /> : null}
+                ids={{ doi: p.doi, pmid: p.pmid }}
+                href={workHref(p)}
+                status={null}
+                pm={null}
+              />
+            ))}
+          </ul>
+          {onByline > byline.papers.length && byline.papers.length > 0 ? (
+            <span className="text-muted-foreground text-[12.5px]">
+              Showing {fmt(byline.papers.length)} of {fmt(onByline)}.
+            </span>
+          ) : null}
+        </>
       ) : (
         <span className="font-semibold">
           {onlyRec === 0
@@ -2141,6 +2202,33 @@ function Publications({
         </a>
       ) : null}
     </div>
+  );
+}
+
+/** What on the bylines points the other way. Any one of these keeps the byline
+ *  papers out of the match strength (`bylineBandPapers`). */
+function BylineCaveats({ byline: b }: { byline: OrcidBylineDetail }) {
+  const list = [
+    ...(b.otherHolders.length > 0
+      ? [`Also tied to ${b.otherHolders.join(", ")}: on their accepted papers, or on file for them.`]
+      : []),
+    ...(b.otherIds.length > 0
+      ? [`The scholar's other accepted papers print ${b.otherIds.join(", ")}.`]
+      : []),
+    ...(b.rejected > 0
+      ? [
+          `${fmt(b.rejected)} rejected ${b.rejected === 1 ? "paper prints" : "papers print"} this iD there too.`,
+        ]
+      : []),
+  ];
+  if (list.length === 0) return null;
+  return (
+    <p
+      className="text-apollo-amber m-0 text-[12.5px]"
+      data-testid="orcid-queue-byline-caveats"
+    >
+      {list.join(" ")} The byline papers don&rsquo;t raise the match strength.
+    </p>
   );
 }
 

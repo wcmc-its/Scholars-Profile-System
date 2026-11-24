@@ -24,6 +24,7 @@ const h = vi.hoisted(() => {
       competitor?: boolean;
       nameAgrees?: boolean;
       /** Bulk floor facts; defaults pass (etl:bulk-confirm-strong rule). */
+      shared?: number;
       instMatch?: boolean;
       reciterRead?: boolean;
       rejected?: number;
@@ -84,7 +85,7 @@ const h = vi.hoisted(() => {
               cwid: r.cwid,
               orcid: r.orcid,
               band: r.band,
-              shared: 5,
+              shared: r.shared ?? 5,
               nameAgrees: r.nameAgrees ?? true,
               competitor: r.competitor ?? false,
               competitorCwids: r.competitorCwids ?? [],
@@ -862,6 +863,7 @@ describe("bulk-confirm", () => {
   });
 
   it.each([
+    ["2 shared works (Strong from byline papers)", { shared: 2 }],
     ["no institution match", { instMatch: false }],
     ["ReCiter not read", { reciterRead: false }],
     ["a work rejected in ReCiter", { rejected: 1 }],

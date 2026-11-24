@@ -32,6 +32,7 @@ import {
   ORCID_UNDO_WINDOW_MS,
   pairState,
   type OrcidCandidateSource,
+  type OrcidBylineDetail,
   type OrcidEvidenceDetail,
   type OrcidOnFile,
   type OrcidOnFileHow,
@@ -763,6 +764,7 @@ function asDetail(v: unknown): OrcidEvidenceDetail | null {
     institutionEmail: d.institutionEmail ?? null,
     email: d.email ?? null,
     shared: d.shared,
+    ...(asByline(d.byline) ? { byline: asByline(d.byline)! } : {}),
     competitors: {
       cwids: Array.isArray(d.competitors?.cwids) ? d.competitors.cwids : [],
       orcids: Array.isArray(d.competitors?.orcids) ? d.competitors.orcids : [],
@@ -770,6 +772,21 @@ function asDetail(v: unknown): OrcidEvidenceDetail | null {
     sources: Array.isArray(d.sources) ? d.sources : [],
     worksDropped: typeof d.worksDropped === "number" ? d.worksDropped : 0,
     ...(asWorkStatus(d.workStatus) ? { workStatus: asWorkStatus(d.workStatus)! } : {}),
+  };
+}
+
+/** `evidence_detail.byline`, or null on an earlier run's row. */
+function asByline(v: unknown): OrcidBylineDetail | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const b = v as Partial<OrcidBylineDetail>;
+  if (!Array.isArray(b.papers)) return null;
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0);
+  return {
+    papers: b.papers,
+    total: n(b.total),
+    rejected: n(b.rejected),
+    otherHolders: asStrings(b.otherHolders),
+    otherIds: asStrings(b.otherIds),
   };
 }
 

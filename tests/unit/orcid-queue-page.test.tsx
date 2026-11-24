@@ -123,6 +123,15 @@ const DETAIL: OrcidEvidenceDetail = {
     { pmid: "101", doi: "10.1/a", title: "A shared paper", year: 2020, journal: "J Example" },
     { pmid: "102", doi: null, title: null, year: null, journal: null },
   ],
+  byline: {
+    papers: [
+      { pmid: "101", doi: "10.1/a", title: "A byline paper", year: 2020, journal: "J Example" },
+    ],
+    total: 1,
+    rejected: 0,
+    otherHolders: [],
+    otherIds: [],
+  },
   competitors: { cwids: [], orcids: [] },
   sources: ["orcid_works", "rpm_inferred"],
   worksDropped: 1,
@@ -990,7 +999,7 @@ describe("client", () => {
     const card = await screen.findByTestId("orcid-queue-card-jd0001");
     expect(within(card).getByText("View profile ↗").getAttribute("href")).toBe("/jane-doe");
     expect(within(card).getByTestId("orcid-queue-evidence").textContent).toContain(
-      "From its one iD: 2 sources agree; 7 of the 12 works on the ORCID record are also in ReCiter; name agrees.",
+      "From its one iD: 2 sources agree; 7 of the 12 works on the ORCID record are also in ReCiter; name agrees; iD printed on 1 accepted paper.",
     );
     expect(screen.getByTestId("orcid-queue-record-link").getAttribute("href")).toBe(
       `https://orcid.org/${ORCID}`,
@@ -1102,6 +1111,70 @@ describe("client", () => {
     expect(screen.getByTestId("orcid-queue-work-status-summary").textContent).toBe(
       "ReCiter: 3 status unknown. ReCiter could not be read on the last run. PubMed lookup unavailable on the last run for 2 DOI-only works",
     );
+  });
+
+  it("byline papers: an empty record opens on them, with a link to the paper", async () => {
+    mount([
+      CARD({}, [
+        { ...ROW, band: "moderate", shared: 0, worksTotal: 0, newWorks: 0, newWorksSample: [] },
+      ]),
+    ]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-evidence").textContent).toContain(
+      "name agrees; iD printed on 1 accepted paper.",
+    );
+    expect(screen.getByTestId("orcid-queue-byline-count").textContent).toBe("On 1 byline");
+    expect(screen.getByTestId("orcid-queue-pubs-byline").getAttribute("aria-selected")).toBe("true");
+    const pubs = screen.getByTestId("orcid-queue-pubs");
+    expect(pubs.textContent).toContain(
+      "1 accepted paper prints this iD next to the scholar's name in PubMed",
+    );
+    expect(screen.queryByTestId("orcid-queue-byline-caveats")).toBeNull();
+    const work = within(pubs).getByTestId("orcid-queue-work");
+    fireEvent.click(within(work).getByRole("button", { name: /A byline paper/ }));
+    expect(within(work).getByText("Open the work ↗").getAttribute("href")).toBe(
+      "https://pubmed.ncbi.nlm.nih.gov/101/",
+    );
+  });
+
+  it("byline papers: what points the other way is said, and that it keeps them out of the rating", async () => {
+    mount([
+      CARD({}, [
+        {
+          ...ROW,
+          detail: {
+            ...DETAIL,
+            byline: {
+              ...DETAIL.byline!,
+              total: 3,
+              rejected: 2,
+              otherHolders: ["xy0002"],
+              otherIds: [OTHER],
+            },
+          },
+        },
+      ]),
+    ]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-evidence").textContent).toContain(
+      "iD printed on 3 accepted papers (contested).",
+    );
+    expect(screen.getByTestId("orcid-queue-byline-count").textContent).toBe(
+      "On 3 bylines (contested)",
+    );
+    fireEvent.click(screen.getByTestId("orcid-queue-pubs-byline"));
+    expect(screen.getByTestId("orcid-queue-byline-caveats").textContent).toBe(
+      `Also tied to xy0002: on their accepted papers, or on file for them. The scholar's other accepted papers print ${OTHER}. 2 rejected papers print this iD there too. The byline papers don’t raise the match strength.`,
+    );
+    expect(screen.getByTestId("orcid-queue-pubs").textContent).toContain("Showing 1 of 3.");
+  });
+
+  it("byline papers: an earlier run's row has no tab and no count", async () => {
+    mount([CARD({}, [{ ...ROW, detail: { ...DETAIL, byline: undefined } }])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.queryByTestId("orcid-queue-pubs-byline")).toBeNull();
+    expect(screen.queryByTestId("orcid-queue-byline-count")).toBeNull();
+    expect(screen.getByTestId("orcid-queue-evidence").textContent).toContain("name agrees.");
   });
 
   it("publications: In both lists the shared papers; Only in ReCiter counts the rest", async () => {
