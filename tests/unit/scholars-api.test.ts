@@ -1,57 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
-import { EXPECTED_HEADSHOT_URL, FIXTURE_CWID } from "../fixtures/scholar";
+import { FIXTURE_CWID, fixtureScholar } from "../fixtures/scholar";
 
-// Mock Prisma BEFORE importing the module under test.
-// The actual lib/api/scholars.ts uses findFirst (with status + deletedAt
-// filters); both findFirst and findUnique are stubbed to be safe.
+// Mock Prisma BEFORE importing the module under test. The row deliberately
+// carries profile content so the exact-shape assertion fails if any leaks.
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholar: {
       findFirst: vi.fn(async () => ({
-        cwid: FIXTURE_CWID,
-        slug: "jane-doe",
-        preferredName: "Jane Doe",
-        fullName: "Jane Q. Doe",
-        primaryTitle: "Associate Professor",
-        primaryDepartment: "Medicine",
-        email: null,
-        overview: null,
-        appointments: [],
-        deletedAt: null,
-        status: "active",
-      })),
-      findUnique: vi.fn(async () => ({
-        cwid: FIXTURE_CWID,
-        slug: "jane-doe",
-        preferredName: "Jane Doe",
-        fullName: "Jane Q. Doe",
-        primaryTitle: "Associate Professor",
-        primaryDepartment: "Medicine",
-        email: null,
-        overview: null,
-        appointments: [],
-        deletedAt: null,
-        status: "active",
+        ...fixtureScholar,
+        email: "person@example.org",
+        overview: "Raw imported overview",
+        appointments: [{ title: "Hidden appointment" }],
+        roleCategory: "full_time_faculty",
       })),
     },
   },
 }));
 
 describe("getScholarByCwid serializer", () => {
-  it("includes identityImageEndpoint in the payload", async () => {
+  it("returns exactly cwid, slug and preferredName, never profile content", async () => {
     const { getScholarByCwid } = await import("@/lib/api/scholars");
-    const payload = await getScholarByCwid(FIXTURE_CWID);
-    expect(payload).not.toBeNull();
-    expect((payload as { identityImageEndpoint?: string }).identityImageEndpoint).toBe(
-      EXPECTED_HEADSHOT_URL,
-    );
+    expect(await getScholarByCwid(FIXTURE_CWID)).toEqual({
+      cwid: FIXTURE_CWID,
+      slug: "jane-doe",
+      preferredName: "Jane Doe",
+    });
   });
 
-  it("identityImageEndpoint is a string (never null)", async () => {
+  it("does not read profile content from the database", async () => {
+    const { prisma } = await import("@/lib/db");
     const { getScholarByCwid } = await import("@/lib/api/scholars");
-    const payload = await getScholarByCwid(FIXTURE_CWID);
-    expect(typeof (payload as { identityImageEndpoint?: string }).identityImageEndpoint).toBe(
-      "string",
-    );
+    await getScholarByCwid(FIXTURE_CWID);
+    const args = vi.mocked(prisma.scholar.findFirst).mock.lastCall![0]!;
+    expect(args.include).toBeUndefined();
+    expect(Object.keys(args.select!).sort()).toEqual([
+      "cwid",
+      "preferredName",
+      "roleCategory",
+      "slug",
+    ]);
   });
 });

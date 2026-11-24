@@ -190,16 +190,6 @@ describe("primary institution on the public payloads", () => {
     findFirst.mockResolvedValue(prodRow("full_time_faculty"));
     expect((await fetchPopoverHeader(CWID))!.primaryOrgCode).toBe("HSS");
   });
-
-  it("JSON API emits code + display name as DATA — WCMC included", async () => {
-    findFirst.mockResolvedValue(prodRow("full_time_faculty"));
-    const hss = await getScholarByCwid(CWID);
-    expect(hss!.primaryOrgCode).toBe("HSS");
-    expect(hss!.primaryInstitution).toBe("Hospital for Special Surgery");
-
-    findFirst.mockResolvedValue({ ...prodRow("full_time_faculty"), primaryOrgCode: "WCMC" });
-    expect((await getScholarByCwid(CWID))!.primaryInstitution).toBe("Weill Cornell Medicine");
-  });
 });
 
 describe("#2221 popover-context route — hidden is INDISTINGUISHABLE from nonexistent", () => {

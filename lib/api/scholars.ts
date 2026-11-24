@@ -6,37 +6,16 @@
  */
 import { prisma } from "@/lib/db";
 import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
-import { headshotUrl } from "@/lib/headshot";
-import { institutionDisplayName } from "@/lib/institutions";
-import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
-import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 
-/** Public shape returned to API consumers. */
+/**
+ * Public shape returned to API consumers: just enough to resolve a CWID to its
+ * profile URL. Profile content stays off this endpoint on purpose; its visibility
+ * rules live in `lib/api/profile.ts` and must not be duplicated here.
+ */
 export type ScholarPayload = {
   cwid: string;
   slug: string;
   preferredName: string;
-  fullName: string;
-  primaryTitle: string | null;
-  primaryDepartment: string | null;
-  /** Bare ED primary-organization code (`WCMC`, `HSS`, …); null until the ED
-   *  ETL writes it. DATA, not a label — WCMC is included here. */
-  primaryOrgCode: string | null;
-  /** `institutionDisplayName(primaryOrgCode)` ("Weill Cornell Medicine",
-   *  "Hospital for Special Surgery", or the bare code when unmapped); null
-   *  when the code is. */
-  primaryInstitution: string | null;
-  email: string | null;
-  overview: string | null;
-  identityImageEndpoint: string;
-  appointments: Array<{
-    title: string;
-    organization: string;
-    startDate: string | null;
-    endDate: string | null;
-    isPrimary: boolean;
-    isInterim: boolean;
-  }>;
 };
 
 /**
@@ -44,9 +23,7 @@ export type ScholarPayload = {
  * Returns `null` if not found (caller maps to 404).
  *
  * #2221 — ALSO excludes the #536 hidden identity classes (doctoral students,
- * alumni). This endpoint is public and unauthenticated and returns MORE than the
- * popover card named in the issue — full name, title, department, the gated
- * email, the overview and the entire appointment history — and it gated on
+ * alumni). This endpoint is public and unauthenticated, and it gated on
  * `deletedAt` + `status` only. Against the prod data shape (690 scholars with a
  * bare `doctoral_student` role and `deleted_at IS NULL`) neither of those gates
  * fires, so the role carve is the only one that does. `null` is returned for a
@@ -65,11 +42,7 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     // access control. `publicRoleWhere()` admits `role_category IS NULL`
     // explicitly (a bare `notIn` drops NULLs and would 404 un-backfilled rows).
     where: { cwid, deletedAt: null, status: "active", ...publicRoleWhere() },
-    include: {
-      appointments: {
-        orderBy: [{ isPrimary: "desc" }, { endDate: "asc" }, { startDate: "desc" }],
-      },
-    },
+    select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
   });
   if (!scholar) return null;
   // Belt-and-braces on the RAW column: Prisma can't express the
@@ -81,33 +54,5 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     cwid: scholar.cwid,
     slug: scholar.slug,
     preferredName: scholar.preferredName,
-    fullName: scholar.fullName,
-    primaryTitle: scholar.primaryTitle,
-    primaryDepartment: scholar.primaryDepartment,
-    primaryOrgCode: scholar.primaryOrgCode ?? null,
-    primaryInstitution: scholar.primaryOrgCode
-      ? institutionDisplayName(scholar.primaryOrgCode)
-      : null,
-    // email-visibility-spec § A + Cache-safety. This anonymous-facing endpoint is
-    // CloudFront-cacheable by path and is NOT in the #866 origin-request policy
-    // (no viewer-address forwarded), so it bakes only the viewer-independent
-    // (public) email — never `institution`/`none`. Internal callers obtain
-    // institution emails via /api/profile/[cwid]/contact-email. No-op when off.
-    email: gateEmailForViewer(
-      scholar.email,
-      scholar.emailVisibility,
-      false,
-      isEmailReleaseGateEnabled(),
-    ),
-    overview: scholar.overview,
-    identityImageEndpoint: headshotUrl(scholar.cwid, scholar.hasHeadshot),
-    appointments: scholar.appointments.map((a) => ({
-      title: a.title,
-      organization: a.organization,
-      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
-      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
-      isPrimary: a.isPrimary,
-      isInterim: a.isInterim,
-    })),
   };
 }
