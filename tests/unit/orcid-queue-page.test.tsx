@@ -1505,7 +1505,11 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
                     ok: true,
                     // A dry run's extras: the name on ORCID, a verified email (aa0001 only).
                     ...(body.dryRun
-                      ? { orcidName: `ORCID ${p.cwid}`, verifiedEmail: p.cwid === "aa0001" }
+                      ? {
+                          orcidName: `ORCID ${p.cwid}`,
+                          verifiedEmail: p.cwid === "aa0001",
+                          hasPublications: !p.cwid.startsWith("ith"),
+                        }
                       : {}),
                   }
                 : { ...p, ok: false, code: "not_bulk_eligible", blocker: "institution" },
@@ -1715,6 +1719,26 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect(screen.getByTestId("orcid-queue-status-undo")).toBeTruthy();
   });
 
+  it("Bulk review compares an Ithaca scholar's works once Scholars has their publications", async () => {
+    const c = CARD({ cwid: "cu0001", name: "Scholar cu0001" }, [
+      {
+        ...ROW,
+        cwid: "cu0001",
+        orcid: ORCID,
+        shared: 7,
+        worksTotal: 9,
+        newWorks: 2,
+        sources: ["web_page_seed"],
+      },
+    ]);
+    mountWith([c], [{ ...summaryOf(c), campus: "ithaca" as const }]);
+    fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
+    const row = await screen.findByTestId("orcid-bulk-row-cu0001");
+    expect(row.className).toContain("coral");
+    expect(row.textContent).toContain("7 of 92");
+    expect(row.textContent).not.toContain("check");
+  });
+
   it("Bulk review opens the reasons when nobody matches, whatever the boxes say", async () => {
     const c = CARD({ cwid: "dd0004", name: "Scholar dd0004" }, [
       { ...ROW, cwid: "dd0004", orcid: ORCID, shared: 7, worksTotal: 7, newWorks: 0 },
@@ -1750,11 +1774,20 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect(screen.getByTestId("orcid-bulk-ithaca-cap").textContent).toContain(
       "2 more after this one",
     );
-    // Never tinted: Ithaca works are all only on ORCID.
-    expect(screen.getByTestId("orcid-bulk-row-ith0000").className).not.toContain("coral");
+    // No publications here: nothing to compare, so no tint and no warning count.
+    const row = screen.getByTestId("orcid-bulk-row-ith0000");
+    expect(row.className).not.toContain("coral");
+    expect(row.textContent).toContain("9 on ORCIDNot compared");
+    expect(row.innerHTML).not.toContain("coral");
+    expect(screen.getByTestId("orcid-bulk").textContent).toContain(
+      "Not compared means Scholars has no publications for this person yet.",
+    );
     fireEvent.click(screen.getByTestId("orcid-bulk-confirm"));
     fireEvent.click(screen.getByTestId("orcid-bulk-confirm-yes"));
     await vi.waitFor(() => expect(posts()).toHaveLength(1));
     expect((posts()[0]!.body.pairs as unknown[]).length).toBe(100);
+    expect((await screen.findByTestId("orcid-queue-status")).textContent).toContain(
+      "Confirmed 100 iDs. Cornell Ithaca iDs stay in Scholars.",
+    );
   });
 });

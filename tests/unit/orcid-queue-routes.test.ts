@@ -36,6 +36,8 @@ const h = vi.hoisted(() => {
     admins: [] as Array<{ cwid: string; orcid: string }>,
     /** Other `orcid_candidate` rows (any source). */
     sources: [] as Array<{ cwid: string; orcid: string; source: string }>,
+    /** Scholars with a confirmed publication. */
+    withPubs: ["jd0001"],
     /** role_category per cwid (default "faculty"). */
     roles: new Map<string, string>(),
     /** dept_code / div_code / primary_org_code per cwid. */
@@ -321,6 +323,7 @@ vi.mock("@/lib/db", () => ({
         findMany: vi.fn(async () => []),
       },
       // Bulk review's dry-run extras (`bulkPairFacts`).
+      publicationAuthor: { groupBy: vi.fn(async () => h.state.withPubs.map((cwid) => ({ cwid }))) },
       orcidCandidateEvidence: {
         findMany: vi.fn(async () => [
           {
@@ -962,7 +965,8 @@ describe("bulk-confirm", () => {
     });
   });
 
-  it("dryRun reports which pairs pass the floor and writes nothing", async () => {
+  it.each([true, false])("dryRun reports which pairs pass the floor and writes nothing (has publications: %s)", async (hasPublications) => {
+    h.state.withPubs = hasPublications ? ["jd0001"] : [];
     h.state.evidence = [
       { cwid: "jd0001", orcid: ORCID, band: "strong" },
       { cwid: "js0002", orcid: OTHER, band: "strong", instMatch: false },
@@ -983,7 +987,11 @@ describe("bulk-confirm", () => {
     };
     expect(results.map((r) => r.ok)).toEqual([true, false]);
     // A passing pair carries Bulk review's Name on ORCID and Verified email.
-    expect(results[0]).toMatchObject({ orcidName: "Jane Doe", verifiedEmail: true });
+    expect(results[0]).toMatchObject({
+      orcidName: "Jane Doe",
+      verifiedEmail: true,
+      hasPublications,
+    });
     expect(results[1]!.orcidName).toBeUndefined();
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
     expect(audits()).toHaveLength(0);

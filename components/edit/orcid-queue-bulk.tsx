@@ -46,6 +46,8 @@ type Result = Pair & { ok: boolean; code?: string };
 type DryResult = Result & {
   orcidName?: string | null;
   verifiedEmail?: boolean;
+  /** Scholars holds publications for this person, so works can be compared. */
+  hasPublications?: boolean;
   blocker?: string;
 };
 
@@ -179,9 +181,11 @@ export function OrcidBulkReview({
     return new Set(ithaca.slice(ORCID_BULK_ITHACA_MAX).map((s) => s.cwid));
   }, [eligible, excluded]);
   const selected = eligible.filter((s) => !excluded.has(s.cwid) && !overCap.has(s.cwid));
-  // Ithaca works are all "only on ORCID" (no SPS publications): never tinted.
-  const tinted = (s: OrcidQueueSummary) =>
-    s.campus !== "ithaca" && onlyOnOrcid(s.candidates[0]!) > 0;
+  // No publications here = every work is "only on ORCID": nothing to compare, so
+  // never tinted. Read per person, not per campus (Ithaca publications will come).
+  const compared = (s: OrcidQueueSummary) => floor?.get(keyOf(s))?.hasPublications !== false;
+  const tinted = (s: OrcidQueueSummary) => compared(s) && onlyOnOrcid(s.candidates[0]!) > 0;
+  const anyNotCompared = eligible.some((s) => !compared(s));
   const tintedChecked = selected.filter(tinted).length;
   const ithacaSelected = selected.filter((s) => s.campus === "ithaca").length;
   const busy = progress !== null;
@@ -331,8 +335,13 @@ export function OrcidBulkReview({
           </label>
         </div>
         <span className="text-muted-foreground text-[12.5px]">
-          Rows with any work only on ORCID are tinted: look at those before confirming. Anything you
-          uncheck stays in the one-at-a-time queue.
+          Only on ORCID counts works on the ORCID record that aren&rsquo;t in this person&rsquo;s
+          publications here. Rows with any are tinted: make sure those works are theirs before
+          confirming.
+          {anyNotCompared
+            ? " Not compared means Scholars has no publications for this person yet."
+            : null}{" "}
+          Anything you uncheck stays in the one-at-a-time queue.
           {hasIthaca
             ? " Sources, shared works and only on ORCID apply to WCM scholars only."
             : null}
@@ -453,21 +462,24 @@ export function OrcidBulkReview({
                     )}
                   </span>
                   <span role="cell" className="tabular-nums">
-                    <span className="font-semibold">
-                      {fmt(c.shared)} of {fmt(c.worksTotal)}
-                    </span>
+                    {compared(s) ? (
+                      <span className="font-semibold">
+                        {fmt(c.shared)} of {fmt(c.worksTotal)}
+                      </span>
+                    ) : (
+                      `${fmt(c.worksTotal)} on ORCID`
+                    )}
                   </span>
                   <span
                     role="cell"
                     className={cn(
                       "tabular-nums",
-                      only > 0
+                      tinted(s)
                         ? "text-apollo-coral-foreground font-semibold"
                         : "text-muted-foreground",
                     )}
                   >
-                    {fmt(only)}
-                    {only > 0 ? <span className="ml-1.5 font-normal">check</span> : null}
+                    {compared(s) ? fmt(only) : "Not compared"}
                   </span>
                   <span role="cell" className="text-[12.5px] leading-snug">
                     {sources.map((x) => ORCID_SOURCE_LABEL[x]).join(", ") || "Unknown"}
