@@ -258,6 +258,13 @@ export const INTENDED_MATRIX: MatrixRow[] = [
       "observer and content editor rows above pin that none of them sees it",
   },
   {
+    name: "pure program_roster_editor",
+    session: sess({ isProgramRosterEditor: true }),
+    grants: grants(),
+    expect: [],
+    pins: "2026-11 — the program roster has no tab: it is linked from its center's editor page",
+  },
+  {
     name: "comms_steward + unit Owner (the Gap 4b monotonicity case)",
     session: sess({ isCommsSteward: true }),
     grants: grants({

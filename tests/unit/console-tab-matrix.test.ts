@@ -31,6 +31,7 @@ const ALL_FLAGS_ON: Record<string, string> = {
   EDIT_DATA_QUALITY_DASHBOARD: "on",
   EDIT_DATA_SHARING_DASHBOARD: "on",
   EDIT_RESEARCH_SECURITY_DASHBOARD: "on",
+  EDIT_PROGRAM_ROSTER: "on",
   CORE_PAGES: "on",
   MATCHA: "on",
   GRANT_MATCHA: "on",
@@ -79,6 +80,7 @@ function mergeSessions(a: EditSession, b: EditSession): EditSession {
     isDataSharingViewer: a.isDataSharingViewer === true || b.isDataSharingViewer === true,
     isResearchSecurityViewer:
       a.isResearchSecurityViewer === true || b.isResearchSecurityViewer === true,
+    isProgramRosterEditor: a.isProgramRosterEditor === true || b.isProgramRosterEditor === true,
     isObserver: a.isObserver === true || b.isObserver === true,
     isContentEditor: a.isContentEditor === true || b.isContentEditor === true,
   };

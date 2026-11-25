@@ -80,6 +80,8 @@ export type DirectoryPeopleTypeaheadProps = {
   source?: "wcm" | "cornell";
   /** Only people with a Scholar profile (WCM source). */
   scholarsOnly?: boolean;
+  /** Show each CWID, for pickers where two people may share a name. */
+  showCwid?: boolean;
 };
 
 const DEBOUNCE_MS = 300;
@@ -93,6 +95,7 @@ export function DirectoryPeopleTypeahead({
   idPrefix = "directory",
   source = "wcm",
   scholarsOnly = false,
+  showCwid = false,
 }: DirectoryPeopleTypeaheadProps) {
   const reactId = React.useId();
   const listboxId = `${idPrefix}-${reactId}-listbox`;
@@ -207,6 +210,7 @@ export function DirectoryPeopleTypeahead({
       >
         <span className="min-w-0 truncate text-sm">
           <span className="font-medium">{value.name}</span>
+          {showCwid && <span className="text-muted-foreground ml-1.5 font-mono text-xs">{value.cwid}</span>}
           {value.title && <span className="text-muted-foreground"> · {value.title}</span>}
         </span>
         <button
@@ -279,6 +283,9 @@ export function DirectoryPeopleTypeahead({
                 )}
               >
                 <span className="font-medium">{result.name}</span>
+                {showCwid && (
+                  <span className="text-muted-foreground ml-1.5 font-mono text-xs">{result.cwid}</span>
+                )}
                 {result.title && <span className="text-muted-foreground"> · {result.title}</span>}
                 {result.dept && (
                   <span className="text-muted-foreground block text-xs">{result.dept}</span>

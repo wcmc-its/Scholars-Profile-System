@@ -176,6 +176,8 @@ export type UnitEditPageProps = {
   /** A department's Vice Chairs (`UNIT_LEADERSHIP_ROLES`). `null` / omitted
    *  renders no section: the flag is off, or the unit is not a department. */
   viceChairs?: ReadonlyArray<UnitLeadershipRoleView> | null;
+  /** Header link to the internal program roster; the caller has checked the gate. */
+  programRosterHref?: string;
 };
 
 export function UnitEditPage({
@@ -184,6 +186,7 @@ export function UnitEditPage({
   orgUnitsNavVisible = false,
   readOnly = false,
   viceChairs = null,
+  programRosterHref,
 }: UnitEditPageProps) {
   const visible = ATTRIBUTES.filter((a) => a.visible(ctx));
   const active: AttrDef =
@@ -230,6 +233,7 @@ export function UnitEditPage({
         contentEditor={ctx.accessReadOnly === true}
         previewHref={previewHref}
         reportsHref={reportsHref}
+        programRosterHref={programRosterHref}
         sections={unitSections(ctx, visible, basePath, viceChairs)}
         initialSection={attr ? LEGACY_ATTR_SECTION[attr as AttrKey] : undefined}
         notice={ctx.unit.suppression !== null ? <RetiredNotice /> : undefined}

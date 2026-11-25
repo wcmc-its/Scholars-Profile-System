@@ -59,6 +59,7 @@ export function UnitEditSections({
   contentEditor = false,
   previewHref,
   reportsHref,
+  programRosterHref,
   sections,
   initialSection,
   notice,
@@ -82,6 +83,8 @@ export function UnitEditSections({
   contentEditor?: boolean;
   previewHref?: string;
   reportsHref?: string;
+  /** The internal program roster, for a viewer who may open it. */
+  programRosterHref?: string;
   sections: ReadonlyArray<UnitEditSection>;
   /** A legacy `?attr=` deep link, mapped to its section id. */
   initialSection?: string;
@@ -158,8 +161,16 @@ export function UnitEditSections({
               Changes are logged against your account.
             </p>
           </div>
-          {(reportsHref || previewHref) && (
-            <div className="flex shrink-0 items-center gap-2">
+          {(reportsHref || previewHref || programRosterHref) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {programRosterHref && (
+                <Button asChild variant="ghost" size="sm" className="text-apollo-slate">
+                  <Link href={programRosterHref} prefetch={false} data-testid="edit-program-roster-link">
+                    Program roster
+                    <ArrowRight className="size-4" aria-hidden />
+                  </Link>
+                </Button>
+              )}
               {reportsHref && (
                 <Button asChild variant="ghost" size="sm" className="text-apollo-slate">
                   <Link href={reportsHref} data-testid="edit-reports-link">

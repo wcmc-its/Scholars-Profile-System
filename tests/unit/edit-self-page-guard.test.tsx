@@ -88,6 +88,7 @@ vi.mock("@/lib/auth/global-roles", () => ({
     honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
     data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
     development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
+    program_roster_editor: { href: "/edit/program-roster", label: "Program roster" },
   },
 }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
@@ -227,6 +228,7 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
     ["honors_curator", "/edit/honors-queue"],
     ["data_sharing_viewer", "/edit/data-sharing"],
     ["development", "/edit/grant-matcha"],
+    ["program_roster_editor", "/edit/program-roster"],
   ] as const)("no self-profile + %s → redirect to %s", async (role, home) => {
     mockLoadEditContext.mockResolvedValue(null);
     mockResolveGlobalRole.mockResolvedValue(role);
@@ -266,6 +268,15 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
       allCores: false,
     });
     expect(mockNotFound).not.toHaveBeenCalled();
+  });
+
+  it("a program roster editor with a unit grant lands on the unit, which links the roster", async () => {
+    mockLoadEditContext.mockResolvedValue(null);
+    mockResolveGlobalRole.mockResolvedValue("program_roster_editor");
+    mockLoadManageableUnits.mockResolvedValue(units({ centers: [unit("center", "meyer_cancer_center")] }));
+    await expect(EditSelfPage({ searchParams: searchParams() })).rejects.toThrow(
+      "__REDIRECT__:/edit/center/meyer_cancer_center",
+    );
   });
 
   it("no self-profile + SEVERAL unit grants → redirect to the /edit/units index", async () => {
