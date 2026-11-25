@@ -15,6 +15,45 @@ export interface CitingDoc {
   level: Level;
   issuingBody: string | null;
   dedupKey: string;
+  /** Citation fields. PubMed fills all but `publisher`; Bookshelf fills only that. */
+  authors: string | null;
+  journal: string | null;
+  journalAbbrev: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  doi: string | null;
+  publisher: string | null;
+}
+
+/** The fields an existing row is back-filled with. */
+export const CITATION_FIELDS = [
+  "authors",
+  "journal",
+  "journalAbbrev",
+  "volume",
+  "issue",
+  "pages",
+  "doi",
+  "publisher",
+] as const;
+
+/** A trimmed string cut to its column width, or null when NCBI sent nothing. */
+function text(v: unknown, max: number): string | null {
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
+}
+
+/** A PubMed ESummary record, as far as the citation needs it. */
+export interface PubmedSummary {
+  title?: string;
+  pubdate?: string;
+  authors?: Array<{ name?: string }>;
+  source?: string;
+  fulljournalname?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  articleids?: Array<{ idtype?: string; value?: string }>;
 }
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
@@ -67,7 +106,7 @@ export function pubmedLevel(
 export function pubmedDoc(
   pmid: number,
   level: Exclude<Level, "authority">,
-  summary: { title?: string; pubdate?: string },
+  summary: PubmedSummary,
 ): CitingDoc {
   const title = cleanTitle(summary.title ?? "") || `PMID ${pmid}`;
   const y = /\d{4}/.exec(summary.pubdate ?? "");
@@ -81,6 +120,15 @@ export function pubmedDoc(
     level,
     issuingBody: null,
     dedupKey: dedupKey(title, year),
+    // Group authors ("AASLD-IDSA Hepatitis C Guidance Panel") are listed with the people.
+    authors: text((summary.authors ?? []).map((a) => a.name).filter(Boolean).join(", "), 65_000),
+    journal: text(summary.fulljournalname, 512),
+    journalAbbrev: text(summary.source, 200),
+    volume: text(summary.volume, 64),
+    issue: text(summary.issue, 128),
+    pages: text(summary.pages, 128),
+    doi: text(summary.articleids?.find((a) => a.idtype === "doi")?.value, 255),
+    publisher: null,
   };
 }
 
@@ -111,6 +159,16 @@ export function bookshelfDoc(summary: {
     level: "authority",
     issuingBody: body,
     dedupKey: dedupKey(title, year),
+    // ponytail: Bookshelf's summary has no author list or DOI, only the
+    // publication statement. Fetch the book record if a DOI is ever needed.
+    authors: null,
+    journal: null,
+    journalAbbrev: null,
+    volume: null,
+    issue: null,
+    pages: null,
+    doi: null,
+    publisher: text(cleanTitle(statement), 512),
   };
 }
 
