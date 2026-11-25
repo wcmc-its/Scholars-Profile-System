@@ -6,6 +6,7 @@
  * Same pure-function shape as `lib/api/profile.ts` etc. — the route file
  * (`app/api/publications/[pmid]/route.ts`) is a thin delegator.
  */
+import { policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
@@ -119,6 +120,84 @@ export type PublicationDetailCore = {
   href: string | null;
 };
 
+/** One guideline, policy document or review citing the paper. */
+export type PolicyCitingDoc = {
+  id: number;
+  level: "authority" | "guideline" | "consensus" | "review";
+  title: string;
+  year: number | null;
+  url: string;
+  /** Health authority, for `authority` documents. */
+  issuingBody: string | null;
+  /** First three authors, then "et al."; null for Bookshelf documents. */
+  authors: string | null;
+  journal: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  doi: string | null;
+  /** Bookshelf publication statement, "Geneva: World Health Organization; 2018 Jul." */
+  publisher: string | null;
+  /** PMID for PubMed documents, the NBK accession for Bookshelf ones. */
+  pmid: string | null;
+  bookshelfId: string | null;
+};
+
+const POLICY_REVIEWS_CAP = 100;
+
+function firstAuthors(authors: string | null): string | null {
+  if (!authors) return null;
+  const names = authors.split(", ");
+  return names.length > 3 ? `${names.slice(0, 3).join(", ")}, et al.` : authors;
+}
+
+/**
+ * The documents behind the row badges, newest first. The same guideline
+ * printed in several journals shares a `dedupKey` and is listed once, as the
+ * rollup counts it. Null on a read failure, so the modal just omits the section.
+ */
+async function readPolicyCitations(
+  pmid: string,
+): Promise<PublicationDetailPayload["policyCitations"] | null> {
+  try {
+    const links = await prisma.publicationCitingDocument.findMany({
+      where: { pmid },
+      select: { citingDocument: true },
+      orderBy: [{ citingDocument: { year: "desc" } }, { citingDocumentId: "asc" }],
+    });
+    const seen = new Set<string>();
+    const docs: PolicyCitingDoc[] = [];
+    let reviewTotal = 0;
+    for (const { citingDocument: d } of links) {
+      if (seen.has(d.dedupKey)) continue;
+      seen.add(d.dedupKey);
+      // ponytail: reviews beyond the cap are counted, not listed; page them if anyone asks.
+      if (d.level === "review" && ++reviewTotal > POLICY_REVIEWS_CAP) continue;
+      docs.push({
+        id: d.id,
+        level: d.level as PolicyCitingDoc["level"],
+        title: d.title,
+        year: d.year,
+        url: d.url,
+        issuingBody: d.issuingBody,
+        authors: firstAuthors(d.authors),
+        journal: d.journalAbbrev ?? d.journal,
+        volume: d.volume,
+        issue: d.issue,
+        pages: d.pages,
+        doi: d.doi,
+        publisher: d.publisher,
+        pmid: d.source === "pubmed" ? d.externalId : null,
+        bookshelfId: d.source === "bookshelf" ? d.externalId : null,
+      });
+    }
+    return docs.length > 0 ? { docs, reviewTotal } : undefined;
+  } catch (err) {
+    console.error("[publication-detail] policy citations read failed", err);
+    return null;
+  }
+}
+
 export type PublicationDetailPayload = {
   pub: {
     pmid: string;
@@ -175,6 +254,10 @@ export type PublicationDetailPayload = {
    *  twice (#1041). Null when reciterdb was unreachable — the modal renders
    *  "Citation list temporarily unavailable" in that case. */
   citingPubs: PublicationDetailCitingPub[] | null;
+  /** Guidelines, policy documents and reviews citing this paper. Absent when
+   *  `POLICY_CITATION_BADGES` is off or there are none; the modal omits the
+   *  section then. `reviewTotal` can exceed the reviews listed. */
+  policyCitations?: { docs: PolicyCitingDoc[]; reviewTotal: number };
   /** Count of distinct citing pmids in `analysis_nih_cites` for this
    *  `cited_pmid`. Typically
    *  smaller than `pub.citationCount` because the upstream table is iCite-
@@ -740,6 +823,9 @@ export async function getPublicationDetail(
     }
   }
 
+  const policyCitations =
+    policyCitationBadgesOn() && pmidInt !== null ? await readPolicyCitations(pmid) : null;
+
   const translationalStage = resolveSearchPubsTranslationalStageFacet()
     ? displayStage(pub.translationalStage, pub.translationalStageConfidence)
     : null;
@@ -778,6 +864,7 @@ export async function getPublicationDetail(
     cores,
     citingPubs,
     citingPubsTotal,
+    ...(policyCitations ? { policyCitations } : {}),
   };
 }
 
