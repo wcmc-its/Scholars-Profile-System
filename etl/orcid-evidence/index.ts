@@ -138,6 +138,7 @@ import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb
 
 import {
   bylineFactsOf,
+  contestsBeyond,
   heldByOrcid,
   indexBylines,
   MIN_BYLINE_STRONG,
@@ -162,10 +163,15 @@ const NEW_WORKS_SAMPLE = 5;
 const ORCID_PATTERN = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
 /** 82,430 byline rows on 2026-11-23; half of that is a short read. */
 const BYLINE_ROW_FLOOR = 40_000;
-/** Crossref slots ASKED, with or without an iD: about 306,000 when the backfill is
- *  done. It runs newest PMID first, so a part-filled table can lack the older
- *  rejected paper that contests an iD. */
-const CROSSREF_ASKED_FLOOR = 280_000;
+/** Crossref slots ANSWERED, with or without an iD: about 306,000 when the backfill is
+ *  done. Backstop for a short `scholar_active`, which would shrink the share below. */
+const CROSSREF_ANSWERED_FLOOR = 280_000;
+/** Slots still to be answered, as a share of all. A missing one can be the rejected
+ *  paper that contests an iD. A few DOIs never have a Crossref record (0.4% on
+ *  2026-11-25, the backfill half done). */
+const CROSSREF_DUE_SHARE = 0.02;
+/** The collector runs nightly: older than this and it has stopped. */
+const CROSSREF_MAX_AGE_HOURS = 7 * 24;
 const BYLINE_QUERY_TIMEOUT_MS = 300_000;
 /** Shared papers kept in `evidence_detail` (the `shared` column has the full count). */
 export const SHARED_DETAIL_CAP = 100;
@@ -922,10 +928,12 @@ export function assembleEvidence(args: {
     const bf = args.bylineCrossref === true ? listed : pubmed;
     const counted = new Set(bf?.papers.map((x) => x.pmid));
     const uncounted = (listed?.papers ?? []).filter((x) => !counted.has(x.pmid)).length;
+    const uncountedContests = listed && bf && contestsBeyond(listed, bf);
     const byline: OrcidBylineDetail | null = bf && {
       ...bf,
       total: bf.papers.length,
       ...(uncounted > 0 ? { uncounted } : {}),
+      ...(uncountedContests ? { uncountedContests } : {}),
       papers: (listed ?? bf).papers
         .slice(0, SHARED_DETAIL_CAP)
         .map((x) => ({ ...barePaper(x.pmid), sources: x.sources })),
@@ -1401,32 +1409,79 @@ export async function loadBylineRows(floor = BYLINE_ROW_FLOOR): Promise<BylineRo
   }
 }
 
-/** Crossref's iD for the same author entries (`pubsource_article_orcid`: one row per
- *  slot asked, orcid NULL = none printed; stale rows are never deleted there, hence the
- *  joins to the live entry). Null, so PubMed alone, when it cannot be read or holds
- *  fewer than `floor` slots, counted on the slots asked. */
+/** The slots ReCiterDB's collectArticleOrcids.py asks Crossref about (the conditions are
+ *  its SLOTS_SQL), each with the answer, plus the answered slots PubMed has printed an iD
+ *  on since. `answered`: Crossref has a record, for this DOI and byline position. */
+const CROSSREF_SLOTS_SQL = `SELECT a.personIdentifier, a.pmid, p.userAssertion,
+       IF(c.found = 1 AND c.author_rank = a.\`rank\` AND c.doi = LOWER(TRIM(p.doi)), 1, 0) AS answered,
+       c.orcid, TIMESTAMPDIFF(HOUR, c.fetched_at, UTC_TIMESTAMP()) AS ageHours
+  FROM scholar_active s
+  JOIN person_article_author a ON a.personIdentifier = s.cwid
+  JOIN person_article p ON p.personIdentifier = a.personIdentifier AND p.pmid = a.pmid
+  LEFT JOIN pubsource_article_orcid c
+    ON c.personIdentifier = a.personIdentifier AND c.pmid = a.pmid AND c.source = 'crossref'
+ WHERE a.targetAuthor LIKE '1%' AND COALESCE(p.targetAuthorCount, 1) <= 1
+   AND p.userAssertion IN ('ACCEPTED', 'REJECTED') AND p.doi LIKE '10.%'
+   AND INSTR(a.personIdentifier, '_') = 0
+   AND (COALESCE(a.orcid, '') = '' OR c.orcid IS NOT NULL)`;
+
+/** Everyone who accepted an author entry Crossref prints an iD on. The slots above are
+ *  active scholars' only: this adds the people who have left since they were asked about,
+ *  and anyone else whose accepted entry is the same one. */
+const CROSSREF_HOLDERS_SQL = `SELECT b.personIdentifier, c.pmid, c.orcid, q.userAssertion
+  FROM pubsource_article_orcid c
+  JOIN person_article_author a
+    ON a.personIdentifier = c.personIdentifier AND a.pmid = c.pmid AND a.\`rank\` = c.author_rank
+  JOIN person_article p ON p.personIdentifier = c.personIdentifier AND p.pmid = c.pmid
+  JOIN person_article_author b
+    ON b.pmid = c.pmid AND b.\`rank\` = c.author_rank
+  JOIN person_article q ON q.personIdentifier = b.personIdentifier AND q.pmid = b.pmid
+ WHERE c.source = 'crossref' AND c.orcid IS NOT NULL
+   AND a.targetAuthor LIKE '1%' AND COALESCE(p.targetAuthorCount, 1) <= 1
+   AND p.userAssertion = 'ACCEPTED' AND c.doi = LOWER(TRIM(p.doi))
+   AND b.targetAuthor LIKE '1%' AND COALESCE(q.targetAuthorCount, 1) <= 1
+   AND q.userAssertion = 'ACCEPTED'`;
+
+type CrossrefSlotRow = BylineDbRow & {
+  answered: number | bigint;
+  ageHours: number | bigint | null;
+};
+
+/** Crossref's iD for the same author entries (`pubsource_article_orcid`). Null, so PubMed
+ *  alone, when it cannot be read, too few slots are answered, too many are still due, or
+ *  nothing was asked lately (stored rows are never deleted: their count alone would
+ *  still pass long after the collector stopped). */
 export async function loadCrossrefBylineRows(
-  floor = CROSSREF_ASKED_FLOOR,
+  floor = CROSSREF_ANSWERED_FLOOR,
 ): Promise<BylineRow[] | null> {
   try {
-    const rows = (await withReciterConnection((conn) =>
-      conn.query({
-        sql: `SELECT c.personIdentifier, c.pmid, c.orcid, p.userAssertion
-           FROM pubsource_article_orcid c
-           JOIN person_article_author a
-             ON a.personIdentifier = c.personIdentifier AND a.pmid = c.pmid
-            AND a.\`rank\` = c.author_rank
-           JOIN person_article p
-             ON p.personIdentifier = c.personIdentifier AND p.pmid = c.pmid
-          WHERE c.source = 'crossref' AND a.targetAuthor LIKE '1%'
-            AND COALESCE(p.targetAuthorCount, 1) <= 1`,
-        timeout: BYLINE_QUERY_TIMEOUT_MS,
-      }),
-    )) as BylineDbRow[];
-    const out = bylineRowsOf(rows, "crossref");
-    console.log(`Crossref byline iDs: ${out.length} of ${rows.length} slots asked`);
-    if (rows.length < floor) {
-      console.warn(`Crossref byline iDs: fewer than ${floor} slots asked; PubMed alone this run`);
+    const [slots, holders] = await withReciterConnection(async (conn) => {
+      const read = (sql: string) => conn.query({ sql, timeout: BYLINE_QUERY_TIMEOUT_MS });
+      return [
+        (await read(CROSSREF_SLOTS_SQL)) as CrossrefSlotRow[],
+        (await read(CROSSREF_HOLDERS_SQL)) as BylineDbRow[],
+      ];
+    });
+    const answered = slots.filter((r) => Number(r.answered) === 1);
+    const due = slots.length - answered.length;
+    const ages = slots.flatMap((r) => (r.ageHours === null ? [] : [Number(r.ageHours)]));
+    const newest = ages.reduce((a, b) => Math.min(a, b), Infinity);
+    const own = bylineRowsOf(answered, "crossref");
+    // The holders repeat the scholars' own accepted rows: `indexBylines` merges them.
+    const out = [...own, ...bylineRowsOf(holders, "crossref")];
+    console.log(
+      `Crossref byline iDs: ${own.length} (${holders.length} accepted claims, anyone's); ${answered.length} of ${slots.length} slots answered, ${due} due, newest ${newest} h old`,
+    );
+    const refused =
+      answered.length < floor
+        ? `fewer than ${floor} slots answered`
+        : due > slots.length * CROSSREF_DUE_SHARE
+          ? `more than ${CROSSREF_DUE_SHARE * 100}% of the slots are due`
+          : newest > CROSSREF_MAX_AGE_HOURS
+            ? `nothing asked for ${newest} hours`
+            : null;
+    if (refused) {
+      console.warn(`Crossref byline iDs: ${refused}; PubMed alone this run`);
       return null;
     }
     return out;

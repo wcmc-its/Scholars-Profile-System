@@ -207,18 +207,8 @@ export type OrcidSharedPaper = {
 
 export type OrcidBylineSource = "pubmed" | "crossref";
 
-/** The accepted papers that print the iD next to the scholar's own name, and what
- *  on the bylines points the other way (etl/orcid-evidence/byline.ts). Everything
- *  but `papers` and `uncounted` is what the band reads: PubMed alone while
- *  `ORCID_BYLINE_CROSSREF` is off, PubMed and Crossref when it is on. */
-export type OrcidBylineDetail = {
-  /** Newest first, capped; `total` + `uncounted` is the full count. `sources`: who
-   *  prints the iD there; absent on an earlier run's row (PubMed). */
-  papers: Array<OrcidSharedPaper & { sources?: OrcidBylineSource[] }>;
-  total: number;
-  /** Papers only Crossref prints the iD on, listed while `ORCID_BYLINE_CROSSREF` is
-   *  off: not in `total`. Absent = 0. */
-  uncounted?: number;
+/** What on the bylines points the other way. */
+export type OrcidBylineContests = {
   /** Papers ReCiter rejected for the scholar that print it there. */
   rejected: number;
   /** Other people (CWID or NetID) whose accepted papers print it on their byline, or
@@ -226,6 +216,23 @@ export type OrcidBylineDetail = {
   otherHolders: string[];
   /** Other iDs on this scholar's accepted bylines. */
   otherIds: string[];
+};
+
+/** The accepted papers that print the iD next to the scholar's own name, and what
+ *  on the bylines points the other way (etl/orcid-evidence/byline.ts). Everything
+ *  but `papers` and the `uncounted` fields is what the band reads: PubMed alone while
+ *  `ORCID_BYLINE_CROSSREF` is off, PubMed and Crossref when it is on. */
+export type OrcidBylineDetail = OrcidBylineContests & {
+  /** Newest first, capped; `total` + `uncounted` is the full count. `sources`: who
+   *  prints the iD there; absent on an earlier run's row (PubMed). */
+  papers: Array<OrcidSharedPaper & { sources?: OrcidBylineSource[] }>;
+  total: number;
+  /** Papers only Crossref prints the iD on, listed while `ORCID_BYLINE_CROSSREF` is
+   *  off: not in `total`. Absent = 0. */
+  uncounted?: number;
+  /** What contests the iD only in Crossref, while `ORCID_BYLINE_CROSSREF` is off: shown,
+   *  not read by the band. Absent = nothing. */
+  uncountedContests?: OrcidBylineContests;
 };
 
 /** The accepted byline papers that may count toward the band: all of them, or none

@@ -34,6 +34,7 @@ import {
   pairState,
   type OrcidCandidateSource,
   type OrcidBulkBlocker,
+  type OrcidBylineContests,
   type OrcidBylineDetail,
   type OrcidEvidenceDetail,
   type OrcidOnFile,
@@ -799,13 +800,18 @@ function asByline(v: unknown): OrcidBylineDetail | null {
   const b = v as Partial<OrcidBylineDetail>;
   if (!Array.isArray(b.papers)) return null;
   const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0);
+  const contests = (c: Partial<OrcidBylineContests>): OrcidBylineContests => ({
+    rejected: n(c.rejected),
+    otherHolders: asStrings(c.otherHolders),
+    otherIds: asStrings(c.otherIds),
+  });
+  const u = b.uncountedContests;
   return {
     papers: b.papers,
     total: n(b.total),
     ...(n(b.uncounted) > 0 ? { uncounted: n(b.uncounted) } : {}),
-    rejected: n(b.rejected),
-    otherHolders: asStrings(b.otherHolders),
-    otherIds: asStrings(b.otherIds),
+    ...(u && typeof u === "object" ? { uncountedContests: contests(u) } : {}),
+    ...contests(b),
   };
 }
 
