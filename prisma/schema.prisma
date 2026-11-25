@@ -911,6 +911,18 @@ model PublicationCitingDocument {
   @@map("publication_citing_document")
 }
 
+/// A publication that PubMed's own systematic review filter (`systematic[sb]`)
+/// matches. Refreshed weekly by `etl:pubmed-systematic-reviews`, which keeps
+/// only the PMIDs flagged now. Derived data, not curated. No FK to Publication:
+/// the reciter ETL can drop and re-add a publication.
+model PubmedSystematicReview {
+  pmid      String   @id @db.VarChar(32)
+  /// When this paper was first seen flagged; unchanged on later runs.
+  flaggedAt DateTime @default(now()) @map("flagged_at")
+
+  @@map("pubmed_systematic_review")
+}
+
 /// GrantRecs Phase 2 — a single funding OPPORTUNITY (not an awarded grant),
 /// projected from ReciterAI's `GRANT#` DynamoDB record by the dynamodb ETL
 /// (`etl/dynamodb/index.ts` → `grant-opportunity-mapper.ts`). MySQL is the

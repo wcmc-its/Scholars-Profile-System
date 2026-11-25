@@ -2471,6 +2471,18 @@ export class EtlStack extends Stack {
       // etl/policy-citations/index.ts), so the step runs about 40 minutes every week by design.
       // `continue` — writes only add rows, so a miss just delays new citations a week.
       { id: "PolicyCitationsWeekly", npmScript: "etl:policy-citations", external: true, tier: "continue" },
+      // PubMed systematic review flags (etl/pubmed-systematic-reviews) — asks PubMed
+      // which corpus PMIDs its own systematic review filter matches and keeps that
+      // set in pubmed_systematic_review. Public NCBI E-utilities over NAT egress and
+      // the SPS database only, so external:false (not in SOURCES_SCRIPTS). One call
+      // per 100 PMIDs across the whole corpus every week. `continue` — a miss leaves
+      // last week's flags in place; its own guards abort before a bad write.
+      {
+        id: "PubMedSystematicReviewsWeekly",
+        npmScript: "etl:pubmed-systematic-reviews",
+        external: false,
+        tier: "continue",
+      },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
