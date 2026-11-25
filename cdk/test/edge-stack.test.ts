@@ -2146,7 +2146,7 @@ describe("EdgeStack", () => {
         const chromium = byName("block-chromium146-ua-mismatch");
         const count = byName("count-chrome-ua-without-client-hints");
         const tls = byName("block-chrome-ua-non-browser-tls");
-        const noAlpn = byName("count-chrome-ua-no-alpn");
+        const noAlpn = byName("block-chrome-ua-no-alpn");
 
         // Just enough of WAF's evaluator for these three rules. A statement
         // on a header the request lacks does NOT match (AWS WAF developer
@@ -2284,8 +2284,8 @@ describe("EdgeStack", () => {
               ja4: scraperJa4,
               headers: { "user-agent": chrome116, "sec-ch-ua": scraperHints },
             }),
-            // The no-ALPN count also matches, but in WAF the earlier block terminates first.
-          ).toEqual(["block-chrome-ua-non-browser-tls", "count-chrome-ua-no-alpn"]);
+            // The no-ALPN block also matches, but in WAF the earlier block terminates first.
+          ).toEqual(["block-chrome-ua-non-browser-tls", "block-chrome-ua-no-alpn"]);
           // Real Chrome on Chrome's own TLS stack: untouched.
           expect(
             hits({
@@ -2312,20 +2312,21 @@ describe("EdgeStack", () => {
           ).toEqual([]);
         });
 
-        it("counts (never blocks) a Chrome UA whose TLS hello offers no ALPN", () => {
-          expect(noAlpn?.Action).toEqual({ Count: {} });
+        it("blocks a Chrome UA whose TLS hello offers no ALPN", () => {
+          expect(noAlpn?.Action).toEqual(chromium?.Action);
+          expect(noAlpn?.Action?.Block?.CustomResponse?.ResponseCode).toBe(403);
           const chrome158 = ua.chrome120.replace("Chrome/120.", "Chrome/158.");
           const noAlpnJa4 = "t13d181100_85036bcba153_d41ae481755e";
           const chromeJa4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd";
           // The Chrome/158 cohort: no ALPN.
           expect(hits({ ja4: noAlpnJa4, headers: { "user-agent": chrome158 } })).toEqual([
             "count-chrome-ua-without-client-hints",
-            "count-chrome-ua-no-alpn",
+            "block-chrome-ua-no-alpn",
           ]);
           // Fleet 2's second JA4 variant (no ALPN), which the exact-JA4 block misses.
           expect(
             hits({ ja4: "t13d131100_f57a46bbacb6_f50d94e863eb", headers: { "user-agent": chrome158, "sec-ch-ua": "x" } }),
-          ).toEqual(["count-chrome-ua-no-alpn"]);
+          ).toEqual(["block-chrome-ua-no-alpn"]);
           // Real Chrome (h2 ALPN), with or without hints: untouched by this rule.
           expect(
             hits({ ja4: chromeJa4, headers: { "user-agent": ua.chrome146, "sec-ch-ua": hints146 } }),
@@ -2345,6 +2346,16 @@ describe("EdgeStack", () => {
                 "user-agent": ua.chrome146,
                 "sec-ch-ua": hints146,
                 "sec-fetch-mode": "navigate",
+              },
+            }),
+          ).toEqual([]);
+          // The institution's link checker is left out.
+          expect(
+            hits({
+              ja4: noAlpnJa4,
+              headers: {
+                "user-agent": `${ua.chrome146} LinkCheck by Siteimprove.com`,
+                "sec-ch-ua": "x",
               },
             }),
           ).toEqual([]);

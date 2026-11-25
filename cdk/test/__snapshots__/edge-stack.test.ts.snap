@@ -2003,9 +2003,14 @@ a{color:var(--slate)}
           },
           {
             "Action": {
-              "Count": {},
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "inconsistentClient",
+                  "ResponseCode": 403,
+                },
+              },
             },
-            "Name": "count-chrome-ua-no-alpn",
+            "Name": "block-chrome-ua-no-alpn",
             "Priority": 8,
             "Statement": {
               "AndStatement": {
@@ -2058,6 +2063,27 @@ a{color:var(--slate)}
                             },
                           },
                           "Size": 0,
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "SingleHeader": {
+                              "Name": "user-agent",
+                            },
+                          },
+                          "PositionalConstraint": "CONTAINS",
+                          "SearchString": "Siteimprove",
                           "TextTransformations": [
                             {
                               "Priority": 0,
@@ -2125,7 +2151,7 @@ a{color:var(--slate)}
             },
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
-              "MetricName": "sps-edge-prod-count-chrome-ua-no-alpn",
+              "MetricName": "sps-edge-prod-block-chrome-ua-no-alpn",
               "SampledRequestsEnabled": true,
             },
           },
@@ -5002,9 +5028,14 @@ a{color:var(--slate)}
           },
           {
             "Action": {
-              "Count": {},
+              "Block": {
+                "CustomResponse": {
+                  "CustomResponseBodyKey": "inconsistentClient",
+                  "ResponseCode": 403,
+                },
+              },
             },
-            "Name": "count-chrome-ua-no-alpn",
+            "Name": "block-chrome-ua-no-alpn",
             "Priority": 8,
             "Statement": {
               "AndStatement": {
@@ -5057,6 +5088,27 @@ a{color:var(--slate)}
                             },
                           },
                           "Size": 0,
+                          "TextTransformations": [
+                            {
+                              "Priority": 0,
+                              "Type": "NONE",
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    "NotStatement": {
+                      "Statement": {
+                        "ByteMatchStatement": {
+                          "FieldToMatch": {
+                            "SingleHeader": {
+                              "Name": "user-agent",
+                            },
+                          },
+                          "PositionalConstraint": "CONTAINS",
+                          "SearchString": "Siteimprove",
                           "TextTransformations": [
                             {
                               "Priority": 0,
@@ -5124,7 +5176,7 @@ a{color:var(--slate)}
             },
             "VisibilityConfig": {
               "CloudWatchMetricsEnabled": true,
-              "MetricName": "sps-edge-staging-count-chrome-ua-no-alpn",
+              "MetricName": "sps-edge-staging-block-chrome-ua-no-alpn",
               "SampledRequestsEnabled": true,
             },
           },
