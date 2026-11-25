@@ -53,7 +53,7 @@ describe("shape", () => {
   });
 
   it("builds a PubMed document", () => {
-    expect(pubmedDoc(31816111, "guideline", { title: "Hepatitis C Guidance.", pubdate: "2020 Feb" })).toEqual({
+    expect(pubmedDoc(31816111, "guideline", { title: "Hepatitis C Guidance.", pubdate: "2020 Feb" })).toMatchObject({
       source: "pubmed",
       externalId: "31816111",
       title: "Hepatitis C Guidance.",
@@ -62,6 +62,40 @@ describe("shape", () => {
       level: "guideline",
       issuingBody: null,
       dedupKey: "hepatitis c guidance|2020",
+    });
+  });
+
+  it("keeps the fields a full citation needs", () => {
+    const doc = pubmedDoc(31816111, "guideline", {
+      title: "Hepatitis C Guidance.",
+      pubdate: "2020 Feb",
+      authors: [{ name: "Ghany MG" }, { name: "Morgan TR" }, { name: "AASLD-IDSA Hepatitis C Guidance Panel" }],
+      source: "Hepatology",
+      fulljournalname: "Hepatology (Baltimore, Md.)",
+      volume: "71",
+      issue: "2",
+      pages: "686-721",
+      articleids: [
+        { idtype: "pubmed", value: "31816111" },
+        { idtype: "doi", value: "10.1002/hep.31060" },
+      ],
+    });
+    expect(doc).toMatchObject({
+      authors: "Ghany MG, Morgan TR, AASLD-IDSA Hepatitis C Guidance Panel",
+      journal: "Hepatology (Baltimore, Md.)",
+      journalAbbrev: "Hepatology",
+      volume: "71",
+      issue: "2",
+      pages: "686-721",
+      doi: "10.1002/hep.31060",
+      publisher: null,
+    });
+    // A record with none of them stores NULLs, not empty strings.
+    expect(pubmedDoc(1, "review", { title: "T", volume: "", authors: [] })).toMatchObject({
+      authors: null,
+      journalAbbrev: null,
+      volume: null,
+      doi: null,
     });
   });
 
@@ -79,6 +113,9 @@ describe("shape", () => {
       url: "https://www.ncbi.nlm.nih.gov/books/NBK442272/",
       level: "authority",
       issuingBody: "WHO",
+      publisher: "Geneva: World Health Organization; 2017 Feb.",
+      authors: null,
+      doi: null,
     });
   });
 

@@ -40,7 +40,15 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { withEtlRun } from "@/lib/etl-run";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { bookshelfCiters, esummary, harvestPmids } from "./ncbi";
-import { authorityBodies, bookshelfDoc, pubmedDoc, pubmedLevel, type CitingDoc } from "./shape";
+import {
+  authorityBodies,
+  bookshelfDoc,
+  CITATION_FIELDS,
+  pubmedDoc,
+  pubmedLevel,
+  type CitingDoc,
+  type PubmedSummary,
+} from "./shape";
 
 /** PubMed publication types behind each level. */
 const TYPE_TERMS = {
@@ -80,6 +88,23 @@ async function saveDocs(source: CitingDoc["source"], docs: CitingDoc[]): Promise
     select: { id: true, externalId: true },
   });
   return new Map(rows.map((r) => [r.externalId, r.id]));
+}
+
+/**
+ * Fill the citation fields on rows saved before those fields existed. Only the
+ * citation fields are written: level, title and the dedup key stay as they are.
+ */
+async function backfillCitations(docs: CitingDoc[]): Promise<void> {
+  for (const batch of chunks(docs, 100)) {
+    await db.write.$transaction(
+      batch.map((d) =>
+        db.write.citingDocument.update({
+          where: { source_externalId: { source: d.source, externalId: d.externalId } },
+          data: Object.fromEntries(CITATION_FIELDS.map((f) => [f, d[f]])),
+        }),
+      ),
+    );
+  }
 }
 
 async function saveLinks(links: Array<{ pmid: string; citingDocumentId: number }>): Promise<number> {
@@ -140,27 +165,34 @@ async function pubmedPass(pmids: string[], partial: boolean): Promise<number> {
     (
       await db.write.citingDocument.findMany({
         where: { source: "pubmed" },
-        select: { externalId: true, level: true },
+        select: { externalId: true, level: true, journalAbbrev: true },
       })
-    ).map((d) => [d.externalId, d.level]),
+    ).map((d) => [d.externalId, d]),
   );
   const citing = [...new Set(links.map((l) => l[1]))];
   const fresh = citing.filter((p) => !existing.has(String(p)));
-  console.log(`${citing.length} distinct citing documents, ${fresh.length} new.`);
+  // Rows saved before the citation fields existed. Every PubMed record has a
+  // journal abbreviation, so a NULL one means the row was never filled.
+  const unfilled = new Set(citing.filter((p) => existing.get(String(p))?.journalAbbrev === null));
+  console.log(
+    `${citing.length} distinct citing documents, ${fresh.length} new, ${unfilled.size} missing citation fields.`,
+  );
 
   const docs: CitingDoc[] = [];
-  for (const batch of chunks(fresh, SUMMARY_BATCH)) {
+  const refill: CitingDoc[] = [];
+  for (const batch of chunks([...fresh, ...unfilled], SUMMARY_BATCH)) {
     const summaries = await esummary("pubmed", batch);
     for (const p of batch) {
       const s = summaries.get(String(p));
-      if (s) docs.push(pubmedDoc(p, pubmedLevel(p, sets)!, s as { title?: string; pubdate?: string }));
+      if (s) (unfilled.has(p) ? refill : docs).push(pubmedDoc(p, pubmedLevel(p, sets)!, s as PubmedSummary));
     }
   }
+  await backfillCitations(refill);
 
   // A paper indexed as a review can later be typed as a guideline.
   for (const level of ["guideline", "consensus", "review"] as const) {
     const retyped = citing
-      .filter((p) => pubmedLevel(p, sets) === level && existing.has(String(p)) && existing.get(String(p)) !== level)
+      .filter((p) => pubmedLevel(p, sets) === level && existing.has(String(p)) && existing.get(String(p))!.level !== level)
       .map(String);
     for (const batch of chunks(retyped, INSERT_BATCH)) {
       await db.write.citingDocument.updateMany({
@@ -214,6 +246,11 @@ async function bookshelfPass(pmids: string[], budgetMin: number): Promise<number
     }
     if (docs.size > 0) {
       const ids = await saveDocs("bookshelf", [...docs.values()]);
+      const unfilled = await db.write.citingDocument.findMany({
+        where: { source: "bookshelf", externalId: { in: [...docs.keys()] }, publisher: null },
+        select: { externalId: true },
+      });
+      await backfillCitations(unfilled.map((r) => docs.get(r.externalId)!));
       added += await saveLinks(
         [...pairs].map((p) => {
           const [pmid, accession] = p.split("|");

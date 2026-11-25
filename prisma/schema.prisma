@@ -872,6 +872,17 @@ model CitingDocument {
   /// Health authority that issued it (lib/citations/issuing-bodies.ts); NULL for
   /// PubMed-indexed documents.
   issuingBody String? @map("issuing_body") @db.VarChar(64)
+  /// Citation fields, so a citing document can be printed as a full reference.
+  /// PubMed documents: every author, "Ghany MG, Morgan TR". Bookshelf: NULL.
+  authors       String? @db.Text
+  journal       String? @db.VarChar(512)
+  journalAbbrev String? @map("journal_abbrev") @db.VarChar(200)
+  volume        String? @db.VarChar(64)
+  issue         String? @db.VarChar(128)
+  pages         String? @db.VarChar(128)
+  doi           String? @db.VarChar(255)
+  /// Bookshelf only: the publication statement, "Geneva: World Health Organization; 2017 Feb."
+  publisher     String? @db.VarChar(512)
   /// Normalized title + year. The same guideline printed in several journals
   /// shares a key, and counts once.
   dedupKey    String  @map("dedup_key") @db.VarChar(191)
