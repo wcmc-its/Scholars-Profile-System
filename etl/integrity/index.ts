@@ -151,6 +151,9 @@ export function staleSources(
 // 0 on most runs (which the sampler skips). Prod 2026-11-24: 194, then 1, which
 // failed this guard. SearchReconcile returns the same kind of count. A replay that
 // fails throws on its own.
+// PolicyCitations (etl/policy-citations) only adds, and returns citation links ADDED.
+// Staging 2026-11-25: the 390,313-link backfill, then 7, which failed this guard. Its
+// own assertSourceVolume and an empty-read check grade the PubMed links it reads.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
@@ -161,6 +164,7 @@ export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "FundableWork",
   "CdnReconcile",
   "SearchReconcile",
+  "PolicyCitations",
 ]);
 
 /**
