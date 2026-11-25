@@ -77,6 +77,7 @@ export const REPORT_KEYS = [
   "21",
   "22",
   "23",
+  "24",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -273,6 +274,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Vice Chairs",
     summary:
       "Vice Chair roles across all departments, with each title as the department publishes it. Filter by area, department or hospital site.",
+    descriptionHtml: null,
+  },
+  "24": {
+    slug: "policy-citations",
+    name: "Guideline and policy citations",
+    summary:
+      "Publications cited by health authorities (WHO, NICE, CDC, AHRQ, National Academies), clinical guidelines, consensus statements and systematic reviews, by publication or by person. Open to every unit administrator, for the units they administer.",
     descriptionHtml: null,
   },
 };

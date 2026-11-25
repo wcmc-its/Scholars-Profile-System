@@ -2161,6 +2161,12 @@ model Publication {
   authorityBodies       Json?     @map("authority_bodies")
   guidelineCount        Int       @default(0) @map("guideline_count")
   reviewCount           Int       @default(0) @map("review_count")
+  /// The other two levels and the newest citing document's year, kept so the
+  /// /edit report 24 (`lib/edit/policy-citations-report.ts`) can rank every
+  /// cited publication without aggregating the link table on each page load.
+  authorityCount        Int       @default(0) @map("authority_count")
+  consensusCount        Int       @default(0) @map("consensus_count")
+  latestCitingYear      Int?      @map("latest_citing_year")
   /// When `etl:policy-citations` last asked NCBI Bookshelf which books cite this
   /// paper. Drives the rolling pass (never-checked first, then oldest).
   bookshelfCheckedAt    DateTime? @map("bookshelf_checked_at")
@@ -2187,6 +2193,9 @@ model Publication {
   @@index([year])
   @@index([dateAddedToEntrez])
   @@index([topTopicId])
+  /// Covers report 24's read of the policy rollups (the cited publications are
+  /// a small share of a wide table).
+  @@index([authorityCount, guidelineCount, consensusCount, reviewCount, latestCitingYear], map: "publication_policy_rollup_idx")
   @@map("publication")
 }
 

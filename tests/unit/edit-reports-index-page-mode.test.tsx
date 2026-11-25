@@ -77,6 +77,10 @@ vi.mock("@/lib/edit/report-access", () => ({
 vi.mock("@/lib/edit/article-count-report", () => ({
   canViewArticleCountReport: vi.fn().mockResolvedValue(false),
 }));
+vi.mock("@/lib/edit/policy-citations-report", () => ({
+  canViewPolicyCitationsReport: vi.fn().mockResolvedValue(false),
+  POLICY_CITATIONS_ACCESS_RULE: "",
+}));
 vi.mock("@/lib/db", () => ({
   db: { read: { reportMeta: { findMany: vi.fn().mockResolvedValue([]) } }, write: {} },
 }));

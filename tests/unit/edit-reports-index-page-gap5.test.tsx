@@ -103,6 +103,12 @@ vi.mock("@/lib/edit/report-access", () => {
 // Report 8 (Article counts) rides the administrator gate — default: denied,
 // so the pinned unit lists below stay exactly the program-row cases.
 vi.mock("@/lib/edit/article-count-report", () => ({ canViewArticleCountReport: mockCanViewArticleCount }));
+// Report 24 (Guideline and policy citations) rides the same gate with its own
+// test — denied here, so the pinned lists stay as they were.
+vi.mock("@/lib/edit/policy-citations-report", () => ({
+  canViewPolicyCitationsReport: vi.fn().mockResolvedValue(false),
+  POLICY_CITATIONS_ACCESS_RULE: "",
+}));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
 vi.mock("@/lib/db", () => ({

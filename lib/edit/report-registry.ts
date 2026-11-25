@@ -99,6 +99,7 @@ import { renderNihFundedPubsReport } from "@/components/edit/reports/nih-funded-
 import { renderOptimizeMembershipReport } from "@/components/edit/reports/optimize-membership-body";
 import { renderPublicationsReport } from "@/components/edit/reports/publications-body";
 import { renderPubCitationReport } from "@/components/edit/reports/pub-citation-body";
+import { renderPolicyCitationsReport } from "@/components/edit/reports/policy-citations-body";
 import { renderPubRelevanceReport } from "@/components/edit/reports/pub-relevance-body";
 import { renderSharedResourceUsageReport } from "@/components/edit/reports/shared-resource-usage-body";
 import { renderFkAwardsReport } from "@/components/edit/reports/fk-awards-body";
@@ -113,6 +114,7 @@ import {
   HIGH_IMPACT_PUBS_REPORT,
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
+import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
 /** The page's `searchParams`, awaited — Next's shape (a repeated key is an array). */
@@ -186,6 +188,11 @@ export type ReportDef =
       /** Any unit administrator (`canViewArticleCountReport`); a denied actor
        *  gets `notFound()`, like the person gate. */
       gate: "admin";
+      /** A narrower test than `canViewArticleCountReport` (report 24: only
+       *  someone with a unit to see, and no `article-count` grant rows), with
+       *  the access badge's rule line. Set together. */
+      canView?: (session: EditSession) => Promise<boolean>;
+      accessRule?: string;
       render: (props: AdminReportProps) => Promise<ReportRender>;
     }
   | {
@@ -251,6 +258,15 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
   "22": { n: "22", gate: "superuser", render: renderIdentityLinksReport },
   // Vice Chair roles across departments (`unit_leadership_role`). Superusers only.
   "23": { n: "23", gate: "superuser", render: renderViceChairsReport },
+  // Guideline and policy citations (etl/policy-citations). Unit administrators,
+  // each narrowed to their own units; superusers and comms stewards see all.
+  "24": {
+    n: "24",
+    gate: "admin",
+    canView: canViewPolicyCitationsReport,
+    accessRule: POLICY_CITATIONS_ACCESS_RULE,
+    render: renderPolicyCitationsReport,
+  },
 };
 
 /** The unit kinds a unit-gated report serves — the `allowedKinds` the page
