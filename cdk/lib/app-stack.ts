@@ -2067,11 +2067,11 @@ export class AppStack extends Stack {
         // Internal program roster (trainees and mentors, some of them minors).
         //   EDIT_PROGRAM_ROSTER -- the page, its API and the
         //     `program_roster_editor` role; off = 404 and no directory check.
-        //     OFF in both envs until the ED group below exists (a missing group
-        //     trips the role-check alarm) and the roster is signed off.
+        //     On in staging since the ED group below was created (2026-11-24);
+        //     prod stays off until the roster is signed off.
         //   SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN -- the ED group.
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        EDIT_PROGRAM_ROSTER: "off",
+        EDIT_PROGRAM_ROSTER: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
