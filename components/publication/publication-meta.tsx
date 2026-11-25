@@ -54,9 +54,13 @@ import { pubSource } from "@/lib/publication-source";
  * abstract. The border sets it apart, so it takes no middot. Only the search
  * and topic rows pass it; unit cards have no meta row and show it on their
  * journal line instead.
+ *
+ * `reviewCount` — systematic reviews citing the paper, as plain text after the
+ * citation count ("in 6 systematic reviews"). Only the profile row passes it.
  */
 export function PublicationMeta({
   citationCount,
+  reviewCount,
   impactScore,
   impactJustification,
   conceptImpactScore,
@@ -72,6 +76,7 @@ export function PublicationMeta({
   className,
 }: {
   citationCount?: number | null;
+  reviewCount?: number | null;
   impactScore?: number | null;
   impactJustification?: string | null;
   conceptImpactScore?: number | null;
@@ -198,6 +203,14 @@ export function PublicationMeta({
     blocks.push(
       <span key="cite" className="font-medium text-zinc-700 dark:text-zinc-300">
         {citationCount.toLocaleString()} citations
+      </span>,
+    );
+  }
+
+  if (reviewCount && reviewCount > 0) {
+    blocks.push(
+      <span key="reviews">
+        in {reviewCount.toLocaleString()} systematic review{reviewCount === 1 ? "" : "s"}
       </span>,
     );
   }

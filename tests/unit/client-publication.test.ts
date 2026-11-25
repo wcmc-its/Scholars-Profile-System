@@ -92,6 +92,15 @@ const roundTrip = (pubs: ProfilePublication[]) =>
   hydrateClientPublications(toClientPublicationWire(pubs));
 
 describe("client publication wire (#2213)", () => {
+  it("carries the guideline and policy rollup only on rows that have one", () => {
+    const policy = { authority: [{ body: "WHO", count: 4 }], guidelines: 9, reviews: 6 };
+    const wire = toClientPublicationWire([fullPub({ policy }), fullPub({ pmid: "2" })]);
+    expect(wire.pubs[1]).not.toHaveProperty("pc");
+    const [withPolicy, without] = hydrateClientPublications(wire);
+    expect(withPolicy.policy).toEqual(policy);
+    expect(without).not.toHaveProperty("policy");
+  });
+
   it("round-trips every client-read field", () => {
     const pubs = [
       fullPub(),

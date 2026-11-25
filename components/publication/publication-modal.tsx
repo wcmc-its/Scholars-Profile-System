@@ -12,13 +12,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { ArrowUpRight, Download, HelpCircle } from "lucide-react";
+import { ArrowUpRight, Download, HelpCircle, Landmark } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { translationalStageDisplay } from "@/lib/translational-stage";
+import type { PolicyCitingDoc } from "@/lib/api/publication-detail";
 import type {
   PublicationDetailCore,
   PublicationDetailMethodFamily,
@@ -48,13 +49,16 @@ import { profilePath } from "@/lib/profile-url";
  * be client components.
  */
 
-type ModalState = {
-  pmid: string;
+type OpenOpts = {
   currentTopicSlug?: string;
+  /** Open scrolled to this section (the row's guideline badges pass "policy"). */
+  section?: SectionKey;
 };
 
+type ModalState = { pmid: string } & OpenOpts;
+
 type Ctx = {
-  open: (pmid: string, opts?: { currentTopicSlug?: string }) => void;
+  open: (pmid: string, opts?: OpenOpts) => void;
   close: () => void;
   state: ModalState | null;
 };
@@ -73,12 +77,12 @@ export function PublicationModalProvider({ children }: { children: ReactNode }) 
   const [state, setState] = useState<ModalState | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
-  const open = useCallback((pmid: string, opts?: { currentTopicSlug?: string }) => {
+  const open = useCallback((pmid: string, opts?: OpenOpts) => {
     // Capture the element that opened the modal so we can restore focus
     // on close per SPEC §4.4 (a11y restore-focus-to-trigger).
     triggerRef.current =
       typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
-    setState({ pmid, currentTopicSlug: opts?.currentTopicSlug });
+    setState({ pmid, currentTopicSlug: opts?.currentTopicSlug, section: opts?.section });
   }, []);
 
   const close = useCallback(() => {
@@ -100,6 +104,7 @@ export function PublicationModalProvider({ children }: { children: ReactNode }) 
           key={state.pmid}
           pmid={state.pmid}
           currentTopicSlug={state.currentTopicSlug}
+          initialSection={state.section}
           onClose={close}
         />
       )}
@@ -110,10 +115,12 @@ export function PublicationModalProvider({ children }: { children: ReactNode }) 
 function PublicationModal({
   pmid,
   currentTopicSlug,
+  initialSection,
   onClose,
 }: {
   pmid: string;
   currentTopicSlug?: string;
+  initialSection?: SectionKey;
   onClose: () => void;
 }) {
   const [data, setData] = useState<PublicationDetailPayload | null>(null);
@@ -233,6 +240,7 @@ function PublicationModal({
           <ModalContent
             payload={data}
             currentTopicSlug={currentTopicSlug}
+            initialSection={initialSection}
             onClose={onClose}
             titleId={titleId}
           />
@@ -303,18 +311,20 @@ function ModalStatus({
   );
 }
 
-type SectionKey = "summary" | "areas" | "terms" | "cited";
+type SectionKey = "summary" | "areas" | "terms" | "policy" | "cited";
 
 type SectionTab = { key: SectionKey; label: string; count: string | null };
 
 function ModalContent({
   payload,
   currentTopicSlug,
+  initialSection,
   onClose,
   titleId,
 }: {
   payload: PublicationDetailPayload;
   currentTopicSlug: string | undefined;
+  initialSection?: SectionKey;
   onClose: () => void;
   titleId: string;
 }) {
@@ -336,6 +346,13 @@ function ModalContent({
   }
   if (methodFamilies.length > 0 || cores.length > 0 || pub.meshTerms.length > 0) {
     tabs.push({ key: "terms", label: "Methods & MeSH", count: null });
+  }
+  const policy = payload.policyCitations;
+  if (policy) {
+    // The tab counts guidelines and policy documents; reviews are listed but
+    // would swamp the number.
+    const n = policy.docs.filter((d) => d.level !== "review").length;
+    tabs.push({ key: "policy", label: "Guidelines and policy", count: n > 0 ? String(n) : null });
   }
   tabs.push({
     key: "cited",
@@ -420,6 +437,20 @@ function ModalContent({
     }
     if (current !== active) setActive(current);
   };
+
+  // Opened from a row badge: land on that section. Instant, not smooth, so the
+  // modal does not open mid-scroll.
+  useEffect(() => {
+    const body = bodyRef.current;
+    const target = initialSection
+      ? body?.querySelector<HTMLElement>(`[data-sec="${initialSection}"]`)
+      : null;
+    if (!body || !target || !initialSection) return;
+    body.scrollTop = Math.max(0, target.offsetTop - 4);
+    pinnedTopRef.current = body.scrollTop;
+    setActive(initialSection);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
+  }, []);
 
   const showTabs = tabs.length > 1;
 
@@ -584,6 +615,7 @@ function ModalContent({
           meshTerms={pub.meshTerms}
           pmid={pub.pmid}
         />
+        {policy ? <PolicySection docs={policy.docs} reviewTotal={policy.reviewTotal} /> : null}
         {/* #3259 — citing pubs are PubMed-keyed; external pubs have no list to show. */}
         {pubSource(pub.pmid).isPubmed ? (
           <CitingPubsSection
@@ -1181,6 +1213,136 @@ function IdentifiersLine({
         </a>
       ) : null}
     </div>
+  );
+}
+
+/** "Ghany MG, Morgan TR, et al. Hepatology. 2020;71(2):686-721." */
+function policyDocCitation(d: PolicyCitingDoc): string {
+  if (d.publisher) return d.publisher;
+  const locator = [d.volume, d.issue ? `(${d.issue})` : "", d.pages ? `:${d.pages}` : ""].join("");
+  const dated = [d.year, locator].filter(Boolean).join(";");
+  return [d.authors, d.journal, dated]
+    .filter(Boolean)
+    .map((part) => `${String(part).replace(/\.$/, "")}.`)
+    .join(" ");
+}
+
+function PolicyDoc({ doc }: { doc: PolicyCitingDoc }) {
+  const citation = policyDocCitation(doc);
+  return (
+    <li className="flex flex-col gap-0.5 text-sm leading-[1.45]">
+      {doc.level === "authority" ? (
+        <div>
+          <span className="font-semibold">{doc.issuingBody}</span>
+          {doc.year ? ` · ${doc.year}` : ""}
+        </div>
+      ) : null}
+      <a
+        href={doc.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        {...pubTitleProps(sanitizePubTitle(doc.title), `${ACCENT_LINK} hover:underline`)}
+      />
+      <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-[13px]">
+        {citation ? <span>{citation}</span> : null}
+        {doc.pmid ? <span>PMID {doc.pmid}</span> : null}
+        {doc.bookshelfId ? <span>NCBI Bookshelf {doc.bookshelfId}</span> : null}
+        {doc.doi ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <a
+              href={`https://doi.org/${doc.doi}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`underline decoration-dotted underline-offset-2 ${HOVER_ACCENT}`}
+            >
+              DOI {doc.doi}
+            </a>
+          </>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+const POLICY_GROUPS = [
+  ["guideline", "Clinical practice guidelines"],
+  ["consensus", "Consensus statements"],
+] as const;
+
+function PolicySection({ docs, reviewTotal }: { docs: PolicyCitingDoc[]; reviewTotal: number }) {
+  const [showReviews, setShowReviews] = useState(false);
+  const authority = docs.filter((d) => d.level === "authority");
+  const reviews = docs.filter((d) => d.level === "review");
+  const count = (n: number) => <span className="text-muted-foreground font-normal"> · {n}</span>;
+  return (
+    <section data-sec="policy" className="flex flex-col gap-3.5 pt-7">
+      <SectionHeading>Guidelines and policy</SectionHeading>
+      {authority.length > 0 ? (
+        <div className="flex flex-col gap-2.5 rounded-[10px] border border-[#d5e0ec] bg-[#ecf1f6] p-4 dark:border-zinc-700 dark:bg-zinc-800">
+          <div className="flex items-center gap-[7px] text-sm font-semibold text-[#274158] dark:text-zinc-100">
+            <Landmark className="size-[15px]" strokeWidth={2} aria-hidden="true" />
+            Health authorities and national academies
+            <span className="font-normal"> · {authority.length}</span>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {authority.map((d) => (
+              <PolicyDoc key={d.id} doc={d} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {POLICY_GROUPS.map(([level, label]) => {
+        const group = docs.filter((d) => d.level === level);
+        return group.length > 0 ? (
+          <div key={level} className="border-apollo-border flex flex-col gap-2.5 rounded-[10px] border p-4">
+            <div className="text-sm font-semibold">
+              {label}
+              {count(group.length)}
+            </div>
+            <ul className="flex flex-col gap-2">
+              {group.map((d) => (
+                <PolicyDoc key={d.id} doc={d} />
+              ))}
+            </ul>
+          </div>
+        ) : null;
+      })}
+      {reviews.length > 0 ? (
+        <div className="border-apollo-border flex flex-col rounded-[10px] border px-4 py-1.5">
+          <div className="flex items-center justify-between text-sm">
+            <div className="font-semibold">
+              Systematic reviews
+              {count(reviewTotal)}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowReviews((s) => !s)}
+              aria-expanded={showReviews}
+              className={`min-h-11 px-1 text-sm ${ACCENT_LINK}`}
+            >
+              {showReviews ? "Hide" : "Show"}
+            </button>
+          </div>
+          {showReviews ? (
+            <ul className="flex flex-col gap-2 pb-3">
+              {reviews.map((d) => (
+                <PolicyDoc key={d.id} doc={d} />
+              ))}
+              {reviewTotal > reviews.length ? (
+                <li className="text-muted-foreground text-[13px]">
+                  The {reviews.length} most recent of {reviewTotal.toLocaleString()} are listed.
+                </li>
+              ) : null}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="text-muted-foreground text-xs leading-normal">
+        Sources: PubMed, NIH iCite and NCBI Bookshelf. Covers documents those sources index, so
+        some citing guidelines and reports are not listed.
+      </p>
+    </section>
   );
 }
 

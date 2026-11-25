@@ -6,6 +6,7 @@
  * profile page server component imports this directly for ISR; the equivalent
  * external API endpoint would call the same function.
  */
+import { policyCitationBadgesOn, toPolicyRollup, type PolicyRollup } from "@/lib/citations/policy-rollup";
 import { loadProfileViceChairTitles } from "@/lib/api/unit-leadership-roles";
 import { isUnitLeadershipEnabled } from "@/lib/edit/unit-leadership-flags";
 import { alsoIn, type AlsoInLink } from "@/lib/edit/clip-repeats";
@@ -403,6 +404,9 @@ export type ProfilePublication = ScoredPublication<{
    *  despite rendering collapsed. The meta row fetches the gated text from
    *  `/api/publications/[pmid]` on first open (`lazyAbstract`). */
   hasAbstract: boolean;
+  /** Guideline and policy citations, for the row badges. Absent when
+   *  `POLICY_CITATION_BADGES` is off or nothing of the kind cites the paper. */
+  policy?: PolicyRollup;
   /** Active WCM scholars (incl. the profile owner) who are confirmed authors
    *  on this publication. Chip-row shape matching the topic/search surfaces. */
   wcmAuthors: Array<{
@@ -1204,6 +1208,9 @@ export const getScholarFullProfileBySlug = cache(
               year: true,
               publicationType: true,
               citationCount: true,
+              authorityBodies: true,
+              guidelineCount: true,
+              reviewCount: true,
               dateAddedToEntrez: true,
               doi: true,
               pmcid: true,
@@ -1608,6 +1615,7 @@ export const getScholarFullProfileBySlug = cache(
         a.publication.impactScore !== null && a.publication.impactScore !== undefined
           ? Number(a.publication.impactScore)
           : 0;
+      const policy = policyCitationBadgesOn() ? toPolicyRollup(a.publication) : null;
       return {
         pmid: a.publication.pmid,
         title: a.publication.title,
@@ -1631,6 +1639,7 @@ export const getScholarFullProfileBySlug = cache(
         isConfirmed: a.isConfirmed,
         meshTerms: normalizeMeshTerms(a.publication.meshTerms),
         hasAbstract: pmidsWithAbstract.has(a.publication.pmid),
+        ...(policy ? { policy } : {}),
         // All confirmed WCM authors on this publication, including the profile
         // owner. Same chip-row shape as topic/search; the page renders chips and
         // omits the plain authorsString to avoid duplicating WCM author names.
