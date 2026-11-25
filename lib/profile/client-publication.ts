@@ -1,4 +1,5 @@
 import type { ProfilePublication } from "@/lib/api/profile";
+import type { PolicyRollup } from "@/lib/citations/policy-rollup";
 
 /**
  * #2213 — the profile publication list as the client sees it.
@@ -50,6 +51,8 @@ export type ProfileClientPublication = {
   meshUis: string[];
   hasAbstract: boolean;
   wcmAuthors: ProfileClientWcmAuthor[];
+  /** Guideline and policy citations, for the row badges; absent when none. */
+  policy?: PolicyRollup;
 };
 
 /** The fields `<PublicationRow>` reads. The profile's Selected highlights pass a
@@ -68,6 +71,7 @@ export type ProfileRowPublication = Pick<
   | "authorship"
   | "hasAbstract"
   | "wcmAuthors"
+  | "policy"
 >;
 
 /** One WCM author identity, interned: the profile owner sits on every row and
@@ -110,6 +114,8 @@ type WirePub = {
   /** WCM authors in chip order: (personIndex << 2) | (isLast << 1) | isFirst —
    *  omitted when empty */
   w?: number[];
+  /** policy — omitted when nothing of the kind cites the paper (most rows) */
+  pc?: PolicyRollup;
 };
 
 export type ClientPublicationWire = {
@@ -181,6 +187,7 @@ export function toClientPublicationWire(
       m.push(intern(t.ui));
     }
     if (m.length > 0) w.m = m;
+    if (p.policy) w.pc = p.policy;
     if (p.wcmAuthors.length > 0) {
       w.w = p.wcmAuthors.map(
         (a) =>
@@ -239,6 +246,7 @@ export function hydrateClientPublications(
           roleCategory: person.roleCategory,
         };
       }),
+      ...(w.pc ? { policy: w.pc } : {}),
     };
   });
 }

@@ -8,6 +8,8 @@ import {
   AuthorPositionBadge,
   deriveAuthorPositionRole,
 } from "@/components/profile/author-position-badge";
+import { Landmark } from "lucide-react";
+import { authorityBadgeLabel, plural } from "@/lib/citations/policy-rollup";
 import type { ProfileRowPublication } from "@/lib/profile/client-publication";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -69,6 +71,9 @@ export function PublicationRow({
   const typeLabel = publicationTypeLabel(pub.publicationType);
   const titleHtml = sanitizePubTitle(pub.title);
   const { open } = usePublicationModal();
+  const policy = pub.policy;
+  const openPolicy = () => open(pub.pmid, { section: "policy" });
+  const badge = "inline-flex min-h-6 items-center gap-[5px] rounded-full border px-2.5 text-xs font-medium";
   return (
     <div>
       <div
@@ -104,8 +109,35 @@ export function PublicationRow({
         pmid={pub.pmid}
         currentProfileCwid={currentProfileCwid}
       />
+      {policy && (policy.authority.length > 0 || policy.guidelines > 0) ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {policy.authority.map((a) => (
+            <button
+              key={a.body}
+              type="button"
+              onClick={openPolicy}
+              aria-haspopup="dialog"
+              className={`${badge} border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white hover:opacity-90`}
+            >
+              <Landmark className="size-3" strokeWidth={2} aria-hidden="true" />
+              {authorityBadgeLabel(a.body, a.count)}
+            </button>
+          ))}
+          {policy.guidelines > 0 ? (
+            <button
+              type="button"
+              onClick={openPolicy}
+              aria-haspopup="dialog"
+              className={`${badge} border-[#d5e0ec] bg-[#ecf1f6] text-[#274158] hover:border-[var(--color-accent-slate)]`}
+            >
+              {plural(policy.guidelines, "clinical guideline", "clinical guidelines")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <PublicationMeta
         citationCount={pub.citationCount}
+        reviewCount={policy?.reviews}
         role={
           role || typeLabel ? (
             <span className="inline-flex flex-wrap items-center gap-1.5">

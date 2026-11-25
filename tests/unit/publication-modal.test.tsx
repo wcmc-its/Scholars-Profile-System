@@ -1216,6 +1216,79 @@ describe("PublicationModal — section tabs", { retry: 2 }, () => {
   });
 });
 
+describe("PublicationModal — Guidelines and policy section", { retry: 2 }, () => {
+  const doc = (over: Record<string, unknown>) => ({
+    id: 1,
+    level: "guideline",
+    title: "EASL guidelines on widgets",
+    year: 2023,
+    url: "https://pubmed.ncbi.nlm.nih.gov/111/",
+    issuingBody: null,
+    authors: "Ghany MG, Morgan TR, Lok AS, et al.",
+    journal: "J Hepatol",
+    volume: "79",
+    issue: "3",
+    pages: "768-828",
+    doi: "10.1/x",
+    publisher: null,
+    pmid: "111",
+    bookshelfId: null,
+    ...over,
+  });
+
+  it("is absent, tab and all, when the payload has no policy citations", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByText("Guidelines and policy")).toBeNull();
+  });
+
+  it("groups documents by level with full citations, reviews collapsed", async () => {
+    mockFetch(
+      makePayload({
+        policyCitations: {
+          reviewTotal: 1,
+          docs: [
+            doc({
+              id: 2,
+              level: "authority",
+              title: "WHO widget testing guidelines",
+              year: 2017,
+              issuingBody: "WHO",
+              authors: null,
+              journal: null,
+              volume: null,
+              issue: null,
+              pages: null,
+              doi: null,
+              publisher: "Geneva: World Health Organization; 2017 Feb.",
+              pmid: null,
+              bookshelfId: "NBK442272",
+            }),
+            doc({}),
+            doc({ id: 3, level: "review", title: "A review of widgets" }),
+          ],
+        },
+      } as Partial<PublicationDetailPayload>),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByText("WHO widget testing guidelines")).toBeDefined());
+    // Tab counts the authority document and the guideline, not the review.
+    expect(screen.getByRole("button", { name: "Guidelines and policy 2" })).toBeDefined();
+    expect(screen.getByText("Geneva: World Health Organization; 2017 Feb.")).toBeDefined();
+    expect(screen.getByText("NCBI Bookshelf NBK442272")).toBeDefined();
+    expect(
+      screen.getByText("Ghany MG, Morgan TR, Lok AS, et al. J Hepatol. 2023;79(3):768-828."),
+    ).toBeDefined();
+    expect(screen.getByText("PMID 111")).toBeDefined();
+    expect(screen.queryByText("A review of widgets")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(screen.getByText("A review of widgets")).toBeDefined();
+  });
+});
+
 describe("PublicationModal — error path", { retry: 2 }, () => {
   it("shows the error fallback when /api/publications/[pmid] errors", async () => {
     globalThis.fetch = vi.fn(async () => {

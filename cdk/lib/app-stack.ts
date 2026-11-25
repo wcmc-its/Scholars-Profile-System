@@ -2064,6 +2064,11 @@ export class AppStack extends Stack {
         RESEARCH_SECURITY_VIEWER_ENABLED: "on",
         SCHOLARS_RESEARCH_SECURITY_VIEWER_GROUP_CN:
           "ITS:Library:Scholars/research-security-viewer-role",
+        // POLICY_CITATION_BADGES -- guideline and policy citation badges on
+        // profile publication rows, and the "Guidelines and policy" section of
+        // the publication modal. Render-only, read from the rollup columns and
+        // tables the weekly `etl:policy-citations` step fills. Staging first.
+        POLICY_CITATION_BADGES: envConfig.envName === "staging" ? "on" : "off",
         // Internal program roster (trainees and mentors, some of them minors).
         //   EDIT_PROGRAM_ROSTER -- the page, its API and the
         //     `program_roster_editor` role; off = 404 and no directory check.
