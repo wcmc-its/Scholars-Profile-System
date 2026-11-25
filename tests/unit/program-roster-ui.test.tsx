@@ -148,12 +148,12 @@ describe("ProgramRoster", () => {
     expect(row.getAllByText("2021 to 2025").length).toBeGreaterThan(0);
   });
 
-  it("the download carries the filters, and is off above the cap with the reason", () => {
+  it("the download carries the program and year, never the search text, and is off above the cap with the reason", () => {
     const { unmount } = show(false);
     fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2026" } });
     fireEvent.change(screen.getByLabelText("Find a person or mentor"), { target: { value: " avery " } });
     expect(screen.getByRole("link", { name: "Download Excel" }).getAttribute("href")).toBe(
-      "/api/edit/program-roster/export?program=sum&year=2026&q=avery",
+      "/api/edit/program-roster/export?program=sum&year=2026",
     );
     unmount();
     render(<ProgramRoster programs={PROGRAMS} entries={ENTRIES} canEdit exportCap={3} />);
@@ -173,6 +173,7 @@ describe("ProgramRoster", () => {
       person: { cwid: "new001", name: "Casey Morrow" },
       year: "2026",
       mentors: [{ cwid: "men002", name: "Emery Stone" }],
+      researchProgram: "Cancer Biology",
       held,
     });
     const rows = [row("good line", null), row("bad line", "This CWID is not in the directory")];
@@ -199,7 +200,7 @@ describe("ProgramRoster", () => {
     const { unmount } = show();
     fireEvent.click(screen.getByRole("button", { name: "Paste a list" }));
     fireEvent.change(screen.getByLabelText("List to paste"), { target: { value: "good line" } });
-    const ready = { raw: "good line", person: { cwid: "new001", name: "Casey Morrow" }, year: "2026", mentors: [], held: null };
+    const ready = { raw: "good line", person: { cwid: "new001", name: "Casey Morrow" }, year: "2026", mentors: [], researchProgram: "", held: null };
     fetchMock.mockResolvedValue(reply(200, { ok: true, rows: [ready] }));
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
     const save = await screen.findByRole("button", { name: "Save 1 row" });

@@ -1,7 +1,8 @@
 /**
- * GET /api/edit/program-roster/export?program=<id>[&year=][&q=]: one program of
- * the internal roster as an `.xlsx` (People, Mentors, Criteria) under the
- * page's filters.
+ * GET /api/edit/program-roster/export?program=<id>[&year=]: one program of
+ * the internal roster as an `.xlsx` (People, Mentors, Criteria), all years or
+ * one. The page's search is left out on purpose: a trainee's name in a URL
+ * would be kept in access logs.
  *
  * Gate: `canViewProgramRoster`, the page's own, checked before anything is
  * read; 404 for anyone else. A list of people, so `SCHOLAR_EXPORT_CAP` applies:
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = request.nextUrl.searchParams;
   const year = sp.get("year");
   if (year && !/^\d{4}$/.test(year)) return editError(400, "invalid_year", "year");
-  const filter = { year: year ? Number(year) : null, query: (sp.get("q") ?? "").slice(0, 200) };
+  const filter = { year: year ? Number(year) : null, query: "" };
 
   const roster = await loadProgramRoster(db.read);
   const program = roster.programs.find((p) => p.id === sp.get("program"));

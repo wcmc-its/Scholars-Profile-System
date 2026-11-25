@@ -29,7 +29,7 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { directoryDisplayName } from "@/lib/edit/directory-names";
 import { MAX_PASTE_ROWS, parseEntryInput, parseProgramInput, type EntryInput } from "@/lib/edit/program-roster";
 import { canEditProgramRoster } from "@/lib/edit/program-roster-access";
-import { checkPaste, parsePaste } from "@/lib/edit/program-roster-paste";
+import { checkPaste, cwidsToLookUp, parsePaste } from "@/lib/edit/program-roster-paste";
 import { entryView, programView, type EntryRow } from "@/lib/edit/program-roster.server";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { fetchDirectoryPeopleByCwid, type DirectoryPerson } from "@/lib/sources/ldap";
@@ -264,7 +264,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await requireOpenProgram(db.write, programId);
 
       const inputs = lines.flatMap((l) => (l.input ? [l.input] : []));
-      const people = await directoryPeople([...new Set(inputs.flatMap((e) => [e.menteeCwid, ...e.mentorCwids]))]);
+      const people = await directoryPeople([...new Set(lines.flatMap(cwidsToLookUp))]);
       const listed = await db.write.rosterEntry.findMany({
         where: { programId, menteeCwid: { in: inputs.map((e) => e.menteeCwid) } },
         select: { menteeCwid: true, year: true },

@@ -125,7 +125,9 @@ export function mentorCounts(entries: readonly RosterEntryView[], f: RosterFilte
       // The name saved with the newest entry.
       const mentor = own[0].mentors.find((m) => m.cwid === cwid)!;
       const inYear = own.filter((e) => f.year === null || e.year === f.year);
-      if (inYear.length === 0 || !(hit(mentor) || inYear.some((e) => hit(e.mentee)))) return [];
+      // The same test as `filterEntries`, so every mentor here is on a listed entry.
+      const named = (e: RosterEntryView) => e.mentors.find((m) => m.cwid === cwid)!;
+      if (!inYear.some((e) => hit(named(e)) || hit(e.mentee))) return [];
       return [
         {
           mentor,
@@ -151,6 +153,7 @@ export type PasteRowView = {
   person: RosterPerson;
   year: string;
   mentors: RosterPerson[];
+  researchProgram: string;
   /** Why the line is held, or null when it is ready. */
   held: string | null;
 };

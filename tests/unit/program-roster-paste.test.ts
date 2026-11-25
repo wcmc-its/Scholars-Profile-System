@@ -43,8 +43,29 @@ describe("parsePaste", () => {
     ["Avery Quill\ttra001\t2026\ttra001", "The person is listed as their own mentor"],
     ["\ttra001\t2026\tmen001", "No name"],
     ["Avery Quill\ttra001\t2026\tmen001\tCB\textra", "Too many columns"],
+    ["Avery Quill, tra001, 2026, men001, men002", expect.stringMatching(/^men002 is in the research program column/)],
+    ["Avery Quill\ttra001\t2026\tmen001\tMEN002", expect.stringMatching(/^men002 is in the research program column/)],
+    ["CWID: Avery\tCWID: tra001\t2026\tmen001", "The second column is not a CWID"],
     ["Quill, Avery, tra001, 2026, men001", "The year is not valid"],
   ])("holds %j", (text, why) => expect(held(text)).toEqual([why]));
+});
+
+describe("parsePaste quoting", () => {
+  it("holds both halves of a cell with a line break", () => {
+    expect(held('Avery Quill\ttra001\t2026\tmen001\t"Cancer\nBiology"')).toEqual([
+      expect.stringMatching(/split across lines/),
+      expect.stringMatching(/split across lines/),
+    ]);
+  });
+
+  it("keeps a quoted comma inside its cell", () => {
+    const [l] = parsePaste('Avery Quill,tra001,2026,men001,"Cancer, Stem Cell"', 2026);
+    expect(l.input).toMatchObject({ mentorCwids: ["men001"], researchProgram: "Cancer, Stem Cell" });
+  });
+
+  it("a research program that is an ordinary word is not mistaken for a CWID", () => {
+    expect(held("Avery Quill\ttra001\t2026\tmen001\timmunology")).toEqual([null]);
+  });
 });
 
 describe("checkPaste", () => {
@@ -81,6 +102,13 @@ describe("nameAgrees", () => {
     ["Casey Morrow", "Cameron Morley", false],
     ["Bob Vale", "Robert Vale", false],
     ["A. Quill", "Avery Quill", false],
+    ["A. Quill", "A. Jordan Quill", false],
+    ["Minh Anh Do", "Minh Anh Pa", false],
+    ["Kim Lee Do", "Kim Lee", false],
+    ["Ji Hoon O", "Ji Hoon E", false],
+    ["Mary Ann S.", "Mary Ann", false],
+    ["Robert Vale Jr", "Robert Vale Sr", false],
+    ["Quill, Avery", "Avery Quill, MD, PhD", true],
     ["Quill", "Avery Quill", false],
     ["", "Avery Quill", false],
   ])("%j against %j: %s", (pasted, name, want) => expect(nameAgrees(pasted, person("x", name))).toBe(want));
@@ -120,6 +148,13 @@ describe("mentor counts", () => {
     expect(mentorCounts(ALL, { year: 2026, query: "" }).map((m) => [m.mentor.cwid, m.trainees])).toEqual([["m2", 3]]);
     expect(mentorCounts(ALL, { year: null, query: "T1" }).map((m) => [m.mentor.cwid, m.trainees])).toEqual([["m1", 2]]);
     expect(mentorCounts(ALL, { year: 2026, query: "t1" })).toEqual([]);
+  });
+
+  it("a mentor whose saved name changed is never listed without an entry that is", () => {
+    const renamed = [entry("a", "t1", 2024, ["m1"]), entry("b", "t2", 2026, ["m1"])];
+    const f = { year: 2024, query: "m1 2026" }; // the newer saved name only
+    expect(filterEntries(renamed, f)).toEqual([]);
+    expect(mentorCounts(renamed, f)).toEqual([]);
   });
 
   it("milestones at 5, 10 and 15", () => {

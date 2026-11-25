@@ -246,6 +246,13 @@ describe("paste", () => {
     expect(h.transaction).not.toHaveBeenCalled();
   });
 
+  it("looks up a mentor pasted one column over, so it is held and not saved as a research program", async () => {
+    const text = `Avery Quill\ttra001\t${YEAR}\tmen001\tmen002`;
+    const { rows } = (await (await post(paste("paste_check", text))).json()) as { rows: Array<{ held: string | null }> };
+    expect(rows[0].held).toMatch(/^men002 is in the research program column/);
+    expect(await result(paste("paste_save", text))).toEqual([409, "paste_changed"]);
+  });
+
   it("save writes every line in one transaction, each with its audit row and no names", async () => {
     const second = `Emery Stone\tmen002\t${YEAR}\tmen001`;
     const res = await post(paste("paste_save", `${GOOD}\n${second}`));

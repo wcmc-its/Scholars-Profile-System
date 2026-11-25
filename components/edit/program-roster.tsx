@@ -153,7 +153,9 @@ export function ProgramRoster({
   const filter = { year: year ? Number(year) : null, query };
   const shown = filterEntries(inProgram, filter);
   const mentors = view === "mentors" ? mentorCounts(inProgram, filter) : [];
-  const listed = peopleCount(shown);
+  // The download takes the year, not the search: no name goes into a URL.
+  const inYear = filterEntries(inProgram, { ...filter, query: "" });
+  const listed = peopleCount(inYear);
   const overCap = listed > exportCap;
   const countOf = (id: string) => entries.filter((e) => e.programId === id).length;
 
@@ -164,11 +166,10 @@ export function ProgramRoster({
   }
 
   const download =
-    selected && shown.length > 0 && !overCap
+    selected && inYear.length > 0 && !overCap
       ? `/api/edit/program-roster/export?${new URLSearchParams({
           program: selected.id,
           ...(year && { year }),
-          ...(query.trim() && { q: query.trim() }),
         })}`
       : null;
   const canAdd = canEdit && selected !== null && !selected.retiredAt;
@@ -291,8 +292,8 @@ export function ProgramRoster({
           </div>
           {overCap && (
             <p className="text-muted-foreground mt-2 text-[13px]">
-              Download Excel is limited to {exportCap} people, and this list has {listed}. Choose a year or search to
-              narrow it.
+              Download Excel is limited to {exportCap} people, and this list has {listed}.
+              {!year && " Choose a year to narrow it."}
             </p>
           )}
 
@@ -755,6 +756,7 @@ function PasteDialog({
                     <th className={TH}>Person</th>
                     <th className={cn(TH, "hidden sm:table-cell")}>Year</th>
                     <th className={cn(TH, "hidden sm:table-cell")}>Mentors</th>
+                    <th className={cn(TH, "hidden sm:table-cell")}>Research program</th>
                     <th className={TH}>Result</th>
                   </tr>
                 </thead>
@@ -768,12 +770,14 @@ function PasteDialog({
                         <div className="mt-1 sm:hidden">
                           {r.year}
                           <PastedMentors r={r} />
+                          {r.researchProgram}
                         </div>
                       </td>
                       <td className={cn(TD, "hidden tabular-nums sm:table-cell")}>{r.year}</td>
                       <td className={cn(TD, "hidden sm:table-cell")}>
                         <PastedMentors r={r} />
                       </td>
+                      <td className={cn(TD, "hidden sm:table-cell")}>{r.researchProgram}</td>
                       <td className={TD}>
                         {r.held === null ? (
                           <span className="text-apollo-green-foreground">Ready</span>

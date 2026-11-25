@@ -44,7 +44,6 @@ export async function buildProgramRosterWorkbook(
   addCriteriaSheet(wb, [
     ["Program", `${program.name} (${program.shortLabel})`],
     ["Year", filter.year === null ? "All years" : String(filter.year)],
-    ["Search", filter.query.trim() || "None"],
     ["Entries", String(entries.length)],
     [
       "Trainee counts",
