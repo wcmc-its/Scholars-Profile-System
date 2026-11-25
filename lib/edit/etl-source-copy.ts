@@ -364,6 +364,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Guidelines, systematic reviews and health-authority documents that cite our publications.",
     origin: "external", // PubMed + NCBI Bookshelf + ReCiterDB citation links
   },
+  PubMedSystematicReviews: {
+    label: "Systematic Review Flags",
+    description: "Records which of our publications PubMed classifies as systematic reviews.",
+    origin: "external", // PubMed E-utilities
+  },
   FundableWork: {
     label: "Fundable Work",
     description: "Conference abstracts and preprints scored for private-funding potential.",
