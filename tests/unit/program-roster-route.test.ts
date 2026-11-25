@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   directory: vi.fn(),
   transaction: vi.fn(),
   findEntryOuter: vi.fn(),
+  listed: vi.fn(),
   tx: {
     rosterProgram: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     rosterEntry: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn() },
@@ -29,7 +30,14 @@ vi.mock("@/lib/auth/effective-identity", () => ({
 vi.mock("@/lib/auth/session-server", () => ({ getSession: h.real }));
 vi.mock("@/lib/sources/ldap", () => ({ fetchDirectoryPeopleByCwid: h.directory }));
 vi.mock("@/lib/db", () => ({
-  db: { read: {}, write: { $transaction: h.transaction, rosterEntry: { findUnique: h.findEntryOuter } } },
+  db: {
+    read: {},
+    write: {
+      $transaction: h.transaction,
+      rosterEntry: { findUnique: h.findEntryOuter, findMany: h.listed },
+      rosterProgram: h.tx.rosterProgram,
+    },
+  },
 }));
 
 import { POST } from "@/app/api/edit/program-roster/route";
@@ -88,6 +96,7 @@ beforeEach(() => {
   h.tx.rosterEntry.count.mockResolvedValue(0);
   h.tx.rosterEntry.findUnique.mockResolvedValue(ENTRY);
   h.findEntryOuter.mockResolvedValue(ENTRY);
+  h.listed.mockResolvedValue([]);
   h.tx.rosterEntry.create.mockImplementation(async ({ data }) => ({ ...ENTRY, ...data, mentors: data.mentors.create }));
   h.tx.rosterEntry.update.mockImplementation(async ({ data }) => ({ ...ENTRY, ...data, mentors: data.mentors.create }));
   h.tx.$executeRaw.mockResolvedValue(1);
@@ -103,7 +112,7 @@ describe("gate", () => {
     ["research_security_viewer", { ...none, isResearchSecurityViewer: true }],
   ])("%s gets 404 and nothing is touched", async (_n, s) => {
     h.session.mockResolvedValue(s);
-    for (const body of [CREATE, { action: "entry_delete", id: "e1" }, { action: "program_create", name: "A", shortLabel: "B" }]) {
+    for (const body of [CREATE, { action: "paste_check", programId: "p1", text: "x" }, { action: "entry_delete", id: "e1" }, { action: "program_create", name: "A", shortLabel: "B" }]) {
       expect(await result(body)).toEqual([404, "not_found"]);
     }
     expect(h.transaction).not.toHaveBeenCalled();
@@ -208,6 +217,70 @@ describe("entries", () => {
     expect(audit()).toContain("tra001");
     h.tx.rosterEntry.findUnique.mockResolvedValue(null);
     expect(await result({ action: "entry_delete", id: "e1" })).toEqual([404, "entry_not_found"]);
+  });
+});
+
+describe("names", () => {
+  it("stores the name the people search shows, middle initial included", async () => {
+    h.directory.mockResolvedValue([
+      { ...person("tra001", "Avery", "Quill"), name: "Avery J. Quill" },
+      { ...person("men001", "Jordan", "Vale"), name: "men001" }, // the directory's stand-in for no name
+    ]);
+    expect((await post(CREATE)).status).toBe(200);
+    expect(h.tx.rosterEntry.create.mock.calls[0][0].data).toMatchObject({
+      menteeName: "Avery J. Quill",
+      mentors: { create: [{ mentorCwid: "men001", mentorName: "Jordan Vale" }] },
+    });
+  });
+});
+
+describe("paste", () => {
+  const GOOD = `Avery Quill\ttra001\t${YEAR}\tmen001; MEN002\tCancer Biology`;
+  const WRONG = `Casey Morrow\tmen002\t${YEAR}\tmen001`;
+  const paste = (action: string, text: unknown) => ({ action, programId: "p1", text });
+
+  it("check reports each line and saves nothing", async () => {
+    const res = await post(paste("paste_check", `Name\tCWID\tYear\n${GOOD}\n${WRONG}`));
+    const { rows } = (await res.json()) as { rows: Array<{ person: unknown; held: string | null }> };
+    expect(rows.map((r) => r.held)).toEqual([null, "The directory has Emery Stone for this CWID"]);
+    expect(h.transaction).not.toHaveBeenCalled();
+  });
+
+  it("save writes every line in one transaction, each with its audit row and no names", async () => {
+    const second = `Emery Stone\tmen002\t${YEAR}\tmen001`;
+    const res = await post(paste("paste_save", `${GOOD}\n${second}`));
+    expect(res.status).toBe(200);
+    expect(h.transaction).toHaveBeenCalledTimes(1);
+    expect(h.tx.rosterEntry.create.mock.calls.map((c) => c[0].data.menteeName)).toEqual(["Avery Quill", "Emery Stone"]);
+    expect(h.tx.rosterEntry.create.mock.calls[0][0].data.mentors.create).toHaveLength(2);
+    expect(h.tx.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(h.tx.$executeRaw.mock.calls)).not.toMatch(/Avery|Quill|Emery|Stone/);
+  });
+
+  it("one held line and nothing is saved", async () => {
+    expect(await result(paste("paste_save", `${GOOD}\n${WRONG}`))).toEqual([409, "paste_changed"]);
+    h.listed.mockResolvedValue([{ menteeCwid: "TRA001", year: YEAR }]);
+    expect(await result(paste("paste_save", GOOD))).toEqual([409, "paste_changed"]);
+    expect(h.transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty or too long list, a retired program, and a directory that is down", async () => {
+    expect(await result(paste("paste_check", "  \n"))).toEqual([400, "empty_paste"]);
+    expect(await result(paste("paste_check", 7))).toEqual([400, "empty_paste"]);
+    expect(await result(paste("paste_check", Array(101).fill(GOOD).join("\n")))).toEqual([400, "too_many_rows"]);
+    h.directory.mockRejectedValueOnce(new Error("ldap down"));
+    expect(await result(paste("paste_save", GOOD))).toEqual([500, "write_failed"]);
+    h.tx.rosterProgram.findUnique.mockResolvedValue({ ...PROGRAM, retiredAt: new Date() });
+    expect(await result(paste("paste_save", GOOD))).toEqual([409, "program_retired"]);
+    expect(h.transaction).not.toHaveBeenCalled();
+  });
+
+  it("retired between the check and the write, or listed by someone else, rolls back", async () => {
+    h.tx.rosterProgram.findUnique.mockResolvedValueOnce(PROGRAM).mockResolvedValueOnce({ ...PROGRAM, retiredAt: new Date() });
+    expect(await result(paste("paste_save", GOOD))).toEqual([409, "program_retired"]);
+    expect(h.tx.rosterEntry.create).not.toHaveBeenCalled();
+    h.tx.rosterEntry.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    expect(await result(paste("paste_save", GOOD))).toEqual([409, "already_listed"]);
   });
 });
 
