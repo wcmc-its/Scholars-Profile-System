@@ -14,7 +14,8 @@
  *      pass takes about 100 minutes. The budget covers a whole pass, so a new
  *      authority citation shows up within a week. If the pass is cut short it
  *      resumes next run: never-checked papers first, then the oldest checks.
- *   3. Recompute `publication.authority_bodies / guideline_count / review_count`.
+ *   3. Recompute the rollups on `publication`: `authority_bodies`, a count per
+ *      level, and the newest citing document's year.
  *
  * Writes only ever add: a document or link is inserted if new and left alone
  * otherwise, so `first_seen_at` is the date we first saw a citation and a
@@ -295,21 +296,29 @@ async function bookshelfPass(pmids: string[], budgetMin: number): Promise<number
   return added;
 }
 
-/** Step 3: recompute the three rollup columns from the link tables. */
+/** Step 3: recompute the rollup columns from the link tables. */
 async function rollup(): Promise<void> {
-  // Only rows whose counts changed are written.
+  // Only rows whose counts changed are written. `<=>` is the NULL-safe equal:
+  // the newest citing year is NULL for a paper nothing cites.
   const counts = await db.write.$executeRaw`
     UPDATE publication p
       LEFT JOIN (
         SELECT l.pmid,
+               COUNT(DISTINCT CASE WHEN d.level = 'authority' THEN d.dedup_key END) AS a,
                COUNT(DISTINCT CASE WHEN d.level = 'guideline' THEN d.dedup_key END) AS g,
-               COUNT(DISTINCT CASE WHEN d.level = 'review' THEN d.dedup_key END) AS r
+               COUNT(DISTINCT CASE WHEN d.level = 'consensus' THEN d.dedup_key END) AS c,
+               COUNT(DISTINCT CASE WHEN d.level = 'review' THEN d.dedup_key END) AS r,
+               MAX(d.year) AS y
           FROM publication_citing_document l
           JOIN citing_document d ON d.id = l.citing_document_id
          GROUP BY l.pmid
       ) x ON x.pmid = p.pmid
-       SET p.guideline_count = COALESCE(x.g, 0), p.review_count = COALESCE(x.r, 0)
-     WHERE p.guideline_count <> COALESCE(x.g, 0) OR p.review_count <> COALESCE(x.r, 0)`;
+       SET p.authority_count = COALESCE(x.a, 0), p.guideline_count = COALESCE(x.g, 0),
+           p.consensus_count = COALESCE(x.c, 0), p.review_count = COALESCE(x.r, 0),
+           p.latest_citing_year = x.y
+     WHERE p.authority_count <> COALESCE(x.a, 0) OR p.guideline_count <> COALESCE(x.g, 0)
+        OR p.consensus_count <> COALESCE(x.c, 0) OR p.review_count <> COALESCE(x.r, 0)
+        OR NOT (p.latest_citing_year <=> x.y)`;
 
   const authority = await db.write.publicationCitingDocument.findMany({
     where: { citingDocument: { level: "authority" } },

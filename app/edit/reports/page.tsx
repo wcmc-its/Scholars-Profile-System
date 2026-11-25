@@ -86,6 +86,7 @@ import {
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
+import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import { db } from "@/lib/db";
 import {
   loadReportLiveness,
@@ -214,8 +215,9 @@ export default async function EditReportsIndexPage({
   // Reports 8 (Article counts: unit administrators + grants) and 9 (Top
   // clinical and high-impact journal publications: grants) ride a second
   // pseudo-unit. (Report 10, Display titles, is the Titles queue now.)
-  const [canArticleCount, highImpactScopes, grantAttributionScopes] = await Promise.all([
+  const [canArticleCount, canPolicyCitations, highImpactScopes, grantAttributionScopes] = await Promise.all([
     canViewArticleCountReport(session),
+    canViewPolicyCitationsReport(session),
     getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),
     isGrantAttributionQueueEnabled() ? getReportScopes(session, GRANT_ATTRIBUTION_REPORT) : new Set<string>(),
   ]);
@@ -235,6 +237,9 @@ export default async function EditReportsIndexPage({
       : []),
     ...(grantAttributionScopes.size > 0
       ? [catalogEntry(meta, 14, await loadReportAccessPopoverProps(GRANT_ATTRIBUTION_REPORT, session))]
+      : []),
+    ...(canPolicyCitations
+      ? [catalogEntry(meta, 24, { mode: "unit", audience: ADMIN_AUDIENCE, rule: POLICY_CITATIONS_ACCESS_RULE })]
       : []),
     ...(session.isSuperuser
       ? [

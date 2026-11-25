@@ -404,7 +404,7 @@ const STAGE_NOT_LOW = Prisma.sql`(p.translational_stage_confidence IS NULL OR p.
 /** The year each counted article falls in: the calendar year of publication,
  *  the fiscal year of its PubMed add date, or (date-added window) the
  *  calendar year of its PubMed add date. */
-export function articleYearExpr(p: ArticleCountParams): Prisma.Sql {
+export function articleYearExpr(p: Pick<ArticleCountParams, "basis" | "added">): Prisma.Sql {
   if (p.added) return Prisma.sql`YEAR(p.date_added_to_entrez)`;
   return p.basis === "fy"
     ? Prisma.sql`YEAR(DATE_ADD(p.date_added_to_entrez, INTERVAL 6 MONTH))`

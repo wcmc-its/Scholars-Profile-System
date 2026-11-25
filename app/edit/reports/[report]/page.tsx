@@ -33,6 +33,8 @@
  *   - `"admin"` (report 8): `canViewArticleCountReport` — any unit
  *     administrator, or an `article-count` grant row; the popover lists the
  *     grant rows like the person gate's.
+ *     Report 24 rides the same gate with its own test (`ReportDef.canView`:
+ *     a viewer with a unit to see, no grant rows) and a static rule line.
  *   - `"person"` (reports 7, 9): `getReportScopes(session, accessKey)`; an empty
  *     set → `notFound()` BEFORE any data read (the route reads as unbuilt to
  *     someone it was never granted to, like `/edit/data-sharing`). The
@@ -191,7 +193,13 @@ export default async function EditReportPage({
   const def = REPORTS[n];
   if (partner) {
     const key =
-      def.gate === "admin" ? ARTICLE_COUNT_REPORT : def.gate === "person" ? def.accessKey : null;
+      def.gate === "admin"
+        ? def.canView
+          ? null
+          : ARTICLE_COUNT_REPORT
+        : def.gate === "person"
+          ? def.accessKey
+          : null;
     if (key === null || !PARTNER_REPORT_KEYS.has(key)) notFound();
   }
 
@@ -262,12 +270,16 @@ export default async function EditReportPage({
       loadCoreHeader = () => coreReportsHeader(session, code, ctx.unit.name, n, ctx.viewOnly === true);
     }
   } else if (def.gate === "admin") {
-    if (!(await canViewArticleCountReport(session))) notFound();
+    if (!(await (def.canView ?? canViewArticleCountReport)(session))) notFound();
     back = "/edit/reports";
-    loadAccess = async () => ({
-      ...(await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)),
-      audience: ADMIN_AUDIENCE,
-    });
+    const { accessRule } = def;
+    loadAccess = async () =>
+      accessRule
+        ? { mode: "unit", audience: ADMIN_AUDIENCE, rule: accessRule }
+        : {
+            ...(await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)),
+            audience: ADMIN_AUDIENCE,
+          };
     render = () => def.render({ n, session, searchParams: sp, basePath });
   } else if (def.gate === "superuser") {
     if (!session.isSuperuser) notFound();
