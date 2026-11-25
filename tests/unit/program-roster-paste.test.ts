@@ -1,7 +1,7 @@
 /** Reading a pasted cohort, holding what does not match, and the mentor counts. */
 import { describe, expect, it } from "vitest";
 
-import { filterEntries, mentorCounts, milestoneOf, peopleCount, type RosterEntryView } from "@/lib/edit/program-roster";
+import { filterEntries, mentorCounts, milestoneOf, type RosterEntryView } from "@/lib/edit/program-roster";
 import { checkPaste, nameAgrees, parsePaste } from "@/lib/edit/program-roster-paste";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 
@@ -159,10 +159,5 @@ describe("mentor counts", () => {
 
   it("milestones at 5, 10 and 15", () => {
     expect([0, 4, 5, 9, 10, 14, 15, 40].map(milestoneOf)).toEqual([null, null, 5, 5, 10, 10, 15, 15]);
-  });
-
-  it("people are counted once across both columns", () => {
-    expect(peopleCount(ALL)).toBe(6);
-    expect(peopleCount(filterEntries(ALL, { year: 2024, query: "" }))).toBe(2);
   });
 });

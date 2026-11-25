@@ -12,7 +12,6 @@ import { notFound, redirect } from "next/navigation";
 
 import { ConsoleShell } from "@/components/edit/console-shell";
 import { ProgramRoster } from "@/components/edit/program-roster";
-import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { db } from "@/lib/db";
 import { countPendingHonors, isHonorsQueueTabVisible } from "@/lib/edit/honor-queue";
 import { canEditProgramRoster, canViewProgramRoster, PROGRAM_ROSTER_CENTER } from "@/lib/edit/program-roster-access";
@@ -69,7 +68,6 @@ export default async function EditProgramRosterPage() {
       <ProgramRoster
         programs={programs}
         entries={entries}
-        exportCap={SCHOLAR_EXPORT_CAP}
         canEdit={canEditProgramRoster(session, impersonatedCwid)}
       />
     </ConsoleShell>

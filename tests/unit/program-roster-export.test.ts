@@ -1,4 +1,4 @@
-/** The roster's Excel download: who gets it, the people cap, and what is in the file. */
+/** The roster's Excel download: who gets it and what is in the file. */
 import ExcelJS from "exceljs";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +12,6 @@ vi.mock("@/lib/edit/request", async () => {
   };
 });
 vi.mock("@/lib/edit/program-roster.server", () => ({ loadProgramRoster: h.load }));
-vi.mock("@/lib/api/export-scholars", () => ({ SCHOLAR_EXPORT_CAP: 50 }));
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
 import { GET } from "@/app/api/edit/program-roster/export/route";
@@ -86,11 +85,12 @@ describe("program roster export", () => {
     expect(line).not.toMatch(/Quill|tra0|Vale/);
   });
 
-  it("refuses a list of more than 50 people instead of cutting it short; 50 is fine", async () => {
-    const many = (n: number) => Array.from({ length: n }, (_, i) => entry(i, 2026)); // plus the one mentor
-    h.load.mockResolvedValue({ programs: PROGRAMS, entries: many(50) });
-    expect((await get()).status).toBe(409);
-    h.load.mockResolvedValue({ programs: PROGRAMS, entries: many(49) });
-    expect((await get()).status).toBe(200);
+  it("is exempt from the 50-person export cap: a list of 120 downloads in full", async () => {
+    const many = Array.from({ length: 120 }, (_, i) => entry(i, 2026));
+    h.load.mockResolvedValue({ programs: PROGRAMS, entries: many });
+    const res = await get();
+    expect(res.status).toBe(200);
+    const line = log.mock.calls.map((c) => String(c[0])).findLast((l) => l.includes("export_program_roster"))!;
+    expect(JSON.parse(line)).toMatchObject({ rows: 120 });
   });
 });

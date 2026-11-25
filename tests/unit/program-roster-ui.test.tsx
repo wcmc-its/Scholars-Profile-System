@@ -28,7 +28,7 @@ const fetchMock = vi.fn();
 const reply = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body });
 const sent = () => JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string);
 const names = () => screen.getAllByTestId(/^roster-entry-/).map((r) => r.getAttribute("data-testid"));
-const show = (canEdit = true) => render(<ProgramRoster programs={PROGRAMS} entries={ENTRIES} canEdit={canEdit} exportCap={50} />);
+const show = (canEdit = true) => render(<ProgramRoster programs={PROGRAMS} entries={ENTRIES} canEdit={canEdit} />);
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -111,7 +111,7 @@ describe("ProgramRoster", () => {
 
   it("offers Delete only for an empty program, Retire or Reopen otherwise; a retired one takes no new people", async () => {
     render(
-      <ProgramRoster programs={PROGRAMS} entries={[...ENTRIES, entry("ddd", "Old One", 2019, { programId: "old" })]} canEdit exportCap={50} />,
+      <ProgramRoster programs={PROGRAMS} entries={[...ENTRIES, entry("ddd", "Old One", 2019, { programId: "old" })]} canEdit />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Manage programs" }));
     const dialog = within(screen.getByRole("dialog"));
@@ -124,7 +124,7 @@ describe("ProgramRoster", () => {
   });
 
   it("with no programs, creating the first one opens it", async () => {
-    render(<ProgramRoster programs={[]} entries={[]} canEdit exportCap={50} />);
+    render(<ProgramRoster programs={[]} entries={[]} canEdit />);
     expect(screen.getByText(/No programs yet/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Manage programs" }));
     fireEvent.click(screen.getByRole("button", { name: "New program" }));
@@ -138,7 +138,7 @@ describe("ProgramRoster", () => {
 
   it("the Mentors view counts trainees over all years and shows milestones", () => {
     const five = [1, 2, 3, 4, 5].map((i) => entry(`m${i}x`, `Trainee ${i}`, 2020 + i));
-    render(<ProgramRoster programs={PROGRAMS} entries={five} canEdit exportCap={50} />);
+    render(<ProgramRoster programs={PROGRAMS} entries={five} canEdit />);
     fireEvent.click(screen.getByRole("button", { name: "Mentors" }));
     expect(screen.queryByTestId("roster-entry-m1x")).toBeNull();
     fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2025" } });
@@ -148,7 +148,7 @@ describe("ProgramRoster", () => {
     expect(row.getAllByText("2021 to 2025").length).toBeGreaterThan(0);
   });
 
-  it("the download carries the program and year, never the search text, and is off above the cap with the reason", () => {
+  it("the download carries the program and year, never the search text, and stays on for a long list", () => {
     const { unmount } = show(false);
     fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2026" } });
     fireEvent.change(screen.getByLabelText("Find a person or mentor"), { target: { value: " avery " } });
@@ -156,11 +156,10 @@ describe("ProgramRoster", () => {
       "/api/edit/program-roster/export?program=sum&year=2026",
     );
     unmount();
-    render(<ProgramRoster programs={PROGRAMS} entries={ENTRIES} canEdit exportCap={3} />);
-    expect(screen.queryByRole("link", { name: "Download Excel" })).toBeNull();
-    expect(screen.getByText(/limited to 3 people, and this list has 4/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2025" } });
+    const many = Array.from({ length: 60 }, (_, i) => entry(`m${String(i).padStart(3, "0")}`, `Person ${i}`, 2026));
+    render(<ProgramRoster programs={PROGRAMS} entries={many} canEdit />);
     expect(screen.getByRole("link", { name: "Download Excel" })).toBeTruthy();
+    expect(screen.queryByText(/limited to/)).toBeNull();
   });
 
   it("paste: check, save the ready lines, keep the held ones to fix; an edit clears the check", async () => {

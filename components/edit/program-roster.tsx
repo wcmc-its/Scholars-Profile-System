@@ -36,7 +36,6 @@ import {
   MAX_PASTE_ROWS,
   mentorCounts,
   milestoneOf,
-  peopleCount,
   PROGRAM_NAME_MAX,
   RESEARCH_PROGRAM_MAX,
   SHORT_LABEL_MAX,
@@ -125,13 +124,10 @@ export function ProgramRoster({
   programs: initialPrograms,
   entries: initialEntries,
   canEdit,
-  exportCap,
 }: {
   programs: RosterProgramView[];
   entries: RosterEntryView[];
   canEdit: boolean;
-  /** SCHOLAR_EXPORT_CAP, from the server. */
-  exportCap: number;
 }) {
   const [programs, setPrograms] = React.useState(initialPrograms);
   const [entries, setEntries] = React.useState(initialEntries);
@@ -155,8 +151,6 @@ export function ProgramRoster({
   const mentors = view === "mentors" ? mentorCounts(inProgram, filter) : [];
   // The download takes the year, not the search: no name goes into a URL.
   const inYear = filterEntries(inProgram, { ...filter, query: "" });
-  const listed = peopleCount(inYear);
-  const overCap = listed > exportCap;
   const countOf = (id: string) => entries.filter((e) => e.programId === id).length;
 
   function select(id: string) {
@@ -166,7 +160,7 @@ export function ProgramRoster({
   }
 
   const download =
-    selected && inYear.length > 0 && !overCap
+    selected && inYear.length > 0
       ? `/api/edit/program-roster/export?${new URLSearchParams({
           program: selected.id,
           ...(year && { year }),
@@ -290,12 +284,6 @@ export function ProgramRoster({
               </PopoverContent>
             </Popover>
           </div>
-          {overCap && (
-            <p className="text-muted-foreground mt-2 text-[13px]">
-              Download Excel is limited to {exportCap} people, and this list has {listed}.
-              {!year && " Choose a year to narrow it."}
-            </p>
-          )}
 
           {view === "mentors" ? (
             <MentorTable rows={mentors} empty={inProgram.length === 0} />

@@ -140,10 +140,6 @@ export function mentorCounts(entries: readonly RosterEntryView[], f: RosterFilte
     .sort((a, b) => b.trainees - a.trainees || a.mentor.name.localeCompare(b.mentor.name));
 }
 
-/** Distinct people, trainees and mentors, named by these entries. */
-export const peopleCount = (entries: readonly RosterEntryView[]): number =>
-  new Set(entries.flatMap((e) => [e.mentee.cwid, ...e.mentors.map((m) => m.cwid)])).size;
-
 export const MAX_PASTE_ROWS = 100;
 
 /** One pasted line after the check. A held line is never saved. */

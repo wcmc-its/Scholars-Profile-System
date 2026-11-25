@@ -5,15 +5,15 @@
  * would be kept in access logs.
  *
  * Gate: `canViewProgramRoster`, the page's own, checked before anything is
- * read; 404 for anyone else. A list of people, so `SCHOLAR_EXPORT_CAP` applies:
- * above it the download is refused, never truncated. The log line says who took
- * the file and how many rows, never who is in it.
+ * read; 404 for anyone else. Exempt from `SCHOLAR_EXPORT_CAP` (Paul Albert,
+ * 2026-11-25), like the center roster download: only the roster's own editors
+ * can take it. The log line says who took the file and how many rows, never
+ * who is in it.
  */
 import { NextResponse, type NextRequest } from "next/server";
 
-import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { db } from "@/lib/db";
-import { filterEntries, mentorCounts, peopleCount } from "@/lib/edit/program-roster";
+import { filterEntries, mentorCounts } from "@/lib/edit/program-roster";
 import { canViewProgramRoster } from "@/lib/edit/program-roster-access";
 import { buildProgramRosterWorkbook } from "@/lib/edit/program-roster-xlsx";
 import { loadProgramRoster } from "@/lib/edit/program-roster.server";
@@ -37,7 +37,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!program) return editError(404, "program_not_found", "program");
   const inProgram = roster.entries.filter((e) => e.programId === program.id);
   const entries = filterEntries(inProgram, filter);
-  if (peopleCount(entries) > SCHOLAR_EXPORT_CAP) return editError(409, "over_scholar_export_cap");
 
   const generatedAt = new Date();
   const buffer = await buildProgramRosterWorkbook(
