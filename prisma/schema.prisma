@@ -902,6 +902,8 @@ model PublicationCitingDocument {
   pmid             String         @db.VarChar(32)
   citingDocumentId Int            @map("citing_document_id")
   firstSeenAt      DateTime       @default(now()) @map("first_seen_at")
+  /// Bookshelf only: the chapters and sections citing the paper, `[{ url, label }]`.
+  locations        Json?
   citingDocument   CitingDocument @relation(fields: [citingDocumentId], references: [id], onDelete: Cascade)
 
   @@id([pmid, citingDocumentId])

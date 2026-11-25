@@ -132,6 +132,56 @@ export function pubmedDoc(
   };
 }
 
+/** A place in a book that cites a paper: a chapter, or a section of one. */
+export type BookLocation = { url: string; label: string };
+
+export type BookRecord = {
+  /** "NBK442228/sec_000044" for a section, "NBK442267" for a whole chapter. */
+  rid?: string;
+  rtype?: string;
+  title?: string;
+  chapteraccessionid?: string;
+};
+
+const MAX_LOCATIONS = 5;
+
+/** "PREVENTION AND TESTING" -> "Prevention and testing"; mixed case is left alone. */
+function heading(raw: string): string {
+  const t = cleanTitle(raw);
+  return t === t.toUpperCase() ? t.charAt(0) + t.slice(1).toLowerCase() : t;
+}
+
+/**
+ * The places one book cites one paper, from the Bookshelf records linking them.
+ * A section is labelled "Chapter: Section" and links to its heading; a chapter
+ * record is dropped when one of its sections is listed.
+ */
+export function bookLocations(records: readonly BookRecord[]): BookLocation[] {
+  const chapterTitle = new Map<string, string>();
+  for (const r of records) {
+    if (r.rtype === "chapter" && r.chapteraccessionid && r.title) {
+      chapterTitle.set(r.chapteraccessionid, heading(r.title));
+    }
+  }
+  const withParts = new Set(
+    records.filter((r) => r.rtype !== "chapter").map((r) => r.chapteraccessionid),
+  );
+  const out = new Map<string, BookLocation>();
+  for (const r of records) {
+    const chapter = r.chapteraccessionid;
+    if (!chapter || !/^NBK\d+$/.test(chapter)) continue;
+    if (r.rtype === "chapter" && withParts.has(chapter)) continue;
+    // ponytail: only section anchors are known to resolve; a table or box links to its chapter.
+    const anchor = r.rtype === "sec" ? r.rid?.split("/")[1] : undefined;
+    const url = `https://www.ncbi.nlm.nih.gov/books/${chapter}/${anchor ? `#${encodeURIComponent(anchor)}` : ""}`;
+    const own = heading(r.title ?? "");
+    const parent = chapterTitle.get(chapter);
+    const label = [parent, own !== parent ? own : ""].filter(Boolean).join(": ") || chapter;
+    if (!out.has(url)) out.set(url, { url, label });
+  }
+  return [...out.values()].slice(0, MAX_LOCATIONS);
+}
+
 /**
  * A Bookshelf ESummary record is a section, table or reference list. Roll it up
  * to its book, and keep it only if a listed health authority published it.

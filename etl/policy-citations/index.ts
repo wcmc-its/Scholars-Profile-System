@@ -44,7 +44,9 @@ import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb
 import { bookshelfCiters, esummary, harvestPmids } from "./ncbi";
 import {
   authorityBodies,
+  bookLocations,
   bookshelfDoc,
+  type BookRecord,
   CITATION_FIELDS,
   pubmedDoc,
   pubmedLevel,
@@ -224,7 +226,7 @@ async function pubmedPass(pmids: string[], partial: boolean): Promise<number> {
 async function bookshelfPass(pmids: string[], budgetMin: number): Promise<number> {
   const deadline = Date.now() + budgetMin * 60_000;
   /** Bookshelf record id -> its book, or null when no listed authority issued it. */
-  const books = new Map<string, CitingDoc | null>();
+  const books = new Map<string, { doc: CitingDoc; record: BookRecord } | null>();
   let checked = 0;
   let added = 0;
 
@@ -238,17 +240,23 @@ async function bookshelfPass(pmids: string[], budgetMin: number): Promise<number
     const unknown = [...new Set([...citers.values()].flat())].filter((u) => !books.has(u));
     for (const batch of chunks(unknown, SUMMARY_BATCH)) {
       const summaries = await esummary("books", batch);
-      for (const u of batch) books.set(u, summaries.has(u) ? bookshelfDoc(summaries.get(u)!) : null);
+      for (const u of batch) {
+        const record = summaries.get(u);
+        const doc = record ? bookshelfDoc(record) : null;
+        books.set(u, doc ? { doc, record: record as BookRecord } : null);
+      }
     }
 
     const docs = new Map<string, CitingDoc>();
-    const pairs = new Set<string>();
+    /** "pmid|accession" -> the Bookshelf records linking that paper and book. */
+    const pairs = new Map<string, BookRecord[]>();
     for (const [pmid, uids] of citers) {
       for (const u of uids) {
-        const doc = books.get(u);
-        if (!doc) continue;
-        docs.set(doc.externalId, doc);
-        pairs.add(`${pmid}|${doc.externalId}`);
+        const book = books.get(u);
+        if (!book) continue;
+        docs.set(book.doc.externalId, book.doc);
+        const key = `${pmid}|${book.doc.externalId}`;
+        pairs.set(key, [...(pairs.get(key) ?? []), book.record]);
       }
     }
     if (docs.size > 0) {
@@ -258,12 +266,20 @@ async function bookshelfPass(pmids: string[], budgetMin: number): Promise<number
         select: { externalId: true },
       });
       await backfillCitations(unfilled.map((r) => docs.get(r.externalId)!));
-      added += await saveLinks(
-        [...pairs].map((p) => {
-          const [pmid, accession] = p.split("|");
-          return { pmid, citingDocumentId: ids.get(accession)! };
-        }),
-      );
+      const links = [...pairs].map(([key, records]) => {
+        const [pmid, accession] = key.split("|");
+        return { pmid, citingDocumentId: ids.get(accession)!, locations: bookLocations(records) };
+      });
+      added += await saveLinks(links.map(({ pmid, citingDocumentId }) => ({ pmid, citingDocumentId })));
+      // Rewritten every pass: NCBI's answer is the whole set of places, and
+      // links saved before this column existed have none.
+      for (const batch of chunks(links, INSERT_BATCH)) {
+        await db.write.$transaction(
+          batch.map(({ locations, ...where }) =>
+            db.write.publicationCitingDocument.updateMany({ where, data: { locations } }),
+          ),
+        );
+      }
     }
     await db.write.publication.updateMany({
       where: { pmid: { in: group } },

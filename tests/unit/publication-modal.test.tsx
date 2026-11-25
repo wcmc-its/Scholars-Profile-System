@@ -1265,6 +1265,7 @@ describe("PublicationModal — Guidelines and policy section", { retry: 2 }, () 
               publisher: "Geneva: World Health Organization; 2017 Feb.",
               pmid: null,
               bookshelfId: "NBK442272",
+              locations: [{ url: "https://www.ncbi.nlm.nih.gov/books/NBK442267/", label: "References" }],
             }),
             doc({}),
             doc({ id: 3, level: "review", title: "A review of widgets" }),
@@ -1279,6 +1280,9 @@ describe("PublicationModal — Guidelines and policy section", { retry: 2 }, () 
     expect(screen.getByRole("button", { name: "Guidelines and policy 2" })).toBeDefined();
     expect(screen.getByText("Geneva: World Health Organization; 2017 Feb.")).toBeDefined();
     expect(screen.getByText("NCBI Bookshelf NBK442272")).toBeDefined();
+    expect(screen.getByRole("link", { name: "References" }).getAttribute("href")).toBe(
+      "https://www.ncbi.nlm.nih.gov/books/NBK442267/",
+    );
     expect(
       screen.getByText("Ghany MG, Morgan TR, Lok AS, et al. J Hepatol. 2023;79(3):768-828."),
     ).toBeDefined();

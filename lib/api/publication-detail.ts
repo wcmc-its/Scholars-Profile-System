@@ -141,6 +141,8 @@ export type PolicyCitingDoc = {
   /** PMID for PubMed documents, the NBK accession for Bookshelf ones. */
   pmid: string | null;
   bookshelfId: string | null;
+  /** Bookshelf only: the chapters and sections that cite the paper. */
+  locations: Array<{ url: string; label: string }>;
 };
 
 const POLICY_REVIEWS_CAP = 100;
@@ -162,13 +164,13 @@ async function readPolicyCitations(
   try {
     const links = await prisma.publicationCitingDocument.findMany({
       where: { pmid },
-      select: { citingDocument: true },
+      select: { citingDocument: true, locations: true },
       orderBy: [{ citingDocument: { year: "desc" } }, { citingDocumentId: "asc" }],
     });
     const seen = new Set<string>();
     const docs: PolicyCitingDoc[] = [];
     let reviewTotal = 0;
-    for (const { citingDocument: d } of links) {
+    for (const { citingDocument: d, locations } of links) {
       if (seen.has(d.dedupKey)) continue;
       seen.add(d.dedupKey);
       // ponytail: reviews beyond the cap are counted, not listed; page them if anyone asks.
@@ -189,6 +191,13 @@ async function readPolicyCitations(
         publisher: d.publisher,
         pmid: d.source === "pubmed" ? d.externalId : null,
         bookshelfId: d.source === "bookshelf" ? d.externalId : null,
+        locations: Array.isArray(locations)
+          ? (locations as Array<{ url?: unknown; label?: unknown }>).flatMap((l) =>
+              typeof l?.url === "string" && l.url.startsWith("https://www.ncbi.nlm.nih.gov/") && typeof l.label === "string"
+                ? [{ url: l.url, label: l.label }]
+                : [],
+            )
+          : [],
       });
     }
     return docs.length > 0 ? { docs, reviewTotal } : undefined;
