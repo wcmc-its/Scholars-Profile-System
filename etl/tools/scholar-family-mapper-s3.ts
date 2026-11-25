@@ -136,6 +136,19 @@ export type BuildScholarFamilyS3Result = {
   duplicateFamilyLabel: number;
 };
 
+/** Per-scholar family cap when the caller passes no `topNPerScholar`. Exported so
+ *  a post-mapper merge (./systematic-review-rule.ts) re-applies the SAME cap. */
+export const DEFAULT_FAMILY_TOP_N = 50;
+
+/** The per-scholar family ranking the top-N cap cuts on: most publications first,
+ *  `family_id` as the stable tiebreak. Shared with ./systematic-review-rule.ts. */
+export function compareFamilyRank(
+  a: { pmidCount: number; familyId: string },
+  b: { pmidCount: number; familyId: string },
+): number {
+  return b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId);
+}
+
 type Accum = {
   familyLabel: string;
   supercategory: string;
@@ -279,7 +292,7 @@ export function buildScholarFamilyWritesFromS3(
     suppression?: PublicationSuppressions;
   },
 ): BuildScholarFamilyS3Result {
-  const topN = opts.topNPerScholar ?? 50;
+  const topN = opts.topNPerScholar ?? DEFAULT_FAMILY_TOP_N;
   const known = opts.knownSupercategories;
   const toolContext = opts.toolContext;
   const suppression = opts.suppression;
@@ -402,9 +415,7 @@ export function buildScholarFamilyWritesFromS3(
       }
     }
 
-    const ranked = [...byStableKey.values()].sort(
-      (a, b) => b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId),
-    );
+    const ranked = [...byStableKey.values()].sort(compareFamilyRank);
 
     for (const e of ranked.slice(0, topN)) {
       // Invariant alarm only among populated rows: a pre-#175 artifact has no

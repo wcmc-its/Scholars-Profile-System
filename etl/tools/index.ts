@@ -38,6 +38,11 @@
  *   SCHOLAR_TOOL_FORCE_REPLACE (set to "1", or pass --force) — bypass the
  *     sha256 short-circuit and always full-replace (operator escape hatch,
  *     mirrors MESH_FORCE_REPLACE in etl/mesh-descriptors)
+ *   METHOD_FAMILY_SR_RULE ("on" | anything else = off) — merge PubMed's
+ *     systematic review filter matches into the "Systematic review and
+ *     meta-analysis" family (./systematic-review-rule.ts). The flag state is
+ *     part of the stored run signature, so the first run after a flip in either
+ *     direction rebuilds both tables without --force.
  *
  * Usage:
  *   npm run etl:scholar-tool
@@ -57,8 +62,19 @@ import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import { buildScholarToolWritesFromS3, type ToolsArtifactSlice } from "./scholar-tool-mapper-s3";
 import {
   buildScholarFamilyWritesFromS3,
+  DEFAULT_FAMILY_TOP_N,
   type ScholarFamilyWrite,
 } from "./scholar-family-mapper-s3";
+import {
+  isSystematicReviewRuleOn,
+  runSystematicReviewRule,
+  SR_FAMILY_LABEL,
+  SR_FAMILY_SUPERCATEGORY,
+  SR_RULE_FLAG,
+  toolsRunSignature,
+} from "./systematic-review-rule";
+import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "../../lib/eligibility";
+import { FEED_EXCLUDED_TYPES } from "../../lib/publication-types";
 import { buildToolContextIndex, type ToolContextIndex } from "./tool-context";
 import {
   buildFamilyEntityWritesFromS3,
@@ -159,7 +175,11 @@ async function recordRun(args: {
     // top-level sha — so the next run's short-circuit detects a single-object
     // republish (e.g. tool_context.json only, ReciterAI#238). Compared, never
     // displayed; readable provenance stays in manifestTaxonomyVersion.
-    manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
+    // toolsRunSignature folds in METHOD_FAMILY_SR_RULE when it is on (and is the
+    // identity when it is off), so a flag flip mismatches the next comparison.
+    manifestSha256: args.manifest
+      ? toolsRunSignature(manifestContentSignature(args.manifest))
+      : null,
     now: Date.now(),
   });
   // WARN when a manifest-bearing run produced no anchor, so a source whose
@@ -295,7 +315,11 @@ async function main(): Promise<void> {
   // (ReciterAI#238) is NOT masked by an unchanged primary artifact. `--force` /
   // SCHOLAR_TOOL_FORCE_REPLACE bypasses it entirely (operator escape hatch).
   if (!dryRun && !forceReplace) {
-    const signature = manifestContentSignature(manifest);
+    // The artifact signature, plus the systematic review rule's flag state when
+    // it is on: turning METHOD_FAMILY_SR_RULE on or off mismatches the last run
+    // and forces one rebuild (apply the rule / remove its rows). Flag off, this
+    // is the plain artifact signature, as before.
+    const signature = toolsRunSignature(manifestContentSignature(manifest));
     const lastRun = await db.write.etlRun.findFirst({
       where: { source: SOURCE, status: "success" },
       orderBy: { completedAt: "desc" },
@@ -310,7 +334,29 @@ async function main(): Promise<void> {
         db.write,
         lastRun.completedAt,
       );
-      if (!suppressionChanged) {
+      // The artifact sha is just as blind to pubmed_systematic_review. With the
+      // systematic review rule on, rebuild when its weekly job has succeeded
+      // since the last successful run here (that covers pmids it REMOVED, which
+      // leave no timestamp behind, and picks up authorship and role changes at
+      // the same weekly cadence), or when a pmid was flagged since then (covers
+      // a job whose write committed but whose run record did not). Never queried
+      // while the flag is off.
+      const systematicReviewsChanged =
+        isSystematicReviewRuleOn() &&
+        (lastRun.completedAt === null ||
+          (await db.write.etlRun.findFirst({
+            where: {
+              source: "PubMedSystematicReviews",
+              status: "success",
+              completedAt: { gt: lastRun.completedAt },
+            },
+            select: { id: true },
+          })) !== null ||
+          (await db.write.pubmedSystematicReview.findFirst({
+            where: { flaggedAt: { gt: lastRun.completedAt } },
+            select: { pmid: true },
+          })) !== null);
+      if (!suppressionChanged && !systematicReviewsChanged) {
         log("short_circuit", {
           sha256: manifest.sha256,
           signature_prefix: signature.slice(0, 12),
@@ -320,7 +366,7 @@ async function main(): Promise<void> {
         await recordRun({ status: "success", rowsProcessed: 0, manifest });
         return;
       }
-      log("suppression_changed_rebuild", {
+      log(suppressionChanged ? "suppression_changed_rebuild" : "systematic_reviews_changed_rebuild", {
         since: lastRun.completedAt?.toISOString() ?? null,
         version: manifest.version,
       });
@@ -568,6 +614,127 @@ async function main(): Promise<void> {
     ).length,
   });
 
+  // Systematic review rule (METHOD_FAMILY_SR_RULE). Runs here, before the dry-run
+  // exit and before ANY guard or write, so a missing family throws with both
+  // tables still holding their previous contents. Flag off: returns the mapper's
+  // array untouched and reads nothing.
+  const srRule = await runSystematicReviewRule({
+    writes: familyResult.writes,
+    registry: parsed.families,
+    familyDefById,
+    activeCwids: ourCwidSet,
+    topN: DEFAULT_FAMILY_TOP_N,
+    // ADR-005: a taken-down paper or a hidden authorship earns no credit. The
+    // #1502 probe above already rebuilds when a suppression is added or revoked.
+    suppression,
+    // Drop flagged papers of a type the family feed never shows (FEED_EXCLUDED_TYPES:
+    // retractions, errata, letters, editorials), so a row's count cannot include a
+    // paper the page omits. Looked up as "is excluded" and subtracted, because a
+    // `notIn` filter would also drop rows whose type is null.
+    loadFlaggedPmids: async () => {
+      const flagged = (
+        await db.read.pubmedSystematicReview.findMany({ select: { pmid: true } })
+      ).map((r) => r.pmid);
+      const excluded = new Set<string>();
+      const IN_BATCH = 1000;
+      for (let i = 0; i < flagged.length; i += IN_BATCH) {
+        for (const r of await db.read.publication.findMany({
+          where: {
+            pmid: { in: flagged.slice(i, i + IN_BATCH) },
+            publicationType: { in: [...FEED_EXCLUDED_TYPES] },
+          },
+          select: { pmid: true },
+        })) {
+          excluded.add(r.pmid);
+        }
+      }
+      return flagged.filter((pmid) => !excluded.has(pmid));
+    },
+    // "Full-time faculty" = TOP_SCHOLARS_ELIGIBLE_ROLES (full_time_faculty plus
+    // part_time_faculty, which lib/eligibility.ts counts as full-time everywhere
+    // the carve applies), among the same active scholars as ourCwidSet.
+    loadFullTimeFacultyCwids: async () =>
+      new Set(
+        (
+          await db.write.scholar.findMany({
+            where: {
+              deletedAt: null,
+              status: "active",
+              roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
+            },
+            select: { cwid: true },
+          })
+        ).map((s) => s.cwid),
+      ),
+    loadConfirmedAuthorships: async (pmids) => {
+      const pairs: Array<{ pmid: string; cwid: string | null }> = [];
+      const IN_BATCH = 1000;
+      for (let i = 0; i < pmids.length; i += IN_BATCH) {
+        pairs.push(
+          ...(await db.read.publicationAuthor.findMany({
+            where: {
+              pmid: { in: pmids.slice(i, i + IN_BATCH) },
+              isConfirmed: true,
+              cwid: { not: null },
+            },
+            select: { pmid: true, cwid: true },
+          })),
+        );
+      }
+      return pairs;
+    },
+  });
+  // Null while the flag is off, so the summary logs below are unchanged then.
+  let srRuleSummary: Record<string, unknown> | null = null;
+  if (srRule.status === "skipped_empty") {
+    srRuleSummary = { status: "skipped_empty" };
+    console.warn(
+      `[Tools] WARNING: ${SR_RULE_FLAG} is on but pubmed_systematic_review is empty ` +
+        `(etl:pubmed-systematic-reviews has not run yet); the systematic review rule was skipped.`,
+    );
+    log("systematic_review_rule_skipped", {
+      reason: "pubmed_systematic_review is empty",
+      family_id: srRule.family.familyId,
+    });
+  } else if (srRule.status === "applied") {
+    const c = srRule.counters;
+    srRuleSummary = {
+      status: "applied",
+      flagged_pmids: c.flaggedPmids,
+      qualifying_pmids: c.qualifyingPmids,
+      scholars_credited: c.scholarsCredited,
+      rows_created: c.rowsCreated,
+      rows_extended: c.rowsExtended,
+      rows_unchanged: c.rowsUnchanged,
+      suppressed_authorships: c.suppressedAuthorships,
+      pmids_added: c.pmidsAdded,
+      rows_dropped_by_cap: c.rowsDroppedByCap,
+    };
+    log("systematic_review_rule_applied", {
+      ...srRuleSummary,
+      family_id: srRule.family.familyId,
+      family_label: srRule.family.familyLabel,
+      supercategory: srRule.family.supercategory,
+      has_definition: srRule.family.definition !== null,
+      family_rows_before: familyResult.writes.length,
+      family_rows_after: srRule.writes.length,
+      // Should be 1: more means the registry carries duplicate ids for the family.
+      registry_matches: srRule.registryMatches,
+      // Should be 0: existing rows whose label is not byte-equal to the registry
+      // label, which public pages would group apart from rule-created rows.
+      label_drift_rows: c.labelDriftRows,
+    });
+    if (srRule.registryMatches > 1 || c.labelDriftRows > 0) {
+      console.warn(
+        `[Tools] WARNING: systematic review rule: ${srRule.registryMatches} registry entries match ` +
+          `"${SR_FAMILY_LABEL}" under "${SR_FAMILY_SUPERCATEGORY}", ${c.labelDriftRows} existing rows ` +
+          `carry a differently spelled label.`,
+      );
+    }
+    // Everything below (dry run, volume guard, table replace) reads the merged rows.
+    familyResult.writes = srRule.writes;
+  }
+
   // #1166 — entity DIMENSION + per-(pub × entity) FACTS from the same fetch. ADR-005
   // suppression drops dark-pmid facts; `evidenced` is recomputed against survivors.
   const entityResult = buildFamilyEntityWritesFromS3(entityArtifact, { suppression });
@@ -592,6 +759,7 @@ async function main(): Promise<void> {
     log("dry_run_complete", {
       rows_would_write: result.writes.length,
       family_rows_would_write: familyResult.writes.length,
+      ...(srRuleSummary ? { systematic_review_rule: srRuleSummary } : {}),
       entity_rows_would_write: entityResult.entityWrites.length,
       entity_usage_rows_would_write: entityResult.usageWrites.length,
     });
@@ -761,6 +929,7 @@ async function main(): Promise<void> {
   log("write_complete", {
     rows: inserted,
     family_rows: familiesInserted,
+    ...(srRuleSummary ? { systematic_review_rule: srRuleSummary } : {}),
     entity_rows: entityRowsInserted,
     entity_usage_rows: usageRowsInserted,
     version: manifest.version,

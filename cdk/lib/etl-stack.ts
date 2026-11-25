@@ -1057,6 +1057,15 @@ export class EtlStack extends Stack {
       // back to "ddb". Applied via cdk deploy --exclusively Sps-Etl-<env>; run
       // etl:scholar-tool after the deploy.
       SCHOLAR_TOOL_SOURCE: "s3",
+      // Systematic review rule in etl:scholar-tool: when exactly "on", the papers
+      // PubMed's systematic review filter matches (pubmed_systematic_review, filled
+      // weekly by etl:pubmed-systematic-reviews) are merged into the "Systematic
+      // review and meta-analysis" method family before scholar_family is replaced.
+      // Staging first; off in prod.
+      // The flag state is part of the run signature etl:scholar-tool stores, so
+      // the first nightly after a flip (on or off) rebuilds without --force.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      METHOD_FAMILY_SR_RULE: env === "staging" ? "on" : "off",
       // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
       // Resolves lateral recruits with no person_nih_profile row (name →
       // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
