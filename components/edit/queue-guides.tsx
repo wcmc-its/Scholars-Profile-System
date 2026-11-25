@@ -73,8 +73,8 @@ export function HonorsReadOnlyText() {
 }
 
 /** ORCID. Levels: `bandOf` in `etl/orcid-evidence/index.ts` (MIN_SHARED = 3,
- *  ORCID_HISTORY_BAND and ORCID_BYLINE_BAND on in both envs; ORCID_BYLINE_CROSSREF on
- *  in staging only: where it is off the card says Crossref's papers don't count);
+ *  ORCID_HISTORY_BAND, ORCID_BYLINE_BAND and ORCID_BYLINE_CROSSREF on in both envs; on a
+ *  row an earlier run wrote the card still says Crossref's papers don't count);
  *  auto-confirm: `planAutoConfirm` there, on only where ORCID_EMAIL_AUTOCONFIRM is
  *  (prod today, `cdk/lib/etl-stack.ts`), so the copy says "may be";
  *  labels: `ORCID_QUEUE_BAND_LABEL`; who decides: `isOrcidQueueTabVisible`. */
