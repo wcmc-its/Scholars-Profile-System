@@ -2452,7 +2452,7 @@ describe("EtlStack", () => {
       // MINUTES would never alarm at all. Pin the real numbers.
       const expected: Record<string, number> = {
         [`sps-etl-nightly-duration-staging`]: 150 * 60 * 1000,
-        [`sps-etl-weekly-duration-staging`]: 4 * 60 * 60 * 1000,
+        [`sps-etl-weekly-duration-staging`]: 8 * 60 * 60 * 1000,
         [`sps-etl-heartbeat-duration-staging`]: 30 * 60 * 1000,
       };
       for (const [name, threshold] of Object.entries(expected)) {

@@ -10,8 +10,10 @@
  *      every paper we hold) whose citing paper is in one of those sets.
  *   2. NCBI Bookshelf. Ask which books cite each paper, and keep those issued
  *      by a listed health authority (lib/citations/issuing-bodies.ts). This
- *      lookup runs at about 100 ms a paper, so it works through the corpus on a
- *      time budget each run: never-checked papers first, then the oldest checks.
+ *      lookup runs at about 30 ms a paper (three calls in flight), so a whole
+ *      pass takes about 100 minutes. The budget covers a whole pass, so a new
+ *      authority citation shows up within a week. If the pass is cut short it
+ *      resumes next run: never-checked papers first, then the oldest checks.
  *   3. Recompute `publication.authority_bodies / guideline_count / review_count`.
  *
  * Writes only ever add: a document or link is inserted if new and left alone
@@ -64,8 +66,13 @@ const INSERT_BATCH = 2000;
 /** Bookshelf ELink: ids per call, and calls in flight. Larger calls stall. */
 const ELINK_BATCH = 100;
 const ELINK_CONCURRENCY = 3;
-/** Minutes the Bookshelf pass may run; `--bookshelf-minutes` overrides it. */
-const BOOKSHELF_BUDGET_MIN = 30;
+/**
+ * Minutes the Bookshelf pass may run; `--bookshelf-minutes` overrides it. A
+ * whole pass over 198,694 papers took about 100 minutes (staging, 2026-11-24).
+ * // ponytail: keyless NCBI rate. An NCBI_API_KEY would allow three times the
+ * // calls in flight and cut the pass to about 35 minutes.
+ */
+const BOOKSHELF_BUDGET_MIN = 120;
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);

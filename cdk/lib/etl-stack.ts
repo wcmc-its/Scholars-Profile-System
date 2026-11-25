@@ -2798,9 +2798,10 @@ export class EtlStack extends Stack {
         // Capped at the CloudWatch max (7d = 604800s); the 7-day cadence
         // leaves no room for grace within the limit.
         cadenceWindow: Duration.days(7),
-        // prod 120d: median 1.50h, p90 1.89h; the latest full run was 2h 40m,
-        // and PolicyCitationsWeekly adds about 40 minutes on top of that.
-        maxDuration: Duration.hours(4),
+        // The five prod runs to 2026-11-22 took 4.9h to 5.3h (2.6h to 3.1h
+        // before 2026-10-25). PolicyCitationsWeekly adds about 2h on top: its
+        // Bookshelf pass covers every paper each run (BOOKSHELF_BUDGET_MIN).
+        maxDuration: Duration.hours(8),
         stateMachine: this.weeklyStateMachine,
       },
       {
