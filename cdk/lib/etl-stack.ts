@@ -1097,6 +1097,13 @@ export class EtlStack extends Stack {
       // On in both envs since 2026-11-24, after a review of the staging run.
       // Applied via cdk deploy --exclusively Sps-Etl-<env>.
       ORCID_BYLINE_BAND: "on",
+      // ORCID queue — etl:orcid-evidence lets the byline iDs Crossref prints (reciterdb
+      // pubsource_article_orcid) count and contest like PubMed's only when this is
+      // exactly "on". It matters only with ORCID_BYLINE_BAND on. Off: Crossref's papers
+      // are listed on the card and the run logs the band moves they would make. Prod
+      // stays off until the staging run's moves are reviewed.
+      // Applied via cdk deploy --exclusively Sps-Etl-<env>.
+      ORCID_BYLINE_CROSSREF: env === "staging" ? "on" : "off",
       // Ithaca ORCID plan, step 1 — etl:ithaca-roster writes Cornell Ithaca scholar
       // rows only when this is exactly "on"; otherwise it logs the counts it would
       // write. On in both envs since 2026-11-19: the prod dry run matched the

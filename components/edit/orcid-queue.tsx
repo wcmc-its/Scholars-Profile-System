@@ -67,6 +67,7 @@ import {
   workHref,
   type OrcidInstitutionPair,
   type OrcidBylineDetail,
+  type OrcidBylineSource,
   type OrcidOnFile,
   type OrcidQueueBand,
   type OrcidQueueCard,
@@ -2043,7 +2044,8 @@ function Publications({
   const onlyOrcid = r.newWorks;
   const both = r.shared;
   const byline = r.detail?.byline;
-  const onByline = byline?.total ?? 0;
+  const uncounted = byline?.uncounted ?? 0;
+  const onByline = (byline?.total ?? 0) + uncounted;
   // Opens on the first non-empty list.
   const [tab, setTab] = useState<PubTab>(
     onlyOrcid > 0 ? "orcid" : both > 0 ? "both" : onByline > 0 ? "byline" : "rec",
@@ -2181,16 +2183,31 @@ function Publications({
           <span className="font-semibold">
             {onByline === 0
               ? "No accepted paper prints this iD next to the scholar's name in PubMed."
-              : `${fmt(onByline)} accepted ${onByline === 1 ? "paper prints" : "papers print"} this iD next to the scholar's name in PubMed`}
+              : `${fmt(onByline)} accepted ${onByline === 1 ? "paper prints" : "papers print"} this iD next to the scholar's name`}
           </span>
           {onByline > 0 ? <BylineCaveats byline={byline} /> : null}
+          {uncounted > 0 ? (
+            <span
+              className="text-muted-foreground text-[12.5px]"
+              data-testid="orcid-queue-byline-uncounted"
+            >
+              {uncounted === 1
+                ? "1 is only in Crossref and doesn't count toward the match strength."
+                : `${fmt(uncounted)} are only in Crossref and don't count toward the match strength.`}
+            </span>
+          ) : null}
           <ul className="m-0 flex list-none flex-col p-0">
             {byline.papers.map((p) => (
               <PubItem
                 key={p.pmid}
                 title={p.title ? <PubTitle value={p.title} /> : `PMID ${p.pmid}`}
                 year={p.year}
-                meta={p.journal ? <PubJournal as="span" value={p.journal} /> : null}
+                meta={
+                  <>
+                    {p.journal ? <PubJournal as="span" value={p.journal} /> : null}
+                    <span className="block">{bylineSourceLabel(p.sources)}</span>
+                  </>
+                }
                 ids={{ doi: p.doi, pmid: p.pmid }}
                 href={workHref(p)}
                 status={null}
@@ -2222,6 +2239,15 @@ function Publications({
   );
 }
 
+const BYLINE_SOURCE_LABEL: Record<OrcidBylineSource, string> = {
+  pubmed: "PubMed",
+  crossref: "Crossref",
+};
+
+/** An earlier run's paper has no `sources`: it read PubMed alone. */
+const bylineSourceLabel = (sources: readonly OrcidBylineSource[] = ["pubmed"]) =>
+  `in ${sources.map((x) => BYLINE_SOURCE_LABEL[x]).join(" and ")}`;
+
 /** What on the bylines points the other way. Any one of these keeps the byline
  *  papers out of the match strength (`bylineBandPapers`). */
 function BylineCaveats({ byline: b }: { byline: OrcidBylineDetail }) {
@@ -2230,7 +2256,7 @@ function BylineCaveats({ byline: b }: { byline: OrcidBylineDetail }) {
       ? [`Also tied to ${b.otherHolders.join(", ")}: on their accepted papers, or on file for them.`]
       : []),
     ...(b.otherIds.length > 0
-      ? [`The scholar's other accepted papers print ${b.otherIds.join(", ")}.`]
+      ? [`The scholar's accepted papers also print ${b.otherIds.join(", ")}.`]
       : []),
     ...(b.rejected > 0
       ? [

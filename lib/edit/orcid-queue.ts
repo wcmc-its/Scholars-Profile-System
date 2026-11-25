@@ -205,12 +205,20 @@ export type OrcidSharedPaper = {
   journal: string | null;
 };
 
+export type OrcidBylineSource = "pubmed" | "crossref";
+
 /** The accepted papers that print the iD next to the scholar's own name, and what
- *  on the bylines points the other way (etl/orcid-evidence/byline.ts). */
+ *  on the bylines points the other way (etl/orcid-evidence/byline.ts). Everything
+ *  but `papers` and `uncounted` is what the band reads: PubMed alone while
+ *  `ORCID_BYLINE_CROSSREF` is off, PubMed and Crossref when it is on. */
 export type OrcidBylineDetail = {
-  /** Newest first, capped; `total` is the full count. */
-  papers: OrcidSharedPaper[];
+  /** Newest first, capped; `total` + `uncounted` is the full count. `sources`: who
+   *  prints the iD there; absent on an earlier run's row (PubMed). */
+  papers: Array<OrcidSharedPaper & { sources?: OrcidBylineSource[] }>;
   total: number;
+  /** Papers only Crossref prints the iD on, listed while `ORCID_BYLINE_CROSSREF` is
+   *  off: not in `total`. Absent = 0. */
+  uncounted?: number;
   /** Papers ReCiter rejected for the scholar that print it there. */
   rejected: number;
   /** Other people (CWID or NetID) whose accepted papers print it on their byline, or

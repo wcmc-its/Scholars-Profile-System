@@ -802,6 +802,7 @@ function asByline(v: unknown): OrcidBylineDetail | null {
   return {
     papers: b.papers,
     total: n(b.total),
+    ...(n(b.uncounted) > 0 ? { uncounted: n(b.uncounted) } : {}),
     rejected: n(b.rejected),
     otherHolders: asStrings(b.otherHolders),
     otherIds: asStrings(b.otherIds),

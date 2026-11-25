@@ -21,9 +21,12 @@ import {
   assembleEvidence,
   bandOf,
   bylineBandShift,
+  bylineCrossrefShift,
   historyBandShift,
   isBylineBandEnabled,
+  isBylineCrossrefEnabled,
   loadBylineRows,
+  loadCrossrefBylineRows,
   recordFacts,
   SHARED_DETAIL_CAP,
   withSharedPaperDetail,
@@ -42,7 +45,12 @@ const row = (
   pmid: string,
   orcid = ORCID,
   assertion: BylineRow["assertion"] = "ACCEPTED",
-): BylineRow => ({ cwid, pmid, orcid, assertion });
+  source: BylineRow["source"] = "pubmed",
+): BylineRow => ({ cwid, pmid, orcid, assertion, source });
+const xrow = (...[cwid, pmid, orcid, assertion]: Parameters<typeof row>) =>
+  row(cwid, pmid, orcid, assertion, "crossref");
+/** Papers PubMed alone prints the iD on. */
+const pm = (...pmids: string[]) => pmids.map((pmid) => ({ pmid, sources: ["pubmed"] }));
 
 const factsFor = (rows: BylineRow[], opts: Parameters<typeof indexBylines>[1] = {}, held?: string[]) =>
   bylineFactsOf(indexBylines(rows, opts), "jd0001", ORCID, held);
@@ -50,7 +58,7 @@ const factsFor = (rows: BylineRow[], opts: Parameters<typeof indexBylines>[1] = 
 describe("byline facts", () => {
   it("lists the accepted papers once each, newest first, whatever the cwid's case", () => {
     expect(factsFor([row("JD0001", "101"), row("jd0001", "101"), row("jd0001", "205")])).toEqual({
-      papers: ["205", "101"],
+      papers: pm("205", "101"),
       rejected: 0,
       otherHolders: [],
       otherIds: [],
@@ -63,7 +71,7 @@ describe("byline facts", () => {
       row("jd0001", "102", ORCID, "PENDING"),
       row("jd0001", "103", ORCID, "REJECTED"),
     ]);
-    expect(f).toMatchObject({ papers: ["101"], rejected: 1 });
+    expect(f).toMatchObject({ papers: pm("101"), rejected: 1 });
   });
 
   it("two rows for one paper: REJECTED beats ACCEPTED, in either order", () => {
@@ -73,7 +81,7 @@ describe("byline facts", () => {
     ])
       expect(factsFor(rows)).toMatchObject({ papers: [], rejected: 1 });
     expect(factsFor([row("jd0001", "101", ORCID, "PENDING"), row("jd0001", "101")])).toMatchObject({
-      papers: ["101"],
+      papers: pm("101"),
       rejected: 0,
     });
   });
@@ -108,7 +116,7 @@ describe("byline facts", () => {
       ],
       { dismissed: new Set([`xy0002|${ORCID}`, `jd0001|${OTHER}`]) },
     );
-    expect(f).toEqual({ papers: ["101"], rejected: 0, otherHolders: [], otherIds: [] });
+    expect(f).toEqual({ papers: pm("101"), rejected: 0, otherHolders: [], otherIds: [] });
   });
 
   it("a deprecated iD counts as its primary, so it is no second iD", () => {
@@ -116,7 +124,7 @@ describe("byline facts", () => {
       deprecated: new Map([[ORCID, PRIMARY]]),
     });
     expect(bylineFactsOf(index, "jd0001", PRIMARY)).toMatchObject({
-      papers: ["102", "101"],
+      papers: pm("102", "101"),
       otherIds: [],
     });
   });
@@ -126,7 +134,7 @@ describe("byline facts", () => {
       deprecated: new Map([[ORCID, PRIMARY]]),
       dismissed: new Set([`jd0001|${ORCID}`]),
     });
-    expect(bylineFactsOf(index, "jd0001", PRIMARY).papers).toEqual(["102"]);
+    expect(bylineFactsOf(index, "jd0001", PRIMARY).papers).toEqual(pm("102"));
   });
 
   it("heldByOrcid: live scholars only, a deprecated iD on file held as its primary", () => {
@@ -145,6 +153,51 @@ describe("byline facts", () => {
 
   it("a pair with no byline rows has no papers", () => {
     expect(factsFor([])).toEqual({ papers: [], rejected: 0, otherHolders: [], otherIds: [] });
+  });
+
+  it("one paper, one vote: PubMed and Crossref print the same iD on it", () => {
+    for (const rows of [
+      [row("jd0001", "101"), xrow("JD0001", "101"), xrow("jd0001", "101"), xrow("jd0001", "102")],
+      [row("jd0001", "101"), xrow("jd0001", "102"), xrow("JD0001", "101")],
+    ])
+      expect(factsFor(rows).papers).toEqual([
+        { pmid: "102", sources: ["crossref"] },
+        { pmid: "101", sources: ["pubmed", "crossref"] },
+      ]);
+  });
+
+  it("a Crossref row on a paper rejected elsewhere: REJECTED still wins", () => {
+    expect(factsFor([row("jd0001", "101", ORCID, "REJECTED"), xrow("jd0001", "101")])).toMatchObject({
+      papers: [],
+      rejected: 1,
+    });
+  });
+
+  it("PubMed and Crossref print different iDs on one slot: each is the other's second iD", () => {
+    const index = indexBylines([
+      row("jd0001", "101"),
+      row("jd0001", "102"),
+      xrow("jd0001", "101", OTHER),
+      xrow("jd0001", "103", OTHER),
+    ]);
+    for (const [orcid, other] of [
+      [ORCID, OTHER],
+      [OTHER, ORCID],
+    ] as const) {
+      const f = bylineFactsOf(index, "jd0001", orcid);
+      expect(f.papers).toHaveLength(2);
+      expect(f.otherIds).toEqual([other]);
+      expect(bylineBandPapers({ ...f, total: f.papers.length })).toBe(0);
+    }
+  });
+
+  it("a Crossref iD the librarian ruled out, or deprecated into the other, is no conflict", () => {
+    const rows = [row("jd0001", "101"), xrow("jd0001", "101", OTHER)];
+    expect(factsFor(rows, { dismissed: new Set([`jd0001|${OTHER}`]) }).otherIds).toEqual([]);
+    expect(factsFor(rows, { deprecated: new Map([[OTHER, ORCID]]) })).toMatchObject({
+      papers: [{ pmid: "101", sources: ["pubmed", "crossref"] }],
+      otherIds: [],
+    });
   });
 
   it("bylineBandPapers: all of them, or none when anything points the other way", () => {
@@ -205,7 +258,13 @@ describe("assembleEvidence with byline papers", () => {
   const JANE = { cwid: "jd0001", fullName: "Jane Doe", preferredName: "Jane Doe", email: null };
   const run = (
     rows: BylineRow[] | null,
-    over: { on?: boolean; family?: string; heldBy?: Map<string, string[]> } = {},
+    over: {
+      on?: boolean;
+      family?: string;
+      heldBy?: Map<string, string[]>;
+      crossref?: BylineRow[];
+      crossrefOn?: boolean;
+    } = {},
   ) =>
     assembleEvidence({
       pairs: [{ cwid: "jd0001", orcid: ORCID }],
@@ -218,13 +277,17 @@ describe("assembleEvidence with byline papers", () => {
       bylines: rows ? indexBylines(rows) : undefined,
       heldBy: over.heldBy,
       bylineBand: over.on ?? true,
+      bylinesWithCrossref: over.crossref && indexBylines([...(rows ?? []), ...over.crossref]),
+      bylineCrossref: over.crossrefOn,
     });
 
   it("an empty record with one byline paper: the paper is listed, and the match is Moderate", () => {
     const rows = run([row("jd0001", "101")]);
     expect(rows[0]).toMatchObject({ band: "moderate", shared: 0, worksTotal: 0 });
     expect(rows[0]!.evidenceDetail.byline).toEqual({
-      papers: [{ pmid: "101", doi: null, title: null, year: null, journal: null }],
+      papers: [
+        { pmid: "101", doi: null, title: null, year: null, journal: null, sources: ["pubmed"] },
+      ],
       total: 1,
       rejected: 0,
       otherHolders: [],
@@ -299,6 +362,122 @@ describe("assembleEvidence with byline papers", () => {
     expect(rows[0]!.evidenceDetail).not.toHaveProperty("byline");
   });
 
+  describe("Crossref rows", () => {
+    const shift = (rows: BylineRow[], crossref: BylineRow[], heldBy?: Map<string, string[]>) =>
+      bylineCrossrefShift(
+        run(rows, { crossref, crossrefOn: true, heldBy }),
+        {
+          bylines: indexBylines(rows),
+          bylinesWithCrossref: indexBylines([...rows, ...crossref]),
+          heldBy,
+        },
+        false,
+      );
+    const P1 = [row("jd0001", "101")];
+    const P2 = [...P1, row("jd0001", "102")];
+    const X3 = [xrow("jd0001", "103")];
+
+    it("on: a paper in each is Strong, the sources are named, nothing is left uncounted", () => {
+      const r = run(P1, { crossref: [...X3, xrow("jd0001", "101")], crossrefOn: true })[0]!;
+      expect(r.band).toBe("strong");
+      expect(r.evidenceDetail.byline).toMatchObject({
+        total: 2,
+        papers: [
+          { pmid: "103", sources: ["crossref"] },
+          { pmid: "101", sources: ["pubmed", "crossref"] },
+        ],
+      });
+      expect(r.evidenceDetail.byline).not.toHaveProperty("uncounted");
+      expect(shift(P1, X3)).toEqual({ "moderate->strong": 1 });
+      expect(run([], { crossref: X3, crossrefOn: true })[0]!.band).toBe("moderate");
+    });
+
+    it("on, but ORCID_BYLINE_BAND off: the band does not move", () => {
+      expect(run(P1, { on: false, crossref: X3, crossrefOn: true })[0]!.band).toBe("weak");
+    });
+
+    it.each([
+      ["more papers", X3],
+      ["a paper PubMed has too", [xrow("jd0001", "101")]],
+      ["a rejected paper", [xrow("jd0001", "103", ORCID, "REJECTED")]],
+      ["another person's byline", [xrow("xy0002", "300")]],
+      ["a second iD", [xrow("jd0001", "103", OTHER)]],
+      ["a different iD on PubMed's own paper", [xrow("jd0001", "101", OTHER)]],
+      ["a rejection of PubMed's own paper", [xrow("jd0001", "101", ORCID, "REJECTED")]],
+    ] as Array<[string, BylineRow[]]>)("off (%s): band, contest and moves are PubMed's alone", (_, crossref) => {
+      for (const rows of [[], P1, P2]) {
+        const [alone] = run(rows);
+        const [off] = run(rows, { crossref });
+        const alike = { papers: [], uncounted: undefined };
+        expect({ ...off!.evidenceDetail.byline!, ...alike }).toEqual({
+          ...alone!.evidenceDetail.byline!,
+          ...alike,
+        });
+        expect(off!.band).toBe(alone!.band);
+        expect(bylineBandPapers(off!.evidenceDetail.byline)).toBe(rows.length);
+        expect(bylineBandShift([off!], false)).toEqual(bylineBandShift([alone!], false));
+      }
+    });
+
+    it("off: Crossref's papers are listed with their source and counted apart", () => {
+      const b = run(P1, { crossref: [...X3, xrow("jd0001", "101")] })[0]!.evidenceDetail.byline!;
+      expect(b).toMatchObject({ total: 1, uncounted: 1 });
+      expect(b.papers.map((p) => [p.pmid, p.sources])).toEqual([
+        ["103", ["crossref"]],
+        ["101", ["pubmed", "crossref"]],
+      ]);
+    });
+
+    it.each([
+      ["a rejected paper", [xrow("jd0001", "103", ORCID, "REJECTED")]],
+      ["another person's byline", [xrow("xy0002", "300")]],
+      ["a second iD", [xrow("jd0001", "103", OTHER)]],
+      ["a different iD on PubMed's own paper", [xrow("jd0001", "101", OTHER)]],
+    ] as Array<[string, BylineRow[]]>)("on (%s in Crossref): it contests PubMed's papers", (_, crossref) => {
+      expect(run(P2)[0]!.band).toBe("strong");
+      const r = run(P2, { crossref, crossrefOn: true })[0]!;
+      expect(r.band).toBe("weak");
+      expect(bylineBandPapers(r.evidenceDetail.byline)).toBe(0);
+      expect(shift(P2, crossref)).toEqual({ "strong->weak": 1 });
+    });
+
+    it("on file for someone else: Crossref's papers never lift, nor count as a move", () => {
+      const heldBy = new Map([[ORCID, ["xy0002"]]]);
+      const r = run([], { crossref: X3, crossrefOn: true, heldBy })[0]!;
+      expect(r.band).toBe("weak");
+      expect(shift([], [...X3, xrow("jd0001", "104")], heldBy)).toEqual({});
+    });
+
+    it("Crossref unreadable: PubMed alone, even when on", () => {
+      expect(run(P2, { crossrefOn: true })).toEqual(run(P2));
+    });
+
+    it("PubMed unreadable: no byline evidence at all", () => {
+      const r = run(null, { crossref: X3, crossrefOn: true })[0]!;
+      expect(r.band).toBe("weak");
+      expect(r.evidenceDetail).not.toHaveProperty("byline");
+    });
+
+    // The bulk floor takes a Strong WCM pair with 3+ shared, inst_match, an agreeing name
+    // and no competitor. Each such pair has the same band with no byline paper at all.
+    it("bulk confirm: whatever passes the WCM floor's other checks has its band without byline papers", () => {
+      for (const emailVerified of [true, false])
+        for (const historyMatch of [true, false])
+          for (const shared of [3, 4, 50])
+            for (const byline of [1, 2, 50]) {
+              const e = {
+                emailVerified,
+                historyMatch,
+                shared,
+                instMatch: true,
+                competitor: false,
+                nameAgrees: true,
+              };
+              expect(bandOf({ ...e, byline })).toBe(bandOf(e));
+            }
+    });
+  });
+
   it("nothing but evidence_detail is added to the row the ETL upserts", () => {
     const without = Object.keys(run(null)[0]!).sort();
     expect(Object.keys(run([row("jd0001", "101")])[0]!).sort()).toEqual(without);
@@ -310,13 +489,23 @@ describe("assembleEvidence with byline papers", () => {
       new Map([["101", { doi: "10.1/a", title: "Paper one", year: 2020, journal: "J Example" }]]),
     );
     expect(filled[0]!.evidenceDetail.byline?.papers).toEqual([
-      { pmid: "101", doi: "10.1/a", title: "Paper one", year: 2020, journal: "J Example" },
+      {
+        pmid: "101",
+        doi: "10.1/a",
+        title: "Paper one",
+        year: 2020,
+        journal: "J Example",
+        sources: ["pubmed"],
+      },
     ]);
   });
 });
 
-it('isBylineBandEnabled is exactly "on"', () => {
-  const prev = process.env.ORCID_BYLINE_BAND;
+it.each([
+  ["ORCID_BYLINE_BAND", isBylineBandEnabled],
+  ["ORCID_BYLINE_CROSSREF", isBylineCrossrefEnabled],
+] as const)('%s is exactly "on"', (name, enabled) => {
+  const prev = process.env[name];
   try {
     for (const [v, want] of [
       ["on", true],
@@ -324,14 +513,14 @@ it('isBylineBandEnabled is exactly "on"', () => {
       ["1", false],
       ["off", false],
     ] as const) {
-      process.env.ORCID_BYLINE_BAND = v;
-      expect(isBylineBandEnabled()).toBe(want);
+      process.env[name] = v;
+      expect(enabled()).toBe(want);
     }
-    delete process.env.ORCID_BYLINE_BAND;
-    expect(isBylineBandEnabled()).toBe(false);
+    delete process.env[name];
+    expect(enabled()).toBe(false);
   } finally {
-    if (prev === undefined) delete process.env.ORCID_BYLINE_BAND;
-    else process.env.ORCID_BYLINE_BAND = prev;
+    if (prev === undefined) delete process.env[name];
+    else process.env[name] = prev;
   }
 });
 
@@ -380,5 +569,59 @@ describe("loadBylineRows", () => {
   it("reciterdb unreachable: null, not a failed run", async () => {
     query.mockRejectedValue(new Error("unreachable"));
     expect(await loadBylineRows(1)).toBeNull();
+  });
+});
+
+describe("loadCrossrefBylineRows", () => {
+  beforeEach(() => {
+    query.mockReset();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  const dbRow = (over: Record<string, unknown> = {}) => ({
+    personIdentifier: "JD0001",
+    pmid: 101,
+    orcid: ORCID,
+    userAssertion: "ACCEPTED",
+    ...over,
+  });
+
+  it("reads the live slots' iDs; a slot asked with no iD is no row", async () => {
+    query.mockResolvedValue([
+      dbRow(),
+      dbRow({ pmid: 102, orcid: null }),
+      dbRow({ pmid: 103, orcid: OTHER.toLowerCase(), userAssertion: "REJECTED" }),
+    ]);
+    expect(await loadCrossrefBylineRows(3)).toEqual([
+      xrow("JD0001", "101"),
+      xrow("JD0001", "103", OTHER, "REJECTED"),
+    ]);
+    const { sql, timeout } = query.mock.calls[0]![0] as { sql: string; timeout: number };
+    expect(sql).toContain("a.`rank` = c.author_rank");
+    expect(sql).toContain("a.personIdentifier = c.personIdentifier AND a.pmid = c.pmid");
+    expect(sql).toContain("p.personIdentifier = c.personIdentifier AND p.pmid = c.pmid");
+    expect(sql).toContain("c.source = 'crossref'");
+    expect(sql).toContain("a.targetAuthor LIKE '1%'");
+    expect(sql).toContain("COALESCE(p.targetAuthorCount, 1) <= 1");
+    expect(timeout).toBeGreaterThan(0);
+  });
+
+  it("the floor counts slots asked, with or without an iD", async () => {
+    query.mockResolvedValue([dbRow(), dbRow({ pmid: 102, orcid: null })]);
+    expect(await loadCrossrefBylineRows(2)).toHaveLength(1);
+    expect(await loadCrossrefBylineRows(3)).toBeNull();
+  });
+
+  it("a part-filled backfill is no read", async () => {
+    const rows = Array.from({ length: 279_999 }, (_, i) => dbRow({ pmid: i + 1 }));
+    query.mockResolvedValue(rows);
+    expect(await loadCrossrefBylineRows()).toBeNull();
+    query.mockResolvedValue([...rows, dbRow({ pmid: 900_000, orcid: null })]);
+    expect(await loadCrossrefBylineRows()).toHaveLength(279_999);
+  });
+
+  it("table absent or reciterdb unreachable: null, not a failed run", async () => {
+    query.mockRejectedValue(new Error("Table 'pubsource_article_orcid' doesn't exist"));
+    expect(await loadCrossrefBylineRows(1)).toBeNull();
   });
 });

@@ -434,6 +434,8 @@ describe("loaders", () => {
       admins?: Array<{ cwid: string; orcid: string }>;
       /** Manual division code → its hand-added roster. */
       rosters?: Record<string, string[]>;
+      /** a00001's `evidence_detail`. */
+      detail?: unknown;
     } = {},
   ) => {
     const evidence = [
@@ -459,7 +461,7 @@ describe("loaders", () => {
         e.cwid === "a00001"
           ? [...STATUS_SAMPLE, { title: "Old row", year: 2020, status: "bogus" }]
           : [],
-      evidenceDetail: e.cwid === "a00001" ? DETAIL : null,
+      evidenceDetail: e.cwid === "a00001" ? (opts.detail ?? DETAIL) : null,
     });
     const held: Record<string, string | null> = {
       a00001: null,
@@ -679,6 +681,20 @@ describe("loaders", () => {
         }),
       ),
     ).toEqual(["f00001"]);
+  });
+
+  it("evidence_detail.byline: an earlier run's row is kept as it was; the Crossref fields survive", async () => {
+    const bylineOf = async (byline: unknown) => {
+      const c = client({ detail: { ...DETAIL, byline } });
+      const card = (await (await actual()).loadOrcidQueueCard(c, "a00001"))!;
+      return card.candidates[0]!.detail!.byline;
+    };
+    expect(await bylineOf(DETAIL.byline)).toEqual(DETAIL.byline);
+    expect(await bylineOf(DETAIL.byline)).not.toHaveProperty("uncounted");
+    const papers = [{ ...DETAIL.byline!.papers[0]!, sources: ["crossref"] }];
+    const off = { ...DETAIL.byline!, papers, total: 0, uncounted: 1 };
+    expect(await bylineOf(off)).toEqual(off);
+    expect(await bylineOf({ ...off, uncounted: "1" })).not.toHaveProperty("uncounted");
   });
 
   it("the card: every candidate with its evidence, sources and work statuses; the publication count", async () => {
@@ -1127,8 +1143,11 @@ describe("client", () => {
     expect(screen.getByTestId("orcid-queue-pubs-byline").getAttribute("aria-selected")).toBe("true");
     const pubs = screen.getByTestId("orcid-queue-pubs");
     expect(pubs.textContent).toContain(
-      "1 accepted paper prints this iD next to the scholar's name in PubMed",
+      "1 accepted paper prints this iD next to the scholar's name",
     );
+    // An earlier run's paper names no source: it read PubMed alone.
+    expect(within(pubs).getByTestId("orcid-queue-work").textContent).toContain("in PubMed");
+    expect(screen.queryByTestId("orcid-queue-byline-uncounted")).toBeNull();
     expect(screen.queryByTestId("orcid-queue-byline-caveats")).toBeNull();
     const work = within(pubs).getByTestId("orcid-queue-work");
     fireEvent.click(within(work).getByRole("button", { name: /A byline paper/ }));
@@ -1164,9 +1183,74 @@ describe("client", () => {
     );
     fireEvent.click(screen.getByTestId("orcid-queue-pubs-byline"));
     expect(screen.getByTestId("orcid-queue-byline-caveats").textContent).toBe(
-      `Also tied to xy0002: on their accepted papers, or on file for them. The scholar's other accepted papers print ${OTHER}. 2 rejected papers print this iD there too. The byline papers don’t raise the match strength.`,
+      `Also tied to xy0002: on their accepted papers, or on file for them. The scholar's accepted papers also print ${OTHER}. 2 rejected papers print this iD there too. The byline papers don’t raise the match strength.`,
     );
     expect(screen.getByTestId("orcid-queue-pubs").textContent).toContain("Showing 1 of 3.");
+  });
+
+  const PAPER = DETAIL.byline!.papers[0]!;
+  const BYLINE_3: NonNullable<OrcidEvidenceDetail["byline"]> = {
+    ...DETAIL.byline!,
+    papers: [
+      { ...PAPER, pmid: "301", sources: ["pubmed"] },
+      { ...PAPER, pmid: "302", sources: ["crossref"] },
+      { ...PAPER, pmid: "303", sources: ["pubmed", "crossref"] },
+    ],
+  };
+
+  it("byline papers: each names its source, and all count when none is left out", async () => {
+    mount([CARD({}, [{ ...ROW, detail: { ...DETAIL, byline: { ...BYLINE_3, total: 3 } } }])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-byline-count").textContent).toBe("On 3 bylines");
+    fireEvent.click(screen.getByTestId("orcid-queue-pubs-byline"));
+    const works = within(screen.getByTestId("orcid-queue-pubs")).getAllByTestId("orcid-queue-work");
+    expect(works.map((w) => /in (PubMed|Crossref).*$/.exec(w.textContent ?? "")?.[0])).toEqual([
+      "in PubMed",
+      "in Crossref",
+      "in PubMed and Crossref",
+    ]);
+    expect(screen.queryByTestId("orcid-queue-byline-uncounted")).toBeNull();
+  });
+
+  it("byline papers: Crossref-only ones that don't count are listed, not counted, not contested", async () => {
+    mount([
+      CARD({}, [{ ...ROW, detail: { ...DETAIL, byline: { ...BYLINE_3, total: 2, uncounted: 1 } } }]),
+    ]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-evidence").textContent).toContain(
+      "iD printed on 2 accepted papers.",
+    );
+    expect(screen.getByTestId("orcid-queue-byline-count").textContent).toBe("On 2 bylines");
+    expect(screen.getByTestId("orcid-queue-pubs-byline").textContent).toContain("3");
+    fireEvent.click(screen.getByTestId("orcid-queue-pubs-byline"));
+    expect(screen.getByTestId("orcid-queue-byline-uncounted").textContent).toBe(
+      "1 is only in Crossref and doesn't count toward the match strength.",
+    );
+    expect(screen.queryByTestId("orcid-queue-byline-caveats")).toBeNull();
+  });
+
+  it("byline papers: an empty record with only uncounted ones opens on them, with no count", async () => {
+    const byline = { ...BYLINE_3, papers: BYLINE_3.papers.slice(1, 2), total: 0, uncounted: 2 };
+    mount([
+      CARD({}, [
+        {
+          ...ROW,
+          shared: 0,
+          worksTotal: 0,
+          newWorks: 0,
+          newWorksSample: [],
+          detail: { ...DETAIL, byline },
+        },
+      ]),
+    ]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-evidence").textContent).toContain("name agrees.");
+    expect(screen.queryByTestId("orcid-queue-byline-count")).toBeNull();
+    expect(screen.getByTestId("orcid-queue-pubs-byline").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("orcid-queue-byline-uncounted").textContent).toBe(
+      "2 are only in Crossref and don't count toward the match strength.",
+    );
+    expect(screen.getByTestId("orcid-queue-pubs").textContent).toContain("Showing 1 of 2.");
   });
 
   it("byline papers: an earlier run's row has no tab and no count", async () => {

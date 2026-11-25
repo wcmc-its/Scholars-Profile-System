@@ -2258,6 +2258,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "off",
+              },
+              {
                 "Name": "ITHACA_ROSTER",
                 "Value": "on",
               },
@@ -3021,6 +3025,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "off",
+              },
+              {
                 "Name": "ITHACA_ROSTER",
                 "Value": "on",
               },
@@ -3721,6 +3729,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "off",
+              },
+              {
                 "Name": "ITHACA_ROSTER",
                 "Value": "on",
               },
@@ -4350,6 +4362,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_BYLINE_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "off",
               },
               {
                 "Name": "ITHACA_ROSTER",
@@ -5420,6 +5436,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "ORCID_BYLINE_BAND",
                 "Value": "on",
+              },
+              {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "off",
               },
               {
                 "Name": "ITHACA_ROSTER",
@@ -15050,6 +15070,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "on",
+              },
+              {
                 "Name": "ITHACA_ROSTER",
                 "Value": "on",
               },
@@ -15813,6 +15837,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "on",
+              },
+              {
                 "Name": "ITHACA_ROSTER",
                 "Value": "on",
               },
@@ -16513,6 +16541,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "ORCID_BYLINE_CROSSREF",
+                "Value": "on",
+              },
+              {
                 "Name": "ITHACA_ROSTER",
                 "Value": "on",
               },
@@ -17141,6 +17173,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_BYLINE_BAND",
+                "Value": "on",
+              },
+              {
+                "Name": "ORCID_BYLINE_CROSSREF",
                 "Value": "on",
               },
               {
@@ -18211,6 +18247,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORCID_BYLINE_BAND",
+                "Value": "on",
+              },
+              {
+                "Name": "ORCID_BYLINE_CROSSREF",
                 "Value": "on",
               },
               {
