@@ -66,6 +66,7 @@ import {
   RECITER_WORK_STATUSES,
   workHref,
   type OrcidInstitutionPair,
+  type OrcidBylineContests,
   type OrcidBylineDetail,
   type OrcidBylineSource,
   type OrcidOnFile,
@@ -2248,10 +2249,9 @@ const BYLINE_SOURCE_LABEL: Record<OrcidBylineSource, string> = {
 const bylineSourceLabel = (sources: readonly OrcidBylineSource[] = ["pubmed"]) =>
   `in ${sources.map((x) => BYLINE_SOURCE_LABEL[x]).join(" and ")}`;
 
-/** What on the bylines points the other way. Any one of these keeps the byline
- *  papers out of the match strength (`bylineBandPapers`). */
-function BylineCaveats({ byline: b }: { byline: OrcidBylineDetail }) {
-  const list = [
+/** What on the bylines points the other way, as sentences. */
+function bylineContestText(b: OrcidBylineContests): string {
+  return [
     ...(b.otherHolders.length > 0
       ? [`Also tied to ${b.otherHolders.join(", ")}: on their accepted papers, or on file for them.`]
       : []),
@@ -2263,15 +2263,34 @@ function BylineCaveats({ byline: b }: { byline: OrcidBylineDetail }) {
           `${fmt(b.rejected)} rejected ${b.rejected === 1 ? "paper prints" : "papers print"} this iD there too.`,
         ]
       : []),
-  ];
-  if (list.length === 0) return null;
+  ].join(" ");
+}
+
+/** The contests. A counted one keeps the byline papers out of the match strength
+ *  (`bylineBandPapers`); one only in Crossref, while Crossref doesn't count, does not. */
+function BylineCaveats({ byline: b }: { byline: OrcidBylineDetail }) {
+  const counted = bylineContestText(b);
+  const uncounted = b.uncountedContests ? bylineContestText(b.uncountedContests) : "";
   return (
-    <p
-      className="text-apollo-amber m-0 text-[12.5px]"
-      data-testid="orcid-queue-byline-caveats"
-    >
-      {list.join(" ")} The byline papers don&rsquo;t raise the match strength.
-    </p>
+    <>
+      {counted ? (
+        <p
+          className="text-apollo-amber m-0 text-[12.5px]"
+          data-testid="orcid-queue-byline-caveats"
+        >
+          {counted} The byline papers don&rsquo;t raise the match strength.
+        </p>
+      ) : null}
+      {uncounted ? (
+        <p
+          className="text-apollo-amber m-0 text-[12.5px]"
+          data-testid="orcid-queue-byline-crossref-caveats"
+        >
+          Only in Crossref: {uncounted} This doesn&rsquo;t change the match strength. Check it
+          before confirming.
+        </p>
+      ) : null}
+    </>
   );
 }
 

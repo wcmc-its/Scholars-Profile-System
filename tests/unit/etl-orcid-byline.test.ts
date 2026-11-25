@@ -408,7 +408,7 @@ describe("assembleEvidence with byline papers", () => {
       for (const rows of [[], P1, P2]) {
         const [alone] = run(rows);
         const [off] = run(rows, { crossref });
-        const alike = { papers: [], uncounted: undefined };
+        const alike = { papers: [], uncounted: undefined, uncountedContests: undefined };
         expect({ ...off!.evidenceDetail.byline!, ...alike }).toEqual({
           ...alone!.evidenceDetail.byline!,
           ...alike,
@@ -417,6 +417,20 @@ describe("assembleEvidence with byline papers", () => {
         expect(bylineBandPapers(off!.evidenceDetail.byline)).toBe(rows.length);
         expect(bylineBandShift([off!], false)).toEqual(bylineBandShift([alone!], false));
       }
+    });
+
+    it.each([
+      ["a rejected paper", [xrow("jd0001", "104", ORCID, "REJECTED")], { rejected: 1 }],
+      ["another person's byline", [xrow("xy0002", "300")], { otherHolders: ["xy0002"] }],
+      ["a second iD", [xrow("jd0001", "104", OTHER)], { otherIds: [OTHER] }],
+    ] as Array<[string, BylineRow[], object]>)("off (%s): what contests the iD only in Crossref is kept for the card", (_, crossref, want) => {
+      const none = { rejected: 0, otherHolders: [], otherIds: [] };
+      const b = (over: object) => run(P1, { crossref: [...X3, ...crossref], ...over })[0]!.evidenceDetail.byline!;
+      expect(b({}).uncountedContests).toEqual({ ...none, ...want });
+      expect(b({ crossrefOn: true })).not.toHaveProperty("uncountedContests");
+      // PubMed says it too: it is counted already.
+      const both = run([...P1, ...crossref.map((r) => ({ ...r, source: "pubmed" as const }))], { crossref });
+      expect(both[0]!.evidenceDetail.byline).not.toHaveProperty("uncountedContests");
     });
 
     it("off: Crossref's papers are listed with their source and counted apart", () => {
@@ -583,45 +597,89 @@ describe("loadCrossrefBylineRows", () => {
     pmid: 101,
     orcid: ORCID,
     userAssertion: "ACCEPTED",
+    answered: 1,
+    ageHours: 3,
     ...over,
   });
+  /** The slots query answers first, the holders query second. */
+  const answer = (slots: unknown[], holders: unknown[] = []) =>
+    query.mockReset().mockResolvedValueOnce(slots).mockResolvedValueOnce(holders);
+  const many = (n: number, over: Record<string, unknown> = {}) =>
+    Array.from({ length: n }, (_, i) => dbRow({ pmid: i + 1, ...over }));
 
-  it("reads the live slots' iDs; a slot asked with no iD is no row", async () => {
-    query.mockResolvedValue([
+  it("reads the live slots' iDs; a slot answered with no iD, or not for this DOI, is no row", async () => {
+    answer([
+      ...many(100, { orcid: null }),
       dbRow(),
-      dbRow({ pmid: 102, orcid: null }),
       dbRow({ pmid: 103, orcid: OTHER.toLowerCase(), userAssertion: "REJECTED" }),
+      dbRow({ pmid: 104, answered: 0 }),
     ]);
     expect(await loadCrossrefBylineRows(3)).toEqual([
       xrow("JD0001", "101"),
       xrow("JD0001", "103", OTHER, "REJECTED"),
     ]);
-    const { sql, timeout } = query.mock.calls[0]![0] as { sql: string; timeout: number };
-    expect(sql).toContain("a.`rank` = c.author_rank");
-    expect(sql).toContain("a.personIdentifier = c.personIdentifier AND a.pmid = c.pmid");
-    expect(sql).toContain("p.personIdentifier = c.personIdentifier AND p.pmid = c.pmid");
-    expect(sql).toContain("c.source = 'crossref'");
-    expect(sql).toContain("a.targetAuthor LIKE '1%'");
-    expect(sql).toContain("COALESCE(p.targetAuthorCount, 1) <= 1");
-    expect(timeout).toBeGreaterThan(0);
+    const [slots, holders] = query.mock.calls.map((c) => c[0] as { sql: string; timeout: number });
+    for (const { sql, timeout } of [slots!, holders!]) {
+      expect(sql).toContain("a.targetAuthor LIKE '1%'");
+      expect(sql).toContain("COALESCE(p.targetAuthorCount, 1) <= 1");
+      expect(sql).toContain("c.source = 'crossref'");
+      expect(sql).toContain("c.doi = LOWER(TRIM(p.doi))");
+      expect(timeout).toBeGreaterThan(0);
+    }
+    expect(slots!.sql).toContain("c.found = 1 AND c.author_rank = a.`rank`");
+    expect(slots!.sql).toContain("LEFT JOIN pubsource_article_orcid");
+    expect(holders!.sql).toContain("b.pmid = c.pmid AND b.`rank` = c.author_rank");
+    expect(holders!.sql).toContain("q.userAssertion = 'ACCEPTED'");
+    expect(holders!.sql).toContain("COALESCE(q.targetAuthorCount, 1) <= 1");
   });
 
-  it("the floor counts slots asked, with or without an iD", async () => {
-    query.mockResolvedValue([dbRow(), dbRow({ pmid: 102, orcid: null })]);
+  it("someone never asked about who accepted the same entry contests the iD", async () => {
+    answer([dbRow(), dbRow({ pmid: 102 })], [dbRow(), dbRow({ personIdentifier: "xy0002" })]);
+    const index = indexBylines((await loadCrossrefBylineRows(2))!);
+    expect(bylineFactsOf(index, "jd0001", ORCID)).toMatchObject({
+      papers: [{ pmid: "102" }, { pmid: "101" }],
+      otherHolders: ["xy0002"],
+    });
+  });
+
+  it("the floor counts answered slots, with or without an iD", async () => {
+    const rows = [dbRow(), dbRow({ pmid: 102, orcid: null })];
+    answer(rows);
     expect(await loadCrossrefBylineRows(2)).toHaveLength(1);
+    answer(rows);
     expect(await loadCrossrefBylineRows(3)).toBeNull();
   });
 
-  it("a part-filled backfill is no read", async () => {
-    const rows = Array.from({ length: 279_999 }, (_, i) => dbRow({ pmid: i + 1 }));
-    query.mockResolvedValue(rows);
+  it("the default floor", async () => {
+    answer(many(279_999));
     expect(await loadCrossrefBylineRows()).toBeNull();
-    query.mockResolvedValue([...rows, dbRow({ pmid: 900_000, orcid: null })]);
-    expect(await loadCrossrefBylineRows()).toHaveLength(279_999);
+    answer(many(280_000));
+    expect(await loadCrossrefBylineRows()).toHaveLength(280_000);
+  });
+
+  it("slots still due: up to 2% is complete enough, more is not", async () => {
+    const due = (n: number) =>
+      many(n, { orcid: null, answered: 0, ageHours: null });
+    answer([...many(98), ...due(2)]);
+    expect(await loadCrossrefBylineRows(98)).toHaveLength(98);
+    answer([...many(97), ...due(3)]);
+    expect(await loadCrossrefBylineRows(97)).toBeNull();
+  });
+
+  it("the collector stopped: a full table nothing was added to for a week is no read", async () => {
+    answer([dbRow({ ageHours: 500 }), dbRow({ pmid: 102, ageHours: 168 })]);
+    expect(await loadCrossrefBylineRows(2)).toHaveLength(2);
+    answer([dbRow({ ageHours: 500 }), dbRow({ pmid: 102, ageHours: 169 })]);
+    expect(await loadCrossrefBylineRows(2)).toBeNull();
+  });
+
+  it("the driver's bigints and a slot with no row read the same", async () => {
+    answer([dbRow({ answered: 1n, ageHours: 3n })]);
+    expect(await loadCrossrefBylineRows(1)).toHaveLength(1);
   });
 
   it("table absent or reciterdb unreachable: null, not a failed run", async () => {
-    query.mockRejectedValue(new Error("Table 'pubsource_article_orcid' doesn't exist"));
+    query.mockReset().mockRejectedValue(new Error("Table 'pubsource_article_orcid' doesn't exist"));
     expect(await loadCrossrefBylineRows(1)).toBeNull();
   });
 });

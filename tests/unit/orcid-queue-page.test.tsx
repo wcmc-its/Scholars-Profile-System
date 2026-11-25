@@ -695,6 +695,14 @@ describe("loaders", () => {
     const off = { ...DETAIL.byline!, papers, total: 0, uncounted: 1 };
     expect(await bylineOf(off)).toEqual(off);
     expect(await bylineOf({ ...off, uncounted: "1" })).not.toHaveProperty("uncounted");
+    const contested = {
+      ...off,
+      uncountedContests: { rejected: 2, otherHolders: ["xy0002"], otherIds: [OTHER] },
+    };
+    expect(await bylineOf(contested)).toEqual(contested);
+    expect(await bylineOf({ ...off, uncountedContests: "x" })).not.toHaveProperty(
+      "uncountedContests",
+    );
   });
 
   it("the card: every candidate with its evidence, sources and work statuses; the publication count", async () => {
@@ -1225,6 +1233,23 @@ describe("client", () => {
     fireEvent.click(screen.getByTestId("orcid-queue-pubs-byline"));
     expect(screen.getByTestId("orcid-queue-byline-uncounted").textContent).toBe(
       "1 is only in Crossref and doesn't count toward the match strength.",
+    );
+    expect(screen.queryByTestId("orcid-queue-byline-caveats")).toBeNull();
+  });
+
+  it("byline papers: what contests the iD only in Crossref is said, and that it changes nothing", async () => {
+    const byline = {
+      ...BYLINE_3,
+      total: 2,
+      uncounted: 1,
+      uncountedContests: { rejected: 2, otherHolders: ["xy0002"], otherIds: [OTHER] },
+    };
+    mount([CARD({}, [{ ...ROW, detail: { ...DETAIL, byline } }])]);
+    await screen.findByTestId("orcid-queue-card-jd0001");
+    expect(screen.getByTestId("orcid-queue-byline-count").textContent).toBe("On 2 bylines");
+    fireEvent.click(screen.getByTestId("orcid-queue-pubs-byline"));
+    expect(screen.getByTestId("orcid-queue-byline-crossref-caveats").textContent).toBe(
+      `Only in Crossref: Also tied to xy0002: on their accepted papers, or on file for them. The scholar's accepted papers also print ${OTHER}. 2 rejected papers print this iD there too. This doesn’t change the match strength. Check it before confirming.`,
     );
     expect(screen.queryByTestId("orcid-queue-byline-caveats")).toBeNull();
   });

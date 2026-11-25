@@ -100,6 +100,20 @@ export function heldByOrcid(
   return out;
 }
 
+/** What contests the iD in `all` and not in `counted`, or null. Pure. */
+export function contestsBeyond(
+  all: BylineFacts,
+  counted: BylineFacts,
+): Omit<BylineFacts, "papers"> | null {
+  const beyond = (xs: string[], ys: string[]) => xs.filter((x) => !ys.includes(x));
+  const out = {
+    rejected: Math.max(0, all.rejected - counted.rejected),
+    otherHolders: beyond(all.otherHolders, counted.otherHolders),
+    otherIds: beyond(all.otherIds, counted.otherIds),
+  };
+  return out.rejected > 0 || out.otherHolders.length > 0 || out.otherIds.length > 0 ? out : null;
+}
+
 /** What the bylines say about one (scholar, iD) pair. `heldBy`: who has the iD on
  *  file. Pure. */
 export function bylineFactsOf(
