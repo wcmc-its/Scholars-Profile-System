@@ -1705,7 +1705,7 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           },
-          // Observation only, for now. 2026-11-23: the Chrome-without-hints
+          // Blocked since 2026-11-25 (counted first). 2026-11-23: the Chrome-without-hints
           // count above mixes real browsers (Chrome's own JA4, Android phones)
           // with scrapers. Every scraper cohort in it (a nonexistent
           // "Chrome/158" from ~610 IPs, a second fleet-2 JA4 variant, Chrome
@@ -1716,12 +1716,15 @@ export class EdgeStack extends Stack {
           // brotli), so a request with Sec-Fetch-Mode is left out; Chrome 76+
           // sends it on every HTTPS request. That kept 92% of matches. JA4
           // t13d190900_... (Chrome/99, 58 IPs) is left out too: it runs JS and
-          // sends cookies, and is not yet explained. Promote to block once 24h
-          // of matches from this version show no real browsers.
+          // sends cookies, and is not yet explained.
+          // 20.5h of matches from this version (2026-11-24/25 prod, 61k) showed
+          // no real browsers: the only proxied traffic was App Engine scanners.
+          // Siteimprove's LinkCheck (the institution's link checker) does match and
+          // says neither "compatible" nor anything else exempt, so it is left out.
           {
-            name: "count-chrome-ua-no-alpn",
+            name: "block-chrome-ua-no-alpn",
             priority: managedGroups.length + 5,
-            action: { count: {} },
+            action: inconsistentClientBlock,
             statement: {
               andStatement: {
                 statements: [
@@ -1745,6 +1748,7 @@ export class EdgeStack extends Stack {
                     },
                   },
                   { notStatement: { statement: hasSecFetchMode } },
+                  { notStatement: { statement: headerContains("user-agent", "Siteimprove") } },
                   headerContains("user-agent", "Chrome/"),
                   {
                     notStatement: {
@@ -1757,7 +1761,7 @@ export class EdgeStack extends Stack {
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
-              metricName: `sps-edge-${env}-count-chrome-ua-no-alpn`,
+              metricName: `sps-edge-${env}-block-chrome-ua-no-alpn`,
               sampledRequestsEnabled: true,
             },
           },
