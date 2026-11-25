@@ -132,7 +132,11 @@ jobs:
       - name: ECR login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build image
+      # Both images come from the one Dockerfile and share its `deps` stage
+      # (npm ci). `buildx bake` builds that stage once and the two targets side
+      # by side; they used to build one after the other. The ETL target is left
+      # out when its repo does not exist yet (see "Skipped ETL image" below).
+      - name: Build images
         run: |
           set -euo pipefail
           # NEXT_DEPLOYMENT_ID = the deploying commit SHA, inlined by Next for
@@ -155,18 +159,48 @@ jobs:
           else
             ISR_CACHE_S3="on"
           fi
-          docker build \
-            --build-arg NEXT_DEPLOYMENT_ID="${{ github.sha }}" \
-            --build-arg NEXT_ISR_CACHE_S3="$ISR_CACHE_S3" \
-            --tag "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}" \
-            --tag "${{ steps.outputs.outputs.ecr_uri }}:latest" \
-            .
+          APP_URI="${{ steps.outputs.outputs.ecr_uri }}"
+          ETL_URI="${{ steps.outputs.outputs.etl_ecr_uri }}"
+          SHA="${{ github.sha }}"
+          # The ETL image is not a Next app, so it takes no build args.
+          jq -n --arg app "$APP_URI" --arg etl "$ETL_URI" --arg sha "$SHA" --arg isr "$ISR_CACHE_S3" '{
+            target: {
+              app: {
+                context: ".",
+                args: { NEXT_DEPLOYMENT_ID: $sha, NEXT_ISR_CACHE_S3: $isr },
+                tags: ["\($app):\($sha)", "\($app):latest"]
+              },
+              etl: {
+                context: ".",
+                target: "etl",
+                tags: ["\($etl):\($sha)", "\($etl):latest"]
+              }
+            }
+          }' > "$RUNNER_TEMP/bake.json"
+          targets=(app)
+          if [ -n "$ETL_URI" ]; then targets+=(etl); fi
+          docker buildx bake -f "$RUNNER_TEMP/bake.json" "${targets[@]}"
 
-      - name: Push image
+      # The two commit-tagged pushes run together; `:latest` follows and is
+      # near-instant, since its layers are already in the registry.
+      - name: Push images
         run: |
           set -euo pipefail
-          docker push "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}"
-          docker push "${{ steps.outputs.outputs.ecr_uri }}:latest"
+          APP_URI="${{ steps.outputs.outputs.ecr_uri }}"
+          ETL_URI="${{ steps.outputs.outputs.etl_ecr_uri }}"
+          SHA="${{ github.sha }}"
+          repos=("$APP_URI")
+          if [ -n "$ETL_URI" ]; then repos+=("$ETL_URI"); fi
+          pids=()
+          for repo in "${repos[@]}"; do
+            docker push --quiet "$repo:$SHA" &
+            pids+=($!)
+          done
+          # `wait <pid>` returns that push's exit status, so a failed push fails the step.
+          for pid in "${pids[@]}"; do wait "$pid"; done
+          for repo in "${repos[@]}"; do
+            docker push --quiet "$repo:latest"
+          done
 
       # #2121 -- the immutable digest of what was just pushed, used below to
       # pin task-def revisions instead of trusting the mutable `:latest` tag.
@@ -183,19 +217,9 @@ jobs:
 
       # ETL batch image (#454) -- the tsx-based etl/* + search:index scripts.
       # Built from the `etl` target of the same Dockerfile and pushed to the
-      # dedicated scholars-etl-<env> repo. Self-skips when EtlEcrRepoUri is
-      # absent (repo not yet created by cdk deploy); re-run after deploy.
-      - name: Build and push ETL image
-        if: ${{ steps.outputs.outputs.etl_ecr_uri != '' }}
-        run: |
-          set -euo pipefail
-          docker build --target etl \
-            --tag "${{ steps.outputs.outputs.etl_ecr_uri }}:${{ github.sha }}" \
-            --tag "${{ steps.outputs.outputs.etl_ecr_uri }}:latest" \
-            .
-          docker push "${{ steps.outputs.outputs.etl_ecr_uri }}:${{ github.sha }}"
-          docker push "${{ steps.outputs.outputs.etl_ecr_uri }}:latest"
-
+      # dedicated scholars-etl-<env> repo by the two steps above, which leave
+      # it out when EtlEcrRepoUri is absent (repo not yet created by cdk
+      # deploy); re-run after deploy.
       - name: Skipped ETL image (repo not yet provisioned)
         if: ${{ steps.outputs.outputs.etl_ecr_uri == '' }}
         run: |
