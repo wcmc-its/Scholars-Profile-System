@@ -1,12 +1,13 @@
 /**
  * The internal program roster (`/edit/program-roster`): one tab per open
  * program, its people with year, mentors and research program, and the dialogs
- * that add, edit and remove them. Every write is one POST to
- * `/api/edit/program-roster`; the saved row comes back and replaces the local
- * one, so nothing is re-read from a replica that may lag.
+ * that add, edit, paste and remove them. The Mentors view counts each mentor's
+ * trainees. Every write is one POST to `/api/edit/program-roster`; the saved
+ * row comes back and replaces the local one, so nothing is re-read from a
+ * replica that may lag.
  *
- * People are picked from the directory, never typed, so a name always belongs
- * to its CWID. `canEdit` false (a superuser's "View as") shows it read-only.
+ * People are picked from the directory, or pasted and checked against it, so a
+ * name always belongs to its CWID. `canEdit` false (a superuser's "View as") shows it read-only.
  */
 "use client";
 
@@ -26,12 +27,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DESCRIPTION_MAX,
+  filterEntries,
   MAX_MENTORS,
+  MAX_PASTE_ROWS,
+  mentorCounts,
+  milestoneOf,
   PROGRAM_NAME_MAX,
   RESEARCH_PROGRAM_MAX,
   SHORT_LABEL_MAX,
+  type MentorCount,
+  type PasteRowView,
   type RosterEntryView,
   type RosterPerson,
   type RosterProgramView,
@@ -52,14 +61,20 @@ const ERROR_TEXT: Record<string, string> = {
   too_many_mentors: `A person can have up to ${MAX_MENTORS} mentors.`,
   invalid_name: "Enter a program name.",
   invalid_short_label: "Enter a short name, up to 32 characters.",
+  empty_paste: "Paste at least one line.",
+  too_many_rows: `Paste up to ${MAX_PASTE_ROWS} lines at a time.`,
+  body_too_large: `Paste up to ${MAX_PASTE_ROWS} lines at a time.`,
+  paste_changed: "Something changed since the check. Nothing was saved. Check again.",
 };
-const errorText = (code: string) => ERROR_TEXT[code] ?? "It could not be saved. Try again.";
+const errorText = (code: string, other = "It could not be saved. Try again.") => ERROR_TEXT[code] ?? other;
 
 type Reply = {
   ok: boolean;
   error?: string;
   program?: RosterProgramView;
   entry?: RosterEntryView;
+  entries?: RosterEntryView[];
+  rows?: PasteRowView[];
   deletedId?: string;
 };
 
@@ -78,8 +93,6 @@ async function post(body: Record<string, unknown>): Promise<Reply> {
 }
 
 const byLabel = (a: RosterProgramView, b: RosterProgramView) => a.shortLabel.localeCompare(b.shortLabel);
-const byYearThenName = (a: RosterEntryView, b: RosterEntryView) =>
-  b.year - a.year || a.mentee.name.localeCompare(b.mentee.name);
 
 function PersonName({ p, strong = false }: { p: RosterPerson; strong?: boolean }) {
   return (
@@ -125,21 +138,19 @@ export function ProgramRoster({
   const [year, setYear] = React.useState("");
   const [editing, setEditing] = React.useState<RosterEntryView | "new" | null>(null);
   const [managing, setManaging] = React.useState(false);
+  const [pasting, setPasting] = React.useState(false);
+  const [view, setView] = React.useState<"people" | "mentors">("people");
 
   const selected = programs.find((p) => p.id === selectedId) ?? null;
   // A retired program's tab shows only while it is the one being viewed.
   const tabs = programs.filter((p) => !p.retiredAt || p.id === selectedId);
   const inProgram = entries.filter((e) => e.programId === selectedId);
   const years = [...new Set(inProgram.map((e) => e.year))].sort((a, b) => b - a);
-  const q = query.trim().toLowerCase();
-  const shown = inProgram
-    .filter((e) => !year || e.year === Number(year))
-    .filter(
-      (e) =>
-        !q ||
-        [e.mentee, ...e.mentors].some((p) => p.name.toLowerCase().includes(q) || p.cwid.toLowerCase().includes(q)),
-    )
-    .sort(byYearThenName);
+  const filter = { year: year ? Number(year) : null, query };
+  const shown = filterEntries(inProgram, filter);
+  const mentors = view === "mentors" ? mentorCounts(inProgram, filter) : [];
+  // The download takes the year, not the search: no name goes into a URL.
+  const inYear = filterEntries(inProgram, { ...filter, query: "" });
   const countOf = (id: string) => entries.filter((e) => e.programId === id).length;
 
   function select(id: string) {
@@ -147,6 +158,53 @@ export function ProgramRoster({
     setYear("");
     setQuery("");
   }
+
+  const download =
+    selected && inYear.length > 0
+      ? `/api/edit/program-roster/export?${new URLSearchParams({
+          program: selected.id,
+          ...(year && { year }),
+        })}`
+      : null;
+  const canAdd = canEdit && selected !== null && !selected.retiredAt;
+  const extras = (
+    <>
+      {download ? (
+        <Button asChild variant="outline">
+          <a href={download} download>
+            Download Excel
+          </a>
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" disabled>
+          Download Excel
+        </Button>
+      )}
+      {canAdd && (
+        <Button type="button" variant="outline" onClick={() => setPasting(true)}>
+          Paste a list
+        </Button>
+      )}
+    </>
+  );
+  const viewToggle = (
+    <div role="group" aria-label="View" className="border-apollo-border-strong flex overflow-hidden rounded-md border">
+      {(["people", "mentors"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          aria-pressed={view === v}
+          onClick={() => setView(v)}
+          className={cn(
+            "h-9 flex-1 px-3 text-sm",
+            view === v ? "bg-apollo-surface-2 font-semibold" : "bg-apollo-surface hover:bg-apollo-surface-2",
+          )}
+        >
+          {v === "people" ? "People" : "Mentors"}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div data-testid="program-roster">
@@ -207,72 +265,91 @@ export function ProgramRoster({
                 </option>
               ))}
             </select>
-            {canEdit && !selected.retiredAt && (
-              <Button type="button" variant="apollo" className="ml-auto" onClick={() => setEditing("new")}>
+            <div className="hidden sm:block">{viewToggle}</div>
+            <div className="hidden flex-wrap gap-2.5 sm:ml-auto sm:flex">{extras}</div>
+            {canAdd && (
+              <Button type="button" variant="apollo" onClick={() => setEditing("new")}>
                 Add person
               </Button>
             )}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" className="sm:hidden">
+                  More
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="flex w-56 flex-col gap-2 sm:hidden">
+                {viewToggle}
+                {extras}
+              </PopoverContent>
+            </Popover>
           </div>
 
-          <div className="border-apollo-border bg-apollo-surface mt-3.5 overflow-hidden rounded-[10px] border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-apollo-surface-2">
-                <tr>
-                  <th className={TH}>Person</th>
-                  <th className={TH}>Year</th>
-                  <th className={cn(TH, "hidden md:table-cell")}>Mentors</th>
-                  <th className={cn(TH, "hidden md:table-cell")}>Research program</th>
-                  {canEdit && (
-                    <th className={TH}>
-                      <span className="sr-only">Edit</span>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-apollo-border divide-y">
-                {shown.map((e) => (
-                  <tr key={e.id} data-testid={`roster-entry-${e.id}`}>
-                    <td className={TD}>
-                      <PersonName p={e.mentee} strong />
-                      {/* Below md the other columns stack here. */}
-                      <div className="mt-1.5 md:hidden">
-                        <Mentors e={e} />
-                        {e.researchProgram && <div className="text-muted-foreground mt-1">{e.researchProgram}</div>}
-                      </div>
-                    </td>
-                    <td className={cn(TD, "tabular-nums")}>{e.year}</td>
-                    <td className={cn(TD, "hidden md:table-cell")}>
-                      <Mentors e={e} />
-                    </td>
-                    <td className={cn(TD, "hidden md:table-cell")}>
-                      {e.researchProgram ?? <span className="text-muted-foreground">None</span>}
-                    </td>
+          {view === "mentors" ? (
+            <MentorTable rows={mentors} empty={inProgram.length === 0} />
+          ) : (
+            <div className="border-apollo-border bg-apollo-surface mt-3.5 overflow-hidden rounded-[10px] border">
+              <table className="w-full border-collapse text-sm">
+                <thead className="bg-apollo-surface-2">
+                  <tr>
+                    <th className={TH}>Person</th>
+                    <th className={TH}>Year</th>
+                    <th className={cn(TH, "hidden md:table-cell")}>Mentors</th>
+                    <th className={cn(TH, "hidden md:table-cell")}>Research program</th>
                     {canEdit && (
-                      <td className={cn(TD, "text-right")}>
-                        <button
-                          type="button"
-                          className="text-apollo-slate hover:underline"
-                          aria-label={`Edit ${e.mentee.name}, ${e.year}`}
-                          onClick={() => setEditing(e)}
-                        >
-                          Edit
-                        </button>
-                      </td>
+                      <th className={TH}>
+                        <span className="sr-only">Edit</span>
+                      </th>
                     )}
                   </tr>
-                ))}
-                {shown.length === 0 && (
-                  <tr>
-                    <td className={cn(TD, "text-muted-foreground")} colSpan={5}>
-                      {inProgram.length === 0 ? "Nobody is listed yet." : "Nobody matches."}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-apollo-border divide-y">
+                  {shown.map((e) => (
+                    <tr key={e.id} data-testid={`roster-entry-${e.id}`}>
+                      <td className={TD}>
+                        <PersonName p={e.mentee} strong />
+                        {/* Below md the other columns stack here. */}
+                        <div className="mt-1.5 md:hidden">
+                          <Mentors e={e} />
+                          {e.researchProgram && <div className="text-muted-foreground mt-1">{e.researchProgram}</div>}
+                        </div>
+                      </td>
+                      <td className={cn(TD, "tabular-nums")}>{e.year}</td>
+                      <td className={cn(TD, "hidden md:table-cell")}>
+                        <Mentors e={e} />
+                      </td>
+                      <td className={cn(TD, "hidden md:table-cell")}>
+                        {e.researchProgram ?? <span className="text-muted-foreground">None</span>}
+                      </td>
+                      {canEdit && (
+                        <td className={cn(TD, "text-right")}>
+                          <button
+                            type="button"
+                            className="text-apollo-slate hover:underline"
+                            aria-label={`Edit ${e.mentee.name}, ${e.year}`}
+                            onClick={() => setEditing(e)}
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {shown.length === 0 && (
+                    <tr>
+                      <td className={cn(TD, "text-muted-foreground")} colSpan={5}>
+                        {inProgram.length === 0 ? "Nobody is listed yet." : "Nobody matches."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
           <p className="text-muted-foreground mt-3 text-[13px]" aria-live="polite">
-            Showing {shown.length} of {inProgram.length}.
+            {view === "mentors"
+              ? `Showing ${mentors.length} ${mentors.length === 1 ? "mentor" : "mentors"}. Trainees are counted over all years in this program; one with two mentors counts for each.`
+              : `Showing ${shown.length} of ${inProgram.length}.`}
           </p>
         </>
       )}
@@ -291,6 +368,13 @@ export function ProgramRoster({
             setEntries((prev) => prev.filter((e) => e.id !== id));
             setEditing(null);
           }}
+        />
+      )}
+      {pasting && selected !== null && (
+        <PasteDialog
+          program={selected}
+          onClose={() => setPasting(false)}
+          onSaved={(saved) => setEntries((prev) => [...prev, ...saved])}
         />
       )}
       {managing && (
@@ -314,6 +398,56 @@ export function ProgramRoster({
           }}
         />
       )}
+    </div>
+  );
+}
+
+function MentorTable({ rows, empty }: { rows: MentorCount[]; empty: boolean }) {
+  const pill = (count: number) => {
+    const m = milestoneOf(count);
+    return m === null ? null : (
+      <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+        {m} trainees
+      </span>
+    );
+  };
+  return (
+    <div className="border-apollo-border bg-apollo-surface mt-3.5 overflow-hidden rounded-[10px] border">
+      <table className="w-full border-collapse text-sm">
+        <thead className="bg-apollo-surface-2">
+          <tr>
+            <th className={TH}>Mentor</th>
+            <th className={cn(TH, "text-right")}>Trainees</th>
+            <th className={cn(TH, "hidden md:table-cell")}>Milestone</th>
+            <th className={cn(TH, "hidden md:table-cell")}>Years</th>
+          </tr>
+        </thead>
+        <tbody className="divide-apollo-border divide-y">
+          {rows.map((r) => {
+            const years = r.firstYear === r.lastYear ? String(r.firstYear) : `${r.firstYear} to ${r.lastYear}`;
+            return (
+              <tr key={r.mentor.cwid} data-testid={`roster-mentor-row-${r.mentor.cwid}`}>
+                <td className={TD}>
+                  <PersonName p={r.mentor} strong />
+                  <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-2 md:hidden">
+                    {pill(r.trainees)} {years}
+                  </div>
+                </td>
+                <td className={cn(TD, "text-right tabular-nums")}>{r.trainees}</td>
+                <td className={cn(TD, "hidden md:table-cell")}>{pill(r.trainees)}</td>
+                <td className={cn(TD, "hidden tabular-nums md:table-cell")}>{years}</td>
+              </tr>
+            );
+          })}
+          {rows.length === 0 && (
+            <tr>
+              <td className={cn(TD, "text-muted-foreground")} colSpan={4}>
+                {empty ? "Nobody is listed yet." : "Nobody matches."}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -504,6 +638,174 @@ function EntryDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PastedMentors({ r }: { r: PasteRowView }) {
+  return r.mentors.map((m) => (
+    <div key={m.cwid}>
+      {m.name !== m.cwid && `${m.name} `}
+      <span className="text-muted-foreground font-mono text-xs">{m.cwid}</span>
+    </div>
+  ));
+}
+
+function PasteDialog({
+  program,
+  onClose,
+  onSaved,
+}: {
+  program: RosterProgramView;
+  onClose: () => void;
+  onSaved: (entries: RosterEntryView[]) => void;
+}) {
+  const [text, setText] = React.useState("");
+  /** The check of `text` as it stands; an edit clears it, so Save never outlives it. */
+  const [rows, setRows] = React.useState<PasteRowView[] | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
+
+  const ready = (rows ?? []).filter((r) => r.held === null);
+  const held = (rows ?? []).filter((r) => r.held !== null);
+
+  async function check() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    const r = await post({ action: "paste_check", programId: program.id, text });
+    setBusy(false);
+    if (r.ok && r.rows) setRows(r.rows);
+    else {
+      setRows(null);
+      setError(errorText(r.error ?? "", "It could not be checked. Try again."));
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    const r = await post({ action: "paste_save", programId: program.id, text: ready.map((x) => x.raw).join("\n") });
+    setBusy(false);
+    if (!r.ok || !r.entries) {
+      setError(errorText(r.error ?? ""));
+      return;
+    }
+    onSaved(r.entries);
+    if (held.length === 0) {
+      onClose();
+      return;
+    }
+    // What is left to fix stays in the box.
+    setText(held.map((x) => x.raw).join("\n"));
+    setRows(held);
+    setNotice(`Saved ${r.entries.length}. The lines below were not saved.`);
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Paste a list into {program.shortLabel}</DialogTitle>
+          <DialogDescription>
+            One person per line: name, CWID, year, mentor CWIDs (separated by ;), research program. Copying from Excel
+            works.
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={text}
+          disabled={busy}
+          aria-label="List to paste"
+          spellCheck={false}
+          wrap="off"
+          className="max-h-60 min-h-28 w-full overflow-auto font-mono text-[13px] md:text-[13px]"
+          onChange={(e) => {
+            setText(e.target.value);
+            setRows(null);
+            setNotice(null);
+          }}
+        />
+        {notice && <p role="status">{notice}</p>}
+        {rows !== null && (
+          <>
+            <p className="text-sm" aria-live="polite">
+              <b>
+                {ready.length} ready, {held.length} held.
+              </b>
+              {held.length > 0 && " Held rows are not saved. Fix them above and check again"}
+              {held.length > 0 && (ready.length > 0 ? ", or save the ready rows now." : ".")}
+            </p>
+            <div className="border-apollo-border overflow-x-auto rounded-[10px] border">
+              <table className="w-full border-collapse text-sm">
+                <thead className="bg-apollo-surface-2">
+                  <tr>
+                    <th className={TH}>Person</th>
+                    <th className={cn(TH, "hidden sm:table-cell")}>Year</th>
+                    <th className={cn(TH, "hidden sm:table-cell")}>Mentors</th>
+                    <th className={cn(TH, "hidden sm:table-cell")}>Research program</th>
+                    <th className={TH}>Result</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-apollo-border divide-y">
+                  {[...held, ...ready].map((r, i) => (
+                    <tr key={i} className={cn(r.held !== null && "bg-apollo-amber-tint")}>
+                      <td className={TD}>
+                        <span className="font-semibold">{r.person.name}</span>{" "}
+                        <span className="text-muted-foreground font-mono text-xs">{r.person.cwid}</span>
+                        {/* Below sm the year and mentors stack here. */}
+                        <div className="mt-1 sm:hidden">
+                          {r.year}
+                          <PastedMentors r={r} />
+                          {r.researchProgram}
+                        </div>
+                      </td>
+                      <td className={cn(TD, "hidden tabular-nums sm:table-cell")}>{r.year}</td>
+                      <td className={cn(TD, "hidden sm:table-cell")}>
+                        <PastedMentors r={r} />
+                      </td>
+                      <td className={cn(TD, "hidden sm:table-cell")}>{r.researchProgram}</td>
+                      <td className={TD}>
+                        {r.held === null ? (
+                          <span className="text-apollo-green-foreground">Ready</span>
+                        ) : (
+                          <>
+                            <b>Held</b>
+                            <div>{r.held}</div>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+            {notice ? "Close" : "Cancel"}
+          </Button>
+          <Button
+            type="button"
+            variant={rows === null ? "apollo" : "outline"}
+            disabled={busy || !text.trim()}
+            onClick={() => void check()}
+          >
+            {rows === null ? "Check" : "Check again"}
+          </Button>
+          {ready.length > 0 && (
+            <Button type="button" variant="apollo" disabled={busy} onClick={() => void save()}>
+              {busy ? "Saving…" : `Save ${ready.length} ${ready.length === 1 ? "row" : "rows"}`}
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

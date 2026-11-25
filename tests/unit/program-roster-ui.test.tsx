@@ -135,4 +135,80 @@ describe("ProgramRoster", () => {
     expect(await screen.findByRole("button", { name: "Delete NEW" })).toBeTruthy();
     expect(sent()).toMatchObject({ action: "program_create", shortLabel: "NEW", name: "New program" });
   });
+
+  it("the Mentors view counts trainees over all years and shows milestones", () => {
+    const five = [1, 2, 3, 4, 5].map((i) => entry(`m${i}x`, `Trainee ${i}`, 2020 + i));
+    render(<ProgramRoster programs={PROGRAMS} entries={five} canEdit />);
+    fireEvent.click(screen.getByRole("button", { name: "Mentors" }));
+    expect(screen.queryByTestId("roster-entry-m1x")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2025" } });
+    const row = within(screen.getByTestId("roster-mentor-row-men001"));
+    expect(row.getByRole("cell", { name: "5" })).toBeTruthy();
+    expect(row.getAllByText("5 trainees").length).toBeGreaterThan(0);
+    expect(row.getAllByText("2021 to 2025").length).toBeGreaterThan(0);
+  });
+
+  it("the download carries the program and year, never the search text, and stays on for a long list", () => {
+    const { unmount } = show(false);
+    fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2026" } });
+    fireEvent.change(screen.getByLabelText("Find a person or mentor"), { target: { value: " avery " } });
+    expect(screen.getByRole("link", { name: "Download Excel" }).getAttribute("href")).toBe(
+      "/api/edit/program-roster/export?program=sum&year=2026",
+    );
+    unmount();
+    const many = Array.from({ length: 60 }, (_, i) => entry(`m${String(i).padStart(3, "0")}`, `Person ${i}`, 2026));
+    render(<ProgramRoster programs={PROGRAMS} entries={many} canEdit />);
+    expect(screen.getByRole("link", { name: "Download Excel" })).toBeTruthy();
+    expect(screen.queryByText(/limited to/)).toBeNull();
+  });
+
+  it("paste: check, save the ready lines, keep the held ones to fix; an edit clears the check", async () => {
+    show();
+    fireEvent.click(screen.getByRole("button", { name: "Paste a list" }));
+    const box = screen.getByLabelText("List to paste") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "good line\nbad line" } });
+    const row = (raw: string, held: string | null) => ({
+      raw,
+      person: { cwid: "new001", name: "Casey Morrow" },
+      year: "2026",
+      mentors: [{ cwid: "men002", name: "Emery Stone" }],
+      researchProgram: "Cancer Biology",
+      held,
+    });
+    const rows = [row("good line", null), row("bad line", "This CWID is not in the directory")];
+    fetchMock.mockResolvedValue(reply(200, { ok: true, rows }));
+    fireEvent.click(screen.getByRole("button", { name: "Check" }));
+    expect(await screen.findByText("1 ready, 1 held.")).toBeTruthy();
+    expect(sent()).toMatchObject({ action: "paste_check", programId: "sum", text: "good line\nbad line" });
+
+    fireEvent.change(box, { target: { value: "good line\nbad line " } });
+    expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Check" }));
+    const save = await screen.findByRole("button", { name: "Save 1 row" });
+    fetchMock.mockResolvedValue(reply(200, { ok: true, entries: [entry("new", "Casey Morrow", 2026)] }));
+    fireEvent.click(save);
+    expect(await screen.findByText(/Saved 1\./)).toBeTruthy();
+    expect(sent()).toMatchObject({ action: "paste_save", text: "good line" });
+    expect(box.value).toBe("bad line");
+    expect(screen.queryByRole("button", { name: /^Save/ })).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    expect(screen.getByTestId("roster-entry-new")).toBeTruthy();
+  });
+
+  it("paste closes when every line saves; read-only has no Paste", async () => {
+    const { unmount } = show();
+    fireEvent.click(screen.getByRole("button", { name: "Paste a list" }));
+    fireEvent.change(screen.getByLabelText("List to paste"), { target: { value: "good line" } });
+    const ready = { raw: "good line", person: { cwid: "new001", name: "Casey Morrow" }, year: "2026", mentors: [], researchProgram: "", held: null };
+    fetchMock.mockResolvedValue(reply(200, { ok: true, rows: [ready] }));
+    fireEvent.click(screen.getByRole("button", { name: "Check" }));
+    const save = await screen.findByRole("button", { name: "Save 1 row" });
+    fetchMock.mockResolvedValue(reply(200, { ok: true, entries: [entry("new", "Casey Morrow", 2026)] }));
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("roster-entry-new")).toBeTruthy();
+    unmount();
+    show(false);
+    expect(screen.queryByRole("button", { name: "Paste a list" })).toBeNull();
+  });
 });
