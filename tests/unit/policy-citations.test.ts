@@ -3,6 +3,7 @@ import { issuingBody } from "@/lib/citations/issuing-bodies";
 import { bookshelfCiters, esummary, harvestPmids } from "@/etl/policy-citations/ncbi";
 import {
   authorityBodies,
+  bookLocations,
   bookshelfDoc,
   cleanTitle,
   dedupKey,
@@ -117,6 +118,27 @@ describe("shape", () => {
       authors: null,
       doi: null,
     });
+  });
+
+  it("turns a book's records into chapter and section links", () => {
+    expect(
+      bookLocations([
+        { rid: "NBK442228/sec_000044", rtype: "sec", title: "PREVENTION AND TESTING", chapteraccessionid: "NBK442228" },
+        { rid: "NBK442228", rtype: "chapter", title: "Essential Interventions", chapteraccessionid: "NBK442228" },
+        { rid: "NBK442267", rtype: "ref-list", title: "REFERENCES", chapteraccessionid: "NBK442267" },
+        { rid: "x", rtype: "sec", title: "No chapter" },
+      ]),
+    ).toEqual([
+      {
+        url: "https://www.ncbi.nlm.nih.gov/books/NBK442228/#sec_000044",
+        label: "Essential Interventions: Prevention and testing",
+      },
+      { url: "https://www.ncbi.nlm.nih.gov/books/NBK442267/", label: "References" },
+    ]);
+    // A chapter with no listed section stands for itself.
+    expect(bookLocations([{ rid: "NBK1", rtype: "chapter", title: "Summary", chapteraccessionid: "NBK1" }])).toEqual([
+      { url: "https://www.ncbi.nlm.nih.gov/books/NBK1/", label: "Summary" },
+    ]);
   });
 
   it("drops a Bookshelf record no listed authority published", () => {

@@ -1261,6 +1261,24 @@ function PolicyDoc({ doc }: { doc: PolicyCitingDoc }) {
           </>
         ) : null}
       </div>
+      {doc.locations?.length ? (
+        <div className="text-muted-foreground text-[13px]">
+          Cited in:{" "}
+          {doc.locations.map((l, i) => (
+            <span key={l.url}>
+              {i > 0 ? "; " : ""}
+              <a
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`underline decoration-dotted underline-offset-2 ${HOVER_ACCENT}`}
+              >
+                {l.label}
+              </a>
+            </span>
+          ))}
+        </div>
+      ) : null}
     </li>
   );
 }
