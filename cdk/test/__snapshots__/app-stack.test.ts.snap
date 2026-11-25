@@ -948,7 +948,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "POLICY_CITATION_BADGES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_PROGRAM_ROSTER",
