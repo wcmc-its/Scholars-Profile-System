@@ -1,0 +1,179 @@
+/**
+ * Method services: the types and the pure validation shared by
+ * `/api/edit/method-service` and the Method services editor section
+ * (`components/edit/method-services-section.tsx`).
+ *
+ * No imports from `@/lib/db` or anything that constructs prisma: the client
+ * bundle imports this module by VALUE (the same `lib/cores/cwid-block.ts`
+ * split, for the same `lib/edit/manageable-units.ts` reason).
+ */
+import { validateUnitUrl } from "@/lib/edit/validators";
+
+/** The unit kinds that may own a method service. */
+export const METHOD_SERVICE_ENTITY_TYPES = ["department", "core"] as const;
+export type MethodServiceEntityType = (typeof METHOD_SERVICE_ENTITY_TYPES)[number];
+
+export function isMethodServiceEntityType(value: unknown): value is MethodServiceEntityType {
+  return (
+    typeof value === "string" && (METHOD_SERVICE_ENTITY_TYPES as readonly string[]).includes(value)
+  );
+}
+
+/** A method family, by the stable key a method page resolves on. */
+export type MethodServiceFamily = { supercategory: string; familyLabel: string };
+
+/** One service as the editor shows it. */
+export type MethodServiceView = {
+  id: number;
+  entityType: MethodServiceEntityType;
+  entityId: string;
+  name: string;
+  url: string;
+  families: MethodServiceFamily[];
+  supportedPmids: string[];
+  excludedPmids: string[];
+  countStaffPapers: boolean;
+};
+
+/** One row of the family picker (`GET /api/edit/method-families`). */
+export type MethodFamilyOption = MethodServiceFamily & {
+  supercategoryLabel: string;
+  scholarCount: number;
+};
+
+/** Matches the `@db.VarChar(255)` column. */
+export const SERVICE_NAME_MAX_LENGTH = 255;
+export const SERVICE_FAMILIES_MAX = 25;
+export const SERVICE_PMIDS_MAX = 5000;
+/** `scholar_family.supercategory` / `.family_label` column widths. */
+const SUPERCATEGORY_MAX_LENGTH = 128;
+const FAMILY_LABEL_MAX_LENGTH = 255;
+
+type Result<T, E extends string> = { ok: true; value: T } | { ok: false; error: E };
+
+/** A core counts its own staff's publications by default; a department, where
+ *  only some of the unit works on the service, does not. */
+export function defaultCountStaffPapers(entityType: MethodServiceEntityType): boolean {
+  return entityType === "core";
+}
+
+/** Service name: trimmed, 1 to 255 characters. */
+export function validateServiceName(
+  input: unknown,
+): Result<string, "invalid_value" | "name_required" | "name_too_long"> {
+  if (typeof input !== "string") return { ok: false, error: "invalid_value" };
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return { ok: false, error: "name_required" };
+  if (trimmed.length > SERVICE_NAME_MAX_LENGTH) return { ok: false, error: "name_too_long" };
+  return { ok: true, value: trimmed };
+}
+
+/** Service page: `validateUnitUrl` (https only, 512), except that a service
+ *  must have one, so the empty value that clears a unit's website is refused. */
+export function validateServiceUrl(
+  input: unknown,
+): Result<string, "invalid_value" | "url_required" | "url_too_long" | "invalid_url"> {
+  if (typeof input !== "string") return { ok: false, error: "invalid_value" };
+  const r = validateUnitUrl(input);
+  if (!r.ok) {
+    return { ok: false, error: r.error === "url_too_long" ? "url_too_long" : "invalid_url" };
+  }
+  if (r.value === "") return { ok: false, error: "url_required" };
+  return { ok: true, value: r.value };
+}
+
+export const methodFamilyKey = (f: MethodServiceFamily): string =>
+  `${f.supercategory}::${f.familyLabel}`;
+
+/**
+ * The families a service supports: each needs a non-empty `supercategory` and
+ * `familyLabel` (trimmed), duplicates collapse to the first, and there are 1 to
+ * 25 of them. Shape only; whether a family is real and publicly visible is the
+ * route's check against `scholar_family` and the overlay gate.
+ */
+export function validateServiceFamilies(
+  input: unknown,
+): Result<MethodServiceFamily[], "invalid_value" | "families_required" | "too_many_families"> {
+  if (!Array.isArray(input)) return { ok: false, error: "invalid_value" };
+  const out: MethodServiceFamily[] = [];
+  const seen = new Set<string>();
+  for (const item of input) {
+    if (typeof item !== "object" || item === null) return { ok: false, error: "invalid_value" };
+    const { supercategory, familyLabel } = item as Record<string, unknown>;
+    if (typeof supercategory !== "string" || typeof familyLabel !== "string") {
+      return { ok: false, error: "invalid_value" };
+    }
+    const family = { supercategory: supercategory.trim(), familyLabel: familyLabel.trim() };
+    if (
+      family.supercategory.length === 0 ||
+      family.familyLabel.length === 0 ||
+      family.supercategory.length > SUPERCATEGORY_MAX_LENGTH ||
+      family.familyLabel.length > FAMILY_LABEL_MAX_LENGTH
+    ) {
+      return { ok: false, error: "invalid_value" };
+    }
+    const key = methodFamilyKey(family);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(family);
+  }
+  if (out.length === 0) return { ok: false, error: "families_required" };
+  if (out.length > SERVICE_FAMILIES_MAX) return { ok: false, error: "too_many_families" };
+  return { ok: true, value: out };
+}
+
+/** `PMID: 12345`, `PMID 12345`, `pmid12345`: the label goes, the digits stay. */
+const PMID_LABEL = /\bPMID\s*:?\s*(?=\d)/gi;
+/** A PubMed article link, with or without the scheme, a trailing slash or a
+ *  query string. */
+const PUBMED_URL = /^(?:https?:\/\/)?(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?(?:[?#].*)?$/i;
+const PMID_DIGITS = /^\d{1,9}$/;
+
+/**
+ * Split a pasted block on any run of whitespace, commas or semicolons and
+ * classify each token as a PMID or `invalid`, in `parseCwidBlock`'s house
+ * style (nothing is silently dropped). A PMID is 1 to 9 digits; a
+ * `PMID: 12345` label and a `pubmed.ncbi.nlm.nih.gov/12345` link are read as
+ * the number they carry. Leading zeros are removed, so `0012345` and `12345`
+ * are one PMID; a token of only zeros is invalid. De-duplicated, first-seen
+ * order. Pure. The 5000 cap is NOT applied here: see {@link validatePmidList}.
+ */
+export function parsePmidBlock(text: string): { pmids: string[]; invalid: string[] } {
+  const tokens = text
+    .replace(PMID_LABEL, "")
+    .split(/[\s,;]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  const pmids: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tokens) {
+    const digits = PUBMED_URL.exec(t)?.[1] ?? t;
+    const pmid = PMID_DIGITS.test(digits) ? digits.replace(/^0+/, "") : "";
+    if (pmid === "") {
+      invalid.push(t);
+    } else if (!seen.has(pmid)) {
+      seen.add(pmid);
+      pmids.push(pmid);
+    }
+  }
+  return { pmids, invalid };
+}
+
+/**
+ * A PMID list as the API receives it: an array of strings, re-parsed with
+ * {@link parsePmidBlock} (never trusting the client). Any token that is not a
+ * PMID, or more than 5000 PMIDs, is an error: a list is never silently
+ * shortened.
+ */
+export function validatePmidList(
+  input: unknown,
+): Result<string[], "invalid_value" | "invalid_pmids" | "too_many_pmids"> {
+  if (!Array.isArray(input) || !input.every((v) => typeof v === "string")) {
+    return { ok: false, error: "invalid_value" };
+  }
+  const { pmids, invalid } = parsePmidBlock((input as string[]).join("\n"));
+  if (invalid.length > 0) return { ok: false, error: "invalid_pmids" };
+  if (pmids.length > SERVICE_PMIDS_MAX) return { ok: false, error: "too_many_pmids" };
+  return { ok: true, value: pmids };
+}

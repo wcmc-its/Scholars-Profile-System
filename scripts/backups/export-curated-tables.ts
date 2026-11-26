@@ -127,6 +127,9 @@ export const CURATED_TABLES: readonly string[] = [
   "roster_program",
   "roster_entry",
   "roster_entry_mentor",
+  // A unit's services for a research method (Method services section of the
+  // department and core edit pages). Hand-entered, no upstream.
+  "method_service",
 ];
 
 interface ColumnMeta {

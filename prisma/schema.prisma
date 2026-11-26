@@ -3983,6 +3983,42 @@ model CoreStaff {
   @@map("core_staff")
 }
 
+/// A service a unit offers for one or more research methods ("Systematic review
+/// service"), maintained by the unit's own editors in the Method services
+/// section of `/edit/department/[code]` and `/edit/core/[coreId]`
+/// (`app/api/edit/method-service`). Hand-entered, no ETL writer. Hard delete:
+/// the history lives in the audit log (`roster_change` on the unit,
+/// `fieldsChanged: ["method_services"]`).
+///
+/// The owning unit is polymorphic, as `UnitAdmin` is: `entityType` is
+/// `department` or `core` (the route rejects anything else) and `entityId` is
+/// the department code or the core id. No foreign key, and the owner of a row
+/// never changes.
+model MethodService {
+  id               Int        @id @default(autoincrement())
+  entityType       EntityType @map("entity_type")
+  entityId         String     @map("entity_id") @db.VarChar(64)
+  name             String     @db.VarChar(255)
+  url              String     @db.VarChar(512)
+  /// `[{ supercategory, familyLabel }]`, 1 to 25: the method families the
+  /// service is attached to, by the same stable key a method page resolves on.
+  families         Json
+  /// PMID strings (may be empty, at most 5000) the unit says it supported.
+  supportedPmids   Json       @map("supported_pmids")
+  /// PMID strings (may be empty) the unit took off its count.
+  excludedPmids    Json       @map("excluded_pmids")
+  /// Also count publications co-authored by the unit's own people. The route
+  /// sets it on create: true for a core, false for a department.
+  countStaffPapers Boolean    @default(false) @map("count_staff_papers")
+  /// EFFECTIVE actor cwid, same convention as CoreStaff.addedBy.
+  addedBy          String     @map("added_by") @db.VarChar(32)
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  @@index([entityType, entityId])
+  @@map("method_service")
+}
+
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).
 /// The other of the two fields that flow DynamoDB to MySQL.
 model PublicationScore {

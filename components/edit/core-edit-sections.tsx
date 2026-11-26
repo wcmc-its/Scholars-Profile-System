@@ -21,11 +21,13 @@ import { ArrowRight } from "lucide-react";
 import { CoreBasicsSection } from "@/components/edit/core-basics-section";
 import { CoreLeaderCard, type CoreLeaderState } from "@/components/edit/core-leader-card";
 import { CoreStaffPanel } from "@/components/edit/core-staff-panel";
+import { MethodServicesSection } from "@/components/edit/method-services-section";
 import { UnitAccessCard, type UnitAccessCardProps } from "@/components/edit/unit-access-card";
 import { SectionHeader } from "@/components/edit/unit-basics-section";
 import { UnitEditSections, type UnitEditSection } from "@/components/edit/unit-edit-sections";
 import type { CoreStaffRow } from "@/lib/api/core-staff";
 import type { UnitActorRole } from "@/lib/api/unit-edit-context";
+import type { MethodServiceView } from "@/lib/method-services/validation";
 import { cn } from "@/lib/utils";
 
 /** Old one-panel `?attr=` bookmarks → the section that now holds them. */
@@ -64,6 +66,9 @@ export type CoreEditSectionsProps = {
   coresNavVisible: boolean;
   /** The legacy `?attr=` value, if any. */
   attr?: string;
+  /** The core's method services (`METHOD_SERVICES`). `null` / omitted renders
+   *  no section: the flag is off. */
+  methodServices?: ReadonlyArray<MethodServiceView> | null;
 };
 
 export function CoreEditSections({
@@ -79,6 +84,7 @@ export function CoreEditSections({
   previewHref,
   coresNavVisible,
   attr,
+  methodServices = null,
 }: CoreEditSectionsProps) {
   const basePath = `/edit/core/${encodeURIComponent(core.id)}`;
   const description = core.description?.trim() ?? "";
@@ -120,6 +126,23 @@ export function CoreEditSections({
       content: <CoreStaffSection coreId={core.id} rows={staffRows} {...staff} />,
     },
   ];
+  if (methodServices) {
+    // After Basics, as on a department's page.
+    sections.splice(1, 0, {
+      id: "method-services",
+      label: "Method services",
+      stat: String(methodServices.length),
+      content: (
+        <MethodServicesSection
+          entityType="core"
+          entityId={core.id}
+          unitName={core.name}
+          services={methodServices}
+          headingId="method-services-heading"
+        />
+      ),
+    });
+  }
   if (access !== null) {
     sections.push({
       id: "access",

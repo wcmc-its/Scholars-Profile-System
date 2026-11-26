@@ -38,6 +38,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { countHighConfidence, countReviewSuggestions } from "@/lib/api/core-console-index";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { loadCoreStaff } from "@/lib/api/core-staff";
+import { loadMethodServicesForUnit } from "@/lib/api/method-services";
 import { corePath } from "@/lib/core-url";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -50,6 +51,7 @@ import {
 } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { resolveDirectoryNames } from "@/lib/edit/directory-names";
+import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import { isCorePagesEnabled, isCorePubModalEnabled } from "@/lib/profile/cores-flags";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +103,16 @@ export default async function EditCorePage({
   // `EffectiveUnitRole` it expects, so this is the same check
   // `unit-edit-context.ts`'s local now also delegates to.
   const canManageAccess = canManageAccessPredicate(session, coreRole).ok;
-  const [core, leaderRows, coreRoleRows, accessRows, queue, consoleTabs, staff] = await Promise.all([
+  const [
+    core,
+    leaderRows,
+    coreRoleRows,
+    accessRows,
+    queue,
+    consoleTabs,
+    staff,
+    methodServices,
+  ] = await Promise.all([
     db.read.core.findUnique({
       where: { id: coreId },
       select: {
@@ -148,6 +159,8 @@ export default async function EditCorePage({
     loadConsoleTabs(session, db.read),
     // The Staff section's curated list (Scholar, then ED, names).
     loadCoreStaff(coreId),
+    // The Method services section; null (no section) while the flag is off.
+    isMethodServicesEnabled() ? loadMethodServicesForUnit("core", coreId) : Promise.resolve(null),
   ]);
   if (!core) notFound();
   const candidates = queue?.candidates ?? [];
@@ -243,6 +256,7 @@ export default async function EditCorePage({
       previewHref={previewHref}
       coresNavVisible={consoleTabs.cores}
       attr={attr}
+      methodServices={methodServices}
     />
   );
 }
