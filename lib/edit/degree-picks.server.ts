@@ -5,7 +5,12 @@
  * `lib/degree-picker.ts`.
  */
 import type { PrismaClient } from "@/lib/generated/prisma/client";
-import { DEGREE_OVERRIDE_FIELD, degreeOptions, resolveDegreeOverride } from "@/lib/degree-picker";
+import {
+  DEGREE_OVERRIDE_FIELD,
+  defaultPostnominal,
+  degreeOptions,
+  resolveDegreeOverride,
+} from "@/lib/degree-picker";
 
 type Client = Pick<PrismaClient, "education" | "fieldOverride">;
 
@@ -52,6 +57,30 @@ export async function loadResolvedDegreePicks(
     else stale.push(p.entityId);
   }
   return { resolved, stale };
+}
+
+/** cwid → ASMS-derived default postnominal (`defaultPostnominal`), for every
+ *  scholar with at least one selectable ASMS degree. The ED ETL uses it when
+ *  the directory has no degree for that scholar. */
+export async function loadAsmsDefaultPostnominals(
+  client: Pick<PrismaClient, "education">,
+): Promise<Map<string, string>> {
+  const rows = await client.education.findMany({
+    where: { source: "ASMS" },
+    select: { cwid: true, degree: true, year: true },
+  });
+  const byCwid = new Map<string, { degree: string; year: number | null }[]>();
+  for (const r of rows) {
+    const list = byCwid.get(r.cwid) ?? [];
+    list.push(r);
+    byCwid.set(r.cwid, list);
+  }
+  const out = new Map<string, string>();
+  for (const [cwid, list] of byCwid) {
+    const display = defaultPostnominal(degreeOptions(list));
+    if (display) out.set(cwid, display);
+  }
+  return out;
 }
 
 /** What the /edit Degrees row needs. `selected` null ⇒ showing the ED value. */
