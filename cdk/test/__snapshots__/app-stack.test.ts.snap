@@ -952,7 +952,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_PROGRAM_ROSTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHOD_SERVICES",

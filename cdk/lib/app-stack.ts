@@ -2074,10 +2074,11 @@ export class AppStack extends Stack {
         //   EDIT_PROGRAM_ROSTER -- the page, its API and the
         //     `program_roster_editor` role; off = 404 and no directory check.
         //     On in staging since the ED group below was created (2026-11-24);
-        //     prod stays off until the roster is signed off.
+        //     on in prod since 2026-11-25 (Paul Albert, after the staging
+        //     checks). No SIP data until the FERPA / minors question is settled.
         //   SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN -- the ED group.
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        EDIT_PROGRAM_ROSTER: envConfig.envName === "staging" ? "on" : "off",
+        EDIT_PROGRAM_ROSTER: "on",
         // METHOD_SERVICES -- the Method services section on
         // /edit/department/[code] and /edit/core/[coreId], with
         // POST /api/edit/method-service and GET /api/edit/method-families
