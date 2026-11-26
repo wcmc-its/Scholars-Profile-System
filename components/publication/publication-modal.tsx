@@ -12,7 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { ArrowUpRight, Download, HelpCircle, Landmark } from "lucide-react";
+import { ArrowUpRight, Download, FileText, FlaskConical, HelpCircle, Landmark } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -20,7 +20,8 @@ import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { translationalStageDisplay } from "@/lib/translational-stage";
 import type { PolicyCitingDoc } from "@/lib/api/publication-detail";
-import { policyDocCitation } from "@/lib/citations/policy-rollup";
+import { plural, policyDocCitation } from "@/lib/citations/policy-rollup";
+import type { CitingInvention, CitingTrial, TrialPatentCitations } from "@/lib/citations/trials-patents";
 import type {
   PublicationDetailCore,
   PublicationDetailMethodFamily,
@@ -312,7 +313,7 @@ function ModalStatus({
   );
 }
 
-type SectionKey = "summary" | "areas" | "terms" | "policy" | "cited";
+type SectionKey = "summary" | "areas" | "terms" | "policy" | "trials" | "cited";
 
 type SectionTab = { key: SectionKey; label: string; count: string | null };
 
@@ -354,6 +355,12 @@ function ModalContent({
     // would swamp the number.
     const n = policy.docs.filter((d) => d.level !== "review").length;
     tabs.push({ key: "policy", label: "Guidelines and policy", count: n > 0 ? String(n) : null });
+  }
+  const trialPatent = payload.trialPatentCitations;
+  if (trialPatent) {
+    // Trials counted (the authors' own are listed, not counted) plus inventions.
+    const n = (trialPatent.trials?.count ?? 0) + (trialPatent.inventions?.total ?? 0);
+    tabs.push({ key: "trials", label: "Trials and patents", count: n > 0 ? n.toLocaleString() : null });
   }
   tabs.push({
     key: "cited",
@@ -617,6 +624,7 @@ function ModalContent({
           pmid={pub.pmid}
         />
         {policy ? <PolicySection docs={policy.docs} reviewTotal={policy.reviewTotal} /> : null}
+        {trialPatent ? <TrialPatentSection citations={trialPatent} /> : null}
         {/* #3259 — citing pubs are PubMed-keyed; external pubs have no list to show. */}
         {pubSource(pub.pmid).isPubmed ? (
           <CitingPubsSection
@@ -1366,6 +1374,165 @@ export function PolicyCitationGroups({
         </div>
       ) : null}
     </>
+  );
+}
+
+const TRIAL_PATENT_INITIAL_VISIBLE = 5;
+
+/** One group card: heading with its count, a one-line explanation, the first five rows, then "Show all". */
+function TrialPatentGroup<T extends { id: number }>({
+  icon,
+  heading,
+  count,
+  blurb,
+  items,
+  total,
+  nouns,
+  row,
+}: {
+  icon: ReactNode;
+  heading: string;
+  count: string;
+  blurb: string;
+  items: T[];
+  /** Every row there is; more than `items.length` when the payload was capped. */
+  total: number;
+  nouns: [one: string, many: string];
+  row: (item: T) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items : items.slice(0, TRIAL_PATENT_INITIAL_VISIBLE);
+  return (
+    <div className="border-apollo-border flex flex-col gap-2.5 rounded-[10px] border p-4">
+      <div className="flex flex-wrap items-center gap-x-[7px] text-sm font-semibold">
+        {icon}
+        {heading}
+        <span className="text-muted-foreground font-normal">· {count}</span>
+      </div>
+      <p className="text-muted-foreground text-[13px] leading-[1.45]">{blurb}</p>
+      <ul className="flex flex-col gap-[9px]">
+        {visible.map((item) => (
+          <li key={item.id} className="flex flex-col gap-0.5 text-sm leading-[1.45]">
+            {row(item)}
+          </li>
+        ))}
+        {expanded && total > items.length ? (
+          <li className="text-muted-foreground text-[13px]">
+            The {items.length} most recent of {total.toLocaleString()} are listed.
+          </li>
+        ) : null}
+      </ul>
+      {items.length > TRIAL_PATENT_INITIAL_VISIBLE ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setExpanded((s) => !s)}
+            aria-expanded={expanded}
+            className={`min-h-11 px-1 text-sm ${ACCENT_LINK}`}
+          >
+            {expanded ? "Show fewer" : `Show all ${plural(total, nouns[0], nouns[1])}`}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** A row's title: a link out when the server passed an allowed URL, plain text otherwise. */
+function TrialPatentTitle({ label, url }: { label: string; url: string | null }) {
+  return url ? (
+    <a href={url} target="_blank" rel="noopener noreferrer" className={`${ACCENT_LINK} hover:underline`}>
+      {label}
+    </a>
+  ) : (
+    <span>{label}</span>
+  );
+}
+
+const metaLine = (parts: Array<string | null | false>) => (
+  <div className="text-muted-foreground text-[13px]">{parts.filter(Boolean).join(" · ")}</div>
+);
+
+function TrialRow({ trial: t }: { trial: CitingTrial }) {
+  return (
+    <>
+      <div>
+        <TrialPatentTitle label={t.title} url={t.url} />
+        {t.ownTrial ? (
+          <span className="text-muted-foreground border-apollo-border-strong ml-1 inline-block rounded-full border px-2 py-px text-xs">
+            Authors&rsquo; own trial
+          </span>
+        ) : null}
+      </div>
+      {metaLine([
+        t.sponsor,
+        t.phase,
+        t.status,
+        t.startYear !== null && `started ${t.startYear}`,
+        t.nctId,
+        t.ownTrial && "not included in the count",
+      ])}
+    </>
+  );
+}
+
+function InventionRow({ invention: p }: { invention: CitingInvention }) {
+  return (
+    <>
+      <div>
+        <TrialPatentTitle label={p.title} url={p.url} />
+      </div>
+      {metaLine([
+        p.holder,
+        p.year !== null && `${p.granted ? "granted" : "application published"} ${p.year}`,
+        p.number,
+        p.related > 0 && `and ${plural(p.related, "related patent", "related patents")}`,
+      ])}
+    </>
+  );
+}
+
+function TrialPatentSection({ citations }: { citations: TrialPatentCitations }) {
+  const { trials, inventions } = citations;
+  return (
+    <section data-sec="trials" className="flex flex-col gap-3.5 pt-7">
+      <SectionHeading>Trials and patents</SectionHeading>
+      {trials ? (
+        <TrialPatentGroup
+          icon={<FlaskConical className="size-[15px]" strokeWidth={2} aria-hidden="true" />}
+          heading="Registered clinical trials"
+          count={trials.count.toLocaleString()}
+          blurb="Trials that list this paper as background in their ClinicalTrials.gov record."
+          items={trials.items}
+          total={trials.total}
+          nouns={["trial", "trials"]}
+          row={(t) => <TrialRow trial={t} />}
+        />
+      ) : null}
+      {inventions ? (
+        <TrialPatentGroup
+          icon={<FileText className="size-[15px]" strokeWidth={2} aria-hidden="true" />}
+          heading="Patents that cite this paper"
+          count={plural(inventions.total, "invention", "inventions")}
+          blurb="US patents whose text or references cite this paper. Citing a paper does not mean its authors hold the patent. Related patents for one invention are grouped."
+          items={inventions.items}
+          total={inventions.total}
+          nouns={["invention", "inventions"]}
+          row={(p) => <InventionRow invention={p} />}
+        />
+      ) : null}
+      <p className="text-muted-foreground text-xs leading-normal">
+        Sources:{" "}
+        {[
+          trials && "ClinicalTrials.gov",
+          inventions &&
+            "Reliance on Science (Marx and Fuegi), CC BY-NC 4.0, with patent details from USPTO PatentsView. US patents only. Patents usually cite a paper years after it is published, so recent papers show few or none",
+        ]
+          .filter(Boolean)
+          .join("; ")}
+        .
+      </p>
+    </section>
   );
 }
 
