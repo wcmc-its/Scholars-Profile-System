@@ -4017,6 +4017,12 @@ model MethodService {
   /// of the phrases. Computed by the route on save, never sent by a client.
   /// The column defaults to `[]` in SQL.
   coauthoredPmids  Json       @map("coauthored_pmids")
+  /// The supported PMIDs whose author affiliations have been read from PubMed
+  /// and compared with the current phrases; `coauthoredPmids` is the subset
+  /// that matched. A save asks PubMed only for supported PMIDs not in here.
+  /// Server-only, never sent to or by a client. The column defaults to `[]`
+  /// in SQL.
+  affiliationCheckedPmids Json @map("affiliation_checked_pmids")
   /// EFFECTIVE actor cwid, same convention as CoreStaff.addedBy.
   addedBy          String     @map("added_by") @db.VarChar(32)
   createdAt        DateTime   @default(now()) @map("created_at")

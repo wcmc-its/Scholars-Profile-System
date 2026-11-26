@@ -205,11 +205,9 @@ describe("loadFamilyServiceCollaborations: who the unit's people are", () => {
     expect([...s.marked.keys()].sort()).toEqual(["102", "103"]);
   });
 
-  it("does not look anyone up while automatic counting is off", async () => {
+  it("counts nothing on a member's authorship alone while automatic counting is off", async () => {
     seedPeople();
     const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
-    expect(m.scholarFindMany).not.toHaveBeenCalled();
-    expect(m.authorFindMany).not.toHaveBeenCalled();
     expect(s.marked.size).toBe(0);
   });
 
@@ -244,11 +242,31 @@ describe("loadFamilyServiceCollaborations: a core's confirmed publications", () 
       pmid: { in: PAGE },
       revokedAt: null,
     });
-    expect(m.coreStaffFindMany).not.toHaveBeenCalled();
+    // The staff list is read with the toggle off too: a staff author would
+    // make this confirmed paper a collaboration.
+    expect(m.coreStaffFindMany).toHaveBeenCalled();
     expect(reasons(s.marked)).toEqual({ "104": "confirmed" });
     expect(s.researchCount).toBe(1);
     // No unit author: the core supported it.
     expect([s.researchCollaborations, s.researchSupport]).toEqual([0, 1]);
+  });
+
+  it("toggle off: a staff author makes a confirmed paper a collaboration and counts nothing else", async () => {
+    seedPeople();
+    m.serviceFindMany.mockResolvedValue([coreService()]);
+    m.publicationCoreFindMany.mockResolvedValue([{ pmid: "103", coreId: "77", status: "confirmed" }]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    // Core staff wrote 102 and 103; only 103 is confirmed for the core.
+    expect(reasons(s.marked)).toEqual({ "103": "staff" });
+    expect([s.researchCollaborations, s.researchSupport]).toEqual([1, 0]);
+  });
+
+  it("toggle off, a department: a member's authorship makes a supported paper a collaboration", async () => {
+    seedPeople();
+    m.serviceFindMany.mockResolvedValue([service({ supportedPmids: ["101", "102"] })]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect(reasons(s.marked)).toEqual({ "101": "supported", "102": "staff" });
+    expect([s.researchCollaborations, s.researchSupport]).toEqual([1, 1]);
   });
 
   it("an owner's claim counts without an engine row, and a rejection removes an engine match", async () => {

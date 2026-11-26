@@ -98,9 +98,9 @@ describe("computeCollaboration: precedence", () => {
   });
 
   it("supported still marks with automatic counting off", () => {
-    expect(
-      marked({ supportedPmids: ["101"], countStaffPapers: false, staffPmids: new Set(["101"]) }),
-    ).toEqual({ "101": "supported" });
+    expect(marked({ supportedPmids: ["101"], countStaffPapers: false })).toEqual({
+      "101": "supported",
+    });
   });
 });
 
@@ -183,15 +183,35 @@ describe("computeCollaboration: collaboration or support", () => {
     ).toEqual({});
   });
 
-  it("toggle off: a unit member's authorship neither counts a paper nor makes it a collaboration", () => {
+  it("toggle off: a unit member's authorship does not count a paper, but makes a counted one a collaboration", () => {
+    const input = {
+      supportedPmids: ["101"],
+      confirmedPmids: new Set(["103"]),
+      countStaffPapers: false,
+      staffPmids: new Set(["101", "102", "103"]),
+    };
+    // 102 is by a unit member only: not counted. 101 (supported list) and 103
+    // (the core's confirmed) are counted anyway and have a unit author.
+    expect(kinds(input)).toEqual({ "101": "collaboration", "103": "collaboration" });
+    expect(marked(input)).toEqual({ "101": "staff", "103": "staff" });
+  });
+
+  it("the toggle never changes what an already counted paper is called", () => {
+    const input = { supportedPmids: ["101"], staffPmids: new Set(["101"]) };
+    expect(kinds({ ...input, countStaffPapers: false })).toEqual(
+      kinds({ ...input, countStaffPapers: true }),
+    );
+  });
+
+  it("toggle off: an excluded paper with a unit author stays uncounted", () => {
     expect(
       kinds({
         supportedPmids: ["101"],
-        confirmedPmids: new Set(["103"]),
+        excludedPmids: ["101"],
         countStaffPapers: false,
-        staffPmids: new Set(["101", "102", "103"]),
+        staffPmids: new Set(["101"]),
       }),
-    ).toEqual({ "101": "support", "103": "support" });
+    ).toEqual({});
   });
 
   it("toggle off: the PubMed affiliation still makes a supported paper a collaboration", () => {
@@ -292,6 +312,7 @@ describe("computeCollaboration: the automatic toggle", () => {
   });
 
   it("off: only the supported list counts", () => {
+    // 102 has a unit author and is on no list: still not counted.
     expect(
       marked({
         supportedPmids: ["104"],

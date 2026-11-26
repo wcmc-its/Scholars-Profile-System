@@ -524,6 +524,26 @@ describe("MethodServicesSection: affiliation text and the PubMed check", () => {
     ]);
   });
 
+  it("says how far the PubMed check has got when a long list needs another save", async () => {
+    writeResponse = {
+      status: 200,
+      body: {
+        ok: true,
+        changed: true,
+        warning: "pubmed_incomplete",
+        pubmed: { checked: 1800, total: 3200 },
+        service: WITH_PHRASE,
+      },
+    };
+    renderSection({ services: [WITH_PHRASE] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    const warning = await screen.findByTestId("method-service-warning");
+    expect(warning.textContent).toBe(
+      "Checked PubMed for co-authors on 1,800 of 3,200 supported publications so far; save again to check the rest",
+    );
+  });
+
   it("saving again re-sends the unchanged phrases, which is what asks PubMed again, and clears the warning", async () => {
     writeResponse = {
       status: 200,

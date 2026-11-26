@@ -30,6 +30,7 @@ export const METHOD_SERVICE_SELECT = {
   countStaffPapers: true,
   affiliationPhrases: true,
   coauthoredPmids: true,
+  affiliationCheckedPmids: true,
 } as const;
 
 export type MethodServiceRow = {
@@ -44,6 +45,9 @@ export type MethodServiceRow = {
   countStaffPapers: boolean;
   affiliationPhrases: unknown;
   coauthoredPmids: unknown;
+  /** Server-only bookkeeping, not part of the view: see
+   *  {@link affiliationCheckedPmidsOf}. Absent on a row read without it. */
+  affiliationCheckedPmids?: unknown;
 };
 
 function familiesOf(value: unknown): MethodServiceFamily[] {
@@ -62,6 +66,13 @@ function familiesOf(value: unknown): MethodServiceFamily[] {
 /** A stored JSON list of strings (PMIDs, affiliation phrases). */
 function pmidsOf(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** The supported PMIDs whose author affiliations PubMed has already been
+ *  asked about, against the row's current phrases. The save route's own: it is
+ *  what lets a long list be read from PubMed over several saves. */
+export function affiliationCheckedPmidsOf(row: MethodServiceRow): string[] {
+  return pmidsOf(row.affiliationCheckedPmids);
 }
 
 /** A stored row as the editor shows it. The JSON columns are read defensively:

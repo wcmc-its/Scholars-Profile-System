@@ -86,6 +86,19 @@ type Draft = {
 /** Shown when a save went through but PubMed could not be read. */
 const PUBMED_WARNING = "Could not check PubMed for co-authors; try saving again";
 
+type PubMedProgress = { checked: number; total: number };
+
+/**
+ * What a saved service's warning says. PubMed is checked a part at a time: a
+ * long supported list takes more than one save, and each save carries on from
+ * the last, so "save again" always makes progress.
+ */
+export function pubmedWarningText(warning: string, progress?: PubMedProgress): string {
+  if (warning !== "pubmed_incomplete" || !progress) return PUBMED_WARNING;
+  const n = (v: number) => v.toLocaleString("en-US");
+  return `Checked PubMed for co-authors on ${n(progress.checked)} of ${n(progress.total)} supported publications so far; save again to check the rest`;
+}
+
 /** Rejected tokens listed in full up to this many; the rest are counted. */
 const INVALID_SHOWN = 12;
 const FIELD_ORDER: ReadonlyArray<FieldKey> = ["name", "url", "families", "pmids", "phrases"];
@@ -269,6 +282,7 @@ export function MethodServicesSection({
     field?: string;
     service?: MethodServiceView;
     warning?: string;
+    pubmed?: PubMedProgress;
   }> {
     try {
       const res = await fetch("/api/edit/method-service", {
@@ -282,9 +296,10 @@ export function MethodServicesSection({
         field?: string;
         service?: MethodServiceView;
         warning?: string;
+        pubmed?: PubMedProgress;
       };
       return res.ok && data.ok === true
-        ? { ok: true, service: data.service, warning: data.warning }
+        ? { ok: true, service: data.service, warning: data.warning, pubmed: data.pubmed }
         : { ok: false, error: data.error ?? "", field: data.field };
     } catch {
       return { ok: false, error: "" };
@@ -326,8 +341,10 @@ export function MethodServicesSection({
         payload.countStaffPapers = draft.countStaffPapers;
       }
       // Sent whenever there is a phrase, changed or not: its presence is what
-      // makes the server ask PubMed again, which is how "try saving again"
-      // works after a save that could not reach PubMed.
+      // makes the server carry on with the PubMed check, which is how "save
+      // again" works after a save that could not finish it. The server asks
+      // PubMed only for supported PMIDs it has not checked yet, so this costs
+      // nothing once the check is complete.
       if (phrases.value.length > 0 || !sameList(phrases.value, editing.affiliationPhrases)) {
         payload.affiliationPhrases = phrases.value;
       }
@@ -352,7 +369,7 @@ export function MethodServicesSection({
     setBusy(false);
     if (result.ok && result.service) {
       const saved = result.service;
-      if (result.warning) setWarning(PUBMED_WARNING);
+      if (result.warning) setWarning(pubmedWarningText(result.warning, result.pubmed));
       setServices((prev) => [...prev.filter((s) => s.id !== saved.id), saved].sort(byName));
       setStatus(editing ? `Saved ${saved.name}.` : `Added ${saved.name}.`);
       resetForm();
@@ -692,7 +709,8 @@ export function MethodServicesSection({
           <p id="method-service-phrases-hint" className={NOTE_CLASS}>
             This catches staff who are not faculty and people who have left. A publication on the
             supported list counts as a collaboration when an author’s PubMed affiliation contains
-            one of these phrases; otherwise it counts as support.
+            one of these phrases, or when someone in your unit in Scholars is an author; otherwise
+            it counts as support.
           </p>
           {errors.phrases && (
             <p id="method-service-phrases-error" role="alert" className={ERROR_CLASS}>

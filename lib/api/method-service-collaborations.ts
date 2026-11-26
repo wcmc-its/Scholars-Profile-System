@@ -176,19 +176,19 @@ export async function loadServiceUnits(
 /**
  * For each service, the subset of `pagePmids` with at least one confirmed
  * author who belongs to the service's unit. One member query per unit kind and
- * one authorship query in all. A service with automatic counting off is not
- * looked up (its entry is an empty set).
+ * one authorship query in all. Every service's unit is looked up, automatic
+ * counting on or off: with it off a unit author still makes an already counted
+ * publication a collaboration (`computeCollaboration`).
  */
 export async function loadStaffPmidsByUnit(
   services: ReadonlyArray<{
     entityType: MethodServiceEntityType;
     entityId: string;
-    countStaffPapers: boolean;
   }>,
   pagePmids: ReadonlyArray<string>,
 ): Promise<Map<string, Set<string>>> {
   const out = new Map<string, Set<string>>();
-  const counting = services.filter((s) => s.countStaffPapers);
+  const counting = services;
   if (counting.length === 0 || pagePmids.length === 0) return out;
 
   const deptCodes = [

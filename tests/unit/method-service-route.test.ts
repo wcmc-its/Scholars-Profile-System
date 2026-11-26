@@ -333,6 +333,7 @@ describe("POST /api/edit/method-service: create", () => {
         excludedPmids: [],
         affiliationPhrases: [],
         coauthoredPmids: [],
+        affiliationCheckedPmids: [],
         countStaffPapers: false,
         addedBy: ACTOR, // the EFFECTIVE actor
       },
@@ -910,36 +911,61 @@ describe("GET /api/edit/method-service: the review numbers", () => {
 
 describe("POST /api/edit/method-service: co-authors from PubMed affiliations", () => {
   const PHRASE = "Example Health Sciences Library";
-  const AFFILIATIONS = new Map([
-    ["111", ["Department of Examples, Example University.", "example health  sciences LIBRARY, Example City."]],
-    ["222", ["Department of Examples, Example University."]],
-  ]);
+  const MATCH = ["Department of Examples, Example University.", "example health  sciences LIBRARY, Example City."];
+  const NO_MATCH = ["Department of Examples, Example University."];
+  /** What `fetchAuthorAffiliations` hands back: an answer for each PMID given
+   *  that is in `known`, and `complete` only when that is all of them. */
+  const answers =
+    (known: Record<string, string[]>, error?: string) =>
+    async (pmids: string[]) => {
+      const affiliations = new Map(pmids.filter((p) => p in known).map((p) => [p, known[p]]));
+      return {
+        affiliations,
+        complete: affiliations.size === pmids.length,
+        ...(error ? { error } : {}),
+      };
+    };
+  const checkedRow = (over: Record<string, unknown> = {}) =>
+    row({
+      affiliationPhrases: [PHRASE],
+      coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+      ...over,
+    });
   beforeEach(() => {
     defaultSession = SUPERUSER;
-    m.fetchAffiliations.mockResolvedValue(AFFILIATIONS);
+    m.fetchAffiliations.mockImplementation(answers({ "111": MATCH, "222": NO_MATCH }));
   });
 
-  it("create stores the phrases and the supported PMIDs with a matching author", async () => {
+  it("create stores the phrases, the supported PMIDs with a matching author, and what was checked", async () => {
     const res = await call({ ...CREATE, supportedPmids: ["111", "222"], affiliationPhrases: [` ${PHRASE} `] });
     expect(res.status).toBe(200);
     expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
     expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
       affiliationPhrases: [PHRASE],
       coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
     });
     const body = await res.json();
     expect(body.service).toMatchObject({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] });
+    // Server-only bookkeeping: never in the view.
+    expect(body.service).not.toHaveProperty("affiliationCheckedPmids");
     expect(body).not.toHaveProperty("warning");
+    expect(body).not.toHaveProperty("pubmed");
     expect(m.appendAuditRow.mock.calls[0][1].afterValues).toMatchObject({
       affiliationPhrases: [PHRASE],
       coauthoredPmidCount: 1,
+      affiliationCheckedPmidCount: 2,
     });
   });
 
   it("no phrases: an empty set, and PubMed is not asked", async () => {
     await call({ ...CREATE, supportedPmids: ["111", "222"] });
     expect(m.fetchAffiliations).not.toHaveBeenCalled();
-    expect(m.txCreate.mock.calls[0][0].data.coauthoredPmids).toEqual([]);
+    expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+      coauthoredPmids: [],
+      affiliationCheckedPmids: [],
+    });
   });
 
   it("no supported PMIDs: an empty set, and PubMed is not asked", async () => {
@@ -967,47 +993,80 @@ describe("POST /api/edit/method-service: co-authors from PubMed affiliations", (
     expect(m.txUpdate.mock.calls[0][0].data).toEqual({
       affiliationPhrases: [PHRASE],
       coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
     });
   });
 
-  it("update: a new supported list is matched against the STORED phrases", async () => {
-    m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] }));
-    m.fetchAffiliations.mockResolvedValue(new Map([["333", [`${PHRASE}, Example City.`]]]));
+  it("update: a longer supported list asks PubMed for the NEW pmids only, against the STORED phrases", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    m.fetchAffiliations.mockImplementation(answers({ "333": [`${PHRASE}, Example City.`] }));
     await call({ op: "update", id: 5, supportedPmids: ["222", "333"] });
-    expect(m.fetchAffiliations).toHaveBeenCalledWith(["222", "333"]);
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["333"]);
     expect(m.txUpdate.mock.calls[0][0].data).toEqual({
       supportedPmids: ["222", "333"],
       coauthoredPmids: ["333"],
+      affiliationCheckedPmids: ["222", "333"],
     });
   });
 
-  it("update: removing every phrase empties the set without asking PubMed", async () => {
-    m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] }));
+  it("update: removing every phrase empties both sets without asking PubMed", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
     await call({ op: "update", id: 5, affiliationPhrases: [] });
     expect(m.fetchAffiliations).not.toHaveBeenCalled();
-    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ affiliationPhrases: [], coauthoredPmids: [] });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: [],
+      coauthoredPmids: [],
+      affiliationCheckedPmids: [],
+    });
   });
 
   it("update: an update that names neither list does not ask PubMed", async () => {
-    m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] }));
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
     await call({ op: "update", id: 5, name: "Renamed" });
     expect(m.fetchAffiliations).not.toHaveBeenCalled();
     expect(m.txUpdate.mock.calls[0][0].data).toEqual({ name: "Renamed" });
   });
 
-  it("update: unchanged phrases in the body ask PubMed again, and an unchanged answer is no write", async () => {
-    m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] }));
-    const res = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
-    expect(m.fetchAffiliations).toHaveBeenCalledTimes(1);
-    expect(await res.json()).toMatchObject({ ok: true, changed: false });
-    expect(m.transaction).not.toHaveBeenCalled();
+  it("update: a fully checked list costs no PubMed request, even with the phrases resent", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    const res = await call({ op: "update", id: 5, name: "Renamed", affiliationPhrases: [PHRASE] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, changed: true });
+    expect(body).not.toHaveProperty("warning");
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ name: "Renamed" });
   });
 
-  it("update: a retry after a failed check writes the set alone, and audits it", async () => {
+  it("update: a changed phrase starts the check again from nothing", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    m.fetchAffiliations.mockImplementation(answers({ "111": NO_MATCH, "222": ["Example Core, Example City."] }));
+    await call({ op: "update", id: 5, affiliationPhrases: ["Example Core"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: ["Example Core"],
+      coauthoredPmids: ["222"],
+    });
+  });
+
+  it("update: an added phrase keeps the stored matches and re-checks only the rest", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    m.fetchAffiliations.mockImplementation(answers({ "222": ["Example Core, Example City."] }));
+    await call({ op: "update", id: 5, affiliationPhrases: [PHRASE, "Example Core"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: [PHRASE, "Example Core"],
+      coauthoredPmids: ["111", "222"],
+    });
+  });
+
+  it("update: a retry after a failed check writes the sets alone, and audits it", async () => {
     m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: [] }));
     const res = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
     expect(await res.json()).toMatchObject({ ok: true, changed: true });
-    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ coauthoredPmids: ["111"] });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+    });
     expect(m.appendAuditRow.mock.calls[0][1]).toMatchObject({
       beforeValues: { coauthoredPmidCount: 0 },
       afterValues: { coauthoredPmidCount: 1 },
@@ -1015,24 +1074,93 @@ describe("POST /api/edit/method-service: co-authors from PubMed affiliations", (
     expect(m.bustCache).toHaveBeenCalledTimes(1);
   });
 
-  describe("when PubMed cannot be read", () => {
-    beforeEach(() => {
-      m.fetchAffiliations.mockRejectedValue(new Error("EFetch 502"));
+  describe("when PubMed answers for only part of the list", () => {
+    it("keeps what it read, warns with the progress, and the next save asks for the rest only", async () => {
+      // The deadline passed after 111: nothing is known about 222 and 333.
+      m.fetchAffiliations.mockImplementation(answers({ "111": MATCH }, "The operation timed out"));
+      const first = await call({
+        ...CREATE,
+        supportedPmids: ["111", "222", "333"],
+        affiliationPhrases: [PHRASE],
+      });
+      expect(await first.json()).toMatchObject({
+        ok: true,
+        changed: true,
+        warning: "pubmed_incomplete",
+        pubmed: { checked: 1, total: 3 },
+      });
+      expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+        coauthoredPmids: ["111"],
+        affiliationCheckedPmids: ["111"],
+      });
+
+      m.serviceFindUnique.mockResolvedValue(
+        row({
+          supportedPmids: ["111", "222", "333"],
+          affiliationPhrases: [PHRASE],
+          coauthoredPmids: ["111"],
+          affiliationCheckedPmids: ["111"],
+        }),
+      );
+      m.fetchAffiliations.mockClear();
+      m.fetchAffiliations.mockImplementation(answers({ "222": NO_MATCH, "333": MATCH }));
+      const second = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["222", "333"]);
+      const body = await second.json();
+      expect(body).toMatchObject({ ok: true, changed: true });
+      expect(body).not.toHaveProperty("warning");
+      expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+        coauthoredPmids: ["111", "333"],
+        affiliationCheckedPmids: ["111", "222", "333"],
+      });
     });
 
-    it("create still saves, with an empty set and a warning", async () => {
+    it("a PMID PubMed did not answer for never takes a stored match away", async () => {
+      // 111 was a match and is still checked. 333 is new, and PubMed's answer
+      // leaves it out: 111 stays, 333 stays unchecked, and the save warns.
+      m.serviceFindUnique.mockResolvedValue(checkedRow());
+      m.fetchAffiliations.mockImplementation(answers({}));
+      const res = await call({ op: "update", id: 5, supportedPmids: ["111", "222", "333"] });
+      expect(await res.json()).toMatchObject({
+        ok: true,
+        changed: true,
+        warning: "pubmed_unavailable",
+        pubmed: { checked: 2, total: 3 },
+      });
+      expect(m.txUpdate.mock.calls[0][0].data).toEqual({ supportedPmids: ["111", "222", "333"] });
+    });
+  });
+
+  describe("when PubMed cannot be read", () => {
+    beforeEach(() => {
+      m.fetchAffiliations.mockImplementation(answers({}, "EFetch 502"));
+    });
+
+    it("create still saves, with empty sets and a warning", async () => {
       const res = await call({ ...CREATE, supportedPmids: ["111"], affiliationPhrases: [PHRASE] });
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ ok: true, changed: true, warning: "pubmed_unavailable" });
+      expect(await res.json()).toMatchObject({
+        ok: true,
+        changed: true,
+        warning: "pubmed_unavailable",
+        pubmed: { checked: 0, total: 1 },
+      });
       expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
         affiliationPhrases: [PHRASE],
         coauthoredPmids: [],
+        affiliationCheckedPmids: [],
       });
       expect(m.appendAuditRow).toHaveBeenCalledTimes(1);
     });
 
-    it("update still saves the rest, keeps the stored set, and warns", async () => {
-      const stored = row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] });
+    it("a lookup that throws is handled the same way", async () => {
+      m.fetchAffiliations.mockRejectedValue(new Error("boom"));
+      const res = await call({ ...CREATE, supportedPmids: ["111"], affiliationPhrases: [PHRASE] });
+      expect(await res.json()).toMatchObject({ ok: true, warning: "pubmed_unavailable" });
+    });
+
+    it("update still saves the rest, keeps the stored sets, and warns", async () => {
+      const stored = checkedRow();
       m.serviceFindUnique.mockResolvedValue(stored);
       m.txUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => ({
         ...stored,
@@ -1042,7 +1170,8 @@ describe("POST /api/edit/method-service: co-authors from PubMed affiliations", (
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toMatchObject({ ok: true, changed: true, warning: "pubmed_unavailable" });
-      // Not in the write at all: the column keeps its previous value.
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["333"]);
+      // Not in the write at all: the columns keep their previous values.
       expect(m.txUpdate.mock.calls[0][0].data).toEqual({
         name: "Renamed",
         supportedPmids: ["111", "222", "333"],
@@ -1052,10 +1181,13 @@ describe("POST /api/edit/method-service: co-authors from PubMed affiliations", (
     });
 
     it("an update with nothing else to save is no write, and still warns", async () => {
-      m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] }));
+      m.serviceFindUnique.mockResolvedValue(
+        row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"], affiliationCheckedPmids: ["111"] }),
+      );
       const res = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ ok: true, changed: false, warning: "pubmed_unavailable" });
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
       expect(m.transaction).not.toHaveBeenCalled();
     });
   });

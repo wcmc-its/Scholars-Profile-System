@@ -17,13 +17,17 @@
  *
  * What a counted publication IS:
  *   - a "collaboration" when someone from the unit is an author: a current
- *     unit member in Scholars (reason `staff`, only while automatic counting
- *     is on), or the pmid is on the supported list AND in the service's stored
- *     `coauthoredPmids`, the supported pmids with an author whose PubMed
- *     affiliation matches one of the service's phrases (reason `affiliation`);
+ *     unit member in Scholars (reason `staff`), or the pmid is on the
+ *     supported list AND in the service's stored `coauthoredPmids`, the
+ *     supported pmids with an author whose PubMed affiliation matches one of
+ *     the service's phrases (reason `affiliation`);
  *   - "support" otherwise: on the supported list with no matching author
  *     (reason `supported`), or a core's confirmed publication with no unit
  *     author (reason `confirmed`).
+ * The automatic toggle only decides whether a publication is counted (rule 4).
+ * It never decides what a counted publication is called: a supported or
+ * confirmed publication with a unit member as an author is a collaboration
+ * with the toggle off too.
  */
 import { methodFamilyKey, type MethodServiceFamily } from "@/lib/method-services/validation";
 
@@ -57,10 +61,12 @@ export type CollaborationInput = {
    *  unit (server-computed on save). Only counts for a pmid that is still on
    *  the supported list. */
   coauthoredPmids?: ReadonlyArray<string>;
-  /** The service's automatic co-authorship toggle. */
+  /** The service's automatic co-authorship toggle: whether a publication is
+   *  counted on a unit member's authorship alone. */
   countStaffPapers: boolean;
-  /** Publications with at least one confirmed author who belongs to the unit.
-   *  Need not be limited to the page; it is intersected here. */
+  /** Publications with at least one confirmed author who belongs to the unit,
+   *  whatever the toggle says. Need not be limited to the page; it is
+   *  intersected here. */
   staffPmids: ReadonlySet<string>;
   /** A core's confirmed publications. Absent or empty for a department. Need
    *  not be limited to the page; it is intersected here. */
@@ -96,7 +102,12 @@ export function computeCollaboration(input: CollaborationInput): CollaborationRe
     offer(pmid, coauthored.has(pmid) ? "affiliation" : "supported");
   }
   for (const pmid of input.confirmedPmids ?? []) offer(pmid, "confirmed");
-  if (input.countStaffPapers) for (const pmid of input.staffPmids) offer(pmid, "staff");
+  // Last, so "already counted" below means by the list or the core's record.
+  for (const pmid of input.staffPmids) {
+    // Toggle on: a unit author is enough to count it. Toggle off: a unit
+    // author only turns an already counted publication into a collaboration.
+    if (input.countStaffPapers || reasons.has(pmid)) offer(pmid, "staff");
+  }
   const marked = new Map<string, CollaborationMark>();
   for (const [pmid, reason] of reasons) marked.set(pmid, { kind: kindOfReason(reason), reason });
   return { marked, supportedOnPage };
