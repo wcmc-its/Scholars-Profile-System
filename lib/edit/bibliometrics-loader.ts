@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-layer";
 import { readPolicyCitations } from "@/lib/api/publication-detail";
+import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   buildBibliometricsReport,
@@ -105,6 +106,7 @@ export async function loadBibliometricsReport(
         FROM publication_citing_document l
         JOIN citing_document d ON d.id = l.citing_document_id
        WHERE l.pmid IN (${Prisma.join(citedPmids)})
+         AND d.level IN (${Prisma.join([...POLICY_LEVELS])})
        GROUP BY d.level, d.issuing_body`;
     for (const level of report.policy) {
       const mine = rows.filter((r) => r.level === level.level);

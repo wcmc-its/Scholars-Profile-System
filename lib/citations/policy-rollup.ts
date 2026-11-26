@@ -10,6 +10,14 @@ export type PolicyRollup = {
   reviews: number;
 };
 
+/**
+ * The ranked citing-document levels, highest first. `citing_document` also
+ * holds rows at other levels (a ClinicalTrials.gov study is `trial`); those are
+ * a different kind of uptake, so every reader of the ranked levels names these
+ * four and never sees them.
+ */
+export const POLICY_LEVELS = ["authority", "guideline", "consensus", "review"] as const;
+
 /** Server-side gate for the public badges and the modal section. */
 export function policyCitationBadgesOn(): boolean {
   return process.env.POLICY_CITATION_BADGES === "on";

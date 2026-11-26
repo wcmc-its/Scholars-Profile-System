@@ -248,7 +248,7 @@ describe("where the per-publication counts come from", () => {
     "(SELECT pmid, latest_citing_year AS latest, authority_count AS authority, guideline_count AS guideline, consensus_count AS consensus, review_count AS review FROM publication WHERE authority_count > 0 OR guideline_count > 0 OR consensus_count > 0 OR review_count > 0) x";
   // The live aggregate: links and documents only, the document filters inside.
   const LIVE =
-    /^\(SELECT l\.pmid, MAX\(d\.year\) AS latest, COUNT\(DISTINCT CASE WHEN d\.level = \? THEN d\.dedup_key END\) AS authority, .*? FROM publication_citing_document l JOIN citing_document d ON d\.id = l\.citing_document_id WHERE 1 = 1 .*GROUP BY l\.pmid\) x$/;
+    /^\(SELECT l\.pmid, MAX\(d\.year\) AS latest, COUNT\(DISTINCT CASE WHEN d\.level = \? THEN d\.dedup_key END\) AS authority, .*? FROM publication_citing_document l JOIN citing_document d ON d\.id = l\.citing_document_id WHERE d\.level IN \(\?,\?,\?,\?\) .*GROUP BY l\.pmid\) x$/;
   const source = (qs: string) => flat(citedSql({ ...parse(qs), scope: null }));
 
   it("no filter on the documents: the rollup columns on publication, no link table", () => {
@@ -626,7 +626,7 @@ describe("de-dup by dedupKey", () => {
     expect(h.queryRaw).toHaveBeenCalledTimes(1);
     const { text, values } = call(0);
     expect(text).toMatch(
-      /ROW_NUMBER\(\) OVER \(PARTITION BY ok\.pmid, d\.level ORDER BY d\.year DESC, d\.id\) AS rn FROM \(SELECT p\.pmid FROM publication p WHERE p\.pmid IN \(\?,\?\) AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = p\.pmid AND .*s\.dept_code IN \(\?\).*\)\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid JOIN citing_document d ON d\.id = l\.citing_document_id WHERE 1 = 1 .*JSON_SEARCH.*\) t WHERE t\.level <> 'review' OR t\.rn <= \? ORDER BY t\.year DESC, t\.id$/,
+      /ROW_NUMBER\(\) OVER \(PARTITION BY ok\.pmid, d\.level ORDER BY d\.year DESC, d\.id\) AS rn FROM \(SELECT p\.pmid FROM publication p WHERE p\.pmid IN \(\?,\?\) AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = p\.pmid AND .*s\.dept_code IN \(\?\).*\)\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid JOIN citing_document d ON d\.id = l\.citing_document_id WHERE d\.level IN \(\?,\?,\?,\?\) .*JSON_SEARCH.*\) t WHERE t\.level <> 'review' OR t\.rn <= \? ORDER BY t\.year DESC, t\.id$/,
     );
     expect(values).toEqual(expect.arrayContaining(["111", "222", "N1", "abc1234", REVIEWS_SHOWN]));
     // No unit: nothing, whatever PMIDs are asked for.

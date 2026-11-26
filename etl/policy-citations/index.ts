@@ -2,7 +2,7 @@
  * Policy-citations ETL: which clinical guidelines, consensus statements,
  * systematic reviews and health-authority documents cite our publications.
  *
- * Two passes, then a rollup:
+ * Three passes, then a rollup:
  *
  *   1. PubMed. Harvest the PubMed IDs typed as a guideline, a consensus
  *      statement, or a systematic review / meta-analysis, then keep the iCite
@@ -14,8 +14,17 @@
  *      pass takes about 100 minutes. The budget covers a whole pass, so a new
  *      authority citation shows up within a week. If the pass is cut short it
  *      resumes next run: never-checked papers first, then the oldest checks.
- *   3. Recompute the rollups on `publication`: `authority_bodies`, a count per
- *      level, and the newest citing document's year.
+ *   3. ClinicalTrials.gov. Which registered trials list each paper as a
+ *      `BACKGROUND` reference. A whole run walks every study that has a
+ *      background reference (about 100 pages of 1,000, one call at a time) and
+ *      keeps the references to our papers; `--pmids` and `--limit` ask about
+ *      those papers only, 200 to a call. Stored at level `trial`, which is not
+ *      one of the ranked levels: nothing but the `trial_count` rollup reads it.
+ *      A trial one of the paper's confirmed WCM authors is an investigator on
+ *      is stored, flagged on the link (`evidence.ownTrial`), and not counted.
+ *      If this pass fails, the rollup still runs and the run then fails.
+ *   4. Recompute the rollups on `publication`: `authority_bodies`, a count per
+ *      level, the newest ranked citing document's year, and `trial_count`.
  *
  * Writes only ever add: a document or link is inserted if new and left alone
  * otherwise, so `first_seen_at` is the date we first saw a citation and a
@@ -36,17 +45,22 @@
  *   npm run etl:policy-citations -- --bookshelf-minutes 230   # first backfill
  *   npm run etl:policy-citations -- --pmids 24928290          # spot check
  *   npm run etl:policy-citations -- --limit 2000              # smoke test
+ *   npm run etl:policy-citations -- --trials-only --pmids 24725239   # trials pass alone
  */
 import { db } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { withEtlRun } from "@/lib/etl-run";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { BACKGROUND_TERM, ctgovStudies, referencesTerm } from "./ctgov";
 import { bookshelfCiters, esummary, harvestPmids } from "./ncbi";
 import {
   authorityBodies,
+  backgroundRefs,
   bookLocations,
   bookshelfDoc,
+  isOwnTrial,
+  trialDoc,
   type BookRecord,
   CITATION_FIELDS,
   pubmedDoc,
@@ -76,6 +90,8 @@ const ELINK_CONCURRENCY = 3;
  * // calls in flight and cut the pass to about 35 minutes.
  */
 const BOOKSHELF_BUDGET_MIN = 120;
+/** ClinicalTrials.gov: PMIDs per call when asking about named papers. */
+const CTGOV_PMID_BATCH = 200;
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -296,10 +312,139 @@ async function bookshelfPass(pmids: string[], budgetMin: number): Promise<number
   return added;
 }
 
-/** Step 3: recompute the rollup columns from the link tables. */
+/**
+ * Pass 3: ClinicalTrials.gov studies listing a paper as a background reference.
+ * // ponytail: a study's stored title and year are never refreshed, only its
+ * // details; and, as everywhere here, a reference a sponsor later removes stays.
+ */
+async function trialsPass(pmids: string[], partial: boolean): Promise<number> {
+  const corpus = new Set(pmids);
+  const terms = partial ? chunks(pmids, CTGOV_PMID_BATCH).map(referencesTerm) : [BACKGROUND_TERM];
+  const docs = new Map<string, CitingDoc>();
+  /** "pmid|NCT" */
+  const pairs = new Set<string>();
+  let read = 0;
+  let background = 0;
+  let noPmid = 0;
+  for (const term of terms) {
+    for await (const page of ctgovStudies(term)) {
+      for (const study of page) {
+        read++;
+        const refs = backgroundRefs(study);
+        background += refs.pmids.length + refs.noPmid;
+        noPmid += refs.noPmid;
+        const cited = refs.pmids.filter((p) => corpus.has(p));
+        const doc = cited.length > 0 ? trialDoc(study) : null;
+        if (!doc) continue;
+        docs.set(doc.externalId, doc);
+        for (const p of cited) pairs.add(`${p}|${doc.externalId}`);
+      }
+      if (!partial && read % 20_000 === 0) console.log(`  ...ClinicalTrials.gov: ${read} studies read`);
+    }
+  }
+  console.log(
+    `ClinicalTrials.gov: ${read} studies read, ${background} background references ` +
+      `(${noPmid} with no PMID, so unmatchable); ${pairs.size} cite one of our papers, from ${docs.size} trials.`,
+  );
+  if (!partial) {
+    if (read === 0) throw new Error("ClinicalTrials.gov returned no studies with a background reference.");
+    assertSourceVolume("policy-citations:trial-links", {
+      incoming: pairs.size,
+      existing: await db.write.publicationCitingDocument.count({
+        where: { citingDocument: { source: "ctgov" } },
+      }),
+      maxDropPct: 50,
+    });
+  }
+  if (docs.size === 0) return 0;
+
+  // Status and phase move over a trial's life, so details follow the registry.
+  // Compared with sorted keys: MySQL's JSON type does not keep key order.
+  const sorted = (o: unknown) => JSON.stringify(o, o ? Object.keys(o).sort() : undefined);
+  const stored = new Map(
+    (
+      await db.write.citingDocument.findMany({
+        where: { source: "ctgov" },
+        select: { externalId: true, details: true },
+      })
+    ).map((d) => [d.externalId, sorted(d.details)]),
+  );
+  const changed = [...docs.values()].filter(
+    (d) => stored.has(d.externalId) && stored.get(d.externalId) !== sorted(d.details),
+  );
+  for (const batch of chunks(changed, 100)) {
+    await db.write.$transaction(
+      batch.map((d) =>
+        db.write.citingDocument.update({
+          where: { source_externalId: { source: d.source, externalId: d.externalId } },
+          data: { details: d.details },
+        }),
+      ),
+    );
+  }
+
+  const ids = await saveDocs("ctgov", [...docs.values()]);
+  const links = [...pairs].map((pair) => {
+    const [pmid, nct] = pair.split("|");
+    return { pmid, nct, citingDocumentId: ids.get(nct)! };
+  });
+  const added = await saveLinks(links.map(({ pmid, citingDocumentId }) => ({ pmid, citingDocumentId })));
+
+  // Own trials. `person_clinical_trial` is WCM-run trials only, so it is small.
+  const investigators = new Map<string, Set<string>>(); // NCT -> cwids
+  for (const r of await db.write.personClinicalTrial.findMany({
+    where: { trial: { nctNumber: { not: null } } },
+    select: { cwid: true, trial: { select: { nctNumber: true } } },
+  })) {
+    const nct = r.trial.nctNumber!.trim().toUpperCase();
+    investigators.set(nct, (investigators.get(nct) ?? new Set()).add(r.cwid));
+  }
+  const wcmRun = links.filter((l) => investigators.has(l.nct));
+  const authors = new Map<string, Set<string>>(); // pmid -> confirmed WCM authors
+  for (const batch of chunks([...new Set(wcmRun.map((l) => l.pmid))], INSERT_BATCH)) {
+    for (const a of await db.write.publicationAuthor.findMany({
+      where: { pmid: { in: batch }, isConfirmed: true, cwid: { not: null } },
+      select: { pmid: true, cwid: true },
+    })) {
+      authors.set(a.pmid, (authors.get(a.pmid) ?? new Set()).add(a.cwid!));
+    }
+  }
+  const own = wcmRun.filter((l) => isOwnTrial(authors.get(l.pmid), investigators.get(l.nct)));
+  const ownKeys = new Set(own.map((l) => `${l.pmid}|${l.citingDocumentId}`));
+  // Rewritten every pass: an authorship or an investigator row can arrive, or go, later.
+  const seen = new Set(links.map((l) => `${l.pmid}|${l.citingDocumentId}`));
+  const lapsed = (
+    await db.write.publicationCitingDocument.findMany({
+      where: { citingDocument: { source: "ctgov" }, evidence: { not: Prisma.DbNull } },
+      select: { pmid: true, citingDocumentId: true },
+    })
+  ).filter((l) => seen.has(`${l.pmid}|${l.citingDocumentId}`) && !ownKeys.has(`${l.pmid}|${l.citingDocumentId}`));
+  await db.write.$transaction([
+    ...own.map(({ pmid, citingDocumentId }) =>
+      db.write.publicationCitingDocument.updateMany({
+        where: { pmid, citingDocumentId },
+        data: { evidence: { ownTrial: true } },
+      }),
+    ),
+    ...lapsed.map((where) =>
+      db.write.publicationCitingDocument.updateMany({ where, data: { evidence: Prisma.DbNull } }),
+    ),
+  ]);
+
+  const fresh = [...docs.keys()].filter((nct) => !stored.has(nct)).length;
+  console.log(
+    `Trials pass: ${fresh} trials added, ${changed.length} refreshed, ${added} links added, ` +
+      `${own.length} links are the authors' own trial.`,
+  );
+  return added;
+}
+
+/** Step 4: recompute the rollup columns from the link tables. */
 async function rollup(): Promise<void> {
   // Only rows whose counts changed are written. `<=>` is the NULL-safe equal:
-  // the newest citing year is NULL for a paper nothing cites.
+  // the newest citing year is NULL for a paper nothing cites. A trial is not a
+  // ranked level: it has its own count, and its year never reaches
+  // `latest_citing_year`, which report 24 sorts on. Own trials are not counted.
   const counts = await db.write.$executeRaw`
     UPDATE publication p
       LEFT JOIN (
@@ -308,17 +453,19 @@ async function rollup(): Promise<void> {
                COUNT(DISTINCT CASE WHEN d.level = 'guideline' THEN d.dedup_key END) AS g,
                COUNT(DISTINCT CASE WHEN d.level = 'consensus' THEN d.dedup_key END) AS c,
                COUNT(DISTINCT CASE WHEN d.level = 'review' THEN d.dedup_key END) AS r,
-               MAX(d.year) AS y
+               COUNT(DISTINCT CASE WHEN d.level = 'trial'
+                     AND COALESCE(JSON_CONTAINS(l.evidence, 'true', '$.ownTrial'), 0) = 0 THEN d.dedup_key END) AS t,
+               MAX(CASE WHEN d.level IN ('authority', 'guideline', 'consensus', 'review') THEN d.year END) AS y
           FROM publication_citing_document l
           JOIN citing_document d ON d.id = l.citing_document_id
          GROUP BY l.pmid
       ) x ON x.pmid = p.pmid
        SET p.authority_count = COALESCE(x.a, 0), p.guideline_count = COALESCE(x.g, 0),
            p.consensus_count = COALESCE(x.c, 0), p.review_count = COALESCE(x.r, 0),
-           p.latest_citing_year = x.y
+           p.latest_citing_year = x.y, p.trial_count = COALESCE(x.t, 0)
      WHERE p.authority_count <> COALESCE(x.a, 0) OR p.guideline_count <> COALESCE(x.g, 0)
         OR p.consensus_count <> COALESCE(x.c, 0) OR p.review_count <> COALESCE(x.r, 0)
-        OR NOT (p.latest_citing_year <=> x.y)`;
+        OR NOT (p.latest_citing_year <=> x.y) OR p.trial_count <> COALESCE(x.t, 0)`;
 
   const authority = await db.write.publicationCitingDocument.findMany({
     where: { citingDocument: { level: "authority" } },
@@ -356,6 +503,7 @@ async function main(): Promise<number> {
   const only = arg("--pmids")?.split(",").filter(Boolean);
   const limit = Number(arg("--limit")) || undefined;
   const budgetMin = Number(arg("--bookshelf-minutes")) || BOOKSHELF_BUDGET_MIN;
+  const trialsOnly = process.argv.includes("--trials-only");
 
   try {
     // MySQL sorts NULL first ascending: never-checked papers, then the oldest checks.
@@ -368,8 +516,17 @@ async function main(): Promise<number> {
     console.log(`${pmids.length} publications.`);
     if (pmids.length === 0) throw new Error("No publications to check.");
 
-    const added = (await pubmedPass(pmids, Boolean(only || limit))) + (await bookshelfPass(pmids, budgetMin));
+    const partial = Boolean(only || limit);
+    let added = trialsOnly ? 0 : (await pubmedPass(pmids, partial)) + (await bookshelfPass(pmids, budgetMin));
+    // The registry is a source the first two passes do not depend on: if it
+    // fails, their links still get rolled up, and the run still fails.
+    let trialsError: unknown;
+    added += await trialsPass(pmids, partial).catch((e) => {
+      trialsError = e;
+      return 0;
+    });
     await rollup();
+    if (trialsError) throw trialsError;
     console.log(`Done in ${Math.round((Date.now() - start) / 1000)}s: ${added} citation links added.`);
     return added;
   } finally {
