@@ -28,7 +28,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => search,
 }));
 
+import { FamilyListAboutButton } from "@/components/method/family-list-about-button";
 import { MethodServicesBlock } from "@/components/method/method-services-block";
+import { isSystematicReviewFamily } from "@/lib/methods/systematic-review-family";
 import { FamilyPublicationFeed } from "@/components/taxonomy/publication-feed";
 import type { FamilyServiceEntry } from "@/lib/api/methods";
 
@@ -109,6 +111,33 @@ describe("MethodServicesBlock", () => {
     renderBlock([{ ...LIBRARY, url: "javascript:alert(1)" }]);
     expect(screen.queryByRole("link", { name: /Example review service/ })).toBeNull();
     expect(screen.getByText("Example review service")).toBeTruthy();
+  });
+});
+
+describe("the systematic review family's About this list note", () => {
+  it("is for the systematic review family only, spelling aside", () => {
+    expect(
+      isSystematicReviewFamily("computational_statistical", "Systematic review and meta-analysis"),
+    ).toBe(true);
+    expect(
+      isSystematicReviewFamily("computational_statistical", "Systematic Review and Meta-Analysis"),
+    ).toBe(true);
+    expect(isSystematicReviewFamily("computational_statistical", "Example review methods")).toBe(
+      false,
+    );
+    expect(isSystematicReviewFamily("evidence_synthesis", "Systematic review and meta-analysis")).toBe(
+      false,
+    );
+  });
+
+  it("opens to say where the list comes from", async () => {
+    render(<FamilyListAboutButton />);
+    expect(screen.queryByText(/full-time faculty author/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "About this list" }));
+    const note = await screen.findByText(/full-time faculty author/);
+    expect(note.textContent).toContain(
+      "This list combines methods extracted from papers with PubMed's systematic review filter.",
+    );
   });
 });
 
@@ -223,6 +252,56 @@ describe("FamilyPublicationFeed with services", () => {
     await screen.findByText("Example paper 101");
     expect(requests()[0].searchParams.has("service")).toBe(false);
     expect(screen.getByTestId("publications-count").textContent).toBe("3");
+  });
+
+  it("a service with no collaborations in the view gets no filter", async () => {
+    fetchSpy.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hits: [hit("101", { serviceIds: [7] })],
+        total: 1,
+        totalAllTypes: 1200,
+        totalResearchOnly: 1159,
+        page: 1,
+        pageSize: 20,
+        services: [
+          { id: 7, label: "Example Library", count: 190 },
+          { id: 9, label: "Example Imaging Core", count: 0 },
+        ],
+      }),
+    }));
+    renderFeed([SERVICES[0], { ...SERVICES[1], count: 0 }]);
+    await screen.findByText("Example paper 101");
+    expect(screen.getByRole("button", { name: /Example Library collaborations/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Example Imaging Core collaborations/ })).toBeNull();
+  });
+
+  it("a filter that is on with nothing to show stays so it can be turned off, and the empty text names it", async () => {
+    search = new URLSearchParams("service=9");
+    fetchSpy.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hits: [],
+        total: 0,
+        totalAllTypes: 1200,
+        totalResearchOnly: 1159,
+        page: 1,
+        pageSize: 20,
+        services: [
+          { id: 7, label: "Example Library", count: 190 },
+          { id: 9, label: "Example Imaging Core", count: 0 },
+        ],
+      }),
+    }));
+    renderFeed([SERVICES[0], { ...SERVICES[1], count: 0 }]);
+    await screen.findByText("No Example Imaging Core collaborations in this view.");
+    expect(screen.queryByText(/will appear as they are indexed/)).toBeNull();
+    const core = screen.getByRole("button", { name: /Example Imaging Core collaborations/ });
+    expect(core.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(core);
+    expect(replaceSpy).toHaveBeenCalledWith("/methods/sc/fam-fam_1", { scroll: false });
   });
 
   it("with no services there is no filter, no badge, and ?service= is ignored", async () => {

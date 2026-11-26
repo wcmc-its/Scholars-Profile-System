@@ -1784,8 +1784,11 @@ export async function getFamilyServices(
   if (!isMethodsLensEnabled() || !isMethodServicesEnabled()) return [];
   const gate = await loadFamilyOverlayGate();
   if (!isFamilyPubliclyVisible(supercategory, familyLabel, gate)) return [];
-  const pmids = await collectFamilyPmids(supercategory, familyLabel, gate);
-  const services = await loadFamilyServiceCollaborations({ supercategory, familyLabel }, pmids);
+  // The pmid union is only loaded when the family has a service and its
+  // result is not already cached (the feed route shares that cache).
+  const services = await loadFamilyServiceCollaborations({ supercategory, familyLabel }, () =>
+    collectFamilyPmids(supercategory, familyLabel, gate),
+  );
   return services.map((s) => ({
     id: s.id,
     name: s.name,
@@ -1870,7 +1873,9 @@ export async function getFamilyPublications(
   }
 
   // METHOD_SERVICES — the page's visible services and the papers each unit
-  // collaborated on. `[]` (no query) while the flag is off.
+  // collaborated on. `[]` (no query) while the flag is off. Cached per family
+  // (`method-services:`), so sort changes, the type toggle and Load more reuse
+  // what the page render computed.
   const services = await loadFamilyServiceCollaborations(
     { supercategory, familyLabel },
     allPmids,

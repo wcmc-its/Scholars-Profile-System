@@ -5,9 +5,11 @@
  * `GET /api/edit/method-service`.
  *
  * Uses the SAME rule and the same inputs as the public method page
- * (`computeCollaboration`, `loadStaffPmidsByUnit`, the gated page pmids), so
- * the editor's count is the public sentence's count. Two differences, both on
- * purpose: the owning unit's visibility is ignored (a hidden core can prepare
+ * (`computeCollaboration`, `loadStaffPmidsByUnit`,
+ * `loadCoreConfirmedPmidsByUnit`, the gated page pmids), so the editor's count
+ * is the public sentence's count. It reads them directly, never through the
+ * public page's cache, so the owner sees a change at once. Two differences,
+ * both on purpose: the owning unit's visibility is ignored (a hidden core can prepare
  * its service), and a service attached to several methods is summed over them.
  *
  * "On the method page" means the page's default view (research publication
@@ -18,6 +20,7 @@
  * SERVER-ONLY (imports `@/lib/db`). Types may be imported by a client component.
  */
 import {
+  loadCoreConfirmedPmidsByUnit,
   loadPagePublicationSets,
   loadStaffPmidsByUnit,
 } from "@/lib/api/method-service-collaborations";
@@ -60,6 +63,9 @@ export type ServiceReview = {
   excluded: ServiceReviewPublication[];
 };
 
+/** Which reason a publication on several of the service's methods shows. */
+const REASON_RANK: Record<CollaborationReason, number> = { supported: 0, confirmed: 1, staff: 2 };
+
 const byNewest = (a: ServiceReviewPublication, b: ServiceReviewPublication) =>
   (b.year ?? 0) - (a.year ?? 0) || Number(b.pmid) - Number(a.pmid);
 
@@ -74,9 +80,10 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
       const pmids = gate
         ? await collectFamilyPmids(family.supercategory, family.familyLabel, gate)
         : [];
-      const [page, staff] = await Promise.all([
+      const [page, staff, confirmed] = await Promise.all([
         loadPagePublicationSets(pmids),
         loadStaffPmidsByUnit([service], pmids),
+        loadCoreConfirmedPmidsByUnit([service], pmids),
       ]);
       const staffPmids = [...staff.values()][0] ?? new Set<string>();
       const { marked } = computeCollaboration({
@@ -85,6 +92,7 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
         excludedPmids: service.excludedPmids,
         countStaffPapers: service.countStaffPapers,
         staffPmids,
+        confirmedPmids: [...confirmed.values()][0],
       });
       return { family, page, marked };
     }),
@@ -105,7 +113,7 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
       const entry = marked.get(pmid);
       if (entry) {
         entry.methods.push(family.familyLabel);
-        if (reason === "supported") entry.reason = "supported";
+        if (REASON_RANK[reason] < REASON_RANK[entry.reason]) entry.reason = reason;
       } else {
         marked.set(pmid, { reason, methods: [family.familyLabel] });
       }

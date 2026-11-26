@@ -19,6 +19,9 @@ import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
 import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
 import { MethodServicesBlock } from "@/components/method/method-services-block";
+import { FamilyListAboutButton } from "@/components/method/family-list-about-button";
+import { isMethodServicesEnabled } from "@/lib/method-services/flags";
+import { isSystematicReviewFamily } from "@/lib/methods/systematic-review-family";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -97,7 +100,13 @@ export default async function FamilyPage({
     // off; a failed read drops the block, the filter and the badges together).
     getFamilyServices(resolved.supercategory, resolved.familyLabel).catch(() => []),
   ]);
+  // Every visible service goes to the feed, including one with no
+  // collaborations in the default view: it may have some under "Show all
+  // publication types". The feed leaves out a filter whose count is 0.
   const feedServices = services.map((s) => ({ id: s.id, label: s.label, count: s.count }));
+  const showListNote =
+    isMethodServicesEnabled() &&
+    isSystematicReviewFamily(resolved.supercategory, resolved.familyLabel);
 
   // #1166 — when the family resolves to specific cell lines, the master-detail
   // cell-line rail (Surface B §5.1) sits in the left column of the publications
@@ -184,9 +193,14 @@ export default async function FamilyPage({
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           Method
         </div>
-        <h1 className="page-title mt-2 text-3xl leading-tight tracking-tight">
-          {resolved.familyLabel}
-        </h1>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="page-title text-3xl leading-tight tracking-tight">
+            {resolved.familyLabel}
+          </h1>
+          {/* METHOD_SERVICES — where the systematic review family's list comes
+              from (extracted methods plus PubMed's filter). That family only. */}
+          {showListNote && <FamilyListAboutButton />}
+        </div>
 
         {/* #879 — generated capability gloss (render-only passthrough from the A2
             tools-a2-v3 taxonomy). Present only when METHODS_LENS_FAMILY_DEFINITIONS

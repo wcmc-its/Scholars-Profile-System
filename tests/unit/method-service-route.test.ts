@@ -23,6 +23,9 @@ const m = vi.hoisted(() => ({
   txCreate: vi.fn(),
   txUpdate: vi.fn(),
   txDelete: vi.fn(),
+  txFindUnique: vi.fn(),
+  txQueryRaw: vi.fn(),
+  bustCache: vi.fn(),
   appendAuditRow: vi.fn(),
   logEditDenial: vi.fn(),
   resolveEditIdentity: vi.fn(),
@@ -36,6 +39,10 @@ vi.mock("@/lib/edit/request", async (importOriginal) => ({
 }));
 // The review loader has its own tests; here only who may read it matters.
 vi.mock("@/lib/api/method-service-review", () => ({ loadServiceReview: m.loadServiceReview }));
+// The public page's cache: here only that a write clears it matters.
+vi.mock("@/lib/api/method-service-collaborations", () => ({
+  bustMethodServiceCache: m.bustCache,
+}));
 vi.mock("@/lib/edit/authz", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/authz")>()),
   logEditDenial: m.logEditDenial,
@@ -68,7 +75,15 @@ const CORE = "77";
 const FAM = { supercategory: "evidence_synthesis", familyLabel: "Example review methods" };
 const FAM_2 = { supercategory: "evidence_synthesis", familyLabel: "Example search methods" };
 
-const fakeTx = { methodService: { create: m.txCreate, update: m.txUpdate, delete: m.txDelete } };
+const fakeTx = {
+  $queryRaw: m.txQueryRaw,
+  methodService: {
+    create: m.txCreate,
+    update: m.txUpdate,
+    delete: m.txDelete,
+    findUnique: m.txFindUnique,
+  },
+};
 
 /** A stored row, as the DB hands it back. */
 function row(over: Record<string, unknown> = {}) {
@@ -161,6 +176,10 @@ beforeEach(() => {
     ...args.data,
   }));
   m.txDelete.mockResolvedValue({});
+  m.txQueryRaw.mockResolvedValue([{ id: 5 }]);
+  // The locked re-read sees what the first read saw unless a test says another
+  // request got in between.
+  m.txFindUnique.mockImplementation((...args: unknown[]) => m.serviceFindUnique(...args));
   m.appendAuditRow.mockResolvedValue(undefined);
   m.transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => cb(fakeTx));
 });
@@ -707,8 +726,97 @@ describe("POST /api/edit/method-service: exclude (Not ours) and restore (undo)",
     expect(await again.json()).toMatchObject({ ok: true, changed: false });
     const never = await call({ op: "restore", id: 5, pmid: "222" });
     expect(await never.json()).toMatchObject({ ok: true, changed: false });
-    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.txUpdate).not.toHaveBeenCalled();
     expect(m.appendAuditRow).not.toHaveBeenCalled();
+    expect(m.bustCache).not.toHaveBeenCalled();
+  });
+
+  it("locks the row, then decides from the read made under the lock", async () => {
+    const order: string[] = [];
+    m.txQueryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      order.push(`lock:${strings.join("?")}:${values.join(",")}`);
+      return [{ id: 5 }];
+    });
+    m.txFindUnique.mockImplementation(async () => {
+      order.push("read");
+      return row();
+    });
+    m.txUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => {
+      order.push("write");
+      return { ...row(), ...args.data };
+    });
+    await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(order).toEqual([
+      "lock:SELECT id FROM method_service WHERE id = ? FOR UPDATE:5",
+      "read",
+      "write",
+    ]);
+  });
+
+  it("two excludes at once: the second starts from what the first wrote, so neither is lost", async () => {
+    // Both requests read [] before either wrote. The lock makes the second
+    // re-read after the first committed ["111"].
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: [] }));
+    m.txFindUnique.mockResolvedValue(row({ excludedPmids: ["111"] }));
+    const res = await call({ op: "exclude", id: 5, pmid: "222" });
+    expect((await res.json()).service.excludedPmids).toEqual(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ excludedPmids: ["111", "222"] });
+    // The audit row's "before" is the row as it really was.
+    expect(m.appendAuditRow.mock.calls[0][1].beforeValues).toMatchObject({
+      excludedPmidCount: 1,
+      excludedPmids: ["111"],
+    });
+  });
+
+  it("an exclude that another request already made is a no-op, with no second audit row", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: [] }));
+    m.txFindUnique.mockResolvedValue(row({ excludedPmids: ["111"] }));
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, changed: false });
+    expect(body.service.excludedPmids).toEqual(["111"]);
+    expect(m.txUpdate).not.toHaveBeenCalled();
+    expect(m.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("a restore does not bring back an exclusion made in between", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: ["111"] }));
+    m.txFindUnique.mockResolvedValue(row({ excludedPmids: ["111", "222"] }));
+    await call({ op: "restore", id: 5, pmid: "111" });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ excludedPmids: ["222"] });
+  });
+
+  it("404s when the service was removed before the lock was taken", async () => {
+    m.txFindUnique.mockResolvedValue(null);
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "service_not_found" });
+    expect(m.txUpdate).not.toHaveBeenCalled();
+  });
+
+  it("the 5000 cap is checked against the locked read, not the earlier one", async () => {
+    m.serviceFindUnique.mockResolvedValue(
+      row({ excludedPmids: Array.from({ length: 4999 }, (_, i) => String(700000 + i)) }),
+    );
+    m.txFindUnique.mockResolvedValue(
+      row({ excludedPmids: Array.from({ length: 5000 }, (_, i) => String(700000 + i)) }),
+    );
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "too_many_pmids" });
+    expect(m.txUpdate).not.toHaveBeenCalled();
+  });
+
+  it("create, update and delete each clear the public page's cache", async () => {
+    await call(CREATE);
+    await call({ op: "update", id: 5, name: "Renamed service" });
+    await call({ op: "delete", id: 5 });
+    expect(m.bustCache).toHaveBeenCalledTimes(3);
+  });
+
+  it("clears the public page's cache after a change", async () => {
+    await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(m.bustCache).toHaveBeenCalledTimes(1);
   });
 
   it.each([undefined, 111, "", "abc", "111 222", ["111"]])("400s pmid %j", async (pmid) => {
@@ -725,7 +833,8 @@ describe("POST /api/edit/method-service: exclude (Not ours) and restore (undo)",
     const res = await call({ op: "exclude", id: 5, pmid: "111" });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "too_many_pmids" });
-    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.txUpdate).not.toHaveBeenCalled();
+    expect(m.appendAuditRow).not.toHaveBeenCalled();
   });
 
   it("an outsider gets 403 for exclude and for restore, logged, with no write", async () => {

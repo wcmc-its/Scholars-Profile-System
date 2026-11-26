@@ -16,6 +16,8 @@ const m = vi.hoisted(() => ({
   coreStaffFindMany: vi.fn(),
   authorFindMany: vi.fn(),
   publicationFindMany: vi.fn(),
+  publicationCoreFindMany: vi.fn(),
+  coreClaimFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -28,6 +30,8 @@ vi.mock("@/lib/db", () => {
     coreStaff: { findMany: m.coreStaffFindMany },
     publicationAuthor: { findMany: m.authorFindMany },
     publication: { findMany: m.publicationFindMany },
+    publicationCore: { findMany: m.publicationCoreFindMany },
+    coreClaim: { findMany: m.coreClaimFindMany },
   };
   return { prisma: read, db: { read } };
 });
@@ -83,6 +87,8 @@ beforeEach(() => {
   m.scholarFindMany.mockResolvedValue([]);
   m.coreStaffFindMany.mockResolvedValue([]);
   m.authorFindMany.mockResolvedValue([]);
+  m.publicationCoreFindMany.mockResolvedValue([]);
+  m.coreClaimFindMany.mockResolvedValue([]);
   m.publicationFindMany.mockResolvedValue(
     PAGE.map((pmid) => ({ pmid, publicationType: "Academic Article" })),
   );
@@ -209,6 +215,83 @@ describe("loadFamilyServiceCollaborations: who the unit's people are", () => {
     );
     const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
     expect(s.marked.size).toBe(0);
+  });
+});
+
+describe("loadFamilyServiceCollaborations: a core's confirmed publications", () => {
+  const coreService = (over: Record<string, unknown> = {}) =>
+    service({ id: 2, entityType: "core", entityId: "77", countStaffPapers: false, ...over });
+
+  it("marks a paper confirmed for the core with no staff author and automatic counting off", async () => {
+    m.serviceFindMany.mockResolvedValue([coreService()]);
+    m.publicationCoreFindMany.mockResolvedValue([{ pmid: "104", coreId: "77", status: "confirmed" }]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect(m.publicationCoreFindMany.mock.calls[0][0].where).toEqual({
+      coreId: { in: ["77"] },
+      pmid: { in: PAGE },
+      status: "confirmed",
+    });
+    expect(m.coreClaimFindMany.mock.calls[0][0].where).toEqual({
+      coreId: { in: ["77"] },
+      pmid: { in: PAGE },
+      revokedAt: null,
+    });
+    expect(m.coreStaffFindMany).not.toHaveBeenCalled();
+    expect(Object.fromEntries(s.marked)).toEqual({ "104": "confirmed" });
+    expect(s.researchCount).toBe(1);
+  });
+
+  it("an owner's claim counts without an engine row, and a rejection removes an engine match", async () => {
+    m.serviceFindMany.mockResolvedValue([coreService()]);
+    m.publicationCoreFindMany.mockResolvedValue([
+      { pmid: "104", coreId: "77", status: "confirmed" },
+      { pmid: "105", coreId: "77", status: "confirmed" },
+    ]);
+    m.coreClaimFindMany.mockResolvedValue([
+      { pmid: "101", coreId: "77", status: "claimed" },
+      { pmid: "105", coreId: "77", status: "rejected" },
+    ]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect([...s.marked.keys()].sort()).toEqual(["101", "104"]);
+  });
+
+  it("Not ours still takes a confirmed paper off", async () => {
+    m.serviceFindMany.mockResolvedValue([coreService({ excludedPmids: ["104"] })]);
+    m.publicationCoreFindMany.mockResolvedValue([{ pmid: "104", coreId: "77", status: "confirmed" }]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect(s.marked.size).toBe(0);
+  });
+
+  it("another core's confirmed paper does not mark this core's service", async () => {
+    m.serviceFindMany.mockResolvedValue([coreService()]);
+    m.publicationCoreFindMany.mockResolvedValue([{ pmid: "104", coreId: "88", status: "confirmed" }]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect(s.marked.size).toBe(0);
+  });
+
+  it("a department's service never reads the core tables", async () => {
+    m.serviceFindMany.mockResolvedValue([service({ countStaffPapers: true })]);
+    await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect(m.publicationCoreFindMany).not.toHaveBeenCalled();
+    expect(m.coreClaimFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadFamilyServiceCollaborations: the page's pmids given as a function", () => {
+  it("is not called when no service covers the family", async () => {
+    m.serviceFindMany.mockResolvedValue([service({ families: [OTHER_FAM] })]);
+    const load = vi.fn(async () => PAGE);
+    expect(await loadFamilyServiceCollaborations(FAM, load)).toEqual([]);
+    expect(load).not.toHaveBeenCalled();
+    expect(m.publicationFindMany).not.toHaveBeenCalled();
+  });
+
+  it("is called once when a service covers it", async () => {
+    m.serviceFindMany.mockResolvedValue([service({ supportedPmids: ["101"] })]);
+    const load = vi.fn(async () => PAGE);
+    const [s] = await loadFamilyServiceCollaborations(FAM, load);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(Object.fromEntries(s.marked)).toEqual({ "101": "supported" });
   });
 });
 

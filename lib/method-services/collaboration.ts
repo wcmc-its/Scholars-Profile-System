@@ -9,13 +9,19 @@
  *   2. a pmid on its supported list is marked;
  *   3. otherwise it is marked when automatic counting is on and one of the
  *      unit's people is a confirmed author.
+ * A core has one more source, which sits with its supported list at step 2:
+ * the publications already confirmed as the core's own (the engine's confirmed
+ * matches and the owner's claims). That is the core's record of what it
+ * supported, so it does not depend on the automatic toggle, and "Not ours"
+ * (step 1) still takes a paper off.
  * And in every case only a publication already on the method page can be
  * marked: neither list adds a paper to the page.
  */
 import { methodFamilyKey, type MethodServiceFamily } from "@/lib/method-services/validation";
 
-/** Why a publication is marked. `supported` wins when both apply. */
-export type CollaborationReason = "supported" | "staff";
+/** Why a publication is marked. When several apply: `supported`, then
+ *  `confirmed`, then `staff`. */
+export type CollaborationReason = "supported" | "confirmed" | "staff";
 
 export type CollaborationInput = {
   /** The publications on the method page. */
@@ -27,6 +33,9 @@ export type CollaborationInput = {
   /** Publications with at least one confirmed author who belongs to the unit.
    *  Need not be limited to the page; it is intersected here. */
   staffPmids: ReadonlySet<string>;
+  /** A core's confirmed publications. Absent or empty for a department. Need
+   *  not be limited to the page; it is intersected here. */
+  confirmedPmids?: ReadonlySet<string>;
 };
 
 export type CollaborationResult = {
@@ -46,6 +55,10 @@ export function computeCollaboration(input: CollaborationInput): CollaborationRe
     if (!pagePmids.has(pmid)) continue;
     supportedOnPage += 1;
     if (!excluded.has(pmid)) marked.set(pmid, "supported");
+  }
+  for (const pmid of input.confirmedPmids ?? []) {
+    if (!pagePmids.has(pmid) || excluded.has(pmid) || marked.has(pmid)) continue;
+    marked.set(pmid, "confirmed");
   }
   if (input.countStaffPapers) {
     for (const pmid of input.staffPmids) {

@@ -1327,7 +1327,11 @@ export function FamilyPublicationFeed({
           cellLine ? "articles" : "publications"
         }`;
       }}
-      emptyBody={`Publications using ${familyLabel} will appear as they are indexed.`}
+      emptyBody={
+        service
+          ? `No ${service.label} collaborations in this view.`
+          : `Publications using ${familyLabel} will appear as they are indexed.`
+      }
       loadMore={loadMore}
       badgesFor={badgesFor}
       toolbarSlot={
@@ -1362,7 +1366,9 @@ export function FamilyPublicationFeed({
  * METHOD_SERVICES — the "{Unit} collaborations N" filters in the feed toolbar,
  * one per visible service. At most one is on (`?service=` is single-valued);
  * pressing the active one clears it. The count follows the response (the
- * active publication-type filter) once it arrives.
+ * active publication-type filter) once it arrives. A service with no
+ * collaborations in the current view gets no filter, unless it is the one
+ * that is on (reached by a link), which stays so it can be turned off.
  */
 export function ServiceFilterToggles({
   services,
@@ -1380,6 +1386,7 @@ export function ServiceFilterToggles({
       {services.map((s) => {
         const on = s.id === activeId;
         const count = counts?.find((c) => c.id === s.id)?.count ?? s.count;
+        if (count === 0 && !on) return null;
         return (
           <button
             key={s.id}

@@ -14,9 +14,10 @@
  *   - exclude: `{ id, pmid }`. "Not ours": adds one PMID to `excludedPmids`,
  *     which takes it off the unit's count, filter and badge on the method page.
  *   - restore: `{ id, pmid }`. The undo: removes it from `excludedPmids`.
- *     Both read the list from the stored row, so a stale editor cannot
- *     overwrite it, and both are a no-op (`changed: false`, no audit row) when
- *     the list already says so.
+ *     Both re-read the list inside the write's transaction under the row's
+ *     lock (`SELECT ... FOR UPDATE`), so neither a stale editor nor a second
+ *     request at the same moment can overwrite it, and both are a no-op
+ *     (`changed: false`, no audit row) when the list already says so.
  *
  * GET /api/edit/method-service?id=<id> — the numbers under a saved service and
  * its "Review publications" list (`loadServiceReview`): `{ ok: true, review }`.
@@ -43,13 +44,16 @@
  * the service row. PMID lists are summarised: see `auditShape`.
  *
  * The saved row is returned from the write itself. The public method page
- * (`loadFamilyServiceCollaborations`) reads the table per request and the page
- * and its feed route are `force-dynamic`, so there is nothing to revalidate;
- * the section refreshes its own edit page. 404 while
+ * reads services through a short-lived cache (`loadFamilyServiceCollaborations`),
+ * which every write here clears (`bustMethodServiceCache`, on this task and,
+ * by the shared signal, the others); the page and its feed route are
+ * `force-dynamic`, so there is nothing else to revalidate. The section
+ * refreshes its own edit page. 404 while
  * `isMethodServicesEnabled()` is false.
  */
 import { NextResponse, type NextRequest } from "next/server";
 
+import { bustMethodServiceCache } from "@/lib/api/method-service-collaborations";
 import { loadServiceReview } from "@/lib/api/method-service-review";
 import {
   METHOD_SERVICE_SELECT,
@@ -335,6 +339,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
+    bustMethodServiceCache();
     return editOk({ op, changed: true, service: toMethodServiceView(saved) });
   }
 
@@ -366,26 +371,37 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
+    bustMethodServiceCache();
     return editOk({ op, id: existing.id, changed: true });
   }
 
-  // exclude / restore — one PMID on or off the stored excluded list.
+  // exclude / restore — one PMID on or off the stored excluded list. The read,
+  // the decision and the write share one transaction that holds the row's
+  // lock, so two requests for the same service run one after the other and the
+  // second starts from what the first wrote.
   if (op === "exclude" || op === "restore") {
     const parsed = validatePmidList(typeof body.pmid === "string" ? [body.pmid] : null);
     if (!parsed.ok || parsed.value.length !== 1) return editError(400, "invalid_pmids", "pmid");
     const pmid = parsed.value[0];
-    const current = toMethodServiceView(existing);
-    const list = current?.excludedPmids ?? [];
-    const listed = list.includes(pmid);
-    if (listed === (op === "exclude")) return editOk({ op, changed: false, service: current });
-    if (op === "exclude" && list.length >= SERVICE_PMIDS_MAX) {
-      return editError(400, "too_many_pmids", "pmid");
-    }
-    const next = op === "exclude" ? [...list, pmid] : list.filter((p) => p !== pmid);
 
-    let saved: MethodServiceRow;
+    type Outcome =
+      | { kind: "gone" }
+      | { kind: "full" }
+      | { kind: "unchanged"; row: MethodServiceRow }
+      | { kind: "saved"; row: MethodServiceRow };
+    let outcome: Outcome;
     try {
-      saved = await db.write.$transaction(async (tx) => {
+      outcome = await db.write.$transaction(async (tx): Promise<Outcome> => {
+        await tx.$queryRaw`SELECT id FROM method_service WHERE id = ${existing.id} FOR UPDATE`;
+        const locked = await tx.methodService.findUnique({
+          where: { id: existing.id },
+          select: METHOD_SERVICE_SELECT,
+        });
+        if (!locked) return { kind: "gone" };
+        const list = toMethodServiceView(locked)?.excludedPmids ?? [];
+        if (list.includes(pmid) === (op === "exclude")) return { kind: "unchanged", row: locked };
+        if (op === "exclude" && list.length >= SERVICE_PMIDS_MAX) return { kind: "full" };
+        const next = op === "exclude" ? [...list, pmid] : list.filter((p) => p !== pmid);
         const row = await tx.methodService.update({
           where: { id: existing.id },
           data: { excludedPmids: next },
@@ -394,17 +410,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         await audit(
           tx,
           unit,
-          existing,
+          locked,
           row,
           op === "exclude" ? { excludedPmid: pmid } : { restoredPmid: pmid },
         );
-        return row;
+        return { kind: "saved", row };
       });
     } catch (err) {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
-    return editOk({ op, changed: true, service: toMethodServiceView(saved) });
+    if (outcome.kind === "gone") return editError(404, "service_not_found", "id");
+    if (outcome.kind === "full") return editError(400, "too_many_pmids", "pmid");
+    if (outcome.kind === "saved") bustMethodServiceCache();
+    return editOk({
+      op,
+      changed: outcome.kind === "saved",
+      service: toMethodServiceView(outcome.row),
+    });
   }
 
   // update — only the fields present, and only those that differ.
@@ -437,5 +460,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
+  bustMethodServiceCache();
   return editOk({ op, changed: true, service: toMethodServiceView(saved) });
 }

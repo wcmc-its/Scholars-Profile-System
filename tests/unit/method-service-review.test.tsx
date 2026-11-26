@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   collectFamilyPmids: vi.fn(),
   loadPagePublicationSets: vi.fn(),
   loadStaffPmidsByUnit: vi.fn(),
+  loadCoreConfirmedPmidsByUnit: vi.fn(),
   publicationFindMany: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock("@/lib/api/methods-overlay", () => ({ loadFamilyOverlayGate: async () =>
 vi.mock("@/lib/api/method-service-collaborations", () => ({
   loadPagePublicationSets: m.loadPagePublicationSets,
   loadStaffPmidsByUnit: m.loadStaffPmidsByUnit,
+  loadCoreConfirmedPmidsByUnit: m.loadCoreConfirmedPmidsByUnit,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: m.refresh }),
@@ -66,6 +68,7 @@ describe("loadServiceReview", () => {
       research: new Set(["101", "102", "104", "105"]),
     });
     m.loadStaffPmidsByUnit.mockResolvedValue(new Map([["department:DEPTA", new Set(["102", "104"])]]));
+    m.loadCoreConfirmedPmidsByUnit.mockResolvedValue(new Map());
     m.publicationFindMany.mockImplementation(async (args: { where: { pmid: { in: string[] } } }) =>
       args.where.pmid.in.map((pmid) => ({
         pmid,
@@ -93,6 +96,26 @@ describe("loadServiceReview", () => {
     expect(r.marked[0]).toMatchObject({ title: "Example paper 103", journal: "Example Journal" });
     expect(r.excluded.map((p) => p.pmid)).toEqual(["104"]);
     expect(r.excluded[0]).toMatchObject({ reason: null, methods: ["Example review methods"] });
+  });
+
+  it("a core's confirmed publication is marked with its own reason, with automatic counting off", async () => {
+    m.loadStaffPmidsByUnit.mockResolvedValue(new Map());
+    m.loadCoreConfirmedPmidsByUnit.mockResolvedValue(new Map([["core:77", new Set(["105"])]]));
+    const core = {
+      ...SERVICE,
+      entityType: "core" as const,
+      entityId: "77",
+      supportedPmids: [],
+      excludedPmids: [],
+      countStaffPapers: false,
+    };
+    const r = await loadServiceReview(core);
+    expect(m.loadCoreConfirmedPmidsByUnit.mock.calls[0][0][0]).toMatchObject({
+      entityType: "core",
+      entityId: "77",
+    });
+    expect(r.collaborations).toBe(1);
+    expect(r.marked.map((p) => [p.pmid, p.reason])).toEqual([["105", "confirmed"]]);
   });
 
   it("asks for the unit's people with the service's own toggle", async () => {

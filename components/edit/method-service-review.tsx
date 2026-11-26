@@ -150,11 +150,13 @@ function PublicationLine({ pub, multi }: { pub: ServiceReviewPublication; multi:
       <span className="text-muted-foreground text-[12.5px]">
         {pub.reason === "supported"
           ? "On your supported list"
-          : pub.reason === "staff"
-            ? "Co-authored by someone in your unit"
-            : pub.methods.length === 0
-              ? "Not on the method page"
-              : null}
+          : pub.reason === "confirmed"
+            ? "Confirmed as a publication of your core"
+            : pub.reason === "staff"
+              ? "Co-authored by someone in your unit"
+              : pub.methods.length === 0
+                ? "Not on the method page"
+                : null}
         {multi && pub.methods.length > 0 && (
           <>
             {pub.reason ? " · " : ""}

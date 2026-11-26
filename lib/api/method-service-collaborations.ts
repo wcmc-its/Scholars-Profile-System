@@ -6,21 +6,33 @@
  * The rule itself is `computeCollaboration` (`lib/method-services/
  * collaboration.ts`); this module only supplies its inputs:
  *   - the services: `method_service` is small (dozens of rows), so it is read
- *     whole and filtered in memory. Not cached: an owner's "Not ours" should
- *     show on the page straight away;
+ *     whole and filtered in memory;
  *   - who the unit's people are, by the same sources the unit's own pages use:
  *     a department's active scholars (`Scholar.deptCode`, the predicate its
  *     Publications tab uses) and a core's curated staff list (`core_staff`);
  *   - which page publications one of them is a CONFIRMED author of, minus an
- *     authorship that person has hidden (ADR-005).
+ *     authorship that person has hidden (ADR-005);
+ *   - for a core, which page publications are confirmed as the core's own
+ *     (`publication_core` merged with the owner's claims), so a paper the core
+ *     supported counts without a staff author and without a pasted list.
+ *
+ * Both the service list and each family's result go through `cachedRead`
+ * (prefix `method-services:`): a method page and every fetch of its feed share
+ * one computation, and a family with no service costs no query once the list
+ * is warm. Every write to a service clears the prefix
+ * (`bustMethodServiceCache`), so an owner's "Not ours" shows straight away.
+ * Changes made elsewhere (a core's staff list or visibility, a new claim, the
+ * nightly import) show when the entry is next refreshed.
  *
  * The caller passes the page's pmids (`collectFamilyPmids`, already overlay
  * gated and dark-filtered), so nothing here can mark a paper that is not on
  * the page. Returns `[]` while `isMethodServicesEnabled()` is false, before
  * any query. SERVER-ONLY (imports `@/lib/db`).
  */
+import { claimKey, isEffectiveConfirmed } from "@/lib/api/core-merge";
 import { METHOD_SERVICE_SELECT, toMethodServiceView } from "@/lib/api/method-services";
 import { loadPublicationSuppressions } from "@/lib/api/manual-layer";
+import { bust, cachedRead } from "@/lib/api/swr-cache";
 import { corePath } from "@/lib/core-url";
 import { db } from "@/lib/db";
 import {
@@ -33,10 +45,11 @@ import {
   type ServiceUnitFacts,
 } from "@/lib/method-services/collaboration";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
-import type {
-  MethodServiceEntityType,
-  MethodServiceFamily,
-  MethodServiceView,
+import {
+  methodFamilyKey,
+  type MethodServiceEntityType,
+  type MethodServiceFamily,
+  type MethodServiceView,
 } from "@/lib/method-services/validation";
 import { officialUnitName } from "@/lib/org-unit-names";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
@@ -73,6 +86,22 @@ export type FamilyServiceCollaboration = {
 };
 
 const unitKey = (entityType: string, entityId: string) => `${entityType}:${entityId}`;
+
+/** `cachedRead` prefix for everything here; its first segment is what the
+ *  cross-task bust signal is keyed on. */
+const CACHE_PREFIX = "method-services:";
+
+/** Drop the cached service list and every family's cached result. Called by
+ *  each write in `/api/edit/method-service`. Never throws. */
+export function bustMethodServiceCache(): void {
+  bust(CACHE_PREFIX);
+}
+
+/** The page's pmids, or a way to get them. The function form is only called
+ *  when the family has a visible service and nothing is cached for it. */
+export type PagePmidsSource =
+  | ReadonlyArray<string>
+  | (() => Promise<ReadonlyArray<string>>);
 
 /** Resolve the owning units of `services`: name, public link, visibility. */
 export async function loadServiceUnits(
@@ -215,6 +244,49 @@ export async function loadStaffPmidsByUnit(
   return out;
 }
 
+/**
+ * For each CORE-owned service, the subset of `pagePmids` confirmed as that
+ * core's publications: an engine `confirmed` match the owner has not rejected,
+ * or any pair the owner has claimed (the same merge the core's own page uses,
+ * `lib/api/core-merge.ts`). Departments have no such record and get no entry.
+ */
+export async function loadCoreConfirmedPmidsByUnit(
+  services: ReadonlyArray<{ entityType: MethodServiceEntityType; entityId: string }>,
+  pagePmids: ReadonlyArray<string>,
+): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  const coreIds = [
+    ...new Set(services.filter((s) => s.entityType === "core").map((s) => s.entityId)),
+  ];
+  if (coreIds.length === 0 || pagePmids.length === 0) return out;
+
+  const [engine, claims] = await Promise.all([
+    db.read.publicationCore.findMany({
+      where: { coreId: { in: coreIds }, pmid: { in: [...pagePmids] }, status: "confirmed" },
+      select: { pmid: true, coreId: true, status: true },
+    }),
+    db.read.coreClaim.findMany({
+      where: { coreId: { in: coreIds }, pmid: { in: [...pagePmids] }, revokedAt: null },
+      select: { pmid: true, coreId: true, status: true },
+    }),
+  ]);
+  const claimByKey = new Map(claims.map((c) => [claimKey(c.pmid, c.coreId), c.status]));
+  const add = (coreId: string, pmid: string) => {
+    const key = unitKey("core", coreId);
+    const set = out.get(key) ?? new Set<string>();
+    set.add(pmid);
+    out.set(key, set);
+  };
+  for (const row of engine) {
+    if (isEffectiveConfirmed(row.status, claimByKey.get(claimKey(row.pmid, row.coreId)))) {
+      add(row.coreId, row.pmid);
+    }
+  }
+  // A claim confirms the pair whatever the engine said, or without an engine row.
+  for (const claim of claims) if (claim.status === "claimed") add(claim.coreId, claim.pmid);
+  return out;
+}
+
 /** Every stored service, as a view. Rows with a bad owner kind are dropped. */
 export async function loadAllMethodServices(): Promise<MethodServiceView[]> {
   const rows = await db.read.methodService.findMany({
@@ -252,25 +324,39 @@ export async function loadPagePublicationSets(
 /**
  * The visible services for one method family with their collaborations, in
  * block order (most collaborations in the default view first, then name).
- * `pagePmids` is the family's gated pmid union (`collectFamilyPmids`).
+ * `pagePmids` is the family's gated pmid union (`collectFamilyPmids`), or a
+ * function that loads it. Cached per family; see the file header.
  */
 export async function loadFamilyServiceCollaborations(
   family: MethodServiceFamily,
-  pagePmids: ReadonlyArray<string>,
+  pagePmids: PagePmidsSource,
 ): Promise<FamilyServiceCollaboration[]> {
   if (!isMethodServicesEnabled()) return [];
-  const attached = (await loadAllMethodServices()).filter((s) => serviceCoversFamily(s, family));
+  const all = await cachedRead(`${CACHE_PREFIX}all`, loadAllMethodServices);
+  const attached = all.filter((s) => serviceCoversFamily(s, family));
   if (attached.length === 0) return [];
+  return cachedRead(`${CACHE_PREFIX}family:${methodFamilyKey(family)}`, async () =>
+    computeFamilyServiceCollaborations(
+      attached,
+      typeof pagePmids === "function" ? await pagePmids() : pagePmids,
+    ),
+  );
+}
 
+async function computeFamilyServiceCollaborations(
+  attached: ReadonlyArray<MethodServiceView>,
+  pagePmids: ReadonlyArray<string>,
+): Promise<FamilyServiceCollaboration[]> {
   const units = await loadServiceUnits(attached);
   const visible = attached.filter(
     (s) => units.get(unitKey(s.entityType, s.entityId))?.visible === true,
   );
   if (visible.length === 0) return [];
 
-  const [page, staffByUnit] = await Promise.all([
+  const [page, staffByUnit, confirmedByUnit] = await Promise.all([
     loadPagePublicationSets(pagePmids),
     loadStaffPmidsByUnit(visible, pagePmids),
+    loadCoreConfirmedPmidsByUnit(visible, pagePmids),
   ]);
 
   const named = visible.map((s) => ({
@@ -289,6 +375,7 @@ export async function loadFamilyServiceCollaborations(
         excludedPmids: service.excludedPmids,
         countStaffPapers: service.countStaffPapers,
         staffPmids: staffByUnit.get(unitKey(service.entityType, service.entityId)) ?? new Set(),
+        confirmedPmids: confirmedByUnit.get(unitKey(service.entityType, service.entityId)),
       });
       let researchCount = 0;
       for (const pmid of marked.keys()) if (page.research.has(pmid)) researchCount += 1;

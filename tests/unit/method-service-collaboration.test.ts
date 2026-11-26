@@ -24,6 +24,7 @@ const base = {
   excludedPmids: [] as string[],
   countStaffPapers: false,
   staffPmids: new Set<string>(),
+  confirmedPmids: undefined as Set<string> | undefined,
 };
 
 const marked = (input: Partial<typeof base>) =>
@@ -82,6 +83,33 @@ describe("computeCollaboration: precedence", () => {
     expect(
       marked({ supportedPmids: ["101"], countStaffPapers: false, staffPmids: new Set(["101"]) }),
     ).toEqual({ "101": "supported" });
+  });
+});
+
+describe("computeCollaboration: a core's confirmed publications", () => {
+  it("marks a confirmed pmid with automatic counting off and no staff author", () => {
+    expect(marked({ confirmedPmids: new Set(["103"]) })).toEqual({ "103": "confirmed" });
+  });
+
+  it("excluded beats confirmed", () => {
+    expect(marked({ confirmedPmids: new Set(["103", "104"]), excludedPmids: ["103"] })).toEqual({
+      "104": "confirmed",
+    });
+  });
+
+  it("the reason is supported, then confirmed, then staff", () => {
+    expect(
+      marked({
+        supportedPmids: ["101"],
+        confirmedPmids: new Set(["101", "102"]),
+        countStaffPapers: true,
+        staffPmids: new Set(["101", "102", "103"]),
+      }),
+    ).toEqual({ "101": "supported", "102": "confirmed", "103": "staff" });
+  });
+
+  it("a confirmed pmid that is not on the page marks nothing", () => {
+    expect(marked({ confirmedPmids: new Set(["999"]) })).toEqual({});
   });
 });
 
