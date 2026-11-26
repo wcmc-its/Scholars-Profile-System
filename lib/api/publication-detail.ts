@@ -7,6 +7,12 @@
  * (`app/api/publications/[pmid]/route.ts`) is a thin delegator.
  */
 import { parseLocations, POLICY_LEVELS, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import {
+  patentCitationsModalOn,
+  shapeTrialPatentCitations,
+  trialCitationsModalOn,
+  type TrialPatentCitations,
+} from "@/lib/citations/trials-patents";
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
@@ -202,6 +208,46 @@ export async function readPolicyCitations(
   }
 }
 
+/**
+ * The trials and patents citing the paper, for the modal's own section. A read
+ * of its own: these levels never enter `policyCitations`. Only the groups whose
+ * flag is on are asked for. Null on a read failure, so the modal omits the section.
+ */
+export async function readTrialPatentCitations(
+  pmid: string,
+  on: { trials: boolean; patents: boolean },
+): Promise<TrialPatentCitations | null | undefined> {
+  const levels = [...(on.trials ? ["trial"] : []), ...(on.patents ? ["patent"] : [])];
+  if (levels.length === 0) return undefined;
+  try {
+    // ponytail: every link is read to group patents into inventions and count
+    // them (about 2,700 slim rows for the most-cited paper). Group in SQL if
+    // that ever shows up in the route's latency.
+    const links = await prisma.publicationCitingDocument.findMany({
+      where: { pmid, citingDocument: { level: { in: levels } } },
+      select: {
+        evidence: true,
+        citingDocument: {
+          select: {
+            id: true,
+            level: true,
+            externalId: true,
+            title: true,
+            year: true,
+            url: true,
+            dedupKey: true,
+            details: true,
+          },
+        },
+      },
+    });
+    return shapeTrialPatentCitations(links, on);
+  } catch (err) {
+    console.error("[publication-detail] trial and patent citations read failed", err);
+    return null;
+  }
+}
+
 export type PublicationDetailPayload = {
   pub: {
     pmid: string;
@@ -262,6 +308,10 @@ export type PublicationDetailPayload = {
    *  `POLICY_CITATION_BADGES` is off or there are none; the modal omits the
    *  section then. `reviewTotal` can exceed the reviews listed. */
   policyCitations?: { docs: PolicyCitingDoc[]; reviewTotal: number };
+  /** Registered trials and US patents citing this paper. Absent when both
+   *  `TRIAL_CITATIONS_MODAL` and `PATENT_CITATIONS_MODAL` are off or there are
+   *  none; a group whose flag is off is absent from it. */
+  trialPatentCitations?: TrialPatentCitations;
   /** Count of distinct citing pmids in `analysis_nih_cites` for this
    *  `cited_pmid`. Typically
    *  smaller than `pub.citationCount` because the upstream table is iCite-
@@ -844,6 +894,14 @@ export async function getPublicationDetail(
   const policyCitations =
     policyCitationBadgesOn() && pmidInt !== null ? await readPolicyCitations(pmid) : null;
 
+  const trialPatentCitations =
+    pmidInt !== null
+      ? await readTrialPatentCitations(pmid, {
+          trials: trialCitationsModalOn(),
+          patents: patentCitationsModalOn(),
+        })
+      : null;
+
   const translationalStage = resolveSearchPubsTranslationalStageFacet()
     ? displayStage(pub.translationalStage, pub.translationalStageConfidence)
     : null;
@@ -883,6 +941,7 @@ export async function getPublicationDetail(
     citingPubs,
     citingPubsTotal,
     ...(policyCitations ? { policyCitations } : {}),
+    ...(trialPatentCitations ? { trialPatentCitations } : {}),
   };
 }
 
