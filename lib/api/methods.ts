@@ -76,6 +76,8 @@ import {
 import { deriveSlug } from "@/lib/slug";
 import { cachedRead } from "@/lib/api/swr-cache";
 import { isPublicScholarCwid, loadHiddenAuthorshipPmids } from "@/lib/api/scholar-filter";
+import { loadFamilyServiceCollaborations } from "@/lib/api/method-service-collaborations";
+import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 
 // Re-export the chip/row data shapes so Method page components import them from
 // here (one module surface) rather than reaching into `topics.ts`.
@@ -1587,6 +1589,9 @@ export type MethodPublicationHit = {
     /** #1168 — WS-C badge: "appears" (generic mention) vs "used" (default). */
     usage: "used" | "appears";
   }>;
+  /** METHOD_SERVICES — ids of the page's services whose unit collaborated on
+   *  this paper (the row's "{Unit} collaboration" badges). Absent when none. */
+  serviceIds?: number[];
 };
 
 const PUB_SELECT = {
@@ -1613,7 +1618,7 @@ const PUB_SELECT = {
  * the lens is off, the family is gated, or `ScholarFamily.pmids` is unpopulated
  * (pre-#175 rollup — the page then renders scholar-list-only, no crash; §3.3 E9).
  */
-async function collectFamilyPmids(
+export async function collectFamilyPmids(
   supercategory: string,
   familyLabel: string,
   gate: FamilyOverlayGate,
@@ -1744,7 +1749,56 @@ export type MethodPublicationsResult = {
   totalResearchOnly: number;
   page: number;
   pageSize: number;
+  /** METHOD_SERVICES — the page's visible services, each with its collaboration
+   *  count under the active publication-type filter. Absent when the flag is
+   *  off or the family has no visible service, so the payload is unchanged. */
+  services?: Array<{ id: number; label: string; count: number }>;
 };
+
+/** One service in the method page's "WCM services for this method" block. */
+export type FamilyServiceEntry = {
+  id: number;
+  name: string;
+  url: string;
+  /** Fully resolved unit name. */
+  unitName: string;
+  /** The unit's public page. */
+  unitHref: string | null;
+  /** What the filter and the badge call the service (the unit's name). */
+  label: string;
+  /** Collaborations among the publications the page lists by default: the N
+   *  beside the page's own research-article total. */
+  count: number;
+};
+
+/**
+ * METHOD_SERVICES — the visible services attached to a method family, in block
+ * order, each with its collaboration count over the family's default
+ * (research-article) view. `[]` when the lens or the flag is off (no query),
+ * the family is gated, or nothing visible is attached.
+ */
+export async function getFamilyServices(
+  supercategory: string,
+  familyLabel: string,
+): Promise<FamilyServiceEntry[]> {
+  if (!isMethodsLensEnabled() || !isMethodServicesEnabled()) return [];
+  const gate = await loadFamilyOverlayGate();
+  if (!isFamilyPubliclyVisible(supercategory, familyLabel, gate)) return [];
+  // The pmid union is only loaded when the family has a service and its
+  // result is not already cached (the feed route shares that cache).
+  const services = await loadFamilyServiceCollaborations({ supercategory, familyLabel }, () =>
+    collectFamilyPmids(supercategory, familyLabel, gate),
+  );
+  return services.map((s) => ({
+    id: s.id,
+    name: s.name,
+    url: s.url,
+    unitName: s.unitName,
+    unitHref: s.unitHref,
+    label: s.label,
+    count: s.researchCount,
+  }));
+}
 
 const METHOD_PUBLICATIONS_PAGE_SIZE = 20;
 
@@ -1780,6 +1834,12 @@ export async function getFamilyPublications(
     /** TAXONOMY_FEED_LOAD_MORE — rows per page (route-validated: whole 20-row
      *  chunks, at most 200); `page` is 0-indexed in units of it. Default 20. */
     pageSize?: number;
+    /** METHOD_SERVICES — restrict the feed to the papers this service's unit
+     *  collaborated on. Like `entityId`, the family-level denominators stay
+     *  over the whole family. An id that is not a visible service of this
+     *  family (unknown, another family's, a hidden unit's) yields an empty
+     *  feed. Ignored while the flag is off. */
+    serviceId?: number;
   },
 ): Promise<MethodPublicationsResult | null> {
   if (!isMethodsLensEnabled()) return null;
@@ -1812,6 +1872,15 @@ export async function getFamilyPublications(
     };
   }
 
+  // METHOD_SERVICES — the page's visible services and the papers each unit
+  // collaborated on. `[]` (no query) while the flag is off. Cached per family
+  // (`method-services:`), so sort changes, the type toggle and Load more reuse
+  // what the page render computed.
+  const services = await loadFamilyServiceCollaborations(
+    { supercategory, familyLabel },
+    allPmids,
+  );
+
   // #1166 — entity filter: restrict the feed pmids to the selected cell line's
   // papers (those with a usage sentence), intersected with the family's gated set,
   // and carry the per-pmid snippet through. Family-level pmids (the denominator)
@@ -1837,6 +1906,10 @@ export async function getFamilyPublications(
   if (scholarPmids) {
     const mine = scholarPmids;
     feedPmids = feedPmids.filter((p) => mine.has(p));
+  }
+  if (opts.serviceId !== undefined && isMethodServicesEnabled()) {
+    const marked = services.find((s) => s.id === opts.serviceId)?.marked;
+    feedPmids = marked ? feedPmids.filter((p) => marked.has(p)) : [];
   }
 
   const typeWhere =
@@ -1883,6 +1956,8 @@ export async function getFamilyPublications(
         includeImpact,
         withAbstract.has(r.pmid),
       );
+      const serviceIds = services.filter((s) => s.marked.has(r.pmid)).map((s) => s.id);
+      if (serviceIds.length > 0) hit.serviceIds = serviceIds;
       const usageFacts = factsByPmid?.get(r.pmid);
       return usageFacts?.length
         ? {
@@ -1902,6 +1977,15 @@ export async function getFamilyPublications(
     totalResearchOnly,
     page,
     pageSize,
+    ...(services.length > 0
+      ? {
+          services: services.map((s) => ({
+            id: s.id,
+            label: s.label,
+            count: filter === "all" ? s.allCount : s.researchCount,
+          })),
+        }
+      : {}),
   };
 }
 

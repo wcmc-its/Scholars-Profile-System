@@ -11,6 +11,19 @@
  *     unit of a row never changes: `entityType` / `entityId` in an update body
  *     are ignored.
  *   - delete: `{ id }`. Hard delete; the history is the audit log.
+ *   - exclude: `{ id, pmid }`. "Not ours": adds one PMID to `excludedPmids`,
+ *     which takes it off the unit's count, filter and badge on the method page.
+ *   - restore: `{ id, pmid }`. The undo: removes it from `excludedPmids`.
+ *     Both re-read the list inside the write's transaction under the row's
+ *     lock (`SELECT ... FOR UPDATE`), so neither a stale editor nor a second
+ *     request at the same moment can overwrite it, and both are a no-op
+ *     (`changed: false`, no audit row) when the list already says so.
+ *
+ * GET /api/edit/method-service?id=<id> — the numbers under a saved service and
+ * its "Review publications" list (`loadServiceReview`): `{ ok: true, review }`.
+ * Read-only, so no audit row, but gated exactly as a write is: the same
+ * identity (observer and content-editor views stripped) and the same unit
+ * predicates, against the stored row. Always `no-store`.
  *
  * Authorization is the owning unit's own, the same predicates its edit page
  * and sibling routes use:
@@ -30,18 +43,25 @@
  * unit code / core id), `fieldsChanged: ["method_services"]`, before / after
  * the service row. PMID lists are summarised: see `auditShape`.
  *
- * The saved row is returned from the write itself. Nothing public reads the
- * table yet, so there is no public-page revalidation; the section refreshes
- * its own edit page. 404 while `isMethodServicesEnabled()` is false.
+ * The saved row is returned from the write itself. The public method page
+ * reads services through a short-lived cache (`loadFamilyServiceCollaborations`),
+ * which every write here clears (`bustMethodServiceCache`, on this task and,
+ * by the shared signal, the others); the page and its feed route are
+ * `force-dynamic`, so there is nothing else to revalidate. The section
+ * refreshes its own edit page. 404 while
+ * `isMethodServicesEnabled()` is false.
  */
-import { type NextRequest, type NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
+import { bustMethodServiceCache } from "@/lib/api/method-service-collaborations";
+import { loadServiceReview } from "@/lib/api/method-service-review";
 import {
   METHOD_SERVICE_SELECT,
   findNonPublicFamilies,
   toMethodServiceView,
   type MethodServiceRow,
 } from "@/lib/api/method-services";
+import { stripContentEditorView, stripObserverView } from "@/lib/auth/observer-view";
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
@@ -55,9 +75,16 @@ import {
   type CoreOwnerLookup,
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
-import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import {
+  editError,
+  editOk,
+  logEditFailure,
+  readEditRequest,
+  resolveEditIdentity,
+} from "@/lib/edit/request";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import {
+  SERVICE_PMIDS_MAX,
   defaultCountStaffPapers,
   isMethodServiceEntityType,
   methodFamilyKey,
@@ -70,7 +97,7 @@ import {
 } from "@/lib/method-services/validation";
 
 const PATH = "/api/edit/method-service";
-const OPS = ["create", "update", "delete"] as const;
+const OPS = ["create", "update", "delete", "exclude", "restore"] as const;
 type Op = (typeof OPS)[number];
 /** 5000 PMIDs is about 60 KB of JSON, right at `readEditRequest`'s default cap. */
 const MAX_BODY_BYTES = 256 * 1024;
@@ -197,6 +224,40 @@ function sameValue(a: Fields[keyof Fields], b: Fields[keyof Fields]): boolean {
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
 
+const NO_STORE = { "cache-control": "no-store" } as const;
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (!isMethodServicesEnabled()) return editError(404, "not_found");
+
+  const identity = await resolveEditIdentity();
+  if (!identity) return new NextResponse(null, { status: 401 });
+  // The identity a write is authorized against (`resolveEditIdentityForWrite`):
+  // whoever may change the service is who may review it.
+  const session = stripContentEditorView(stripObserverView(identity.session));
+
+  const idRaw = request.nextUrl.searchParams.get("id") ?? "";
+  if (!/^[1-9]\d{0,8}$/.test(idRaw)) return editError(400, "invalid_value", "id");
+  // The stored row decides which unit this is. Read on the writer, as the POST
+  // does: the section asks straight after it creates a service.
+  const existing = await db.write.methodService.findUnique({
+    where: { id: Number(idRaw) },
+    select: METHOD_SERVICE_SELECT,
+  });
+  if (!existing) return editError(404, "service_not_found", "id");
+  const view = toMethodServiceView(existing);
+  if (!view) return editError(400, "invalid_entity_type", "id");
+  const denied = await gate(session, view.entityType, view.entityId);
+  if (denied) return denied;
+
+  try {
+    const review = await loadServiceReview(view);
+    return NextResponse.json({ ok: true, review }, { headers: NO_STORE });
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "read_failed");
+  }
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isMethodServicesEnabled()) return editError(404, "not_found");
 
@@ -214,6 +275,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     unit: { entityType: MethodServiceEntityType; entityId: string },
     before: MethodServiceRow | null,
     after: MethodServiceRow | null,
+    /** The one PMID an exclude / restore moved: a long list is audited as its
+     *  count alone (`auditShape`), which would not say which paper. */
+    moved?: { excludedPmid: string } | { restoredPmid: string },
   ): Promise<void> =>
     appendAuditRow(tx, {
       actorCwid: realCwid,
@@ -223,7 +287,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       action: "roster_change",
       fieldsChanged: ["method_services"],
       beforeValues: before ? auditShape(before) : null,
-      afterValues: after ? auditShape(after) : null,
+      afterValues: after ? { ...auditShape(after), ...moved } : null,
       ts: new Date(),
       requestId,
     });
@@ -275,6 +339,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
+    bustMethodServiceCache();
     return editOk({ op, changed: true, service: toMethodServiceView(saved) });
   }
 
@@ -306,7 +371,63 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       logEditFailure(PATH, err);
       return editError(500, "write_failed");
     }
+    bustMethodServiceCache();
     return editOk({ op, id: existing.id, changed: true });
+  }
+
+  // exclude / restore — one PMID on or off the stored excluded list. The read,
+  // the decision and the write share one transaction that holds the row's
+  // lock, so two requests for the same service run one after the other and the
+  // second starts from what the first wrote.
+  if (op === "exclude" || op === "restore") {
+    const parsed = validatePmidList(typeof body.pmid === "string" ? [body.pmid] : null);
+    if (!parsed.ok || parsed.value.length !== 1) return editError(400, "invalid_pmids", "pmid");
+    const pmid = parsed.value[0];
+
+    type Outcome =
+      | { kind: "gone" }
+      | { kind: "full" }
+      | { kind: "unchanged"; row: MethodServiceRow }
+      | { kind: "saved"; row: MethodServiceRow };
+    let outcome: Outcome;
+    try {
+      outcome = await db.write.$transaction(async (tx): Promise<Outcome> => {
+        await tx.$queryRaw`SELECT id FROM method_service WHERE id = ${existing.id} FOR UPDATE`;
+        const locked = await tx.methodService.findUnique({
+          where: { id: existing.id },
+          select: METHOD_SERVICE_SELECT,
+        });
+        if (!locked) return { kind: "gone" };
+        const list = toMethodServiceView(locked)?.excludedPmids ?? [];
+        if (list.includes(pmid) === (op === "exclude")) return { kind: "unchanged", row: locked };
+        if (op === "exclude" && list.length >= SERVICE_PMIDS_MAX) return { kind: "full" };
+        const next = op === "exclude" ? [...list, pmid] : list.filter((p) => p !== pmid);
+        const row = await tx.methodService.update({
+          where: { id: existing.id },
+          data: { excludedPmids: next },
+          select: METHOD_SERVICE_SELECT,
+        });
+        await audit(
+          tx,
+          unit,
+          locked,
+          row,
+          op === "exclude" ? { excludedPmid: pmid } : { restoredPmid: pmid },
+        );
+        return { kind: "saved", row };
+      });
+    } catch (err) {
+      logEditFailure(PATH, err);
+      return editError(500, "write_failed");
+    }
+    if (outcome.kind === "gone") return editError(404, "service_not_found", "id");
+    if (outcome.kind === "full") return editError(400, "too_many_pmids", "pmid");
+    if (outcome.kind === "saved") bustMethodServiceCache();
+    return editOk({
+      op,
+      changed: outcome.kind === "saved",
+      service: toMethodServiceView(outcome.row),
+    });
   }
 
   // update — only the fields present, and only those that differ.
@@ -339,5 +460,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
+  bustMethodServiceCache();
   return editOk({ op, changed: true, service: toMethodServiceView(saved) });
 }

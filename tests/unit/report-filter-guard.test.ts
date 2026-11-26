@@ -181,6 +181,10 @@ const WHO_FILTER_ALLOWLIST: Record<string, { hits: number; reason: string }> = {
     hits: 1,
     reason: "public ranking eligibility: fixed TOP_SCHOLARS_ELIGIBLE_ROLES carve, not a user-selected filter",
   },
+  "lib/api/method-service-collaborations.ts": {
+    hits: 1,
+    reason: "public method page (METHOD_SERVICES): the active scholars of the departments that own a service there, whose co-authored papers are marked; not a person filter",
+  },
   "lib/api/methods.ts": {
     hits: 2,
     reason: "public ranking eligibility: fixed TOP_SCHOLARS_ELIGIBLE_ROLES carve, not a user-selected filter",

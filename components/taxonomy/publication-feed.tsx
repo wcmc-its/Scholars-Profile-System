@@ -36,7 +36,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Compass } from "lucide-react";
+import { Check, Compass } from "lucide-react";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { SnippetUsageBadge } from "@/components/method/snippet-usage-badge";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
@@ -81,6 +81,7 @@ import {
   writeShownParam,
 } from "@/lib/taxonomy/feed-load-more";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { parseServiceParam } from "@/lib/method-services/collaboration";
 import { profilePath } from "@/lib/profile-url";
 import { sanitizePubTitle } from "@/lib/utils";
 import { Caret } from "@/components/ui/caret";
@@ -122,6 +123,18 @@ export type FeedHit = {
   primarySubtopicId?: string | null;
   /** Category-wide hits: the pub's family label (per-row area label). */
   familyLabel?: string | null;
+  /** METHOD_SERVICES — family hits only: the page's services whose unit
+   *  collaborated on this paper. */
+  serviceIds?: number[];
+};
+
+/** METHOD_SERVICES — one service of a method page, as its feed needs it. */
+export type FeedService = {
+  id: number;
+  /** The unit's name (plus the service's, when one unit has two here). */
+  label: string;
+  /** Collaborations in the page's default view. */
+  count: number;
 };
 
 type FeedResponse = {
@@ -135,6 +148,9 @@ type FeedResponse = {
   parentTierTotals?: { strongly: number; also: number };
   page: number;
   pageSize: number;
+  /** METHOD_SERVICES — family feeds only: each visible service's count under
+   *  the active publication-type filter. */
+  services?: Array<{ id: number; label: string; count: number }>;
 };
 
 export type PublicationFeedProps = {
@@ -154,6 +170,13 @@ export type PublicationFeedProps = {
   formatCount?: (data: FeedResponse, filter: Filter) => string;
   /** Rendered between the heading row and the type toggle. */
   headerSlot?: ReactNode;
+  /** Controls placed in the heading row before Sort (the method page's
+   *  "{Unit} collaborations" filters). Gets the latest response, null while
+   *  loading. */
+  toolbarSlot?: (data: FeedResponse | null) => ReactNode;
+  /** Per-row badges shown beside the journal and year (the method page's
+   *  "{Unit} collaboration"). */
+  badgesFor?: (hit: FeedHit) => string[];
   /** Empty-state body copy. */
   emptyBody: string;
   /** TAXONOMY_FEED_LOAD_MORE — Load more + `?shown=` + one merged tier list. */
@@ -222,6 +245,8 @@ export function PublicationFeed({
   entityTerm = null,
   formatCount,
   headerSlot,
+  toolbarSlot,
+  badgesFor,
   emptyBody,
   loadMore = false,
   areaLabelFor,
@@ -359,7 +384,13 @@ export function PublicationFeed({
     }
   }
 
-  const rowProps = { modalTopicSlug, entityTerm, areaLabelFor, plainAuthors: !!renderHeader };
+  const rowProps = {
+    modalTopicSlug,
+    entityTerm,
+    areaLabelFor,
+    badgesFor,
+    plainAuthors: !!renderHeader,
+  };
 
   const sortSelect = (
     <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
@@ -444,6 +475,7 @@ export function PublicationFeed({
             {stageSelect}
           </div>
         )}
+        {toolbarSlot?.(data)}
         <div className="text-muted-foreground flex items-center gap-2 text-[13.5px]">
           Sort by
           {sortSelect}
@@ -675,6 +707,7 @@ type RowProps = {
   modalTopicSlug?: string;
   entityTerm: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
+  badgesFor?: (hit: FeedHit) => string[];
   plainAuthors?: boolean;
 };
 
@@ -900,6 +933,7 @@ export function PubRow({
   modalTopicSlug,
   entityTerm = null,
   areaLabelFor,
+  badgesFor,
   plainAuthors = false,
   focusable = false,
 }: {
@@ -907,6 +941,8 @@ export function PubRow({
   modalTopicSlug?: string;
   entityTerm?: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
+  /** METHOD_SERVICES — "{Unit} collaboration" badges for this row. */
+  badgesFor?: (hit: FeedHit) => string[];
   plainAuthors?: boolean;
   /** Load more: rows take programmatic focus (tabIndex -1). */
   focusable?: boolean;
@@ -918,6 +954,7 @@ export function PubRow({
   const shownUsages = usagesExpanded ? usages : usages.slice(0, 1);
   const moreCount = usages.length - 1;
   const areaLabel = areaLabelFor ? areaLabelFor(hit) : null;
+  const badges = badgesFor ? badgesFor(hit) : [];
   return (
     <li
       className={focusable ? "py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring" : "py-4"}
@@ -937,8 +974,14 @@ export function PubRow({
       </div>
       {/* Kept as `journal || year` (not a boolean) for parity: a row with no
           journal and year 0 has always rendered a stray "0" here. */}
-      {(areaLabel ? true : hit.journal || hit.year) && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+      {(areaLabel || badges.length > 0 ? true : hit.journal || hit.year) && (
+        <div
+          className={
+            badges.length > 0
+              ? "mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+              : "mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"
+          }
+        >
           {hit.journal && (
             <span
               className="italic"
@@ -953,6 +996,15 @@ export function PubRow({
               <span data-testid="pub-area-label">{areaLabel}</span>
             </>
           ) : null}
+          {badges.map((b) => (
+            <span
+              key={b}
+              className="bg-apollo-slate-tint border-apollo-slate-tint-border text-apollo-notice-text inline-flex items-center rounded border px-[7px] py-px text-[11.5px] font-medium"
+              data-testid="pub-service-badge"
+            >
+              {b}
+            </span>
+          ))}
         </div>
       )}
       {/* #327 — the paper's argmax topic when it is ANOTHER topic (the server
@@ -1165,6 +1217,7 @@ export function FamilyPublicationFeed({
   familyLabel,
   cellLineLabels,
   loadMore = false,
+  services,
 }: {
   /** The supercategory URL slug segment (path part 1). */
   supercategorySlug: string;
@@ -1176,6 +1229,10 @@ export function FamilyPublicationFeed({
   cellLineLabels?: Record<string, string>;
   /** TAXONOMY_FEED_LOAD_MORE. */
   loadMore?: boolean;
+  /** METHOD_SERVICES — the page's visible services (family page only). Each
+   *  gets a "{Unit} collaborations" filter (`?service=<id>`) and a row badge.
+   *  Omitted or empty ⇒ neither, and `?service=` is ignored. */
+  services?: ReadonlyArray<FeedService>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1195,25 +1252,33 @@ export function FamilyPublicationFeed({
     });
   };
 
-  return (
-    <PublicationFeed
-      endpoint={`/api/methods/${encodeURIComponent(supercategorySlug)}/${encodeURIComponent(
-        familySegment,
-      )}/publications`}
-      scopeParams={[["entity", cellLine]]}
-      scholarFilter
-      entityTerm={cellLineLabel}
-      // "N of M articles" while an entity filter is on; M is the family total
-      // for the active type filter.
-      formatCount={(data, filter) => {
-        if (!cellLine) return data.total.toLocaleString();
-        const denom = filter === "all" ? data.totalAllTypes : data.totalResearchOnly;
-        return `${data.total.toLocaleString()} of ${denom.toLocaleString()} articles`;
-      }}
-      emptyBody={`Publications using ${familyLabel} will appear as they are indexed.`}
-      loadMore={loadMore}
-      headerSlot={
-        cellLine && cellLineLabel ? (
+  // METHOD_SERVICES — honored only for a service the page itself rendered
+  // (visible unit, this family), exactly as `?entity=` needs a known label.
+  const hasServices = !!services && services.length > 0;
+  const serviceParam = hasServices ? parseServiceParam(searchParams.get("service")) : null;
+  const service = services?.find((s) => s.id === serviceParam) ?? null;
+  const setService = (id: number | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (id === null) params.delete("service");
+    else params.set("service", String(id));
+    params.delete("page");
+    params.delete("shown");
+    router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname, {
+      scroll: false,
+    });
+  };
+  const badgesFor = useMemo(() => {
+    if (!services || services.length === 0) return undefined;
+    const labels = new Map(services.map((s) => [s.id, s.label]));
+    return (hit: FeedHit) =>
+      (hit.serviceIds ?? []).flatMap((id) => {
+        const label = labels.get(id);
+        return label ? [`${label} collaboration`] : [];
+      });
+  }, [services]);
+
+  const cellLineChip =
+    cellLine && cellLineLabel ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted-foreground">Filtered to</span>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-background-info)] px-2.5 py-0.5 text-xs text-[var(--color-text-info)]">
@@ -1235,9 +1300,118 @@ export function FamilyPublicationFeed({
               Clear · view all articles
             </button>
           </div>
-        ) : null
+        ) : null;
+
+  return (
+    <PublicationFeed
+      endpoint={`/api/methods/${encodeURIComponent(supercategorySlug)}/${encodeURIComponent(
+        familySegment,
+      )}/publications`}
+      scopeParams={
+        hasServices
+          ? [
+              ["entity", cellLine],
+              ["service", service ? String(service.id) : null],
+            ]
+          : [["entity", cellLine]]
+      }
+      scholarFilter
+      entityTerm={cellLineLabel}
+      // "N of M articles" while an entity filter is on; M is the family total
+      // for the active type filter. With only a service filter on, "N of M
+      // publications" (the block's own wording).
+      formatCount={(data, filter) => {
+        if (!cellLine && !service) return data.total.toLocaleString();
+        const denom = filter === "all" ? data.totalAllTypes : data.totalResearchOnly;
+        return `${data.total.toLocaleString()} of ${denom.toLocaleString()} ${
+          cellLine ? "articles" : "publications"
+        }`;
+      }}
+      emptyBody={
+        service
+          ? `No ${service.label} collaborations in this view.`
+          : `Publications using ${familyLabel} will appear as they are indexed.`
+      }
+      loadMore={loadMore}
+      badgesFor={badgesFor}
+      toolbarSlot={
+        hasServices
+          ? (data) => (
+              <ServiceFilterToggles
+                services={services!}
+                counts={data?.services}
+                activeId={service?.id ?? null}
+                onChange={setService}
+              />
+            )
+          : undefined
+      }
+      headerSlot={
+        hasServices ? (
+          <>
+            <p className="sr-only" role="status" aria-live="polite">
+              {service ? `Showing ${service.label} collaborations` : ""}
+            </p>
+            {cellLineChip}
+          </>
+        ) : (
+          cellLineChip
+        )
       }
     />
+  );
+}
+
+/**
+ * METHOD_SERVICES — the "{Unit} collaborations N" filters in the feed toolbar,
+ * one per visible service. At most one is on (`?service=` is single-valued);
+ * pressing the active one clears it. The count follows the response (the
+ * active publication-type filter) once it arrives. A service with no
+ * collaborations in the current view gets no filter, unless it is the one
+ * that is on (reached by a link), which stays so it can be turned off.
+ */
+export function ServiceFilterToggles({
+  services,
+  counts,
+  activeId,
+  onChange,
+}: {
+  services: ReadonlyArray<FeedService>;
+  counts?: ReadonlyArray<{ id: number; count: number }>;
+  activeId: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  return (
+    <>
+      {services.map((s) => {
+        const on = s.id === activeId;
+        const count = counts?.find((c) => c.id === s.id)?.count ?? s.count;
+        if (count === 0 && !on) return null;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(on ? null : s.id)}
+            className="border-apollo-slate bg-apollo-slate-tint text-apollo-slate focus-visible:outline-apollo-slate inline-flex min-h-8 max-w-full items-center gap-2 rounded-full border px-3 py-1 text-left text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 max-sm:min-h-11"
+            data-testid={`service-filter-${s.id}`}
+          >
+            <span
+              aria-hidden="true"
+              className={
+                on
+                  ? "border-apollo-slate bg-apollo-slate flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border-[1.5px] text-white"
+                  : "border-apollo-slate flex size-3.5 shrink-0 rounded-[3px] border-[1.5px]"
+              }
+            >
+              {on && <Check className="size-3" strokeWidth={3} />}
+            </span>
+            <span>{s.label} collaborations</span>
+            <span className="tabular-nums">{count.toLocaleString()}</span>
+          </button>
+        );
+      })}
+    </>
   );
 }
 

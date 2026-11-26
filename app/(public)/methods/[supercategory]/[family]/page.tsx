@@ -8,6 +8,7 @@ import {
   getRepresentativePubsForFamily,
   getFamilyCellLineEntities,
   getDistinctPmidCountForFamily,
+  getFamilyServices,
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -17,6 +18,10 @@ import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxono
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
 import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
+import { MethodServicesBlock } from "@/components/method/method-services-block";
+import { FamilyListAboutButton } from "@/components/method/family-list-about-button";
+import { isMethodServicesEnabled } from "@/lib/method-services/flags";
+import { isSystematicReviewFamily } from "@/lib/methods/systematic-review-family";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -75,6 +80,7 @@ export default async function FamilyPage({
     representativePubs,
     cellLineEntities,
     distinctPmidTotal,
+    services,
   ] = await Promise.all([
     getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
     getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
@@ -89,7 +95,18 @@ export default async function FamilyPage({
     // (the feed's `totalResearchOnly` denominator), used for the rail copy + the
     // Spotlight volume gate. 0 when the lens is off / family gated / no pmids.
     getDistinctPmidCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
+    // METHOD_SERVICES — the units offering a service for this method, each with
+    // the publications it collaborated on ([] with no query when the flag is
+    // off; a failed read drops the block, the filter and the badges together).
+    getFamilyServices(resolved.supercategory, resolved.familyLabel).catch(() => []),
   ]);
+  // Every visible service goes to the feed, including one with no
+  // collaborations in the default view: it may have some under "Show all
+  // publication types". The feed leaves out a filter whose count is 0.
+  const feedServices = services.map((s) => ({ id: s.id, label: s.label, count: s.count }));
+  const showListNote =
+    isMethodServicesEnabled() &&
+    isSystematicReviewFamily(resolved.supercategory, resolved.familyLabel);
 
   // #1166 — when the family resolves to specific cell lines, the master-detail
   // cell-line rail (Surface B §5.1) sits in the left column of the publications
@@ -176,9 +193,14 @@ export default async function FamilyPage({
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           Method
         </div>
-        <h1 className="page-title mt-2 text-3xl leading-tight tracking-tight">
-          {resolved.familyLabel}
-        </h1>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="page-title text-3xl leading-tight tracking-tight">
+            {resolved.familyLabel}
+          </h1>
+          {/* METHOD_SERVICES — where the systematic review family's list comes
+              from (extracted methods plus PubMed's filter). That family only. */}
+          {showListNote && <FamilyListAboutButton />}
+        </div>
 
         {/* #879 — generated capability gloss (render-only passthrough from the A2
             tools-a2-v3 taxonomy). Present only when METHODS_LENS_FAMILY_DEFINITIONS
@@ -195,6 +217,15 @@ export default async function FamilyPage({
               </p>
             )}
           </div>
+        )}
+
+        {/* METHOD_SERVICES — "WCM services for this method", under the definition. */}
+        {services.length > 0 && (
+          <MethodServicesBlock
+            services={services}
+            total={distinctPmidTotal}
+            familyPath={`/methods/${resolved.supercategorySlug}/${resolved.familySlug}`}
+          />
         )}
 
         {/* TopScholarsChipRow's built-in "+ N more" link is hardcoded to
@@ -262,6 +293,7 @@ export default async function FamilyPage({
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
             loadMore={feedLoadMore}
+            services={feedServices}
           />
         ) : (
           <FamilyPublicationLayout
@@ -270,6 +302,7 @@ export default async function FamilyPage({
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
             loadMore={feedLoadMore}
+            services={feedServices}
           />
         )}
       </section>

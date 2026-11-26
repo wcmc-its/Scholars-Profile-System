@@ -111,6 +111,8 @@ vi.mock("@/lib/api/methods", () => ({
   getRepresentativePubsForFamily: async () => [],
   getFamilyCellLineEntities: async () => [],
   getDistinctPmidCountForFamily: async () => 0,
+  // METHOD_SERVICES — no service attached: the page is as it was.
+  getFamilyServices: async () => [],
 }));
 
 import TopicPage from "@/app/(public)/topics/[slug]/page";

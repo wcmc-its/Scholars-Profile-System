@@ -1010,8 +1010,8 @@ export class EdgeStack extends Stack {
       // which strips the query string. GET-only (a read).
       ["/api/topics/*/activity", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
-      // `page` (#824), `entity` (#1166), `cwid` (TAXONOMY_SCHOLAR_CARDS) and
-      // `limit` (TAXONOMY_FEED_LOAD_MORE). Same shape as
+      // `page` (#824), `entity` (#1166), `cwid` (TAXONOMY_SCHOLAR_CARDS),
+      // `limit` (TAXONOMY_FEED_LOAD_MORE) and `service` (METHOD_SERVICES). Same shape as
       // `/api/topics/*/publications`. The glob also covers the category-wide
       // feed `/api/methods/<sc>/all/publications` (TAXONOMY_FEED_LOAD_MORE),
       // which sits at this depth on purpose so it needs no behavior of its own.
