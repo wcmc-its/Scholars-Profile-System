@@ -132,9 +132,9 @@ describe("the systematic review family's About this list note", () => {
 
   it("opens to say where the list comes from", async () => {
     render(<FamilyListAboutButton />);
-    expect(screen.queryByText(/full-time faculty author/)).toBeNull();
+    expect(screen.queryByText(/full-time or part-time faculty author/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "About this list" }));
-    const note = await screen.findByText(/full-time faculty author/);
+    const note = await screen.findByText(/full-time or part-time faculty author/);
     expect(note.textContent).toContain(
       "This list combines methods extracted from papers with PubMed's systematic review filter.",
     );

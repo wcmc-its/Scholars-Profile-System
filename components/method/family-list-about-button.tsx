@@ -32,7 +32,7 @@ export function FamilyListAboutButton() {
         <p className="m-0 font-semibold">About this list</p>
         <p className="mt-1 mb-0">
           This list combines methods extracted from papers with PubMed&apos;s systematic review
-          filter. It includes papers with at least one full-time faculty author.
+          filter. It includes papers with at least one full-time or part-time faculty author.
         </p>
       </PopoverContent>
     </Popover>
