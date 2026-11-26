@@ -509,8 +509,15 @@ describe("loaders", () => {
     });
     return {
       orcidCandidateEvidence: {
-        findMany: vi.fn(async (args: { where?: { cwid?: string } } = {}) =>
-          evidence.filter((e) => !args.where?.cwid || e.cwid === args.where.cwid).map(full),
+        findMany: vi.fn(
+          async (args: { where?: { cwid?: string | { in: string[] }; band?: string } } = {}) =>
+            evidence
+              .filter((e) => {
+                const c = args.where?.cwid;
+                return !c || (typeof c === "string" ? e.cwid === c : c.in.includes(e.cwid));
+              })
+              .filter((e) => !args.where?.band || e.band === args.where.band)
+              .map(full),
         ),
       },
       orcidCandidate: {
@@ -681,6 +688,49 @@ describe("loaders", () => {
         }),
       ),
     ).toEqual(["f00001"]);
+  });
+
+  it("each summary candidate carries the institution match and, for a Strong pair, its uncontested byline papers", async () => {
+    const { loadOrcidQueue } = await actual();
+    const best = async (byline: unknown) =>
+      (await loadOrcidQueue(client({ detail: { ...DETAIL, byline } }))).summaries.find(
+        (s) => s.cwid === "a00001",
+      )!.candidates;
+    const uncontested = { papers: [], total: 3, rejected: 0, otherHolders: [], otherIds: [] };
+    const cands = await best(uncontested);
+    expect(cands[0]).toMatchObject({ band: "strong", instMatch: true, bylinePapers: 3 });
+    // The scholar's Weak iD: Bulk review never takes it, so no count is carried.
+    expect(cands[1]).not.toHaveProperty("bylinePapers");
+    // Contested, or an earlier run's row: no byline papers.
+    expect((await best({ ...uncontested, rejected: 1 }))[0]).not.toHaveProperty("bylinePapers");
+    expect((await best({ ...uncontested, otherHolders: ["zz0009"] }))[0]).not.toHaveProperty(
+      "bylinePapers",
+    );
+    expect((await best(undefined))[0]).not.toHaveProperty("bylinePapers");
+    // Contested in Crossref alone (ORCID_BYLINE_CROSSREF off): none for bulk either.
+    const beyond = { rejected: 0, otherHolders: [], otherIds: [OTHER] };
+    expect(
+      (await best({ ...uncontested, uncountedContests: beyond }))[0],
+    ).not.toHaveProperty("bylinePapers");
+  });
+
+  it("the byline read is limited to the listed scholars' Strong pairs, and skipped on request", async () => {
+    const { loadOrcidQueue } = await actual();
+    const c = client();
+    const calls = () =>
+      (
+        c as unknown as { orcidCandidateEvidence: { findMany: ReturnType<typeof vi.fn> } }
+      ).orcidCandidateEvidence.findMany.mock.calls
+        .map(([a]) => (a as { where?: { band?: string; cwid?: { in?: string[] } } }).where)
+        .filter((w) => w?.band === "strong");
+    const q = await loadOrcidQueue(c);
+    expect(calls()).toHaveLength(1);
+    const strong = q.summaries
+      .filter((s) => s.candidates.some((x) => x.band === "strong"))
+      .map((s) => s.cwid);
+    expect([...calls()[0]!.cwid!.in!].sort()).toEqual([...strong].sort());
+    await loadOrcidQueue(c, undefined, { bylines: false });
+    expect(calls()).toHaveLength(1);
   });
 
   it("evidence_detail.byline: an earlier run's row is kept as it was; the Crossref fields survive", async () => {
@@ -1759,15 +1809,29 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     );
     fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
     expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
-      "2 of 3 Strong or Email verified scholars match",
+      "2 of 3 Strong scholars match",
     );
+    // A WCM-only view: no Email verified in the heading, no verified-email box.
+    expect(screen.getByTestId("orcid-bulk-heading").textContent).toBe(
+      "Confirm Strong matches that meet the settings above",
+    );
+    expect(screen.queryByTestId("orcid-bulk-rule-email")).toBeNull();
+    // One row of controls: the rule sits in the filter row, which shows neither
+    // Decision nor Confidence here.
+    const bar = screen.getByTestId("orcid-queue-filters");
+    expect(within(bar).getByTestId("orcid-bulk-rule-minShared")).toBeTruthy();
+    expect(within(bar).getByTestId("orcid-bulk-rule-passesBy")).toBeTruthy();
+    expect(bar.textContent).toContain("No competitor");
+    expect(bar.textContent).not.toContain("Found by");
+    expect(screen.queryByTestId("orcid-queue-filter-dec")).toBeNull();
+    expect(screen.queryByTestId("orcid-queue-filter-conf")).toBeNull();
     // Everyone else is counted under the first check they fail; folded while anyone matches.
     const why = () => screen.getByTestId("orcid-bulk-why") as HTMLDetailsElement;
     expect(why().open).toBe(false);
     expect(why().textContent).toContain("Why the other 2 in this view don’t match");
     expect(why().textContent).toContain("1Moderate: reviewed one at a time");
     expect(why().textContent).toContain(
-      "1No Cornell or WCM affiliation or email on the ORCID record",
+      "1No Cornell or WCM affiliation or email on the ORCID record, and fewer than 2 uncontested byline papers",
     );
     expect(screen.queryByTestId("orcid-bulk-row-cc0003")).toBeNull();
     expect(screen.queryByTestId("orcid-bulk-row-dd0004")).toBeNull();
@@ -1779,22 +1843,13 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect((await screen.findByTestId("orcid-queue-bulk-count")).textContent).toBe("2");
     expect(screen.getByTestId("orcid-bulk-row-aa0001").textContent).toContain("ORCID aa0001");
 
-    // Verified email narrows to rows whose record lists the scholar's email.
-    fireEvent.click(screen.getByTestId("orcid-bulk-rule-email"));
-    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe(
-      "1 of 3 Strong or Email verified scholars match",
-    );
-    expect(why().textContent).toContain("1Doesn't meet the boxes checked above");
-    expect(screen.queryByTestId("orcid-bulk-row-bb0002")).toBeNull();
-    fireEvent.click(screen.getByTestId("orcid-bulk-rule-email"));
-
     // Unchecking a threshold stops applying it; checking it restores the default.
-    fireEvent.click(screen.getByTestId("orcid-bulk-rule-minSources-on"));
-    expect((screen.getByTestId("orcid-bulk-rule-minSources") as HTMLSelectElement).disabled).toBe(
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-minShared-on"));
+    expect((screen.getByTestId("orcid-bulk-rule-minShared") as HTMLSelectElement).disabled).toBe(
       true,
     );
-    fireEvent.click(screen.getByTestId("orcid-bulk-rule-minSources-on"));
-    expect((screen.getByTestId("orcid-bulk-rule-minSources") as HTMLSelectElement).value).toBe("2");
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-minShared-on"));
+    expect((screen.getByTestId("orcid-bulk-rule-minShared") as HTMLSelectElement).value).toBe("5");
 
     // Tighten the rule: nothing only on ORCID.
     fireEvent.change(screen.getByTestId("orcid-bulk-rule-maxOnlyOrcid"), {
@@ -1816,7 +1871,7 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
           { cwid: "aa0001", orcid: ORCID },
           { cwid: "bb0002", orcid: ORCID },
         ],
-        rule: { minShared: 5, maxOnlyOrcid: 1, minSources: 2 },
+        rule: { minShared: 5, maxOnlyOrcid: 1 },
       },
     });
     expect((await screen.findByTestId("orcid-queue-status")).textContent).toContain(
@@ -1844,7 +1899,12 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
     const row = await screen.findByTestId("orcid-bulk-row-cu0001");
     expect(row.className).toContain("coral");
-    expect(row.textContent).toContain("7 of 92");
+    expect(row.textContent).toContain("7 of 9Cornell source2");
+    // Cornell Ithaca in view: the heading names Email verified and the box shows.
+    expect(screen.getByTestId("orcid-bulk-heading").textContent).toContain(
+      "Strong and Email verified",
+    );
+    expect(screen.getByTestId("orcid-bulk-rule-email")).toBeTruthy();
     expect(row.textContent).not.toContain("check");
   });
 
@@ -1855,7 +1915,7 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     mountWith([c], undefined, undefined, () => false);
     fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
     expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
-      "0 of 1 Strong or Email verified scholar matches",
+      "0 of 1 Strong scholar matches",
     );
     const why = (await screen.findByTestId("orcid-bulk-why")) as HTMLDetailsElement;
     expect(why.open).toBe(true);
@@ -1863,6 +1923,155 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect(screen.getByTestId("orcid-bulk-why").textContent).toContain(
       "1No Cornell or WCM affiliation or email on the ORCID record",
     );
+  });
+
+  it("Bulk review: the byline route, Passes by, and the boxes that can be unchecked", async () => {
+    const mk = (cwid: string, c: Partial<OrcidQueueSummary["candidates"][number]>, n = 1) => {
+      const card = CARD({ cwid, name: `Scholar ${cwid}` }, [{ ...ROW, cwid, orcid: ORCID }]);
+      const best = { ...summaryOf(card).candidates[0]!, shared: 7, worksTotal: 7, newWorks: 0, ...c };
+      const rest = Array.from({ length: n - 1 }, () => ({ ...best, orcid: OTHER, band: "weak" as const }));
+      return { card, summary: summaryOf(card, { candidates: [best, ...rest] }) };
+    };
+    const all = [
+      mk("re0001", { instMatch: true }),
+      mk("by0002", { shared: 1, worksTotal: 1, instMatch: false, bylinePapers: 3 }),
+      mk("bo0003", { instMatch: true, bylinePapers: 2 }),
+      mk("no0004", { shared: 2, worksTotal: 2, instMatch: true, bylinePapers: 1 }),
+      mk("mu0005", { instMatch: true }, 2),
+      mk("nd0006", { instMatch: true, nameAgrees: false }),
+    ];
+    const { posts } = mountWith(
+      all.map((x) => x.card),
+      all.map((x) => x.summary),
+    );
+    fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
+    expect((await screen.findByTestId("orcid-bulk-count")).textContent).toBe(
+      "3 of 6 Strong scholars match",
+    );
+    const row = (cwid: string) => screen.getByTestId(`orcid-bulk-row-${cwid}`).textContent;
+    expect(row("re0001")).toContain("7 of 7ORCID record0");
+    expect(row("by0002")).toContain("1 of 13 bylineBylines0");
+    expect(row("bo0003")).toContain("7 of 72 bylineBoth0");
+    // The column reads the rule's own test: under "Shared works at least 8" the
+    // pair no longer passes by the ORCID record, so it is not "Both".
+    const minShared = screen.getByTestId("orcid-bulk-rule-minShared");
+    fireEvent.change(minShared, { target: { value: "8" } });
+    expect(row("bo0003")).toContain("7 of 72 bylineBylines0");
+    fireEvent.change(minShared, { target: { value: "5" } });
+    expect(row("bo0003")).toContain("7 of 72 bylineBoth0");
+    const why = () => screen.getByTestId("orcid-bulk-why").textContent;
+    expect(why()).toContain(
+      "1Fewer than 3 shared works and fewer than 2 uncontested byline papers",
+    );
+    expect(why()).toContain("1More than one candidate iD");
+    expect(why()).toContain("1The name on ORCID differs");
+
+    // Passes by narrows to one route.
+    const passesBy = screen.getByTestId("orcid-bulk-rule-passesBy") as HTMLSelectElement;
+    expect(passesBy.value).toBe("either");
+    fireEvent.change(passesBy, { target: { value: "byline" } });
+    expect(screen.queryByTestId("orcid-bulk-row-re0001")).toBeNull();
+    expect(screen.getByTestId("orcid-bulk-row-by0002")).toBeTruthy();
+    expect(screen.getByTestId("orcid-bulk-row-bo0003")).toBeTruthy();
+    fireEvent.change(passesBy, { target: { value: "record" } });
+    expect(screen.queryByTestId("orcid-bulk-row-by0002")).toBeNull();
+    expect(screen.getByTestId("orcid-bulk-row-re0001")).toBeTruthy();
+    fireEvent.change(passesBy, { target: { value: "either" } });
+
+    // One candidate iD and Name agrees can be unchecked; the rows are marked.
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-one"));
+    expect(row("mu0005")).toContain("Best of 2 iDs");
+    fireEvent.click(screen.getByTestId("orcid-bulk-rule-name"));
+    expect(row("nd0006")).toContain("Name differs");
+    expect(row("re0001")).not.toContain("Name differs");
+    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe("5 of 6 Strong scholars match");
+
+    fireEvent.click(screen.getByTestId("orcid-bulk-confirm"));
+    fireEvent.click(screen.getByTestId("orcid-bulk-confirm-yes"));
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
+    // The loosened checks are sent, so the server can validate them.
+    expect(posts()[0]!.body.rule).toEqual({
+      minShared: 5,
+      maxOnlyOrcid: 1,
+      allowMultiple: true,
+      allowNameDiffers: true,
+      passesBy: "either",
+    });
+    expect((posts()[0]!.body.pairs as Array<{ cwid: string }>).map((x) => x.cwid).sort()).toEqual([
+      "bo0003",
+      "by0002",
+      "mu0005",
+      "nd0006",
+      "re0001",
+    ]);
+  });
+
+  it("Bulk review works on unassigned scholars only, whatever Decision said one at a time", async () => {
+    const open = CARD({ cwid: "aa0001", name: "Scholar aa0001" }, [
+      { ...ROW, cwid: "aa0001", shared: 7, worksTotal: 7, newWorks: 0 },
+    ]);
+    const auto = CARD({ cwid: "ee0002", name: "Scholar ee0002" }, [
+      {
+        ...ROW,
+        cwid: "ee0002",
+        band: "email_verified",
+        state: "auto_confirmed",
+        autoConfirmed: true,
+        onFileOrcid: ORCID,
+      },
+    ]);
+    mountWith([open, auto]);
+    // One at a time, Decision = Confirmed by email: only the auto-confirmed scholar.
+    fireEvent.click(screen.getByTestId("orcid-queue-filter-dec"));
+    fireEvent.click(await screen.findByRole("radio", { name: /Confirmed by email/ }));
+    expect(screen.queryByTestId("orcid-queue-item-aa0001")).toBeNull();
+    fireEvent.click(screen.getByTestId("orcid-queue-mode-bulk"));
+    expect(await screen.findByTestId("orcid-bulk-row-aa0001")).toBeTruthy();
+    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe("1 of 1 Strong scholar matches");
+    expect(screen.queryByTestId("orcid-bulk-why")).toBeNull();
+    expect(screen.queryByTestId("orcid-queue-filter-chips")).toBeNull();
+    // Back one at a time, the Decision filter is as it was left.
+    fireEvent.click(screen.getByTestId("orcid-queue-mode-one"));
+    expect(screen.getByTestId("orcid-queue-filter-chips").textContent).toContain(
+      "Confirmed by email",
+    );
+  });
+
+  it("the Confidence counts follow the Decision filter and sum to the N left figure", async () => {
+    const strong = CARD({ cwid: "aa0001", name: "Scholar aa0001" }, [{ ...ROW, cwid: "aa0001" }]);
+    const weak = CARD({ cwid: "bb0002", name: "Scholar bb0002" }, [
+      { ...ROW, cwid: "bb0002", band: "weak" },
+    ]);
+    const auto = CARD({ cwid: "ee0003", name: "Scholar ee0003" }, [
+      {
+        ...ROW,
+        cwid: "ee0003",
+        band: "email_verified",
+        state: "auto_confirmed",
+        autoConfirmed: true,
+        onFileOrcid: ORCID,
+      },
+    ]);
+    mountWith([strong, weak, auto]);
+    expect(screen.getByTestId("orcid-queue-count").textContent).toBe("2 left");
+    const counts = async () => {
+      fireEvent.click(screen.getByTestId("orcid-queue-filter-conf"));
+      const boxes = await screen.findAllByRole("checkbox");
+      const out = boxes.map((b) => b.textContent);
+      fireEvent.click(screen.getByTestId("orcid-queue-filter-conf"));
+      return out;
+    };
+    // Unassigned (the default): the email-confirmed scholar is not counted.
+    expect(await counts()).toEqual([
+      "Email verified0",
+      "Strong1",
+      "Shared papers0",
+      "Moderate0",
+      "Weak1",
+    ]);
+    fireEvent.click(screen.getByTestId("orcid-queue-filter-dec"));
+    fireEvent.click(await screen.findByRole("radio", { name: /Any status/ }));
+    expect((await counts())[0]).toBe("Email verified1");
   });
 
   it("Bulk review takes Cornell Ithaca Strong pairs without the thresholds, at most 100 per batch", async () => {
@@ -1886,7 +2095,7 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     // No publications here: nothing to compare, so no tint and no warning count.
     const row = screen.getByTestId("orcid-bulk-row-ith0000");
     expect(row.className).not.toContain("coral");
-    expect(row.textContent).toContain("9 on ORCIDNot compared");
+    expect(row.textContent).toContain("9 on ORCIDCornell sourceNot compared");
     expect(row.innerHTML).not.toContain("coral");
     expect(screen.getByTestId("orcid-bulk").textContent).toContain(
       "Not compared means Scholars has no publications for this person yet.",

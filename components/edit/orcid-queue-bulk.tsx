@@ -3,16 +3,21 @@
 /**
  * ORCID queue — Bulk review (`/edit/orcid-queue`, the "Bulk review" mode).
  *
- * Lists every scholar in the current view who qualifies under an adjustable
- * rule (`bulkEligible`): the fixed part (one candidate iD, Strong, no
- * competitor, name agrees, nothing on file, no decision on file) plus, for WCM,
- * three thresholds the librarian sets: shared works, works only on ORCID, and
- * discovery sources. Only pairs that also pass the server's floor
+ * Lists every unassigned scholar in the current view who qualifies under an
+ * adjustable rule (`bulkEligible`). The fixed part: Strong, no competitor,
+ * nothing on file, no decision on file, and for WCM one of two routes through the
+ * floor (`bulkRoutes`): the ORCID record (3+ shared works and an institution
+ * match) or the bylines (the iD printed on 2+ of the scholar's accepted papers,
+ * uncontested). The adjustable part (`OrcidBulkRuleControls`, set in the page's
+ * filter row): one candidate iD, name agrees, which route, shared works, works
+ * only on ORCID. Only pairs that also pass the server's floor
  * (`assertBulkConfirmable`, asked once via a `dryRun` post) are listed. Cornell
- * Ithaca rows (Affiliation Manager and web-page pairs) skip the thresholds and are capped at
- * `ORCID_BULK_ITHACA_MAX` per batch: the rest wait, unchecked, for the next one. "Why the rest
- * don't match" counts everyone else in the view by the first check they fail. Each row can be unchecked; a row with any work only on
- * ORCID is tinted so it gets a look first. "Confirm N iDs" asks once more, then
+ * Ithaca rows (Affiliation Manager and web-page pairs, and email-verified ones)
+ * skip the WCM controls and are capped at `ORCID_BULK_ITHACA_MAX` per batch: the
+ * rest wait, unchecked, for the next one. "Why the rest don't match" counts
+ * everyone else in the view by the first check they fail. Each row can be
+ * unchecked; a row with any work only on ORCID is tinted so it gets a look first,
+ * and a row whose name differs is tagged. "Confirm N iDs" asks once more, then
  * posts in chunks of `ORCID_BULK_MAX` to `POST /api/edit/orcid-queue/bulk-confirm`,
  * which re-checks the fixed part per pair and skips anything that no longer
  * qualifies. The page's toast offers Undo for the whole batch.
@@ -23,16 +28,20 @@ import { Button } from "@/components/ui/button";
 import {
   bulkBlocker,
   bulkEligible,
+  bulkRoutes,
   inBulkBand,
   isOrcidBulkBlocker,
   isOrcidCandidateSource,
   ORCID_BULK_BLOCKER_LABEL,
   ORCID_BULK_ITHACA_MAX,
   ORCID_BULK_MAX,
+  ORCID_BULK_ROUTE_LABEL,
+  ORCID_BULK_ROUTES,
   ORCID_BULK_RULE_DEFAULT,
   ORCID_QUEUE_BAND_LABEL,
   ORCID_SOURCE_LABEL,
   onlyOnOrcid,
+  type OrcidBulkRoute,
   type OrcidBulkRule,
   type OrcidQueueSummary,
 } from "@/lib/edit/orcid-queue";
@@ -55,20 +64,31 @@ const PAGE = 100;
 /** Dry-run batches in flight at once (the server checks 4 pairs at a time each). */
 const DRY_RUN_IN_FLIGHT = 3;
 /** The fixed client floor only: the adjustable rule at its loosest. */
-const ANY_RULE: OrcidBulkRule = { minShared: 0, maxOnlyOrcid: 10_000, minSources: 0 };
+const ANY_RULE: OrcidBulkRule = {
+  minShared: 0,
+  maxOnlyOrcid: 10_000,
+  allowMultiple: true,
+  allowNameDiffers: true,
+};
 const keyOf = (s: OrcidQueueSummary) => `${s.cwid}|${s.candidates[0]!.orcid}`;
 const fmt = (n: number) => n.toLocaleString("en-US");
 
 export function OrcidBulkReview({
   list,
+  rule,
+  needEmail,
   outcomes,
   canDecide,
   onConfirmed,
   onError,
   onCount,
 }: {
-  /** The page's list under the current filters. */
+  /** The page's list under the current filters (unassigned scholars). */
   list: OrcidQueueSummary[];
+  /** The rule and the Cornell Ithaca email box, set in the filter row
+   *  (`OrcidBulkRuleControls`). */
+  rule: OrcidBulkRule;
+  needEmail: boolean;
   /** Decisions made on this page (`cwid|orcid` keys): decided scholars drop out. */
   outcomes: Record<string, string>;
   canDecide: boolean;
@@ -77,13 +97,14 @@ export function OrcidBulkReview({
   /** The match count once the server check is in, for the mode toggle. */
   onCount?: (n: number) => void;
 }) {
-  const [rule, setRule] = useState<OrcidBulkRule>(ORCID_BULK_RULE_DEFAULT);
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
-  const [asking, setAsking] = useState(false);
+  // "Confirm N" is asked once more, for the rule as it stood: a changed rule asks again.
+  const ruleKey = JSON.stringify([rule, needEmail]);
+  const [askedFor, setAskedFor] = useState<string | null>(null);
+  const asking = askedFor === ruleKey;
+  const setAsking = (on: boolean) => setAskedFor(on ? ruleKey : null);
   const [progress, setProgress] = useState<string | null>(null);
-  /** Only rows whose ORCID record lists the scholar's email as verified. */
-  const [needEmail, setNeedEmail] = useState(false);
 
   // The server's floor (`assertBulkConfirmable`, the etl:bulk-confirm-strong
   // rule) needs facts the summary doesn't carry, so ask it which pairs pass
@@ -151,7 +172,11 @@ export function OrcidBulkReview({
       if (inBulkBand(s)) inBand += 1;
       const blocker = bulkBlocker(s, ANY_RULE);
       const f = blocker ? undefined : floor?.get(keyOf(s));
-      if (f?.ok && bulkEligible(s, rule) && (!needEmail || f.verifiedEmail)) {
+      // What the librarian's own settings rule out: more than one iD, a name that
+      // differs, the route or a threshold.
+      const mine = bulkBlocker(s, rule);
+      const emailOk = !needEmail || s.campus !== "ithaca" || !!f?.verifiedEmail;
+      if (f?.ok && !mine && emailOk) {
         eligible.push(s);
         continue;
       }
@@ -161,7 +186,9 @@ export function OrcidBulkReview({
           : blocker
             ? ORCID_BULK_BLOCKER_LABEL[blocker]
             : f?.ok
-              ? ORCID_BULK_BLOCKER_LABEL.threshold
+              ? mine && mine !== "band"
+                ? ORCID_BULK_BLOCKER_LABEL[mine]
+                : "Cornell Ithaca, no verified email on the ORCID record"
               : isOrcidBulkBlocker(f?.blocker)
                 ? ORCID_BULK_BLOCKER_LABEL[f.blocker]
                 : "No longer qualifies: reload the page";
@@ -189,12 +216,6 @@ export function OrcidBulkReview({
   const tintedChecked = selected.filter(tinted).length;
   const ithacaSelected = selected.filter((s) => s.campus === "ithaca").length;
   const busy = progress !== null;
-
-  const setNum = (k: keyof OrcidBulkRule, v: string) => {
-    const n = Math.max(0, Math.min(10_000, Math.floor(Number(v) || 0)));
-    setRule((r) => ({ ...r, [k]: n }));
-    setAsking(false);
-  };
 
   const toggle = (cwid: string) =>
     setExcluded((x) => {
@@ -233,40 +254,7 @@ export function OrcidBulkReview({
     if (done.length > 0 || skipped > 0) onConfirmed(done, skipped);
   }
 
-  // A threshold is a checkbox (off = not applied) plus its value.
-  const OPTIONS: Record<keyof OrcidBulkRule, number[]> = {
-    // From 3: the server's floor, so a lower value would change nothing.
-    minShared: [3, 5, 8, 10, 15, 20],
-    maxOnlyOrcid: [0, 1, 2, 3, 5, 10],
-    minSources: [2, 3],
-  };
-  const LOOSE: OrcidBulkRule = ANY_RULE;
-  const on = (k: keyof OrcidBulkRule) => rule[k] !== LOOSE[k];
-  const flip = (k: keyof OrcidBulkRule) =>
-    setNum(k, String(on(k) ? LOOSE[k] : ORCID_BULK_RULE_DEFAULT[k]));
-  const CHIP_ROW =
-    "border-apollo-border-strong bg-apollo-surface flex items-center gap-2 rounded-lg border px-3 py-1.5";
-  const BOX = "accent-apollo-slate size-4";
-  const select = (k: keyof OrcidBulkRule, label: string) => (
-    <select
-      value={on(k) ? rule[k] : ORCID_BULK_RULE_DEFAULT[k]}
-      onChange={(e) => setNum(k, e.target.value)}
-      disabled={!on(k)}
-      aria-label={label}
-      className="border-apollo-border-strong bg-apollo-surface rounded-md border px-1 py-0.5 text-[13px] font-semibold tabular-nums disabled:opacity-50"
-      data-testid={`orcid-bulk-rule-${k}`}
-    >
-      {[...new Set([...OPTIONS[k], rule[k], ORCID_BULK_RULE_DEFAULT[k]])]
-        .filter((n) => n !== LOOSE[k])
-        .sort((a, b) => a - b)
-        .map((n) => (
-          <option key={n} value={n}>
-            {n}
-          </option>
-        ))}
-    </select>
-  );
-
+  const bands = hasIthaca ? "Strong or Email verified" : "Strong";
   return (
     <div className="flex flex-col gap-4" data-testid="orcid-bulk">
       <section
@@ -274,76 +262,31 @@ export function OrcidBulkReview({
         className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-[var(--apollo-radius-card)] border px-5 py-4"
       >
         <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <span className="text-[15px] font-medium">
-            Confirm Strong and Email verified matches where every one of these holds
+          <span className="text-[15px] font-medium" data-testid="orcid-bulk-heading">
+            Confirm {hasIthaca ? "Strong and Email verified" : "Strong"} matches that meet the
+            settings above
           </span>
           <span className="text-muted-foreground text-[13px]" data-testid="orcid-bulk-count">
             <span className="text-foreground font-semibold">{fmt(eligible.length)}</span> of{" "}
-            {fmt(inBand)} Strong or Email verified {inBand === 1 ? "scholar matches" : "scholars match"}
+            {fmt(inBand)} {bands} {inBand === 1 ? "scholar matches" : "scholars match"}
           </span>
         </div>
-        <div className="flex flex-wrap gap-2 text-[13px]">
-          {/* The fixed part: the server enforces these, so they can't be unchecked. */}
-          {["One candidate iD, no competitor", "Name agrees"].map((t) => (
-            <label key={t} className={CHIP_ROW} title="Always required">
-              <input type="checkbox" checked disabled className={BOX} />
-              {t}
-            </label>
-          ))}
-          <label className={CHIP_ROW}>
-            <input
-              type="checkbox"
-              checked={on("minSources")}
-              onChange={() => flip("minSources")}
-              className={BOX}
-              data-testid="orcid-bulk-rule-minSources-on"
-            />
-            Found by {select("minSources", "Found by at least this many sources")} or more sources
-          </label>
-          <label className={CHIP_ROW}>
-            <input
-              type="checkbox"
-              checked={on("minShared")}
-              onChange={() => flip("minShared")}
-              className={BOX}
-              data-testid="orcid-bulk-rule-minShared-on"
-            />
-            Shared works at least {select("minShared", "Shared works at least")}
-          </label>
-          <label className={CHIP_ROW}>
-            <input
-              type="checkbox"
-              checked={on("maxOnlyOrcid")}
-              onChange={() => flip("maxOnlyOrcid")}
-              className={BOX}
-              data-testid="orcid-bulk-rule-maxOnlyOrcid-on"
-            />
-            Only on ORCID at most {select("maxOnlyOrcid", "Works only on ORCID at most")}
-          </label>
-          <label className={CHIP_ROW}>
-            <input
-              type="checkbox"
-              checked={needEmail}
-              onChange={() => {
-                setNeedEmail(!needEmail);
-                setAsking(false);
-              }}
-              className={BOX}
-              data-testid="orcid-bulk-rule-email"
-            />
-            Verified email
-          </label>
-        </div>
         <span className="text-muted-foreground text-[12.5px]">
-          Only on ORCID counts works on the ORCID record that aren&rsquo;t in this person&rsquo;s
-          publications here. Rows with any are tinted: make sure those works are theirs before
-          confirming.
+          Passes by: ORCID record means 3 or more shared works and a Cornell or WCM affiliation or
+          email on the record; Bylines means the iD is printed on 2 or more of the scholar&rsquo;s
+          accepted papers and nothing contests it. Shared works at least narrows the ORCID record
+          route only. Only on ORCID counts works on the ORCID record that aren&rsquo;t in this
+          person&rsquo;s publications here. Rows with any are tinted: make sure those works are
+          theirs before confirming.
           {anyNotCompared
             ? " Not compared means Scholars has no publications for this person yet."
             : null}{" "}
           Anything you uncheck stays in the one-at-a-time queue.
+          {rule.allowMultiple
+            ? " With One candidate iD off, a scholar's best iD is confirmed and their other iDs stay in the queue under Different iD on file."
+            : null}
           {hasIthaca
-            ? " Sources, shared works and only on ORCID apply to WCM scholars only."
+            ? " One candidate iD, Name agrees, Passes by, shared works and only on ORCID apply to WCM scholars only."
             : null}
         </span>
         {floor && why.length > 0 ? (
@@ -384,7 +327,7 @@ export function OrcidBulkReview({
           aria-label="Matches for bulk confirm"
           className="border-apollo-border bg-apollo-surface overflow-x-auto rounded-[var(--apollo-radius-card)] border"
         >
-          <div className="min-w-[860px]">
+          <div className="min-w-[960px]">
             <div
               role="row"
               className={cn(
@@ -408,6 +351,7 @@ export function OrcidBulkReview({
               <span role="columnheader">ORCID iD</span>
               <span role="columnheader">Name on ORCID</span>
               <span role="columnheader">Shared works</span>
+              <span role="columnheader">Passes by</span>
               <span role="columnheader">Only on ORCID</span>
               <span role="columnheader">Found by</span>
             </div>
@@ -417,6 +361,11 @@ export function OrcidBulkReview({
               const capped = overCap.has(s.cwid);
               const on = !excluded.has(s.cwid) && !capped;
               const sources = c.sources.filter(isOrcidCandidateSource);
+              // The same test the rule runs (`bulkBlocker`), so the column and the
+              // Passes by control agree: shared works below the setting is not the
+              // ORCID record route.
+              const routes = bulkRoutes(c);
+              const byRecord = routes.record && c.shared >= rule.minShared;
               return (
                 <div
                   key={s.cwid}
@@ -453,15 +402,23 @@ export function OrcidBulkReview({
                       <span className="font-mono text-[0.92em]">{s.cwid}</span>
                     </span>
                   </span>
-                  <span role="cell" className="font-mono text-[12.5px]">
+                  <span role="cell" className="flex flex-col font-mono text-[12.5px]">
                     {c.orcid}
+                    {s.candidates.length > 1 ? (
+                      <span className={cn(TAG, "font-sans")}>
+                        Best of {fmt(s.candidates.length)} iDs
+                      </span>
+                    ) : null}
                   </span>
-                  <span role="cell" className="min-w-0 truncate">
-                    {floor?.get(keyOf(s))?.orcidName ?? (
-                      <span className="text-muted-foreground">Name not public</span>
-                    )}
+                  <span role="cell" className="flex min-w-0 flex-col">
+                    <span className="truncate">
+                      {floor?.get(keyOf(s))?.orcidName ?? (
+                        <span className="text-muted-foreground">Name not public</span>
+                      )}
+                    </span>
+                    {!c.nameAgrees ? <span className={TAG}>Name differs</span> : null}
                   </span>
-                  <span role="cell" className="tabular-nums">
+                  <span role="cell" className="flex flex-col tabular-nums">
                     {compared(s) ? (
                       <span className="font-semibold">
                         {fmt(c.shared)} of {fmt(c.worksTotal)}
@@ -469,6 +426,20 @@ export function OrcidBulkReview({
                     ) : (
                       `${fmt(c.worksTotal)} on ORCID`
                     )}
+                    {c.bylinePapers ? (
+                      <span className="text-muted-foreground text-[12.5px]">
+                        {fmt(c.bylinePapers)} byline
+                      </span>
+                    ) : null}
+                  </span>
+                  <span role="cell" className="text-[12.5px]">
+                    {s.campus === "ithaca"
+                      ? c.band === "email_verified"
+                        ? "Verified email"
+                        : "Cornell source"
+                      : byRecord && routes.byline
+                        ? "Both"
+                        : ORCID_BULK_ROUTE_LABEL[routes.byline ? "byline" : "record"]}
                   </span>
                   <span
                     role="cell"
@@ -589,4 +560,123 @@ export function OrcidBulkReview({
 }
 
 const GRID =
-  "grid grid-cols-[28px_minmax(180px,1.5fr)_170px_minmax(140px,1fr)_100px_110px_minmax(150px,1.1fr)] items-center gap-x-3 px-4";
+  "grid grid-cols-[28px_minmax(180px,1.5fr)_170px_minmax(140px,1fr)_100px_100px_110px_minmax(150px,1.1fr)] items-center gap-x-3 px-4";
+const TAG =
+  "border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber w-max rounded border px-1.5 text-[11.5px] font-medium";
+
+/**
+ * Bulk review's rule, set in the page's filter row (one row of controls). "No
+ * competitor" is locked: the server enforces it. The rest can be unchecked; the
+ * server validates what the request then sends (`allowMultiple`,
+ * `allowNameDiffers`). The verified-email box only shows, and only applies, where
+ * the view has Cornell Ithaca scholars.
+ */
+export function OrcidBulkRuleControls({
+  rule,
+  onRule,
+  needEmail,
+  onNeedEmail,
+  hasIthaca,
+}: {
+  rule: OrcidBulkRule;
+  onRule: (r: OrcidBulkRule) => void;
+  needEmail: boolean;
+  onNeedEmail: (v: boolean) => void;
+  hasIthaca: boolean;
+}) {
+  // A threshold is a checkbox (off = not applied) plus its value.
+  type Threshold = "minShared" | "maxOnlyOrcid";
+  const OPTIONS: Record<Threshold, number[]> = {
+    // From 3: the server's floor, so a lower value would change nothing.
+    minShared: [3, 5, 8, 10, 15, 20],
+    maxOnlyOrcid: [0, 1, 2, 3, 5, 10],
+  };
+  const on = (k: Threshold) => rule[k] !== ANY_RULE[k];
+  const setNum = (k: Threshold, v: string | number) =>
+    onRule({ ...rule, [k]: Math.max(0, Math.min(10_000, Math.floor(Number(v) || 0))) });
+  const CHIP =
+    "border-apollo-border-strong bg-apollo-surface inline-flex h-[34px] items-center gap-2 rounded-lg border px-3 text-[13.5px] whitespace-nowrap";
+  const BOX = "accent-apollo-slate size-4";
+  const SELECT =
+    "border-apollo-border-strong bg-apollo-surface rounded-md border px-1 py-0.5 text-[13px] font-semibold tabular-nums disabled:opacity-50";
+  const flag = (k: "allowMultiple" | "allowNameDiffers", label: string, testId: string) => (
+    <label className={CHIP}>
+      <input
+        type="checkbox"
+        checked={!rule[k]}
+        onChange={() => onRule({ ...rule, [k]: !rule[k] })}
+        className={BOX}
+        data-testid={testId}
+      />
+      {label}
+    </label>
+  );
+  const threshold = (k: Threshold, before: string, label: string) => (
+    <label className={CHIP}>
+      <input
+        type="checkbox"
+        checked={on(k)}
+        onChange={() => setNum(k, on(k) ? ANY_RULE[k] : ORCID_BULK_RULE_DEFAULT[k])}
+        className={BOX}
+        data-testid={`orcid-bulk-rule-${k}-on`}
+      />
+      {before}
+      <select
+        value={on(k) ? rule[k] : ORCID_BULK_RULE_DEFAULT[k]}
+        onChange={(e) => setNum(k, e.target.value)}
+        disabled={!on(k)}
+        aria-label={label}
+        className={SELECT}
+        data-testid={`orcid-bulk-rule-${k}`}
+      >
+        {[...new Set([...OPTIONS[k], rule[k], ORCID_BULK_RULE_DEFAULT[k]])]
+          .filter((n) => n !== ANY_RULE[k])
+          .sort((a, b) => a - b)
+          .map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+      </select>
+    </label>
+  );
+  return (
+    <>
+      {flag("allowMultiple", "One candidate iD", "orcid-bulk-rule-one")}
+      <label className={CHIP} title="Always required">
+        <input type="checkbox" checked disabled className={BOX} />
+        No competitor
+      </label>
+      {flag("allowNameDiffers", "Name agrees", "orcid-bulk-rule-name")}
+      <label className={CHIP}>
+        Passes by
+        <select
+          value={rule.passesBy ?? "either"}
+          onChange={(e) => onRule({ ...rule, passesBy: e.target.value as OrcidBulkRoute })}
+          className={SELECT}
+          data-testid="orcid-bulk-rule-passesBy"
+        >
+          {ORCID_BULK_ROUTES.map((r) => (
+            <option key={r} value={r}>
+              {ORCID_BULK_ROUTE_LABEL[r]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {threshold("minShared", "Shared works at least", "Shared works at least")}
+      {threshold("maxOnlyOrcid", "Only on ORCID at most", "Works only on ORCID at most")}
+      {hasIthaca ? (
+        <label className={CHIP}>
+          <input
+            type="checkbox"
+            checked={needEmail}
+            onChange={() => onNeedEmail(!needEmail)}
+            className={BOX}
+            data-testid="orcid-bulk-rule-email"
+          />
+          Cornell Ithaca: verified email
+        </label>
+      ) : null}
+    </>
+  );
+}

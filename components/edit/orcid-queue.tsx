@@ -32,12 +32,12 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DecisionStatusBar } from "@/components/edit/news-review-shared";
 import {
-  hasDecision,
+  matchesQueueView,
   OrcidQueueFilterBar,
   type OrcidQueueClientFilter,
 } from "@/components/edit/orcid-queue-filter-bar";
 import { errorMessage, postBatch } from "@/components/edit/orcid-queue-api";
-import { OrcidBulkReview } from "@/components/edit/orcid-queue-bulk";
+import { OrcidBulkReview, OrcidBulkRuleControls } from "@/components/edit/orcid-queue-bulk";
 import { ReadOnlyNote, VIEW_AS_READ_ONLY } from "@/components/edit/queue-help";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Button } from "@/components/ui/button";
@@ -51,7 +51,6 @@ import {
   COMPETITOR_CAP_LEVEL,
   competitorRules,
   isOrcidCandidateSource,
-  matchesQueueSearch,
   ORCID_DISMISS_REASON_LABEL,
   ORCID_QUEUE_BAND_LABEL,
   ORCID_QUEUE_SORT_LABEL,
@@ -59,6 +58,7 @@ import {
   ORCID_SOURCE_LABEL,
   ORCID_SURNAME_RULE_LABEL,
   ORCID_BULK_MAX,
+  ORCID_BULK_RULE_DEFAULT,
   pmCurateHref,
   RECITER_WORK_STATUS_LABEL,
   tierLabel,
@@ -75,6 +75,7 @@ import {
   type OrcidQueueData,
   type OrcidQueueRow,
   type OrcidQueueSort,
+  type OrcidBulkRule,
   type OrcidQueueSummary,
   type OrcidQueueWork,
   type ReciterWorkStatus,
@@ -234,6 +235,15 @@ export function OrcidQueue({
   const [mode, setMode] = useState<"one" | "bulk">("one");
   /** Bulk review's match count, once it has asked the server. */
   const [bulkCount, setBulkCount] = useState<number | null>(null);
+  const [bulkRule, setBulkRule] = useState<OrcidBulkRule>(ORCID_BULK_RULE_DEFAULT);
+  /** Bulk review, Cornell Ithaca rows: only those with a verified email. */
+  const [bulkNeedEmail, setBulkNeedEmail] = useState(false);
+  // Bulk review works on unassigned scholars only, whatever the one-at-a-time
+  // view's Decision and Confidence say (its filter row shows neither).
+  const shownView = useMemo<OrcidQueueClientFilter>(
+    () => (mode === "bulk" ? { ...view, bands: [], decision: "open" } : view),
+    [mode, view],
+  );
   const canDecide = !readOnly;
   const isIthaca = useCallback(
     (cwid: string) => summaries.some((s) => s.cwid === cwid && s.campus === "ithaca"),
@@ -243,25 +253,19 @@ export function OrcidQueue({
   const list = useMemo(
     () =>
       summaries
-        .filter((s) => {
-          if (s.cwid === sticky) return true;
-          if (!matchesQueueSearch(s, view.q)) return false;
-          if (
-            view.bands.length > 0 &&
-            !(s.candidates[0] && view.bands.includes(s.candidates[0].band))
-          )
-            return false;
-          if (view.errorsOnly && !s.conflict) return false;
-          // Scholars decided on this page stay listed (greyed) so the run reads as progress.
-          if (view.decision === "open")
-            return (
-              s.candidates.length > 0 && (!isResolved(s, outcomes) || decidedHere(s, outcomes))
-            );
-          if (view.decision) return hasDecision(s, view.decision);
-          return true;
-        })
+        .filter(
+          (s) =>
+            s.cwid === sticky ||
+            // Scholars decided on this page stay listed (greyed) so the run reads as progress.
+            matchesQueueView(
+              s,
+              shownView,
+              (x) =>
+                x.candidates.length > 0 && (!isResolved(x, outcomes) || decidedHere(x, outcomes)),
+            ),
+        )
         .sort(compareSummaries(sort)),
-    [summaries, view, sort, outcomes, sticky],
+    [summaries, shownView, sort, outcomes, sticky],
   );
   const current = list.find((s) => s.cwid === sel) ?? list[0] ?? null;
 
@@ -517,14 +521,30 @@ export function OrcidQueue({
         facets={facets}
         filter={filter}
         basePath={basePath}
-        view={view}
+        view={shownView}
         onView={(v) => {
-          setView(v);
+          // Bulk review shows neither facet: keep what one-at-a-time had.
+          setView(mode === "bulk" ? { ...v, bands: view.bands, decision: view.decision } : v);
           setSel(null);
           setSticky(null);
         }}
         summaries={summaries}
-      />
+        // The counts' Unassigned is what "N left" counts: not yet decided here.
+        isOpen={(s) => s.candidates.length > 0 && !isResolved(s, outcomes)}
+        bulk={mode === "bulk"}
+      >
+        {mode === "bulk" ? (
+          <OrcidBulkRuleControls
+            rule={bulkRule}
+            onRule={setBulkRule}
+            needEmail={bulkNeedEmail}
+            onNeedEmail={setBulkNeedEmail}
+            // The list Bulk review reads, so the box shows only where its heading
+            // and wording speak of Cornell Ithaca.
+            hasIthaca={list.some((s) => s.campus === "ithaca")}
+          />
+        ) : null}
+      </OrcidQueueFilterBar>
 
       {readOnly ? (
         <ReadOnlyNote testId="orcid-queue-read-only-note">{VIEW_AS_READ_ONLY}</ReadOnlyNote>
@@ -546,6 +566,8 @@ export function OrcidQueue({
       {mode === "bulk" ? (
         <OrcidBulkReview
           list={list}
+          rule={bulkRule}
+          needEmail={bulkNeedEmail}
           outcomes={outcomes}
           canDecide={canDecide}
           onConfirmed={(pairs, skipped) => {

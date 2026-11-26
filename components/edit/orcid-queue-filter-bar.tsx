@@ -11,7 +11,12 @@
  * read the person tables, so a change navigates to the new
  * `?type=…&unit=…&source=…` and the server reloads the scholar list.
  * Search, Confidence (the best iD's band), Decision and Possible errors (a
- * different iD on file) run in the browser over the loaded summaries.
+ * different iD on file) run in the browser over the loaded summaries
+ * (`matchesQueueView`); the Confidence and Decision counts follow the faceting
+ * rule (every other browser filter applied, not the facet's own).
+ *
+ * Bulk review (`bulk`) hides Confidence and Decision (it works on unassigned
+ * Strong matches only) and puts its rule controls (`children`) in the same row.
  */
 import { Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -28,6 +33,7 @@ import {
   ORCID_QUEUE_CAMPUS_LABEL,
   ORCID_QUEUE_CAMPUSES,
   ORCID_SOURCE_LABEL,
+  matchesQueueSearch,
   orcidQueueHref,
   type OrcidCandidateSource,
   type OrcidQueueBand,
@@ -59,6 +65,29 @@ export function hasDecision(s: OrcidQueueSummary, d: Exclude<OrcidQueueDecisionF
   return !!s.decisions?.byScholar;
 }
 
+/** Unassigned, from the summary alone; the page adds the decisions made on it. */
+const isUnassigned = (s: OrcidQueueSummary) => !s.autoConfirmed && s.candidates.length > 0;
+
+/** The scholar passes the browser filters. `skip` leaves one facet out, for that
+ *  facet's own counts. Pure. */
+export function matchesQueueView(
+  s: OrcidQueueSummary,
+  view: OrcidQueueClientFilter,
+  isOpen: (s: OrcidQueueSummary) => boolean = isUnassigned,
+  skip?: "bands" | "decision",
+): boolean {
+  if (!matchesQueueSearch(s, view.q)) return false;
+  if (
+    skip !== "bands" &&
+    view.bands.length > 0 &&
+    !(s.candidates[0] && view.bands.includes(s.candidates[0].band))
+  )
+    return false;
+  if (view.errorsOnly && !s.conflict) return false;
+  if (skip === "decision" || !view.decision) return true;
+  return view.decision === "open" ? isOpen(s) : hasDecision(s, view.decision);
+}
+
 const SERVER_SCOPE = "Narrows the scholar list.";
 const DECISION_LABEL: Record<OrcidQueueDecisionFacet, string> = {
   open: "Unassigned",
@@ -76,6 +105,9 @@ export function OrcidQueueFilterBar({
   view,
   onView,
   summaries,
+  isOpen = isUnassigned,
+  bulk = false,
+  children,
 }: {
   /** null = the facet load failed: only the source filter is offered. */
   facets: DataQualityFacets | null;
@@ -85,6 +117,12 @@ export function OrcidQueueFilterBar({
   onView: (v: OrcidQueueClientFilter) => void;
   /** For the Confidence, Decision and Possible errors counts. */
   summaries: OrcidQueueSummary[];
+  /** Unassigned, counting the decisions made on this page. */
+  isOpen?: (s: OrcidQueueSummary) => boolean;
+  /** Bulk review: no Confidence or Decision filter. */
+  bulk?: boolean;
+  /** Bulk review's rule controls, in the same row. */
+  children?: React.ReactNode;
 }) {
   const router = useRouter();
   const [sel, setSel] = React.useState<OrcidQueueFilter>(filter);
@@ -96,6 +134,8 @@ export function OrcidQueueFilterBar({
   };
 
   const count = (pred: (s: OrcidQueueSummary) => boolean) => summaries.filter(pred).length;
+  const forBands = summaries.filter((s) => matchesQueueView(s, view, isOpen, "bands"));
+  const forDecision = summaries.filter((s) => matchesQueueView(s, view, isOpen, "decision"));
   const deptOptions = facets
     ? [
         ...facets.departments,
@@ -110,7 +150,7 @@ export function OrcidQueueFilterBar({
     options: ORCID_QUEUE_BANDS.map((b) => ({
       value: b,
       label: ORCID_QUEUE_BAND_LABEL[b],
-      count: count((s) => s.candidates[0]?.band === b),
+      count: forBands.filter((s) => s.candidates[0]?.band === b).length,
     })),
     scope: "The scholar's best iD.",
   };
@@ -119,16 +159,14 @@ export function OrcidQueueFilterBar({
     label: "Decision",
     single: true,
     options: [
-      { value: "all", label: "Any status", count: summaries.length },
-      {
-        value: "open",
-        label: DECISION_LABEL.open,
-        count: count((s) => !s.autoConfirmed && s.candidates.length > 0),
-      },
+      { value: "all", label: "Any status", count: forDecision.length },
+      { value: "open", label: DECISION_LABEL.open, count: forDecision.filter(isOpen).length },
       ...DECISION_FACETS.filter((d) => d !== "open").map((d) => ({
         value: d,
         label: DECISION_LABEL[d],
-        count: count((s) => hasDecision(s, d as Exclude<OrcidQueueDecisionFacet, "open">)),
+        count: forDecision.filter((s) =>
+          hasDecision(s, d as Exclude<OrcidQueueDecisionFacet, "open">),
+        ).length,
       })),
     ],
     scope: "Unassigned: no decision yet. Staff: a librarian or proxy.",
@@ -274,29 +312,35 @@ export function OrcidQueueFilterBar({
             data-testid="orcid-queue-search"
           />
         </label>
-        <FacetPopover
-          def={confidence}
-          selected={view.bands}
-          onToggle={(v) => isOrcidQueueBand(v) && onView({ ...view, bands: flip(view.bands, v) })}
-          onClear={() => onView({ ...view, bands: [] })}
-          valueLabel={(v) => labelOf(confidence, v)}
-          testIdPrefix="orcid-queue-filter"
-        />
-        <FacetPopover
-          def={decision}
-          selected={view.decision ? [view.decision] : []}
-          onToggle={(v) =>
-            onView({
-              ...view,
-              decision: (DECISION_FACETS as string[]).includes(v)
-                ? (v as OrcidQueueDecisionFacet)
-                : null,
-            })
-          }
-          onClear={() => onView({ ...view, decision: null })}
-          valueLabel={(v) => labelOf(decision, v)}
-          testIdPrefix="orcid-queue-filter"
-        />
+        {bulk ? null : (
+          <>
+            <FacetPopover
+              def={confidence}
+              selected={view.bands}
+              onToggle={(v) =>
+                isOrcidQueueBand(v) && onView({ ...view, bands: flip(view.bands, v) })
+              }
+              onClear={() => onView({ ...view, bands: [] })}
+              valueLabel={(v) => labelOf(confidence, v)}
+              testIdPrefix="orcid-queue-filter"
+            />
+            <FacetPopover
+              def={decision}
+              selected={view.decision ? [view.decision] : []}
+              onToggle={(v) =>
+                onView({
+                  ...view,
+                  decision: (DECISION_FACETS as string[]).includes(v)
+                    ? (v as OrcidQueueDecisionFacet)
+                    : null,
+                })
+              }
+              onClear={() => onView({ ...view, decision: null })}
+              valueLabel={(v) => labelOf(decision, v)}
+              testIdPrefix="orcid-queue-filter"
+            />
+          </>
+        )}
         {serverDefs.map((d) => (
           <FacetPopover
             key={d.key}
@@ -325,6 +369,7 @@ export function OrcidQueueFilterBar({
         >
           Different iD on file · {errors.toLocaleString("en-US")}
         </button>
+        {children}
         {facets === null ? (
           <span className="text-muted-foreground text-xs">
             Person type, department and institution filters are unavailable right now.

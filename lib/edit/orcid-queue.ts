@@ -243,6 +243,19 @@ export function bylineBandPapers(
   return !b || b.rejected > 0 || b.otherHolders.length > 0 || b.otherIds.length > 0 ? 0 : b.total;
 }
 
+/** The byline papers Bulk review's byline route counts: `bylineBandPapers`, and
+ *  none when Crossref alone contests the iD (`uncountedContests`, written while
+ *  `ORCID_BYLINE_CROSSREF` is off). The band does not read that; an unreviewed
+ *  bulk write does. Pure. */
+export function bulkBylinePapers(
+  b: Omit<OrcidBylineDetail, "papers"> | null | undefined,
+): number {
+  const u = b?.uncountedContests;
+  return u && (u.rejected > 0 || u.otherHolders.length > 0 || u.otherIds.length > 0)
+    ? 0
+    : bylineBandPapers(b);
+}
+
 /** `orcid_candidate_evidence.evidence_detail`: the facts behind each chip,
  *  written by etl/orcid-evidence so the page never re-fetches ORCID. */
 export type OrcidEvidenceDetail = {
@@ -499,6 +512,13 @@ export type OrcidQueueSummaryCandidate = {
   competitor: boolean;
   /** `orcid_candidate.source` values for the pair (the How discovered counts). */
   sources: OrcidCandidateSource[];
+  /** The record carries a Cornell or WCM affiliation or email (`inst_match`).
+   *  Absent on summaries built before it was carried: read as true (the server
+   *  floor decides). */
+  instMatch?: boolean;
+  /** Accepted papers that print the iD on the scholar's byline with nothing
+   *  contesting it (`bulkBylinePapers`); carried for Strong pairs. Absent = 0. */
+  bylinePapers?: number;
 };
 
 /** v3: one row of the scholar list. `candidates` best first; email
@@ -702,22 +722,53 @@ export function tierLabel(c: { band: OrcidQueueBand; competitor: boolean; nameAg
   return k === "thin" ? "Thin evidence" : k === "conflicting" ? "Conflicting" : ORCID_QUEUE_BAND_LABEL[c.band];
 }
 
-/** The adjustable part of the bulk-confirm rule. The fixed part: one
- *  candidate iD, Strong, no competitor, name agrees, nothing on file, not
- *  already decided. */
+/** The two routes through the WCM floor: the ORCID record (shared works and an
+ *  institution match) or the bylines (the iD printed on the scholar's papers). */
+export const ORCID_BULK_ROUTES = ["either", "record", "byline"] as const;
+export type OrcidBulkRoute = (typeof ORCID_BULK_ROUTES)[number];
+export const ORCID_BULK_ROUTE_LABEL: Record<OrcidBulkRoute, string> = {
+  either: "Either",
+  record: "ORCID record",
+  byline: "Bylines",
+};
+
+/** The record route's shared works, and the byline route's accepted papers
+ *  (etl/orcid-evidence's MIN_BYLINE_STRONG). */
+export const ORCID_BULK_MIN_SHARED = 3;
+export const ORCID_BULK_MIN_BYLINE = 2;
+
+/** Which routes a WCM pair passes the floor by. Shared by the browser rule and
+ *  the server floor. Pure. */
+export function bulkRoutes(c: { shared: number; instMatch?: boolean; bylinePapers?: number }): {
+  record: boolean;
+  byline: boolean;
+} {
+  return {
+    record: c.shared >= ORCID_BULK_MIN_SHARED && c.instMatch !== false,
+    byline: (c.bylinePapers ?? 0) >= ORCID_BULK_MIN_BYLINE,
+  };
+}
+
+/** The adjustable part of the bulk-confirm rule. The fixed part: Strong, no
+ *  competitor, nothing on file, not already decided, and one of the two routes
+ *  (`bulkRoutes`). */
 export type OrcidBulkRule = {
-  /** At least this many ORCID works also in ReCiter. */
+  /** ORCID record route: at least this many ORCID works also in ReCiter. */
   minShared: number;
   /** At most this many works only on ORCID (not in ReCiter). */
   maxOnlyOrcid: number;
-  /** Found by at least this many discovery sources. */
-  minSources: number;
+  /** WCM: also take a scholar with more than one candidate iD, for their best
+   *  one. Absent = one candidate iD only. */
+  allowMultiple?: boolean;
+  /** WCM: also take a pair whose name does not agree. Absent = name agrees. */
+  allowNameDiffers?: boolean;
+  /** WCM: the route a pair must pass by. Absent = either. */
+  passesBy?: OrcidBulkRoute;
 };
 
 export const ORCID_BULK_RULE_DEFAULT: OrcidBulkRule = {
   minShared: 5,
   maxOnlyOrcid: 1,
-  minSources: 2,
 };
 
 /** Cornell Ithaca sources a Strong pair can be bulk-confirmed from: Affiliation
@@ -728,7 +779,9 @@ export function isIthacaBulkSource(source: string): boolean {
 }
 
 /** Why a scholar can't be bulk-confirmed. The browser rule (`bulkBlocker`) gives
- *  the first group, the server floor (`bulkConfirmableMany`) the second too. */
+ *  all but the last three, the server floor (`bulkConfirmableMany`) those too.
+ *  `shared` and `institution` name the record-route check that failed for a pair
+ *  that also fails the byline route. */
 export const ORCID_BULK_BLOCKER_LABEL = {
   multiple: "More than one candidate iD",
   on_file: "An iD is already on file",
@@ -736,9 +789,10 @@ export const ORCID_BULK_BLOCKER_LABEL = {
   competitor: "Another scholar or iD competes for the same papers",
   name: "The name on ORCID differs",
   ithaca_source: "Cornell Ithaca, not from Affiliation Manager or a faculty web page",
-  threshold: "Doesn't meet the boxes checked above",
-  shared: "Fewer than 3 shared works",
-  institution: "No Cornell or WCM affiliation or email on the ORCID record",
+  threshold: "Doesn't meet the Passes by, shared works or only on ORCID settings",
+  shared: "Fewer than 3 shared works and fewer than 2 uncontested byline papers",
+  institution:
+    "No Cornell or WCM affiliation or email on the ORCID record, and fewer than 2 uncontested byline papers",
   reciter_unread: "Not yet checked against ReCiter",
   reciter_rejected: "ReCiter has a rejected paper from this ORCID record",
   other_scholar: "The iD is on file or suggested for another scholar",
@@ -764,23 +818,27 @@ export function bulkBlocker(s: OrcidQueueSummary, rule: OrcidBulkRule): OrcidBul
   if (!c) return "decided";
   if (!inBulkBand(s)) return "band";
   if (s.conflict || s.autoConfirmed) return "on_file";
-  if (s.candidates.length !== 1) return "multiple";
+  const wcm = s.campus !== "ithaca";
+  if (s.candidates.length !== 1 && !(wcm && rule.allowMultiple)) return "multiple";
   if (s.decisions) return "decided";
   if (c.competitor) return "competitor";
-  if (!c.nameAgrees) return "name";
+  if (!c.nameAgrees && !(wcm && rule.allowNameDiffers)) return "name";
   // Cornell Ithaca: no SPS publications, so the work/source thresholds can't
   // apply. An email-verified pair qualifies (Ithaca is never auto-confirmed), and
   // a Strong one from an `isIthacaBulkSource`. The server floor does the rest; at
   // most ORCID_BULK_ITHACA_MAX per batch.
-  if (s.campus === "ithaca")
+  if (!wcm)
     return c.band === "email_verified" || c.sources.some(isIthacaBulkSource)
       ? null
       : "ithaca_source";
-  return c.shared >= rule.minShared &&
-    onlyOnOrcid(c) <= rule.maxOnlyOrcid &&
-    c.sources.length >= rule.minSources
-    ? null
-    : "threshold";
+  const routes = bulkRoutes(c);
+  if (!routes.record && !routes.byline)
+    return c.shared < ORCID_BULK_MIN_SHARED ? "shared" : "institution";
+  // `minShared` narrows the record route only: byline papers stand on their own.
+  const by = rule.passesBy ?? "either";
+  const record = routes.record && by !== "byline" && c.shared >= rule.minShared;
+  const byline = routes.byline && by !== "record";
+  return (record || byline) && onlyOnOrcid(c) <= rule.maxOnlyOrcid ? null : "threshold";
 }
 
 /** The scholar qualifies for bulk confirm under `rule`. Pure. */

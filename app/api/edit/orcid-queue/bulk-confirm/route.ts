@@ -3,9 +3,12 @@
  * (`/edit/orcid-queue`, Bulk review).
  *
  * Body `{ pairs: [{ cwid, orcid }], rule: { minShared, maxOnlyOrcid,
- * minSources } }`, at most `ORCID_BULK_MAX` pairs. The librarian picks the pairs
- * in the browser under an adjustable rule (`bulkEligible`); the rule is
- * recorded on each confirm's audit row. The server does not trust the
+ * allowMultiple?, allowNameDiffers?, passesBy? } }`, at most `ORCID_BULK_MAX`
+ * pairs. The librarian picks the pairs in the browser under an adjustable rule
+ * (`bulkEligible`); the rule is recorded on each confirm's audit row. Two of its
+ * flags loosen the floor for WCM pairs, and only when sent as `true`:
+ * `allowMultiple` (the scholar's best iD of several) and `allowNameDiffers`.
+ * Without them the floor is as strict as it gets. The server does not trust the
  * selection: each pair must also pass `assertBulkConfirmable` (the same
  * verified rule as `etl:bulk-confirm-strong`) and then goes through `confirmPair`, the same write as a single
  * Confirm, in its own transaction. A refused pair is skipped with its code; it
@@ -26,6 +29,7 @@ import { normalizeOrcid } from "@/lib/edit/orcid";
 import {
   isOrcidLibrarianQueueEnabled,
   ORCID_BULK_MAX,
+  ORCID_BULK_ROUTES,
   type OrcidBulkBlocker,
 } from "@/lib/edit/orcid-queue";
 import {
@@ -41,7 +45,8 @@ import { reflectOverviewEdit } from "@/lib/edit/revalidation";
 export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/orcid-queue/bulk-confirm";
-const RULE_KEYS = ["minShared", "maxOnlyOrcid", "minSources"] as const;
+const RULE_KEYS = ["minShared", "maxOnlyOrcid"] as const;
+const RULE_FLAGS = ["allowMultiple", "allowNameDiffers"] as const;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidLibrarianQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -79,13 +84,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     pairs.push({ cwid, orcid });
   }
   const ruleRaw = (body.rule ?? {}) as Record<string, unknown>;
-  const rule: Record<string, number> = {};
+  const rule: Record<string, number | boolean | string> = {};
   for (const k of RULE_KEYS) {
     const v = ruleRaw[k];
     if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 10_000)
       return editError(400, "invalid_body", "rule");
     rule[k] = v;
   }
+  // Optional: absent = the strict floor.
+  for (const k of RULE_FLAGS) {
+    const v = ruleRaw[k];
+    if (v === undefined) continue;
+    if (typeof v !== "boolean") return editError(400, "invalid_body", "rule");
+    rule[k] = v;
+  }
+  if (ruleRaw.passesBy !== undefined) {
+    if (!(ORCID_BULK_ROUTES as readonly unknown[]).includes(ruleRaw.passesBy))
+      return editError(400, "invalid_body", "rule");
+    rule.passesBy = ruleRaw.passesBy as string;
+  }
+  const floorRule = {
+    allowMultiple: rule.allowMultiple === true,
+    allowNameDiffers: rule.allowNameDiffers === true,
+  };
 
   const dryRun = body.dryRun === true;
   const ts = new Date();
@@ -110,7 +131,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   };
   if (dryRun) {
     // Read-only: the whole batch in a handful of queries (Bulk review checks ~3,000 pairs).
-    const verdicts = await bulkConfirmableMany(db.write, pairs);
+    const verdicts = await bulkConfirmableMany(db.write, pairs, floorRule);
     for (const pair of pairs) {
       const refused = verdicts.get(`${pair.cwid}|${pair.orcid}`);
       results.push(refused ? refusedOrFailed(pair, refused) : { ...pair, ok: true });
@@ -119,7 +140,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   for (const pair of dryRun ? [] : pairs) {
     try {
       await db.write.$transaction(async (tx) => {
-        await assertBulkConfirmable(tx, pair);
+        await assertBulkConfirmable(tx, pair, floorRule);
         await confirmPair(tx, pair, meta);
       });
       results.push({ ...pair, ok: true });
