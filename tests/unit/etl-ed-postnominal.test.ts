@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolvePostnominal } from "@/etl/ed/index";
+import { defaultPostnominal, degreeOptions } from "@/lib/degree-picker";
 import { collectSorDegrees, DEFAULT_FACULTY_SOR_PERSON_FILTER } from "@/lib/sources/ldap";
 
 describe("resolvePostnominal (#2206)", () => {
@@ -26,6 +27,36 @@ describe("resolvePostnominal (#2206)", () => {
   it("is null when neither source has a non-blank degree", () => {
     expect(resolvePostnominal(null, undefined)).toBeNull();
     expect(resolvePostnominal("", "  ")).toBeNull();
+  });
+});
+
+describe("ASMS fallback for scholars ED sends no degree for", () => {
+  it("is used only when both directory sources are blank", () => {
+    expect(resolvePostnominal(null, null, "MD, PhD")).toBe("MD, PhD");
+    expect(resolvePostnominal("  ", undefined, "PhD")).toBe("PhD");
+    expect(resolvePostnominal(null, "MD", "PhD, MS")).toBe("MD");
+    expect(resolvePostnominal("DO", null, "PhD")).toBe("DO");
+    expect(resolvePostnominal(null, null, null)).toBeNull();
+  });
+
+  it("lists master's too, in picker order, without bachelor's or placeholders", () => {
+    const opts = degreeOptions([
+      { degree: "B.S.", year: 2005 },
+      { degree: "M.S.", year: 2008 },
+      { degree: "Ph.D.", year: 2013 },
+      { degree: "Other", year: null },
+    ]);
+    expect(defaultPostnominal(opts)).toBe("PhD, MS");
+    expect(defaultPostnominal(degreeOptions([{ degree: "M.P.H.", year: 2019 }]))).toBe("MPH");
+    expect(defaultPostnominal([])).toBeNull();
+  });
+
+  it("drops trailing degrees until it fits the 64-char column", () => {
+    const many = ["MD", "PhD", "MPH", "MS", "MBA", "MA", "MSc", "MPhil", "MEng", "MRes", "MLIS", "MSW", "MMS", "MTech"];
+    const out = defaultPostnominal(many)!;
+    expect(out.length).toBeLessThanOrEqual(64);
+    expect(out.startsWith("MD, PhD, MPH")).toBe(true);
+    expect(many.join(", ").startsWith(out)).toBe(true);
   });
 });
 

@@ -37,7 +37,7 @@ import { DEPARTMENT_NAMES } from "@/lib/department-names";
 import { deriveProfessorialRank } from "@/lib/faculty-rank";
 import { isTitleResolutionEnabled } from "@/lib/edit/title-picker";
 import { isDegreePickerEnabled } from "@/lib/degree-picker";
-import { loadResolvedDegreePicks } from "@/lib/edit/degree-picks.server";
+import { loadAsmsDefaultPostnominals, loadResolvedDegreePicks } from "@/lib/edit/degree-picks.server";
 import { formerFacultyRole } from "@/lib/mentee-suggestions/kind";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
@@ -108,14 +108,18 @@ export function appointmentOrganization(a: {
  * #2206 — the `Scholar.postnominal` value written for one ED entry. The
  * people-branch `weillCornellEduDegree` wins when present; otherwise fall back
  * to the faculty SOR parent record's degree (fetchFacultySorDegrees), the same
- * SOR-parent source doctoral students already get theirs from. Blank → null so
+ * SOR-parent source doctoral students already get theirs from. Last, the
+ * scholar's own ASMS degrees (`loadAsmsDefaultPostnominals`): ED sends no
+ * degree for postdocs, fellows or non-faculty academics, so without this they
+ * all rendered bare until someone ticked the degree picker. Blank → null so
  * the profile renders a bare name rather than "Name, ".
  */
 export function resolvePostnominal(
   entryDegree: string | null | undefined,
   sorDegree: string | null | undefined,
+  asmsDegree?: string | null,
 ): string | null {
-  return entryDegree?.trim() || sorDegree?.trim() || null;
+  return entryDegree?.trim() || sorDegree?.trim() || asmsDegree?.trim() || null;
 }
 
 /**
@@ -924,13 +928,29 @@ async function main() {
     allEntries.sort((a, b) => a.cwid.localeCompare(b.cwid));
 
     // #2206 — postnominal coverage, so the run log shows which source fed it.
+    // ASMS fallback for entries ED sends no degree for. Best-effort: a failure
+    // leaves the map empty, i.e. the pre-fallback behaviour. Education rows come
+    // from the ASMS step, so a brand-new scholar picks this up the night after.
+    let asmsDegrees = new Map<string, string>();
+    try {
+      asmsDegrees = await loadAsmsDefaultPostnominals(db.write);
+    } catch (err) {
+      console.warn(
+        `ASMS degree fallback skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const edPostnominal = (f: { cwid: string; degree?: string | null }) =>
+      resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid), asmsDegrees.get(f.cwid));
+
     const withEntryDegree = allEntries.filter((f) => f.degree?.trim()).length;
-    const withPostnominal = allEntries.filter((f) =>
+    const withSorOrEntry = allEntries.filter((f) =>
       resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
     ).length;
+    const withPostnominal = allEntries.filter((f) => edPostnominal(f)).length;
     console.log(
       `[ED] postnominal: ${withPostnominal}/${allEntries.length} entries ` +
-        `(${withEntryDegree} from the entry, ${withPostnominal - withEntryDegree} from faculty SOR fallback)`,
+        `(${withEntryDegree} from the entry, ${withSorOrEntry - withEntryDegree} from faculty SOR fallback, ` +
+        `${withPostnominal - withSorOrEntry} from ASMS fallback)`,
     );
 
     // Degree picker — a scholar's pick from their ASMS degrees replaces the ED
@@ -1303,8 +1323,8 @@ async function main() {
             fullName: f.fullName,
             postnominal:
               degreePicks.resolved.get(f.cwid) ??
-              resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
-            directoryPostnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+              edPostnominal(f),
+            directoryPostnominal: edPostnominal(f),
             // `primaryTitle` holds the RESOLVED display title, but the chief /
             // center-head tiers do not exist until the leader assignments are
             // written further down this run. So write the ED value here as a SEED
@@ -1374,8 +1394,8 @@ async function main() {
             fullName: f.fullName,
             postnominal:
               degreePicks.resolved.get(f.cwid) ??
-              resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
-            directoryPostnominal: resolvePostnominal(f.degree, facultySorDegrees.get(f.cwid)),
+              edPostnominal(f),
+            directoryPostnominal: edPostnominal(f),
             // `primaryTitle` holds the RESOLVED display title, but the chief /
             // center-head tiers do not exist until the leader assignments are
             // written further down this run. So write the ED value here as a SEED

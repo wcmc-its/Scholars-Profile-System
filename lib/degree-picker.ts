@@ -112,6 +112,18 @@ export function degreeOptions(rows: ReadonlyArray<EducationDegreeRow>): string[]
 }
 
 /**
+ * The ASMS-derived default for a scholar whose directory entry carries no
+ * degree (postdocs, fellows, non-faculty academics: ED never sends one). Every
+ * selectable degree in display order, master's included, with trailing tokens
+ * dropped until it fits `Scholar.postnominal`. Null when nothing is selectable.
+ */
+export function defaultPostnominal(options: ReadonlyArray<string>): string | null {
+  const tokens = [...options];
+  while (tokens.length > 0 && tokens.join(", ").length > POSTNOMINAL_MAX) tokens.pop();
+  return tokens.length > 0 ? tokens.join(", ") : null;
+}
+
+/**
  * Validate a pick against the options. Returns the tokens in display order,
  * or null when the pick is empty, malformed, or names anything not on offer.
  */
