@@ -2078,6 +2078,16 @@ export class AppStack extends Stack {
         //   SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN -- the ED group.
         // Both take effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         EDIT_PROGRAM_ROSTER: envConfig.envName === "staging" ? "on" : "off",
+        // METHOD_SERVICES -- the Method services section on
+        // /edit/department/[code] and /edit/core/[coreId], with
+        // POST /api/edit/method-service and GET /api/edit/method-families
+        // (`method_service`, lib/method-services/flags.ts). Read via
+        // isMethodServicesEnabled() (=== "on", and METHODS_LENS_PAGES +
+        // METHODS_LENS_ENABLED on); when off the section is absent and both
+        // routes 404. Editor only: no public page reads the table yet.
+        // Staging on; prod off until the public method-page half ships.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        METHOD_SERVICES: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff

@@ -574,3 +574,81 @@ describe("UnitEditPage — retired read-through (edge 11)", () => {
     expect(screen.queryByTestId("panel-center-roster")).toBeNull();
   });
 });
+
+// Method services (`METHOD_SERVICES`): the page passes a list only when the
+// flag is on; the section itself has its own test.
+vi.mock("@/components/edit/method-services-section", () => ({
+  MethodServicesSection: (props: {
+    entityType: string;
+    entityId: string;
+    unitName: string;
+    services: unknown[];
+    headingId: string;
+  }) => (
+    <div
+      data-testid="panel-method-services"
+      data-entity={`${props.entityType}:${props.entityId}`}
+      data-unit-name={props.unitName}
+      data-count={props.services.length}
+    >
+      <h2 id={props.headingId}>Method services</h2>
+    </div>
+  ),
+}));
+
+describe("UnitEditPage — Method services", () => {
+  const SERVICE = {
+    id: 1,
+    entityType: "department" as const,
+    entityId: "N1280",
+    name: "Example service",
+    url: "https://example.org",
+    families: [{ supercategory: "s", familyLabel: "Example family" }],
+    supportedPmids: [],
+    excludedPmids: [],
+    countStaffPapers: false,
+  };
+
+  it("no section when the page passes no list (flag off)", () => {
+    render(<UnitEditPage ctx={ctx({ actorRole: "superuser", access: [] })} />);
+    expect(sectionIds()).not.toContain("method-services");
+    expect(screen.queryByTestId("panel-method-services")).toBeNull();
+  });
+
+  it("a department gets the section after Basics, with its count in the nav", () => {
+    render(<UnitEditPage ctx={ctx({ actorRole: "owner", access: [] })} methodServices={[SERVICE]} />);
+    expect(sectionIds()).toEqual(["basics", "method-services", "leadership", "access"]);
+    expect(navItems()["method-services"]).toMatchObject({ label: "Method services", stat: "1" });
+    const panel = screen.getByTestId("panel-method-services");
+    expect(panel.getAttribute("data-entity")).toBe("department:N1280");
+    // The same name the page header shows.
+    expect(panel.getAttribute("data-unit-name")).toBe(screen.getByTestId("unit-edit-title").textContent);
+    expect(screen.getByTestId("unit-section-method-services").getAttribute("aria-labelledby")).toBe(
+      "method-services-heading",
+    );
+  });
+
+  it("an empty list still renders the section (the flag is on, nothing added yet)", () => {
+    render(<UnitEditPage ctx={ctx({})} methodServices={[]} />);
+    expect(sectionIds()).toEqual(["basics", "method-services", "leadership"]);
+    expect(navItems()["method-services"].stat).toBe("0");
+  });
+
+  it("never on a division or a center, even if a list is passed", () => {
+    for (const unitType of ["division", "center"] as const) {
+      const view = render(<UnitEditPage ctx={ctx({ unitType })} methodServices={[SERVICE]} />);
+      expect(sectionIds()).not.toContain("method-services");
+      view.unmount();
+    }
+  });
+
+  it("not on a retired department: only Retire stays", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ actorRole: "superuser", suppression: { id: "s1", suppressedAt: new Date() } as never })}
+        methodServices={[SERVICE]}
+      />,
+    );
+    expect(sectionIds()).toEqual(["retire"]);
+  });
+});

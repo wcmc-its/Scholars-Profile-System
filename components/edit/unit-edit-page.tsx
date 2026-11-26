@@ -35,6 +35,7 @@ import { ArrowRight } from "lucide-react";
 import type { UnitLeadershipRoleView } from "@/lib/unit-leadership";
 import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
 import { UnitLeadershipCard } from "@/components/edit/unit-leadership-card";
+import { MethodServicesSection } from "@/components/edit/method-services-section";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -54,6 +55,7 @@ import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
 import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
+import type { MethodServiceView } from "@/lib/method-services/validation";
 
 type AttrKey =
   | "description"
@@ -178,6 +180,9 @@ export type UnitEditPageProps = {
   viceChairs?: ReadonlyArray<UnitLeadershipRoleView> | null;
   /** Header link to the internal program roster; the caller has checked the gate. */
   programRosterHref?: string;
+  /** A department's method services (`METHOD_SERVICES`). `null` / omitted
+   *  renders no section: the flag is off, or the unit is not a department. */
+  methodServices?: ReadonlyArray<MethodServiceView> | null;
 };
 
 export function UnitEditPage({
@@ -187,6 +192,7 @@ export function UnitEditPage({
   readOnly = false,
   viceChairs = null,
   programRosterHref,
+  methodServices = null,
 }: UnitEditPageProps) {
   const visible = ATTRIBUTES.filter((a) => a.visible(ctx));
   const active: AttrDef =
@@ -234,7 +240,7 @@ export function UnitEditPage({
         previewHref={previewHref}
         reportsHref={reportsHref}
         programRosterHref={programRosterHref}
-        sections={unitSections(ctx, visible, basePath, viceChairs)}
+        sections={unitSections(ctx, visible, basePath, viceChairs, methodServices)}
         initialSection={attr ? LEGACY_ATTR_SECTION[attr as AttrKey] : undefined}
         notice={ctx.unit.suppression !== null ? <RetiredNotice /> : undefined}
       />
@@ -341,6 +347,7 @@ function unitSections(
   visible: ReadonlyArray<AttrDef>,
   basePath: string,
   viceChairs: ReadonlyArray<UnitLeadershipRoleView> | null,
+  methodServices: ReadonlyArray<MethodServiceView> | null,
 ): UnitEditSection[] {
   const has = (key: AttrKey) => visible.some((a) => a.key === key);
   const unitType = ctx.unit.unitType;
@@ -393,6 +400,25 @@ function unitSections(
       />
     ),
   });
+
+  // A department's services for a research method. Departments only (a core
+  // has its own page); the caller passes null unless the flag is on.
+  if (unitType === "department" && methodServices) {
+    sections.push({
+      id: "method-services",
+      label: "Method services",
+      stat: String(methodServices.length),
+      content: (
+        <MethodServicesSection
+          entityType="department"
+          entityId={ctx.unit.code}
+          unitName={ctx.unit.name}
+          services={methodServices}
+          headingId="method-services-heading"
+        />
+      ),
+    });
+  }
 
   if (unitType === "center") {
     const leadership = ctx.centerLeadership ?? [];

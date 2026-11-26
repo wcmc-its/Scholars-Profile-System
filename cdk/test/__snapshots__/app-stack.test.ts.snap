@@ -955,6 +955,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "METHOD_SERVICES",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/program-roster-editor-role",
               },
@@ -6210,6 +6214,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_PROGRAM_ROSTER",
+                "Value": "on",
+              },
+              {
+                "Name": "METHOD_SERVICES",
                 "Value": "on",
               },
               {

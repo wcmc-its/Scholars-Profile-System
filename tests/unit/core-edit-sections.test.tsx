@@ -280,3 +280,62 @@ describe("CoreEditSections — Staff summary", () => {
     expect(section.getByTestId("core-staff-counts").textContent).toBe("Not listed");
   });
 });
+
+// Method services (`METHOD_SERVICES`): the page passes a list only when the
+// flag is on; the section itself has its own test.
+vi.mock("@/components/edit/method-services-section", () => ({
+  MethodServicesSection: (props: {
+    entityType: string;
+    entityId: string;
+    unitName: string;
+    services: unknown[];
+    headingId: string;
+  }) => (
+    <div
+      data-testid="panel-method-services"
+      data-entity={`${props.entityType}:${props.entityId}`}
+      data-unit-name={props.unitName}
+    >
+      <h2 id={props.headingId}>Method services</h2>
+    </div>
+  ),
+}));
+
+describe("CoreEditSections — Method services", () => {
+  it("no section when the page passes no list (flag off)", () => {
+    const view = renderSections();
+    expect(sectionIds(view)).not.toContain("method-services");
+    expect(view.queryByTestId("panel-method-services")).toBeNull();
+  });
+
+  it("renders after Basics for the core, with its count in the rail", () => {
+    const view = renderSections({
+      methodServices: [
+        {
+          id: 1,
+          entityType: "core",
+          entityId: "99",
+          name: "Example service",
+          url: "https://example.org",
+          families: [{ supercategory: "s", familyLabel: "Example family" }],
+          supportedPmids: [],
+          excludedPmids: [],
+          countStaffPapers: true,
+        },
+      ],
+    });
+    expect(sectionIds(view)).toEqual(["basics", "method-services", "leadership", "staff", "access"]);
+    const panel = view.getByTestId("panel-method-services");
+    expect(panel.getAttribute("data-entity")).toBe("core:99");
+    expect(panel.getAttribute("data-unit-name")).toBe("Example Imaging Core");
+    expect(navStat(view, "method-services")?.textContent).toBe("1");
+    expect(view.getByTestId("unit-section-method-services").getAttribute("aria-labelledby")).toBe(
+      "method-services-heading",
+    );
+  });
+
+  it("an empty list still renders the section", () => {
+    const view = renderSections({ methodServices: [], access: null });
+    expect(sectionIds(view)).toEqual(["basics", "method-services", "leadership", "staff"]);
+  });
+});

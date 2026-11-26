@@ -136,6 +136,7 @@ The list lives in one place: `CURATED_TABLES` in [`scripts/backups/export-curate
 | Manual curation across the site | `field_override`, `suppression` (org-unit descriptions, leader overrides, "overview for others", hand hide and show decisions) |
 | Core facilities | `core_client`, `core_queue_add`, `core_staff` |
 | Program roster (internal) | `roster_program`, `roster_entry`, `roster_entry_mentor` |
+| Method services | `method_service` |
 
 **Deliberately left out** because the ETL rebuilds them from upstream sources: `scholar_tool`, `scholar_family`, `spotlight`, topics and subtopics, and the search index.
 
