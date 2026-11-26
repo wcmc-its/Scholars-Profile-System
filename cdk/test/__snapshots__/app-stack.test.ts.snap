@@ -956,7 +956,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_SERVICES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_BIBLIOMETRICS",

@@ -2239,7 +2239,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_FAMILY_SR_RULE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -3046,7 +3046,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_FAMILY_SR_RULE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -3790,7 +3790,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_FAMILY_SR_RULE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -4465,7 +4465,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_FAMILY_SR_RULE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -5579,7 +5579,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_FAMILY_SR_RULE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
