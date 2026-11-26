@@ -55,6 +55,8 @@ const SERVICE: MethodServiceView = {
   supportedPmids: ["101", "103", "999"],
   excludedPmids: ["104"],
   countStaffPapers: true,
+  affiliationPhrases: [],
+  coauthoredPmids: [],
 };
 
 describe("loadServiceReview", () => {
@@ -82,20 +84,33 @@ describe("loadServiceReview", () => {
 
   it("counts by the page's default view and lists every marked publication with its reason", async () => {
     const r = await loadServiceReview(SERVICE);
-    // Marked: 101 (supported), 102 (staff), 103 (supported, all types only).
-    // 104 is staff-authored but excluded; 999 is not on the page.
-    expect(r.collaborations).toBe(2);
+    // Counted: 101 (supported: support), 102 (staff: a collaboration), 103
+    // (supported, all types only). 104 is staff-authored but excluded; 999 is
+    // not on the page.
+    expect(r.collaborations).toBe(1);
+    expect(r.support).toBe(1);
     expect(r.supportedListed).toBe(3);
     expect(r.supportedOnPage).toBe(1);
     expect(r.perMethod).toEqual([]);
-    expect(r.marked.map((p) => [p.pmid, p.reason, p.inDefaultView])).toEqual([
-      ["103", "supported", false],
-      ["102", "staff", true],
-      ["101", "supported", true],
+    expect(r.marked.map((p) => [p.pmid, p.kind, p.reason, p.inDefaultView])).toEqual([
+      ["103", "support", "supported", false],
+      ["102", "collaboration", "staff", true],
+      ["101", "support", "supported", true],
     ]);
     expect(r.marked[0]).toMatchObject({ title: "Example paper 103", journal: "Example Journal" });
     expect(r.excluded.map((p) => p.pmid)).toEqual(["104"]);
-    expect(r.excluded[0]).toMatchObject({ reason: null, methods: ["Example review methods"] });
+    expect(r.excluded[0]).toMatchObject({ kind: null, reason: null, methods: ["Example review methods"] });
+  });
+
+  it("a supported publication with a matching PubMed author is a collaboration by affiliation", async () => {
+    const r = await loadServiceReview({ ...SERVICE, coauthoredPmids: ["101", "103"] });
+    expect(r.collaborations).toBe(2);
+    expect(r.support).toBe(0);
+    expect(r.marked.map((p) => [p.pmid, p.kind, p.reason])).toEqual([
+      ["103", "collaboration", "affiliation"],
+      ["102", "collaboration", "staff"],
+      ["101", "collaboration", "affiliation"],
+    ]);
   });
 
   it("a core's confirmed publication is marked with its own reason, with automatic counting off", async () => {
@@ -114,8 +129,9 @@ describe("loadServiceReview", () => {
       entityType: "core",
       entityId: "77",
     });
-    expect(r.collaborations).toBe(1);
-    expect(r.marked.map((p) => [p.pmid, p.reason])).toEqual([["105", "confirmed"]]);
+    expect(r.collaborations).toBe(0);
+    expect(r.support).toBe(1);
+    expect(r.marked.map((p) => [p.pmid, p.kind, p.reason])).toEqual([["105", "support", "confirmed"]]);
   });
 
   it("asks for the unit's people with the service's own toggle", async () => {
@@ -137,10 +153,12 @@ describe("loadServiceReview", () => {
     }));
     m.loadStaffPmidsByUnit.mockResolvedValue(new Map([["department:DEPTA", new Set(["102"])]]));
     const r = await loadServiceReview({ ...SERVICE, families: [FAM, FAM_2], excludedPmids: [] });
-    expect(r.collaborations).toBe(3);
+    // 101 and 103 are on the supported list (support); 102 has a unit author.
+    expect(r.collaborations).toBe(1);
+    expect(r.support).toBe(2);
     expect(r.perMethod).toEqual([
-      { familyLabel: "Example review methods", collaborations: 2, supportedOnPage: 1 },
-      { familyLabel: "Example search methods", collaborations: 2, supportedOnPage: 1 },
+      { familyLabel: "Example review methods", collaborations: 1, support: 1, supportedOnPage: 1 },
+      { familyLabel: "Example search methods", collaborations: 1, support: 1, supportedOnPage: 1 },
     ]);
     expect(r.marked.find((p) => p.pmid === "102")!.methods).toEqual([
       "Example review methods",
@@ -152,7 +170,7 @@ describe("loadServiceReview", () => {
     m.publicationFindMany.mockResolvedValue([]);
     const r = await loadServiceReview({ ...SERVICE, supportedPmids: [], countStaffPapers: false, excludedPmids: ["777"] });
     expect(r.excluded).toEqual([
-      { pmid: "777", title: null, journal: null, year: null, reason: null, methods: [], inDefaultView: false },
+      { pmid: "777", title: null, journal: null, year: null, kind: null, reason: null, methods: [], inDefaultView: false },
     ]);
   });
 });
@@ -166,6 +184,7 @@ describe("MethodServicesSection: review", () => {
     title: `Example paper ${pmid}`,
     journal: "Example Journal",
     year: 2024,
+    kind: "support",
     reason: "supported",
     methods: ["Example review methods"],
     inDefaultView: true,
@@ -180,11 +199,17 @@ describe("MethodServicesSection: review", () => {
   beforeEach(() => {
     stored = { ...SERVICE, supportedPmids: Array.from({ length: 231 }, (_, i) => String(1000 + i)) };
     review = {
-      collaborations: 188,
+      collaborations: 120,
+      support: 68,
       supportedListed: 231,
       supportedOnPage: 167,
       perMethod: [],
-      marked: [pub("101"), pub("102", { reason: "staff" })],
+      marked: [
+        pub("101"),
+        pub("102", { kind: "collaboration", reason: "staff" }),
+        pub("103", { kind: "collaboration", reason: "affiliation" }),
+        pub("104", { reason: "confirmed" }),
+      ],
       excluded: [],
     };
     fetchMock.mockReset();
@@ -197,17 +222,17 @@ describe("MethodServicesSection: review", () => {
         const moved = review.marked.find((p) => p.pmid === body.pmid)!;
         review = {
           ...review,
-          collaborations: review.collaborations - 1,
+          support: review.support - 1,
           marked: review.marked.filter((p) => p.pmid !== body.pmid),
-          excluded: [...review.excluded, { ...moved, reason: null }],
+          excluded: [...review.excluded, { ...moved, kind: null, reason: null }],
         };
       } else {
         stored = { ...stored, excludedPmids: stored.excludedPmids.filter((p) => p !== body.pmid) };
         const moved = review.excluded.find((p) => p.pmid === body.pmid)!;
         review = {
           ...review,
-          collaborations: review.collaborations + 1,
-          marked: [...review.marked, { ...moved, reason: "supported" }],
+          support: review.support + 1,
+          marked: [...review.marked, { ...moved, kind: "support", reason: "supported" }],
           excluded: review.excluded.filter((p) => p.pmid !== body.pmid),
         };
       }
@@ -235,24 +260,24 @@ describe("MethodServicesSection: review", () => {
   it("shows the mockup's line with real numbers", async () => {
     renderSection();
     expect((await line()).textContent).toBe(
-      "188 collaborations on the method page · 231 on your supported list, 167 of them on the page · Review publications",
+      "120 collaborations and 68 supported on the method page · 231 on the supported list, 167 of them on the page · Review publications",
     );
     expect(fetchMock).toHaveBeenCalledWith("/api/edit/method-service?id=5", expect.anything());
   });
 
   it("says '1 collaboration' and leaves the supported part out for an empty list", async () => {
-    review = { ...review, collaborations: 1, supportedListed: 0, supportedOnPage: 0 };
+    review = { ...review, collaborations: 1, support: 0, supportedListed: 0, supportedOnPage: 0 };
     renderSection();
     expect((await line()).textContent).toBe(
-      "1 collaboration on the method page · Review publications",
+      "1 collaboration and 0 supported on the method page · Review publications",
     );
   });
 
   it("keeps the plain supported-list count when the numbers cannot be read", async () => {
-    fetchMock.mockImplementation(async () => json({ ok: false, error: "not_curator" }, 403));
+    fetchMock.mockImplementation(async () => json({ ok: false, error: "not_superuser" }, 403));
     renderSection();
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(screen.getByText("231 publications on your supported list")).toBeTruthy();
+    expect(screen.getByText("231 publications on the supported list")).toBeTruthy();
     expect(screen.queryByTestId("method-service-review-line-5")).toBeNull();
   });
 
@@ -268,9 +293,15 @@ describe("MethodServicesSection: review", () => {
     expect(panel.id).toBe(toggle.getAttribute("aria-controls"));
     const marked = within(screen.getByTestId("method-service-marked-5"));
     expect(marked.getByText("Example paper 101")).toBeTruthy();
-    expect(marked.getByText("On your supported list")).toBeTruthy();
-    expect(marked.getByText("Co-authored by someone in your unit")).toBeTruthy();
-    expect(marked.getAllByText(/Example Journal · 2024 · PMID 10[12]/)).toHaveLength(2);
+    // Each row says which it is, and why.
+    const says = (pmid: string) =>
+      marked.getByText(`Example paper ${pmid}`).closest("li")!.textContent ?? "";
+    expect(says("101")).toContain("Support: supported list");
+    expect(says("102")).toContain("Collaboration: unit member in Scholars");
+    expect(says("103")).toContain("Collaboration: affiliation in PubMed");
+    expect(says("104")).toContain("Support: confirmed core publication");
+    expect(screen.getByText("Counted as collaboration or support (4)")).toBeTruthy();
+    expect(marked.getAllByText(/Example Journal · 2024 · PMID 10[1-4]/)).toHaveLength(4);
     fireEvent.click(toggle);
     expect(screen.queryByTestId("method-service-review-5")).toBeNull();
   });
@@ -283,10 +314,10 @@ describe("MethodServicesSection: review", () => {
 
     const undo = await screen.findByRole("button", { name: "Undo, count it again: Example paper 101" });
     expect(writes()).toEqual([{ op: "exclude", id: 5, pmid: "101" }]);
-    expect((await line()).textContent).toContain("187 collaborations on the method page");
+    expect((await line()).textContent).toContain("120 collaborations and 67 supported on the method page");
     expect(within(screen.getByTestId("method-service-marked-5")).queryByText("Example paper 101")).toBeNull();
-    expect(screen.getByText("Removed from your count (1)")).toBeTruthy();
-    expect(screen.getByText("PMID 101 no longer counts as a collaboration of the Example Library.")).toBeTruthy();
+    expect(screen.getByText("Removed from the count (1)")).toBeTruthy();
+    expect(screen.getByText("PMID 101 no longer counts for the Example Library.")).toBeTruthy();
     // Focus follows the publication to its Undo.
     await waitFor(() => expect(document.activeElement).toBe(undo));
   });
@@ -303,8 +334,8 @@ describe("MethodServicesSection: review", () => {
       { op: "exclude", id: 5, pmid: "101" },
       { op: "restore", id: 5, pmid: "101" },
     ]);
-    expect((await line()).textContent).toContain("188 collaborations on the method page");
-    expect(screen.queryByText(/Removed from your count/)).toBeNull();
+    expect((await line()).textContent).toContain("120 collaborations and 68 supported on the method page");
+    expect(screen.queryByText(/Removed from the count/)).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(notOurs));
   });
 
@@ -315,11 +346,11 @@ describe("MethodServicesSection: review", () => {
     fetchMock.mockImplementation(async (url: string) =>
       String(url).includes("?id=")
         ? json({ ok: true, review })
-        : json({ ok: false, error: "not_curator" }, 403),
+        : json({ ok: false, error: "not_superuser" }, 403),
     );
     fireEvent.click(screen.getByRole("button", { name: "Not ours: Example paper 101" }));
-    expect(await screen.findByText(/You don’t have access to change this unit’s services/)).toBeTruthy();
+    expect(await screen.findByText(/Only a superuser can change method services/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Not ours: Example paper 101" })).toBeTruthy();
-    expect(screen.queryByText(/Removed from your count/)).toBeNull();
+    expect(screen.queryByText(/Removed from the count/)).toBeNull();
   });
 });

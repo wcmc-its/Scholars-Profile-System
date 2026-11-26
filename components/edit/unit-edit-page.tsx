@@ -402,7 +402,8 @@ function unitSections(
   });
 
   // A department's services for a research method. Departments only (a core
-  // has its own page); the caller passes null unless the flag is on.
+  // has its own page); the caller passes null unless the flag is on AND the
+  // viewer is a superuser, who alone manages method services.
   if (unitType === "department" && methodServices) {
     sections.push({
       id: "method-services",

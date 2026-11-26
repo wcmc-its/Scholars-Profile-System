@@ -70,6 +70,8 @@ function service(over: Record<string, unknown> = {}) {
     supportedPmids: ["101", "103", "999"],
     excludedPmids: [],
     countStaffPapers: false,
+    affiliationPhrases: [],
+    coauthoredPmids: [],
     ...over,
   };
 }
@@ -149,16 +151,40 @@ describe("getFamilyPublications: METHOD_SERVICES on", () => {
     const r = await getFamilyPublications(SC, LABEL, { sort: "newest" });
     // 101 is a research article; 103 is a Letter (not in the default view);
     // 999 is not on the page at all.
-    expect(r!.services).toEqual([{ id: 7, label: "Example Library", count: 1 }]);
+    // On the supported list with no author from the unit: support.
+    expect(r!.services).toEqual([
+      { id: 7, label: "Example Library", count: 1, collaborations: 0, support: 1 },
+    ]);
     const ids = Object.fromEntries(r!.hits.map((h) => [h.pmid, h.serviceIds]));
     expect(ids).toEqual({ "101": [7], "102": undefined, "104": undefined });
+    expect(r!.hits.find((h) => h.pmid === "101")!.supportServiceIds).toEqual([7]);
     expect(r!.total).toBe(3);
   });
 
   it("counts under all publication types when that filter is on", async () => {
     const r = await getFamilyPublications(SC, LABEL, { sort: "newest", filter: "all" });
-    expect(r!.services).toEqual([{ id: 7, label: "Example Library", count: 2 }]);
+    expect(r!.services).toEqual([
+      { id: 7, label: "Example Library", count: 2, collaborations: 0, support: 2 },
+    ]);
     expect(r!.hits.find((h) => h.pmid === "103")!.serviceIds).toEqual([7]);
+  });
+
+  it("a supported pmid with a matching PubMed author is a collaboration: no support id on the hit", async () => {
+    m.serviceFindMany.mockResolvedValue([service({ coauthoredPmids: ["101"] })]);
+    const r = await getFamilyPublications(SC, LABEL, { sort: "newest", filter: "all" });
+    expect(r!.services).toEqual([
+      { id: 7, label: "Example Library", count: 2, collaborations: 1, support: 1 },
+    ]);
+    const hit = (pmid: string) => r!.hits.find((h) => h.pmid === pmid)!;
+    expect(hit("101").serviceIds).toEqual([7]);
+    expect("supportServiceIds" in hit("101")).toBe(false);
+    expect(hit("103").supportServiceIds).toEqual([7]);
+  });
+
+  it("the filter selects everything counted, collaboration and support alike", async () => {
+    m.serviceFindMany.mockResolvedValue([service({ coauthoredPmids: ["101"] })]);
+    await getFamilyPublications(SC, LABEL, { sort: "newest", serviceId: 7 });
+    expect(feedPmids()).toEqual(["101", "103"]);
   });
 
   it("serviceId narrows the feed to that unit's collaborations; the family totals stay whole", async () => {
@@ -173,7 +199,9 @@ describe("getFamilyPublications: METHOD_SERVICES on", () => {
     m.serviceFindMany.mockResolvedValue([service({ excludedPmids: ["101"] })]);
     const r = await getFamilyPublications(SC, LABEL, { sort: "newest", serviceId: 7 });
     expect(feedPmids()).toEqual(["103"]);
-    expect(r!.services).toEqual([{ id: 7, label: "Example Library", count: 0 }]);
+    expect(r!.services).toEqual([
+      { id: 7, label: "Example Library", count: 0, collaborations: 0, support: 0 },
+    ]);
   });
 
   it("an id that is not a visible service of this family yields an empty feed", async () => {
@@ -215,6 +243,8 @@ describe("getFamilyServices", () => {
         unitHref: "/departments/example-library",
         label: "Example Library",
         count: 1,
+        collaborations: 0,
+        support: 1,
       },
     ]);
   });

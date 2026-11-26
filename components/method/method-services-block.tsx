@@ -2,17 +2,22 @@
  * METHOD_SERVICES — the "WCM services for this method" block on a method page:
  * every visible service attached to the family, in the order the loader gives
  * (most collaborations first). The same four parts for each: the heading, the
- * service's name as the link out, "Offered by the {unit}", and "The {unit}
- * collaborated on N of the M publications listed here." with "Show them",
- * which turns on that service's filter in the publication list below
+ * service's name as the link out, "Offered by the {unit}", and the sentence
+ * "The {unit} collaborated on N and supported S of the M publications listed
+ * here." (`serviceSentenceParts`: only the half that is not zero) with "Show
+ * them", which turns on that service's filter in the publication list below
  * (`?service=<id>`, read by `FamilyPublicationFeed`).
  *
- * The sentence is left out when N is 0. Server component, no hooks.
+ * The sentence is left out when N and S are both 0. Server component, no hooks.
  */
 import Link from "next/link";
 
 import type { FamilyServiceEntry } from "@/lib/api/methods";
-import { withArticle } from "@/lib/method-services/collaboration";
+import {
+  serviceFilterLabel,
+  serviceSentenceParts,
+  withArticle,
+} from "@/lib/method-services/collaboration";
 
 export function MethodServicesBlock({
   services,
@@ -42,6 +47,12 @@ export function MethodServicesBlock({
         {services.map((s) => {
           const unit = withArticle(s.unitName);
           const unitName = unit.slice("the ".length);
+          // `total` falls back to 0 when its own read fails: no sentence
+          // then, rather than "N of the 0".
+          const sentence =
+            total >= s.count
+              ? serviceSentenceParts(unitName, s.collaborations, s.support, total)
+              : null;
           return (
             <li key={s.id} className="py-3 first:pt-0 last:pb-0" data-testid={`method-service-${s.id}`}>
               <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
@@ -77,19 +88,21 @@ export function MethodServicesBlock({
                   )}
                 </span>
               </div>
-              {/* `total` falls back to 0 when its own read fails: no sentence
-                  then, rather than "N of the 0". */}
-              {s.count > 0 && total >= s.count && (
+              {sentence && (
                 <p className="border-apollo-slate-tint-border mt-2.5 border-t pt-2.5 text-sm leading-[1.55]">
-                  The {unitName} collaborated on{" "}
-                  <b className="font-semibold">
-                    {s.count.toLocaleString("en-US")} of the {total.toLocaleString("en-US")}
-                  </b>{" "}
-                  publications listed here.{" "}
+                  {sentence.map((part, i) =>
+                    part.bold ? (
+                      <b key={i} className="font-semibold">
+                        {part.text}
+                      </b>
+                    ) : (
+                      part.text
+                    ),
+                  )}{" "}
                   <Link
                     href={`${familyPath}?service=${s.id}#publications`}
                     prefetch={false}
-                    aria-label={`Show them: the ${s.count.toLocaleString("en-US")} ${s.label} collaborations`}
+                    aria-label={`Show them: the ${s.count.toLocaleString("en-US")} ${serviceFilterLabel(s.label, s.collaborations, s.support)}`}
                     className="text-apollo-slate focus-visible:outline-apollo-slate font-medium whitespace-nowrap underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
                     data-testid={`method-service-show-${s.id}`}
                   >

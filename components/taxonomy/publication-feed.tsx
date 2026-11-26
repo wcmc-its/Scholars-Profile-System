@@ -81,7 +81,11 @@ import {
   writeShownParam,
 } from "@/lib/taxonomy/feed-load-more";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
-import { parseServiceParam } from "@/lib/method-services/collaboration";
+import {
+  parseServiceParam,
+  serviceBadgeLabel,
+  serviceFilterLabel,
+} from "@/lib/method-services/collaboration";
 import { profilePath } from "@/lib/profile-url";
 import { sanitizePubTitle } from "@/lib/utils";
 import { Caret } from "@/components/ui/caret";
@@ -123,9 +127,12 @@ export type FeedHit = {
   primarySubtopicId?: string | null;
   /** Category-wide hits: the pub's family label (per-row area label). */
   familyLabel?: string | null;
-  /** METHOD_SERVICES — family hits only: the page's services whose unit
-   *  collaborated on this paper. */
+  /** METHOD_SERVICES — family hits only: the page's services this paper is
+   *  counted for. */
   serviceIds?: number[];
+  /** METHOD_SERVICES — the subset of `serviceIds` that is support, not a
+   *  collaboration. */
+  supportServiceIds?: number[];
 };
 
 /** METHOD_SERVICES — one service of a method page, as its feed needs it. */
@@ -133,8 +140,11 @@ export type FeedService = {
   id: number;
   /** The unit's name (plus the service's, when one unit has two here). */
   label: string;
-  /** Collaborations in the page's default view. */
+  /** Everything counted for the service in the page's default view:
+   *  `collaborations` + `support`. */
   count: number;
+  collaborations: number;
+  support: number;
 };
 
 type FeedResponse = {
@@ -148,9 +158,17 @@ type FeedResponse = {
   parentTierTotals?: { strongly: number; also: number };
   page: number;
   pageSize: number;
-  /** METHOD_SERVICES — family feeds only: each visible service's count under
+  /** METHOD_SERVICES — family feeds only: each visible service's counts under
    *  the active publication-type filter. */
-  services?: Array<{ id: number; label: string; count: number }>;
+  services?: Array<{
+    id: number;
+    label: string;
+    count: number;
+    /** Optional only for a response from a task still on the previous image
+     *  mid-deploy, where everything counted was a collaboration. */
+    collaborations?: number;
+    support?: number;
+  }>;
 };
 
 export type PublicationFeedProps = {
@@ -171,11 +189,11 @@ export type PublicationFeedProps = {
   /** Rendered between the heading row and the type toggle. */
   headerSlot?: ReactNode;
   /** Controls placed in the heading row before Sort (the method page's
-   *  "{Unit} collaborations" filters). Gets the latest response, null while
+   *  "{Unit} collaborations and support" filters). Gets the latest response, null while
    *  loading. */
   toolbarSlot?: (data: FeedResponse | null) => ReactNode;
   /** Per-row badges shown beside the journal and year (the method page's
-   *  "{Unit} collaboration"). */
+   *  "{Unit} collaboration" / "{Unit} support"). */
   badgesFor?: (hit: FeedHit) => string[];
   /** Empty-state body copy. */
   emptyBody: string;
@@ -941,7 +959,8 @@ export function PubRow({
   modalTopicSlug?: string;
   entityTerm?: string | null;
   areaLabelFor?: (hit: FeedHit) => string | null;
-  /** METHOD_SERVICES — "{Unit} collaboration" badges for this row. */
+  /** METHOD_SERVICES — "{Unit} collaboration" / "{Unit} support" badges for
+   *  this row. */
   badgesFor?: (hit: FeedHit) => string[];
   plainAuthors?: boolean;
   /** Load more: rows take programmatic focus (tabIndex -1). */
@@ -1230,7 +1249,8 @@ export function FamilyPublicationFeed({
   /** TAXONOMY_FEED_LOAD_MORE. */
   loadMore?: boolean;
   /** METHOD_SERVICES — the page's visible services (family page only). Each
-   *  gets a "{Unit} collaborations" filter (`?service=<id>`) and a row badge.
+   *  gets a filter (`?service=<id>`, named by `serviceFilterLabel`) and a row
+   *  badge.
    *  Omitted or empty ⇒ neither, and `?service=` is ignored. */
   services?: ReadonlyArray<FeedService>;
 }) {
@@ -1273,9 +1293,15 @@ export function FamilyPublicationFeed({
     return (hit: FeedHit) =>
       (hit.serviceIds ?? []).flatMap((id) => {
         const label = labels.get(id);
-        return label ? [`${label} collaboration`] : [];
+        if (!label) return [];
+        const kind = hit.supportServiceIds?.includes(id) ? "support" : "collaboration";
+        return [serviceBadgeLabel(label, kind)];
       });
   }, [services]);
+  // What the active filter is called, by the page's default-view counts.
+  const serviceName = service
+    ? serviceFilterLabel(service.label, service.collaborations, service.support)
+    : "";
 
   const cellLineChip =
     cellLine && cellLineLabel ? (
@@ -1329,7 +1355,7 @@ export function FamilyPublicationFeed({
       }}
       emptyBody={
         service
-          ? `No ${service.label} collaborations in this view.`
+          ? `No ${serviceName} in this view.`
           : `Publications using ${familyLabel} will appear as they are indexed.`
       }
       loadMore={loadMore}
@@ -1350,7 +1376,7 @@ export function FamilyPublicationFeed({
         hasServices ? (
           <>
             <p className="sr-only" role="status" aria-live="polite">
-              {service ? `Showing ${service.label} collaborations` : ""}
+              {service ? `Showing ${serviceName}` : ""}
             </p>
             {cellLineChip}
           </>
@@ -1363,12 +1389,15 @@ export function FamilyPublicationFeed({
 }
 
 /**
- * METHOD_SERVICES — the "{Unit} collaborations N" filters in the feed toolbar,
- * one per visible service. At most one is on (`?service=` is single-valued);
- * pressing the active one clears it. The count follows the response (the
- * active publication-type filter) once it arrives. A service with no
- * collaborations in the current view gets no filter, unless it is the one
- * that is on (reached by a link), which stays so it can be turned off.
+ * METHOD_SERVICES — the service filters in the feed toolbar, one per visible
+ * service. Each selects everything counted for its service and is named for
+ * what that is (`serviceFilterLabel`): "{Unit} collaborations N", "{Unit}
+ * support N" or "{Unit} collaborations and support N". At most one is on
+ * (`?service=` is single-valued); pressing the active one clears it. The
+ * counts follow the response (the active publication-type filter) once it
+ * arrives. A service with nothing counted in the current view gets no filter,
+ * unless it is the one that is on (reached by a link), which stays so it can
+ * be turned off.
  */
 export function ServiceFilterToggles({
   services,
@@ -1377,7 +1406,7 @@ export function ServiceFilterToggles({
   onChange,
 }: {
   services: ReadonlyArray<FeedService>;
-  counts?: ReadonlyArray<{ id: number; count: number }>;
+  counts?: ReadonlyArray<{ id: number; count: number; collaborations?: number; support?: number }>;
   activeId: number | null;
   onChange: (id: number | null) => void;
 }) {
@@ -1385,7 +1414,8 @@ export function ServiceFilterToggles({
     <>
       {services.map((s) => {
         const on = s.id === activeId;
-        const count = counts?.find((c) => c.id === s.id)?.count ?? s.count;
+        const current = counts?.find((c) => c.id === s.id) ?? s;
+        const count = current.count;
         if (count === 0 && !on) return null;
         return (
           <button
@@ -1406,7 +1436,9 @@ export function ServiceFilterToggles({
             >
               {on && <Check className="size-3" strokeWidth={3} />}
             </span>
-            <span>{s.label} collaborations</span>
+            <span>
+              {serviceFilterLabel(s.label, current.collaborations ?? count, current.support ?? 0)}
+            </span>
             <span className="tabular-nums">{count.toLocaleString()}</span>
           </button>
         );

@@ -1,18 +1,24 @@
 /**
  * `lib/method-services/collaboration.ts`: which of a method page's
- * publications a unit collaborated on (excluded beats supported beats
- * automatic, and only the page's own publications count), and when a service
- * is shown at all. Pure; made-up PMIDs and units only.
+ * publications are counted for a unit's service (excluded always wins, and
+ * only the page's own publications count), whether each is a collaboration or
+ * support and why, the public sentence and filter label, and when a service is
+ * shown at all. Pure; made-up PMIDs and units only.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   compareServicesForBlock,
   computeCollaboration,
+  countKinds,
   isServiceUnitVisible,
   parseServiceParam,
   serviceCoversFamily,
+  serviceBadgeLabel,
   serviceDisplayLabels,
+  serviceFilterLabel,
+  serviceSentence,
+  serviceSentenceParts,
   withArticle,
 } from "@/lib/method-services/collaboration";
 
@@ -22,13 +28,22 @@ const base = {
   pagePmids: PAGE,
   supportedPmids: [] as string[],
   excludedPmids: [] as string[],
+  coauthoredPmids: [] as string[],
   countStaffPapers: false,
   staffPmids: new Set<string>(),
   confirmedPmids: undefined as Set<string> | undefined,
 };
 
+/** pmid -> the reason it is counted. */
 const marked = (input: Partial<typeof base>) =>
-  Object.fromEntries(computeCollaboration({ ...base, ...input }).marked);
+  Object.fromEntries(
+    [...computeCollaboration({ ...base, ...input }).marked].map(([pmid, m]) => [pmid, m.reason]),
+  );
+/** pmid -> "collaboration" | "support". */
+const kinds = (input: Partial<typeof base>) =>
+  Object.fromEntries(
+    [...computeCollaboration({ ...base, ...input }).marked].map(([pmid, m]) => [pmid, m.kind]),
+  );
 
 describe("computeCollaboration: precedence", () => {
   it("marks a supported pmid that is on the page", () => {
@@ -68,21 +83,24 @@ describe("computeCollaboration: precedence", () => {
     ).toEqual({});
   });
 
-  it("supported beats automatic: the reason is the owner's list, once", () => {
+  it("a supported pmid a unit member authored is counted once, as that member's collaboration", () => {
     const r = computeCollaboration({
       ...base,
       supportedPmids: ["101"],
       countStaffPapers: true,
       staffPmids: new Set(["101", "102"]),
     });
-    expect(Object.fromEntries(r.marked)).toEqual({ "101": "supported", "102": "staff" });
+    expect(Object.fromEntries(r.marked)).toEqual({
+      "101": { kind: "collaboration", reason: "staff" },
+      "102": { kind: "collaboration", reason: "staff" },
+    });
     expect(r.marked.size).toBe(2);
   });
 
   it("supported still marks with automatic counting off", () => {
-    expect(
-      marked({ supportedPmids: ["101"], countStaffPapers: false, staffPmids: new Set(["101"]) }),
-    ).toEqual({ "101": "supported" });
+    expect(marked({ supportedPmids: ["101"], countStaffPapers: false })).toEqual({
+      "101": "supported",
+    });
   });
 });
 
@@ -97,19 +115,194 @@ describe("computeCollaboration: a core's confirmed publications", () => {
     });
   });
 
-  it("the reason is supported, then confirmed, then staff", () => {
+  it("the reason is staff, then affiliation, then supported, then confirmed", () => {
     expect(
       marked({
-        supportedPmids: ["101"],
-        confirmedPmids: new Set(["101", "102"]),
+        supportedPmids: ["101", "102", "103"],
+        coauthoredPmids: ["101", "102"],
+        confirmedPmids: new Set(["101", "102", "103", "104"]),
         countStaffPapers: true,
-        staffPmids: new Set(["101", "102", "103"]),
+        staffPmids: new Set(["101"]),
       }),
-    ).toEqual({ "101": "supported", "102": "confirmed", "103": "staff" });
+    ).toEqual({ "101": "staff", "102": "affiliation", "103": "supported", "104": "confirmed" });
   });
 
   it("a confirmed pmid that is not on the page marks nothing", () => {
     expect(marked({ confirmedPmids: new Set(["999"]) })).toEqual({});
+  });
+});
+
+describe("computeCollaboration: collaboration or support", () => {
+  it("staff: a current unit member in Scholars is an author, so it is a collaboration", () => {
+    expect(kinds({ countStaffPapers: true, staffPmids: new Set(["101"]) })).toEqual({
+      "101": "collaboration",
+    });
+    expect(marked({ countStaffPapers: true, staffPmids: new Set(["101"]) })).toEqual({
+      "101": "staff",
+    });
+  });
+
+  it("affiliation: on the supported list with a matching PubMed author, so it is a collaboration", () => {
+    const input = { supportedPmids: ["101"], coauthoredPmids: ["101"] };
+    expect(kinds(input)).toEqual({ "101": "collaboration" });
+    expect(marked(input)).toEqual({ "101": "affiliation" });
+  });
+
+  it("supported: on the supported list with no matching author, so it is support", () => {
+    const input = { supportedPmids: ["101", "102"], coauthoredPmids: ["102"] };
+    expect(kinds(input)).toEqual({ "101": "support", "102": "collaboration" });
+    expect(marked(input)).toEqual({ "101": "supported", "102": "affiliation" });
+  });
+
+  it("confirmed: a core's confirmed publication with no unit author is support", () => {
+    const input = { confirmedPmids: new Set(["103"]) };
+    expect(kinds(input)).toEqual({ "103": "support" });
+    expect(marked(input)).toEqual({ "103": "confirmed" });
+  });
+
+  it("a core's confirmed publication a unit member authored is a collaboration", () => {
+    expect(
+      kinds({
+        confirmedPmids: new Set(["103"]),
+        countStaffPapers: true,
+        staffPmids: new Set(["103"]),
+      }),
+    ).toEqual({ "103": "collaboration" });
+  });
+
+  it("excluded wins over every reason", () => {
+    expect(
+      kinds({
+        supportedPmids: ["101", "102"],
+        coauthoredPmids: ["101"],
+        confirmedPmids: new Set(["103"]),
+        countStaffPapers: true,
+        staffPmids: new Set(["104"]),
+        excludedPmids: ["101", "102", "103", "104"],
+      }),
+    ).toEqual({});
+  });
+
+  it("toggle off: a unit member's authorship does not count a paper, but makes a counted one a collaboration", () => {
+    const input = {
+      supportedPmids: ["101"],
+      confirmedPmids: new Set(["103"]),
+      countStaffPapers: false,
+      staffPmids: new Set(["101", "102", "103"]),
+    };
+    // 102 is by a unit member only: not counted. 101 (supported list) and 103
+    // (the core's confirmed) are counted anyway and have a unit author.
+    expect(kinds(input)).toEqual({ "101": "collaboration", "103": "collaboration" });
+    expect(marked(input)).toEqual({ "101": "staff", "103": "staff" });
+  });
+
+  it("the toggle never changes what an already counted paper is called", () => {
+    const input = { supportedPmids: ["101"], staffPmids: new Set(["101"]) };
+    expect(kinds({ ...input, countStaffPapers: false })).toEqual(
+      kinds({ ...input, countStaffPapers: true }),
+    );
+  });
+
+  it("toggle off: an excluded paper with a unit author stays uncounted", () => {
+    expect(
+      kinds({
+        supportedPmids: ["101"],
+        excludedPmids: ["101"],
+        countStaffPapers: false,
+        staffPmids: new Set(["101"]),
+      }),
+    ).toEqual({});
+  });
+
+  it("toggle off: the PubMed affiliation still makes a supported paper a collaboration", () => {
+    expect(
+      kinds({
+        supportedPmids: ["101"],
+        coauthoredPmids: ["101"],
+        countStaffPapers: false,
+        staffPmids: new Set(["101"]),
+      }),
+    ).toEqual({ "101": "collaboration" });
+  });
+
+  it("a stored co-authored pmid that is no longer on the supported list counts for nothing", () => {
+    expect(kinds({ supportedPmids: ["101"], coauthoredPmids: ["101", "102"] })).toEqual({
+      "101": "collaboration",
+    });
+    // Still counted when the core confirmed it, but as support.
+    expect(kinds({ coauthoredPmids: ["103"], confirmedPmids: new Set(["103"]) })).toEqual({
+      "103": "support",
+    });
+  });
+
+  it("no coauthoredPmids given: everything on the supported list is support", () => {
+    const { coauthoredPmids: _omit, ...withoutIt } = base;
+    void _omit;
+    const r = computeCollaboration({ ...withoutIt, supportedPmids: ["101"] });
+    expect(r.marked.get("101")).toEqual({ kind: "support", reason: "supported" });
+  });
+
+  it("countKinds splits the counted set, over everything or within a view", () => {
+    const { marked: m } = computeCollaboration({
+      ...base,
+      supportedPmids: ["101", "102", "103"],
+      coauthoredPmids: ["101"],
+      countStaffPapers: true,
+      staffPmids: new Set(["104"]),
+    });
+    expect(countKinds(m)).toEqual({ collaborations: 2, support: 2 });
+    expect(countKinds(m, new Set(["101", "102"]))).toEqual({ collaborations: 1, support: 1 });
+    expect(countKinds(new Map())).toEqual({ collaborations: 0, support: 0 });
+  });
+});
+
+describe("the public sentence, filter label and badge", () => {
+  const UNIT = "Example Library";
+
+  it("N and S: collaborated on N and supported S of the M", () => {
+    expect(serviceSentence(UNIT, 12, 1340, 5210)).toBe(
+      "The Example Library collaborated on 12 and supported 1,340 of the 5,210 publications listed here.",
+    );
+  });
+
+  it("S is 0: collaborated on N of the M", () => {
+    expect(serviceSentence(UNIT, 12, 0, 40)).toBe(
+      "The Example Library collaborated on 12 of the 40 publications listed here.",
+    );
+  });
+
+  it("N is 0: supported S of the M", () => {
+    expect(serviceSentence(UNIT, 0, 7, 40)).toBe(
+      "The Example Library supported 7 of the 40 publications listed here.",
+    );
+  });
+
+  it("both 0: no sentence", () => {
+    expect(serviceSentence(UNIT, 0, 0, 40)).toBeNull();
+    expect(serviceSentenceParts(UNIT, 0, 0, 40)).toBeNull();
+  });
+
+  it("the numbers are the bold runs", () => {
+    const bold = (n: number, s: number) =>
+      serviceSentenceParts(UNIT, n, s, 40)!
+        .filter((p) => p.bold)
+        .map((p) => p.text);
+    expect(bold(12, 7)).toEqual(["12", "7 of the 40"]);
+    expect(bold(12, 0)).toEqual(["12 of the 40"]);
+    expect(bold(0, 7)).toEqual(["7 of the 40"]);
+  });
+
+  it("the filter is named for what it selects", () => {
+    expect(serviceFilterLabel(UNIT, 12, 0)).toBe("Example Library collaborations");
+    expect(serviceFilterLabel(UNIT, 0, 7)).toBe("Example Library support");
+    expect(serviceFilterLabel(UNIT, 12, 7)).toBe("Example Library collaborations and support");
+    // Nothing counted (a filter reached by a link): the plain name.
+    expect(serviceFilterLabel(UNIT, 0, 0)).toBe("Example Library collaborations");
+  });
+
+  it("the badge says which it is", () => {
+    expect(serviceBadgeLabel(UNIT, "collaboration")).toBe("Example Library collaboration");
+    expect(serviceBadgeLabel(UNIT, "support")).toBe("Example Library support");
   });
 });
 
@@ -119,6 +312,7 @@ describe("computeCollaboration: the automatic toggle", () => {
   });
 
   it("off: only the supported list counts", () => {
+    // 102 has a unit author and is on no list: still not counted.
     expect(
       marked({
         supportedPmids: ["104"],

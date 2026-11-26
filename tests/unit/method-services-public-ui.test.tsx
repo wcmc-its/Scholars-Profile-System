@@ -1,8 +1,9 @@
 /**
  * METHOD_SERVICES on the public method page, rendered:
  *   - `MethodServicesBlock`: the "WCM services for this method" block;
- *   - `FamilyPublicationFeed` with services: the "{Unit} collaborations"
- *     filter (`?service=`), its request, and the "{Unit} collaboration" badge.
+ *   - `FamilyPublicationFeed` with services: the service filter (`?service=`,
+ *     "{Unit} collaborations", "{Unit} support" or both), its request, and the
+ *     "{Unit} collaboration" / "{Unit} support" badge.
  * Made-up units and PMIDs only.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +43,8 @@ const LIBRARY: FamilyServiceEntry = {
   unitHref: "/departments/example-library",
   label: "Example Library",
   count: 188,
+  collaborations: 12,
+  support: 176,
 };
 const CORE: FamilyServiceEntry = {
   id: 9,
@@ -51,6 +54,8 @@ const CORE: FamilyServiceEntry = {
   unitHref: "/cores/77",
   label: "The Example Imaging Core",
   count: 0,
+  collaborations: 0,
+  support: 0,
 };
 
 describe("MethodServicesBlock", () => {
@@ -76,11 +81,38 @@ describe("MethodServicesBlock", () => {
     );
   });
 
-  it("says how many of the page's publications the unit collaborated on, with Show them", () => {
-    renderBlock([LIBRARY]);
+  it("S is 0: collaborated on N of the M", () => {
+    renderBlock([{ ...LIBRARY, collaborations: 188, support: 0 }]);
     const row = screen.getByTestId("method-service-7");
     expect(row.textContent).toContain(
       "The Example Library collaborated on 188 of the 1,159 publications listed here.",
+    );
+    expect(row.textContent).not.toContain("supported");
+    expect(screen.getByTestId("method-service-show-7").getAttribute("aria-label")).toBe(
+      "Show them: the 188 Example Library collaborations",
+    );
+  });
+
+  it("N is 0: supported S of the M", () => {
+    renderBlock([{ ...LIBRARY, collaborations: 0, support: 188 }]);
+    const row = screen.getByTestId("method-service-7");
+    expect(row.textContent).toContain(
+      "The Example Library supported 188 of the 1,159 publications listed here.",
+    );
+    expect(row.textContent).not.toContain("collaborated");
+    expect(screen.getByTestId("method-service-show-7").getAttribute("aria-label")).toBe(
+      "Show them: the 188 Example Library support",
+    );
+  });
+
+  it("N and S: collaborated on N and supported S of the M, with Show them", () => {
+    renderBlock([LIBRARY]);
+    const row = screen.getByTestId("method-service-7");
+    expect(row.textContent).toContain(
+      "The Example Library collaborated on 12 and supported 176 of the 1,159 publications listed here.",
+    );
+    expect(screen.getByTestId("method-service-show-7").getAttribute("aria-label")).toBe(
+      "Show them: the 188 Example Library collaborations and support",
     );
     const show = screen.getByTestId("method-service-show-7");
     expect(show.getAttribute("href")).toBe("/methods/sc/fam-fam_1?service=7#publications");
@@ -89,10 +121,11 @@ describe("MethodServicesBlock", () => {
     expect(show.getAttribute("aria-label")).toMatch(/^Show them/);
   });
 
-  it("leaves the sentence and Show them out when N is 0, and never doubles the article", () => {
+  it("leaves the sentence and Show them out when N and S are both 0, and never doubles the article", () => {
     renderBlock([CORE]);
     const row = screen.getByTestId("method-service-9");
     expect(row.textContent).not.toContain("collaborated on");
+    expect(row.textContent).not.toContain("supported");
     expect(screen.queryByTestId("method-service-show-9")).toBeNull();
     expect(row.textContent).toContain("Offered by the Example Imaging Core");
     expect(row.textContent).not.toContain("the The");
@@ -143,8 +176,8 @@ describe("the systematic review family's About this list note", () => {
 
 describe("FamilyPublicationFeed with services", () => {
   const SERVICES = [
-    { id: 7, label: "Example Library", count: 188 },
-    { id: 9, label: "Example Imaging Core", count: 4 },
+    { id: 7, label: "Example Library", count: 188, collaborations: 12, support: 176 },
+    { id: 9, label: "Example Imaging Core", count: 4, collaborations: 4, support: 0 },
   ];
   const hit = (pmid: string, extra: Record<string, unknown> = {}) => ({
     pmid,
@@ -171,15 +204,19 @@ describe("FamilyPublicationFeed with services", () => {
       ok: true,
       status: 200,
       json: async () => ({
-        hits: [hit("101", { serviceIds: [7, 9] }), hit("102"), hit("103", { serviceIds: [7] })],
+        hits: [
+          hit("101", { serviceIds: [7, 9], supportServiceIds: [7] }),
+          hit("102"),
+          hit("103", { serviceIds: [7] }),
+        ],
         total: 3,
         totalAllTypes: 1200,
         totalResearchOnly: 1159,
         page: 1,
         pageSize: 20,
         services: [
-          { id: 7, label: "Example Library", count: 190 },
-          { id: 9, label: "Example Imaging Core", count: 4 },
+          { id: 7, label: "Example Library", count: 190, collaborations: 12, support: 178 },
+          { id: 9, label: "Example Imaging Core", count: 4, collaborations: 4, support: 0 },
         ],
       }),
     }));
@@ -201,10 +238,12 @@ describe("FamilyPublicationFeed with services", () => {
   it("shows one labelled filter per service, off by default, with the response's count", async () => {
     renderFeed(SERVICES);
     await screen.findByText("Example paper 101");
-    const library = screen.getByRole("button", { name: /Example Library collaborations/ });
+    // Named for what it selects: both kinds for the library, one for the core.
+    const library = screen.getByRole("button", { name: /^Example Library collaborations and support/ });
     expect(library.getAttribute("aria-pressed")).toBe("false");
     expect(library.textContent).toContain("190");
-    expect(screen.getByRole("button", { name: /Example Imaging Core collaborations/ })).toBeTruthy();
+    const core = screen.getByRole("button", { name: /^Example Imaging Core collaborations/ });
+    expect(core.textContent).not.toContain("support");
     expect(requests()[0].searchParams.has("service")).toBe(false);
   });
 
@@ -214,7 +253,7 @@ describe("FamilyPublicationFeed with services", () => {
     const rows = screen.getAllByRole("listitem");
     const badges = (i: number) =>
       within(rows[i]).queryAllByTestId("pub-service-badge").map((b) => b.textContent);
-    expect(badges(0)).toEqual(["Example Library collaboration", "Example Imaging Core collaboration"]);
+    expect(badges(0)).toEqual(["Example Library support", "Example Imaging Core collaboration"]);
     expect(badges(1)).toEqual([]);
     expect(badges(2)).toEqual(["Example Library collaboration"]);
   });
@@ -239,11 +278,67 @@ describe("FamilyPublicationFeed with services", () => {
     expect(library.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByTestId("publications-count").textContent).toBe("3 of 1,159 publications");
     expect(screen.getAllByRole("status").map((el) => el.textContent)).toContain(
-      "Showing Example Library collaborations",
+      "Showing Example Library collaborations and support",
     );
     // Pressing it again clears the filter.
     fireEvent.click(library);
     expect(replaceSpy).toHaveBeenCalledWith("/methods/sc/fam-fam_1", { scroll: false });
+  });
+
+  it("a service with only support is called '{Unit} support', in the filter and the empty text", async () => {
+    search = new URLSearchParams("service=7");
+    fetchSpy.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hits: [],
+        total: 0,
+        totalAllTypes: 1200,
+        totalResearchOnly: 1159,
+        page: 1,
+        pageSize: 20,
+        services: [{ id: 7, label: "Example Library", count: 30, collaborations: 0, support: 30 }],
+      }),
+    }));
+    renderFeed([{ id: 7, label: "Example Library", count: 30, collaborations: 0, support: 30 }]);
+    await screen.findByText("No Example Library support in this view.");
+    const filter = screen.getByTestId("service-filter-7");
+    expect(filter.textContent).toContain("Example Library support");
+    expect(filter.textContent).not.toContain("collaborations");
+    expect(screen.getAllByRole("status").map((el) => el.textContent)).toContain(
+      "Showing Example Library support",
+    );
+  });
+
+  it("the filter's name follows the response's counts for the view", async () => {
+    // Default view: only collaborations. Under all types the response adds support.
+    renderFeed([{ id: 7, label: "Example Library", count: 12, collaborations: 12, support: 0 }]);
+    await screen.findByText("Example paper 101");
+    expect(screen.getByTestId("service-filter-7").textContent).toContain(
+      "Example Library collaborations and support",
+    );
+  });
+
+  it("a response without the split (an older task mid-deploy) reads as collaborations", async () => {
+    fetchSpy.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        hits: [hit("101", { serviceIds: [7] })],
+        total: 1,
+        totalAllTypes: 1200,
+        totalResearchOnly: 1159,
+        page: 1,
+        pageSize: 20,
+        services: [{ id: 7, label: "Example Library", count: 190 }],
+      }),
+    }));
+    renderFeed(SERVICES);
+    await screen.findByText("Example paper 101");
+    const text = screen.getByTestId("service-filter-7").textContent ?? "";
+    expect(text).toContain("Example Library collaborations");
+    expect(text).not.toContain("support");
+    expect(screen.getByTestId("pub-service-badge").textContent).toBe("Example Library collaboration");
   });
 
   it("ignores a ?service= that is not one of the page's services", async () => {

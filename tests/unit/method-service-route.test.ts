@@ -30,6 +30,7 @@ const m = vi.hoisted(() => ({
   logEditDenial: vi.fn(),
   resolveEditIdentity: vi.fn(),
   loadServiceReview: vi.fn(),
+  fetchAffiliations: vi.fn(),
 }));
 
 vi.mock("@/lib/edit/request", async (importOriginal) => ({
@@ -48,6 +49,8 @@ vi.mock("@/lib/edit/authz", async (importOriginal) => ({
   logEditDenial: m.logEditDenial,
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: m.appendAuditRow }));
+// PubMed: never the network. The matching itself stays real.
+vi.mock("@/lib/edit/pubmed-affiliations", () => ({ fetchAuthorAffiliations: m.fetchAffiliations }));
 vi.mock("@/lib/db", () => {
   const read = {
     department: { findUnique: m.deptFindUnique },
@@ -97,6 +100,8 @@ function row(over: Record<string, unknown> = {}) {
     supportedPmids: ["111", "222"],
     excludedPmids: [],
     countStaffPapers: false,
+    affiliationPhrases: [],
+    coauthoredPmids: [],
     ...over,
   };
 }
@@ -112,10 +117,13 @@ const CREATE = {
 
 /** No role of any kind unless a test grants one. */
 const NOBODY = { isSuperuser: false, isCommsSteward: false };
+const SUPERUSER = { isSuperuser: true };
+/** Who `call` signs in when a test names nobody. */
+let defaultSession: Record<string, unknown> = NOBODY;
 
 async function call(
   body: Record<string, unknown>,
-  session: Record<string, unknown> = NOBODY,
+  session: Record<string, unknown> = defaultSession,
   identity: { realCwid?: string; impersonatedCwid?: string | null } = {},
 ) {
   m.readEditRequest.mockResolvedValue({
@@ -149,6 +157,9 @@ function grantDepartment(code: string, role: "owner" | "curator") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  defaultSession = NOBODY;
+  m.fetchAffiliations.mockResolvedValue(new Map());
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.stubEnv("METHOD_SERVICES", "on");
   vi.stubEnv("METHODS_LENS_PAGES", "on");
   vi.stubEnv("METHODS_LENS_ENABLED", "on");
@@ -231,91 +242,73 @@ describe("POST /api/edit/method-service: gates", () => {
   });
 });
 
-describe("POST /api/edit/method-service: who may create", () => {
-  it("a department owner can", async () => {
+describe("POST /api/edit/method-service: superuser only", () => {
+  const ALL_OPS: Array<[string, Record<string, unknown>]> = [
+    ["create", CREATE],
+    ["create on a core", { ...CREATE, entityType: "core", entityId: CORE }],
+    ["update", { op: "update", id: 5, name: "Renamed" }],
+    ["delete", { op: "delete", id: 5 }],
+    ["exclude", { op: "exclude", id: 5, pmid: "111" }],
+    ["restore", { op: "restore", id: 5, pmid: "111" }],
+  ];
+
+  it.each(ALL_OPS)("a superuser can %s", async (_label, body) => {
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: body.op === "restore" ? ["111"] : [] }));
+    const res = await call(body, SUPERUSER);
+    expect(res.status).toBe(200);
+    expect(m.transaction).toHaveBeenCalledTimes(1);
+    expect(m.logEditDenial).not.toHaveBeenCalled();
+  });
+
+  it.each(ALL_OPS)("a unit owner gets 403 on %s, logged, with no write", async (_label, body) => {
+    // Owner of the department AND of the core: neither grant opens anything.
     grantDepartment(DEPT_A, "owner");
-    const res = await call(CREATE);
-    expect(res.status).toBe(200);
-    expect(m.txCreate).toHaveBeenCalledTimes(1);
-  });
-
-  it("a department curator can", async () => {
-    grantDepartment(DEPT_A, "curator");
-    const res = await call(CREATE);
-    expect(res.status).toBe(200);
-    expect(m.txCreate).toHaveBeenCalledTimes(1);
-  });
-
-  it("an outsider gets 403 and the denial is logged, with no write", async () => {
-    const res = await call(CREATE);
+    m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    const res = await call(body);
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "not_curator" });
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_superuser" });
     expect(m.logEditDenial).toHaveBeenCalledWith({
       actorCwid: ACTOR,
-      targetCwid: DEPT_A,
+      targetCwid: ACTOR,
       path: "/api/edit/method-service",
-      reason: "not_curator",
-      targetEntityType: "department",
-      targetEntityId: DEPT_A,
+      reason: "not_superuser",
     });
     expect(m.transaction).not.toHaveBeenCalled();
     expect(m.appendAuditRow).not.toHaveBeenCalled();
-  });
-
-  it("an editor of another department gets 403", async () => {
-    grantDepartment(DEPT_B, "owner");
-    const res = await call(CREATE);
-    expect(res.status).toBe(403);
-    expect(m.transaction).not.toHaveBeenCalled();
-  });
-
-  it("a core owner can, and a core curator can", async () => {
-    for (const role of ["owner", "curator"]) {
-      m.unitAdminFindUnique.mockResolvedValue({ role });
-      const res = await call({ ...CREATE, entityType: "core", entityId: CORE });
-      expect(res.status).toBe(200);
-    }
-    expect(m.unitAdminFindUnique).toHaveBeenCalledWith({
-      where: { entityType_entityId_cwid: { entityType: "core", entityId: CORE, cwid: ACTOR } },
-      select: { role: true },
-    });
-    expect(m.txCreate).toHaveBeenCalledTimes(2);
-  });
-
-  it("a Cores director can, with no grant on the core", async () => {
-    const res = await call({ ...CREATE, entityType: "core", entityId: CORE }, { isCoreDirector: true });
-    expect(res.status).toBe(200);
+    expect(m.bustCache).not.toHaveBeenCalled();
+    // Refused before anything is looked up: no probing for a unit or a service.
+    expect(m.deptFindUnique).not.toHaveBeenCalled();
+    expect(m.coreFindUnique).not.toHaveBeenCalled();
+    expect(m.serviceFindUnique).not.toHaveBeenCalled();
+    expect(m.unitAdminFindMany).not.toHaveBeenCalled();
     expect(m.unitAdminFindUnique).not.toHaveBeenCalled();
   });
 
-  it("a Cores director has no say over a department", async () => {
-    const res = await call(CREATE, { isCoreDirector: true });
-    expect(res.status).toBe(403);
-  });
-
-  it("an outsider to a core gets 403 not_core_owner, logged", async () => {
-    const res = await call({ ...CREATE, entityType: "core", entityId: CORE });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "not_core_owner" });
-    expect(m.logEditDenial).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "not_core_owner", targetEntityType: "core", targetEntityId: CORE }),
-    );
+  it.each([
+    { isCommsSteward: true },
+    { isContentEditor: true },
+    { isCoreDirector: true },
+    { isCommsSteward: true, isObserver: true },
+  ])("%o gets 403 on every op", async (session) => {
+    for (const [, body] of ALL_OPS) {
+      const res = await call(body, session);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "not_superuser" });
+    }
     expect(m.transaction).not.toHaveBeenCalled();
   });
 
-  it("a department grant with the core's id does not open the core", async () => {
-    grantDepartment(CORE, "owner");
-    const res = await call({ ...CREATE, entityType: "core", entityId: CORE });
+  it("an unknown op from someone who is not a superuser is a 403, not a 400", async () => {
+    const res = await call({ op: "merge" });
     expect(res.status).toBe(403);
   });
 
-  it.each([{ isSuperuser: true }, { isCommsSteward: true }, { isContentEditor: true }])(
-    "%o can, on a department and on a core, with no grant",
-    async (session) => {
-      expect((await call(CREATE, session)).status).toBe(200);
-      expect((await call({ ...CREATE, entityType: "core", entityId: CORE }, session)).status).toBe(200);
-    },
-  );
+  it("View as: the verdict is the viewed person's, so a superuser viewing a unit owner is refused", async () => {
+    // `readEditRequest` hands the route the EFFECTIVE session.
+    const res = await call(CREATE, NOBODY, { realCwid: "real001", impersonatedCwid: ACTOR });
+    expect(res.status).toBe(403);
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/edit/method-service: create", () => {
@@ -338,6 +331,9 @@ describe("POST /api/edit/method-service: create", () => {
         families: [FAM],
         supportedPmids: ["111", "222"],
         excludedPmids: [],
+        affiliationPhrases: [],
+        coauthoredPmids: [],
+        affiliationCheckedPmids: [],
         countStaffPapers: false,
         addedBy: ACTOR, // the EFFECTIVE actor
       },
@@ -418,6 +414,16 @@ describe("POST /api/edit/method-service: create", () => {
     ["a malformed family", { families: [{ supercategory: "x" }] }, "invalid_value", "families"],
     ["a token that is not a PMID", { supportedPmids: ["111", "abc"] }, "invalid_pmids", "supportedPmids"],
     ["excludedPmids on create", { excludedPmids: ["111"] }, "invalid_value", "excludedPmids"],
+    ["coauthoredPmids from the client", { coauthoredPmids: ["111"] }, "invalid_value", "coauthoredPmids"],
+    ["a phrase under 3 characters", { affiliationPhrases: ["ab"] }, "phrase_too_short", "affiliationPhrases"],
+    ["a phrase over 120 characters", { affiliationPhrases: ["x".repeat(121)] }, "phrase_too_long", "affiliationPhrases"],
+    [
+      "more than 10 phrases",
+      { affiliationPhrases: Array.from({ length: 11 }, (_, i) => `Example unit ${i}`) },
+      "too_many_phrases",
+      "affiliationPhrases",
+    ],
+    ["phrases that are not strings", { affiliationPhrases: [1] }, "invalid_value", "affiliationPhrases"],
   ])("400s %s", async (_label, over, error, field) => {
     const res = await call({ ...CREATE, ...over }, SU);
     expect(res.status).toBe(400);
@@ -486,37 +492,12 @@ describe("POST /api/edit/method-service: create", () => {
 });
 
 describe("POST /api/edit/method-service: update and delete use the STORED row's unit", () => {
-  it("a department A editor cannot update department B's row, even if the body names A", async () => {
-    grantDepartment(DEPT_A, "owner");
+  it("an update never changes the owner, and is audited against the stored unit", async () => {
     m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
-    const res = await call({ op: "update", id: 5, entityType: "department", entityId: DEPT_A, name: "Hijacked" });
-    expect(res.status).toBe(403);
-    expect(m.logEditDenial).toHaveBeenCalledWith(
-      expect.objectContaining({ targetEntityType: "department", targetEntityId: DEPT_B }),
+    const res = await call(
+      { op: "update", id: 5, entityType: "core", entityId: CORE, name: "Renamed" },
+      SUPERUSER,
     );
-    expect(m.transaction).not.toHaveBeenCalled();
-  });
-
-  it("a department A editor cannot delete department B's row, even if the body names A", async () => {
-    grantDepartment(DEPT_A, "curator");
-    m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
-    const res = await call({ op: "delete", id: 5, entityType: "department", entityId: DEPT_A });
-    expect(res.status).toBe(403);
-    expect(m.transaction).not.toHaveBeenCalled();
-  });
-
-  it("a department editor cannot touch a core's row by naming their department", async () => {
-    grantDepartment(DEPT_A, "owner");
-    m.serviceFindUnique.mockResolvedValue(row({ entityType: "core", entityId: CORE }));
-    const res = await call({ op: "update", id: 5, entityType: "department", entityId: DEPT_A, name: "X" });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "not_core_owner" });
-  });
-
-  it("the row's own editor can update it, and the owner never changes", async () => {
-    grantDepartment(DEPT_B, "curator");
-    m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
-    const res = await call({ op: "update", id: 5, entityType: "core", entityId: CORE, name: "Renamed" });
     expect(res.status).toBe(200);
     expect(m.txUpdate).toHaveBeenCalledWith({
       where: { id: 5 },
@@ -637,8 +618,7 @@ describe("POST /api/edit/method-service: update", () => {
 
 describe("POST /api/edit/method-service: delete", () => {
   it("hard-deletes and audits the row that was there", async () => {
-    grantDepartment(DEPT_A, "owner");
-    const res = await call({ op: "delete", id: 5 });
+    const res = await call({ op: "delete", id: 5 }, SUPERUSER);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, id: 5, changed: true });
     expect(m.txDelete).toHaveBeenCalledWith({ where: { id: 5 } });
@@ -656,16 +636,12 @@ describe("POST /api/edit/method-service: delete", () => {
       requestId: "req-1",
     });
   });
-
-  it("an outsider cannot delete", async () => {
-    const res = await call({ op: "delete", id: 5 });
-    expect(res.status).toBe(403);
-    expect(m.txDelete).not.toHaveBeenCalled();
-  });
 });
 
 describe("POST /api/edit/method-service: exclude (Not ours) and restore (undo)", () => {
-  beforeEach(() => grantDepartment(DEPT_A, "curator"));
+  beforeEach(() => {
+    defaultSession = SUPERUSER;
+  });
 
   it("exclude adds the PMID to the stored excluded list and audits it in the same transaction", async () => {
     m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: ["900"] }));
@@ -837,42 +813,6 @@ describe("POST /api/edit/method-service: exclude (Not ours) and restore (undo)",
     expect(m.appendAuditRow).not.toHaveBeenCalled();
   });
 
-  it("an outsider gets 403 for exclude and for restore, logged, with no write", async () => {
-    m.unitAdminFindMany.mockResolvedValue([]);
-    for (const op of ["exclude", "restore"]) {
-      const res = await call({ op, id: 5, pmid: "111" });
-      expect(res.status).toBe(403);
-      expect(await res.json()).toMatchObject({ ok: false, error: "not_curator" });
-    }
-    expect(m.logEditDenial).toHaveBeenCalledTimes(2);
-    expect(m.logEditDenial).toHaveBeenCalledWith(
-      expect.objectContaining({ actorCwid: ACTOR, targetEntityType: "department", targetEntityId: DEPT_A }),
-    );
-    expect(m.transaction).not.toHaveBeenCalled();
-    expect(m.appendAuditRow).not.toHaveBeenCalled();
-  });
-
-  it("is authorized against the STORED row: department A's editor cannot exclude from department B's service, whatever the body names", async () => {
-    m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
-    const res = await call({
-      op: "exclude",
-      id: 5,
-      pmid: "111",
-      entityType: "department",
-      entityId: DEPT_A,
-    });
-    expect(res.status).toBe(403);
-    expect(m.transaction).not.toHaveBeenCalled();
-  });
-
-  it("a department editor cannot exclude from a core's service", async () => {
-    m.serviceFindUnique.mockResolvedValue(row({ entityType: "core", entityId: CORE }));
-    const res = await call({ op: "exclude", id: 5, pmid: "111" });
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "not_core_owner" });
-    expect(m.transaction).not.toHaveBeenCalled();
-  });
-
   it("404s an id with no row", async () => {
     m.serviceFindUnique.mockResolvedValue(null);
     const res = await call({ op: "exclude", id: 5, pmid: "111" });
@@ -888,7 +828,7 @@ describe("POST /api/edit/method-service: exclude (Not ours) and restore (undo)",
 });
 
 describe("GET /api/edit/method-service: the review numbers", () => {
-  const REVIEW = { collaborations: 2, supportedListed: 2, supportedOnPage: 1, perMethod: [], marked: [], excluded: [] };
+  const REVIEW = { collaborations: 2, support: 1, supportedListed: 2, supportedOnPage: 1, perMethod: [], marked: [], excluded: [] };
   const get = (query = "?id=5") =>
     GET(new NextRequest(`http://localhost/api/edit/method-service${query}`));
   const signIn = (session: Record<string, unknown> = {}) =>
@@ -916,12 +856,13 @@ describe("GET /api/edit/method-service: the review numbers", () => {
   });
 
   it.each(["", "?id=0", "?id=abc", "?id=5%20OR%201"])("400s query %j", async (query) => {
+    signIn(SUPERUSER);
     expect((await get(query)).status).toBe(400);
     expect(m.serviceFindUnique).not.toHaveBeenCalled();
   });
 
-  it("the unit's editor gets the review, uncached", async () => {
-    grantDepartment(DEPT_A, "curator");
+  it("a superuser gets the review, uncached", async () => {
+    signIn(SUPERUSER);
     const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
@@ -929,38 +870,325 @@ describe("GET /api/edit/method-service: the review numbers", () => {
     expect(m.loadServiceReview).toHaveBeenCalledWith(expect.objectContaining({ id: 5, entityId: DEPT_A }));
   });
 
-  it("an outsider gets 403 and the review is never loaded", async () => {
+  it("a unit owner gets 403, and neither the service nor the review is read", async () => {
+    grantDepartment(DEPT_A, "owner");
     const res = await get();
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "not_superuser" });
+    expect(m.serviceFindUnique).not.toHaveBeenCalled();
     expect(m.loadServiceReview).not.toHaveBeenCalled();
-    expect(m.logEditDenial).toHaveBeenCalled();
+    expect(m.logEditDenial).toHaveBeenCalledWith(
+      expect.objectContaining({ actorCwid: ACTOR, reason: "not_superuser" }),
+    );
   });
 
-  it("is authorized against the stored row's unit, not the caller's", async () => {
-    grantDepartment(DEPT_A, "owner");
-    m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
-    expect((await get()).status).toBe(403);
-    expect(m.loadServiceReview).not.toHaveBeenCalled();
-  });
-
-  it("an observer's read-only steward view does not open it, as it does not open a write", async () => {
-    signIn({ isCommsSteward: true, isObserver: true });
+  it.each([
+    { isCommsSteward: true },
+    { isContentEditor: true },
+    { isCoreDirector: true },
+    { isCommsSteward: true, isObserver: true },
+  ])("%o gets 403", async (session) => {
+    signIn(session);
     const res = await get();
     expect(res.status).toBe(403);
     expect(m.loadServiceReview).not.toHaveBeenCalled();
   });
 
   it("404s an id with no row", async () => {
-    grantDepartment(DEPT_A, "curator");
+    signIn(SUPERUSER);
     m.serviceFindUnique.mockResolvedValue(null);
     expect((await get()).status).toBe(404);
   });
 
   it("500s read_failed when the loader throws", async () => {
-    grantDepartment(DEPT_A, "curator");
+    signIn(SUPERUSER);
     m.loadServiceReview.mockRejectedValue(new Error("boom"));
     const res = await get();
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "read_failed" });
+  });
+});
+
+describe("POST /api/edit/method-service: co-authors from PubMed affiliations", () => {
+  const PHRASE = "Example Health Sciences Library";
+  const MATCH = ["Department of Examples, Example University.", "example health  sciences LIBRARY, Example City."];
+  const NO_MATCH = ["Department of Examples, Example University."];
+  /** What `fetchAuthorAffiliations` hands back: an answer for each PMID given
+   *  that is in `known`, and `complete` only when that is all of them. */
+  const answers =
+    (known: Record<string, string[]>, error?: string) =>
+    async (pmids: string[]) => {
+      const affiliations = new Map(pmids.filter((p) => p in known).map((p) => [p, known[p]]));
+      return {
+        affiliations,
+        complete: affiliations.size === pmids.length,
+        ...(error ? { error } : {}),
+      };
+    };
+  const checkedRow = (over: Record<string, unknown> = {}) =>
+    row({
+      affiliationPhrases: [PHRASE],
+      coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+      ...over,
+    });
+  beforeEach(() => {
+    defaultSession = SUPERUSER;
+    m.fetchAffiliations.mockImplementation(answers({ "111": MATCH, "222": NO_MATCH }));
+  });
+
+  it("create stores the phrases, the supported PMIDs with a matching author, and what was checked", async () => {
+    const res = await call({ ...CREATE, supportedPmids: ["111", "222"], affiliationPhrases: [` ${PHRASE} `] });
+    expect(res.status).toBe(200);
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+      affiliationPhrases: [PHRASE],
+      coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+    });
+    const body = await res.json();
+    expect(body.service).toMatchObject({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"] });
+    // Server-only bookkeeping: never in the view.
+    expect(body.service).not.toHaveProperty("affiliationCheckedPmids");
+    expect(body).not.toHaveProperty("warning");
+    expect(body).not.toHaveProperty("pubmed");
+    expect(m.appendAuditRow.mock.calls[0][1].afterValues).toMatchObject({
+      affiliationPhrases: [PHRASE],
+      coauthoredPmidCount: 1,
+      affiliationCheckedPmidCount: 2,
+    });
+  });
+
+  it("no phrases: an empty set, and PubMed is not asked", async () => {
+    await call({ ...CREATE, supportedPmids: ["111", "222"] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+      coauthoredPmids: [],
+      affiliationCheckedPmids: [],
+    });
+  });
+
+  it("no supported PMIDs: an empty set, and PubMed is not asked", async () => {
+    await call({ ...CREATE, affiliationPhrases: [PHRASE] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    expect(m.txCreate.mock.calls[0][0].data.coauthoredPmids).toEqual([]);
+  });
+
+  it("the client cannot set coauthoredPmids, on create or on update", async () => {
+    for (const body of [
+      { ...CREATE, coauthoredPmids: ["222"] },
+      { op: "update", id: 5, name: "Renamed", coauthoredPmids: ["222"] },
+    ]) {
+      const res = await call(body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_value", field: "coauthoredPmids" });
+    }
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("update: new phrases are matched against the STORED supported list", async () => {
+    const res = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
+    expect(res.status).toBe(200);
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: [PHRASE],
+      coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+    });
+  });
+
+  it("update: a longer supported list asks PubMed for the NEW pmids only, against the STORED phrases", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    m.fetchAffiliations.mockImplementation(answers({ "333": [`${PHRASE}, Example City.`] }));
+    await call({ op: "update", id: 5, supportedPmids: ["222", "333"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["333"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      supportedPmids: ["222", "333"],
+      coauthoredPmids: ["333"],
+      affiliationCheckedPmids: ["222", "333"],
+    });
+  });
+
+  it("update: removing every phrase empties both sets without asking PubMed", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    await call({ op: "update", id: 5, affiliationPhrases: [] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: [],
+      coauthoredPmids: [],
+      affiliationCheckedPmids: [],
+    });
+  });
+
+  it("update: an update that names neither list does not ask PubMed", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    await call({ op: "update", id: 5, name: "Renamed" });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ name: "Renamed" });
+  });
+
+  it("update: a fully checked list costs no PubMed request, even with the phrases resent", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    const res = await call({ op: "update", id: 5, name: "Renamed", affiliationPhrases: [PHRASE] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, changed: true });
+    expect(body).not.toHaveProperty("warning");
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ name: "Renamed" });
+  });
+
+  it("update: a changed phrase starts the check again from nothing", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    m.fetchAffiliations.mockImplementation(answers({ "111": NO_MATCH, "222": ["Example Core, Example City."] }));
+    await call({ op: "update", id: 5, affiliationPhrases: ["Example Core"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: ["Example Core"],
+      coauthoredPmids: ["222"],
+    });
+  });
+
+  it("update: an added phrase keeps the stored matches and re-checks only the rest", async () => {
+    m.serviceFindUnique.mockResolvedValue(checkedRow());
+    m.fetchAffiliations.mockImplementation(answers({ "222": ["Example Core, Example City."] }));
+    await call({ op: "update", id: 5, affiliationPhrases: [PHRASE, "Example Core"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      affiliationPhrases: [PHRASE, "Example Core"],
+      coauthoredPmids: ["111", "222"],
+    });
+  });
+
+  it("update: a retry after a failed check writes the sets alone, and audits it", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ affiliationPhrases: [PHRASE], coauthoredPmids: [] }));
+    const res = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
+    expect(await res.json()).toMatchObject({ ok: true, changed: true });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      coauthoredPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+    });
+    expect(m.appendAuditRow.mock.calls[0][1]).toMatchObject({
+      beforeValues: { coauthoredPmidCount: 0 },
+      afterValues: { coauthoredPmidCount: 1 },
+    });
+    expect(m.bustCache).toHaveBeenCalledTimes(1);
+  });
+
+  describe("when PubMed answers for only part of the list", () => {
+    it("keeps what it read, warns with the progress, and the next save asks for the rest only", async () => {
+      // The deadline passed after 111: nothing is known about 222 and 333.
+      m.fetchAffiliations.mockImplementation(answers({ "111": MATCH }, "The operation timed out"));
+      const first = await call({
+        ...CREATE,
+        supportedPmids: ["111", "222", "333"],
+        affiliationPhrases: [PHRASE],
+      });
+      expect(await first.json()).toMatchObject({
+        ok: true,
+        changed: true,
+        warning: "pubmed_incomplete",
+        pubmed: { checked: 1, total: 3 },
+      });
+      expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+        coauthoredPmids: ["111"],
+        affiliationCheckedPmids: ["111"],
+      });
+
+      m.serviceFindUnique.mockResolvedValue(
+        row({
+          supportedPmids: ["111", "222", "333"],
+          affiliationPhrases: [PHRASE],
+          coauthoredPmids: ["111"],
+          affiliationCheckedPmids: ["111"],
+        }),
+      );
+      m.fetchAffiliations.mockClear();
+      m.fetchAffiliations.mockImplementation(answers({ "222": NO_MATCH, "333": MATCH }));
+      const second = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["222", "333"]);
+      const body = await second.json();
+      expect(body).toMatchObject({ ok: true, changed: true });
+      expect(body).not.toHaveProperty("warning");
+      expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+        coauthoredPmids: ["111", "333"],
+        affiliationCheckedPmids: ["111", "222", "333"],
+      });
+    });
+
+    it("a PMID PubMed did not answer for never takes a stored match away", async () => {
+      // 111 was a match and is still checked. 333 is new, and PubMed's answer
+      // leaves it out: 111 stays, 333 stays unchecked, and the save warns.
+      m.serviceFindUnique.mockResolvedValue(checkedRow());
+      m.fetchAffiliations.mockImplementation(answers({}));
+      const res = await call({ op: "update", id: 5, supportedPmids: ["111", "222", "333"] });
+      expect(await res.json()).toMatchObject({
+        ok: true,
+        changed: true,
+        warning: "pubmed_unavailable",
+        pubmed: { checked: 2, total: 3 },
+      });
+      expect(m.txUpdate.mock.calls[0][0].data).toEqual({ supportedPmids: ["111", "222", "333"] });
+    });
+  });
+
+  describe("when PubMed cannot be read", () => {
+    beforeEach(() => {
+      m.fetchAffiliations.mockImplementation(answers({}, "EFetch 502"));
+    });
+
+    it("create still saves, with empty sets and a warning", async () => {
+      const res = await call({ ...CREATE, supportedPmids: ["111"], affiliationPhrases: [PHRASE] });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        ok: true,
+        changed: true,
+        warning: "pubmed_unavailable",
+        pubmed: { checked: 0, total: 1 },
+      });
+      expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+        affiliationPhrases: [PHRASE],
+        coauthoredPmids: [],
+        affiliationCheckedPmids: [],
+      });
+      expect(m.appendAuditRow).toHaveBeenCalledTimes(1);
+    });
+
+    it("a lookup that throws is handled the same way", async () => {
+      m.fetchAffiliations.mockRejectedValue(new Error("boom"));
+      const res = await call({ ...CREATE, supportedPmids: ["111"], affiliationPhrases: [PHRASE] });
+      expect(await res.json()).toMatchObject({ ok: true, warning: "pubmed_unavailable" });
+    });
+
+    it("update still saves the rest, keeps the stored sets, and warns", async () => {
+      const stored = checkedRow();
+      m.serviceFindUnique.mockResolvedValue(stored);
+      m.txUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => ({
+        ...stored,
+        ...args.data,
+      }));
+      const res = await call({ op: "update", id: 5, name: "Renamed", supportedPmids: ["111", "222", "333"] });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: true, changed: true, warning: "pubmed_unavailable" });
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["333"]);
+      // Not in the write at all: the columns keep their previous values.
+      expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+        name: "Renamed",
+        supportedPmids: ["111", "222", "333"],
+      });
+      expect(body.service.coauthoredPmids).toEqual(["111"]);
+      expect(m.bustCache).toHaveBeenCalledTimes(1);
+    });
+
+    it("an update with nothing else to save is no write, and still warns", async () => {
+      m.serviceFindUnique.mockResolvedValue(
+        row({ affiliationPhrases: [PHRASE], coauthoredPmids: ["111"], affiliationCheckedPmids: ["111"] }),
+      );
+      const res = await call({ op: "update", id: 5, affiliationPhrases: [PHRASE] });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ ok: true, changed: false, warning: "pubmed_unavailable" });
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
+      expect(m.transaction).not.toHaveBeenCalled();
+    });
   });
 });

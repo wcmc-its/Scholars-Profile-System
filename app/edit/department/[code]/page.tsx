@@ -90,9 +90,12 @@ export default async function EditDepartmentPage({
     session.isObserver === true &&
     (await loadUnitEditContext("department", code, stripObserverView(session), db.read)) === null;
   const viceChairs = isUnitLeadershipEnabled() ? await loadUnitLeadershipRoles(code, db.read) : null;
-  const methodServices = isMethodServicesEnabled()
-    ? await loadMethodServicesForUnit("department", code)
-    : null;
+  // Method services are managed by a superuser only (never the unit's own
+  // editors): no section for anyone else, as `/api/edit/method-service` 403s.
+  const methodServices =
+    isMethodServicesEnabled() && session.isSuperuser
+      ? await loadMethodServicesForUnit("department", code)
+      : null;
   return (
     <UnitEditPage
       ctx={ctx}

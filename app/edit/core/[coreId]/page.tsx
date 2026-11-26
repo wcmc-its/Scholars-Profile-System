@@ -159,8 +159,11 @@ export default async function EditCorePage({
     loadConsoleTabs(session, db.read),
     // The Staff section's curated list (Scholar, then ED, names).
     loadCoreStaff(coreId),
-    // The Method services section; null (no section) while the flag is off.
-    isMethodServicesEnabled() ? loadMethodServicesForUnit("core", coreId) : Promise.resolve(null),
+    // The Method services section; null (no section) while the flag is off,
+    // and for anyone but a superuser, who alone manages method services.
+    isMethodServicesEnabled() && session.isSuperuser
+      ? loadMethodServicesForUnit("core", coreId)
+      : Promise.resolve(null),
   ]);
   if (!core) notFound();
   const candidates = queue?.candidates ?? [];

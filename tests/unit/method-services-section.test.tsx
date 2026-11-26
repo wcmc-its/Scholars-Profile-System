@@ -41,6 +41,8 @@ const SERVICE: MethodServiceView = {
   supportedPmids: ["111", "222", "333"],
   excludedPmids: [],
   countStaffPapers: false,
+  affiliationPhrases: [],
+  coauthoredPmids: [],
 };
 
 const fetchMock = vi.fn();
@@ -86,6 +88,8 @@ const nameInput = () => screen.getByLabelText("Service name") as HTMLInputElemen
 const urlInput = () => screen.getByLabelText(/^Service page/) as HTMLInputElement;
 const picker = () => screen.getByRole("combobox", { name: /Methods this service supports/ }) as HTMLInputElement;
 const pmidBox = () => screen.getByLabelText(/^Publications this service supported/) as HTMLTextAreaElement;
+const phraseBox = () =>
+  screen.getByLabelText(/^Affiliation text that identifies your unit’s authors in PubMed/) as HTMLTextAreaElement;
 const form = () => within(screen.getByTestId("method-service-form"));
 const isDirty = () => screen.getByTestId("unsaved-guard").getAttribute("data-dirty") === "true";
 
@@ -102,7 +106,10 @@ describe("MethodServicesSection: list", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Method services" }).id).toBe(
       "method-services-heading",
     );
-    expect(screen.getByText(/Services your unit offers for a research method\./)).toBeTruthy();
+    const help = screen.getByText(/Services this unit offers for a research method\./).textContent ?? "";
+    // Says who manages it, and never that it is the unit's own to maintain.
+    expect(help).toContain("Only a superuser can see or change this section");
+    expect(help).not.toMatch(/your unit|your service/);
   });
 
   it("lists a service: name, safe new-tab link, family chips, supported-list count", () => {
@@ -114,7 +121,7 @@ describe("MethodServicesSection: list", () => {
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toContain("noopener");
     expect(within(row.getByRole("list")).getByText("Example review methods")).toBeTruthy();
-    expect(row.getByText("3 publications on your supported list")).toBeTruthy();
+    expect(row.getByText("3 publications on the supported list")).toBeTruthy();
     expect(row.getByRole("button", { name: "Edit Example review service" })).toBeTruthy();
     expect(row.getByRole("button", { name: "Remove Example review service" })).toBeTruthy();
   });
@@ -126,7 +133,7 @@ describe("MethodServicesSection: list", () => {
         { ...SERVICE, id: 6, name: "Other service", supportedPmids: [] },
       ],
     });
-    expect(screen.getByText("1 publication on your supported list")).toBeTruthy();
+    expect(screen.getByText("1 publication on the supported list")).toBeTruthy();
     expect(screen.queryByTestId("method-service-supported-6")).toBeNull();
   });
 
@@ -155,6 +162,10 @@ describe("MethodServicesSection: form", () => {
     expect(screen.getByRole("checkbox", { name: /Also count publications co-authored by people in our unit/ })).toBeTruthy();
     expect(screen.getByText(/Leave off if only some of your unit works on this service\./)).toBeTruthy();
     expect(screen.getByText(/Add PMIDs for work you supported without authorship/)).toBeTruthy();
+    expect(phraseBox().value).toBe("");
+    const hint = document.getElementById(phraseBox().getAttribute("aria-describedby")!)!;
+    expect(hint.textContent).toMatch(/catches staff who are not faculty and people who have left/);
+    expect(screen.getByText(/one phrase per line/)).toBeTruthy();
   });
 
   it("defaults the staff-papers checkbox off for a department and on for a core", () => {
@@ -172,11 +183,11 @@ describe("MethodServicesSection: form", () => {
     expect(preview.textContent).toContain("WCM services for this method");
     expect(preview.textContent).toContain("Offered by the Example Library");
     expect(preview.textContent).toContain(
-      "The Example Library collaborated on N of the M publications listed here.",
+      "The Example Library collaborated on N and supported S of the M publications listed here.",
     );
     fireEvent.change(nameInput(), { target: { value: "Data consultations" } });
     expect(preview.textContent).toContain("Data consultations ↗");
-    expect(screen.getByText(/The count is worked out from your unit’s people and your supported list/)).toBeTruthy();
+    expect(screen.getByText(/worked out from the unit’s people, the supported list and the\s+affiliation text/)).toBeTruthy();
   });
 
   it("does not double the article for a unit named 'The …'", () => {
@@ -371,9 +382,14 @@ describe("MethodServicesSection: add", () => {
       supportedPmids: ["111", "222"],
       excludedPmids: [],
       countStaffPapers: true,
+      affiliationPhrases: ["Example Health Sciences Library", "Example Library"],
+      coauthoredPmids: ["111"],
     };
     writeResponse = { status: 200, body: { ok: true, changed: true, service: created } };
     renderSection();
+    fireEvent.change(phraseBox(), {
+      target: { value: " Example  Health Sciences Library \n\nExample Library\n" },
+    });
 
     fireEvent.change(nameInput(), { target: { value: "  Data consultations " } });
     fireEvent.change(urlInput(), { target: { value: "https://example.org/data" } });
@@ -394,8 +410,13 @@ describe("MethodServicesSection: add", () => {
         families: [FAM_2],
         supportedPmids: ["111", "222"],
         countStaffPapers: true,
+        affiliationPhrases: ["Example Health Sciences Library", "Example Library"],
       },
     ]);
+    // Never the server's own field.
+    expect(writes()[0]).not.toHaveProperty("coauthoredPmids");
+    expect(screen.queryByTestId("method-service-warning")).toBeNull();
+    expect(phraseBox().value).toBe("");
     // Sorted by name: "Data…" before "Example…".
     const ids = [...screen.getByTestId("method-services-list").children].map((li) =>
       li.getAttribute("data-testid"),
@@ -430,14 +451,140 @@ describe("MethodServicesSection: add", () => {
   });
 
   it("shows a form-level alert for a failure with no field (403, network)", async () => {
-    writeResponse = { status: 403, body: { ok: false, error: "not_curator" } };
+    writeResponse = { status: 403, body: { ok: false, error: "not_superuser" } };
     renderSection({ services: [] });
     fireEvent.change(nameInput(), { target: { value: "X" } });
     fireEvent.change(urlInput(), { target: { value: "https://example.org" } });
     await search("exa");
     fireEvent.mouseDown(screen.getAllByRole("option")[0]);
     fireEvent.click(form().getByRole("button", { name: "Add service" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/don’t have access/);
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /Only a superuser can change method services/,
+    );
+  });
+});
+
+describe("MethodServicesSection: affiliation text and the PubMed check", () => {
+  const WITH_PHRASE: MethodServiceView = {
+    ...SERVICE,
+    affiliationPhrases: ["Example Health Sciences Library"],
+    coauthoredPmids: ["111"],
+  };
+
+  it("Edit loads the stored phrases, one per line", () => {
+    renderSection({
+      services: [{ ...WITH_PHRASE, affiliationPhrases: ["Example Health Sciences Library", "Example Library"] }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    expect(phraseBox().value).toBe("Example Health Sciences Library\nExample Library");
+    expect(isDirty()).toBe(false);
+    fireEvent.change(phraseBox(), { target: { value: "Example Library" } });
+    expect(isDirty()).toBe(true);
+  });
+
+  it("refuses a phrase that is too short before sending, on its own field", () => {
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(phraseBox(), { target: { value: "ab" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    expect(writes()).toEqual([]);
+    expect(phraseBox().getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById("method-service-phrases-error")!.textContent).toBe(
+      "Each phrase needs at least 3 characters.",
+    );
+    expect(document.activeElement).toBe(phraseBox());
+  });
+
+  it("a server error on affiliationPhrases lands on that field", async () => {
+    writeResponse = { status: 400, body: { ok: false, error: "too_many_phrases", field: "affiliationPhrases" } };
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(phraseBox(), { target: { value: "Example Library" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Use 10 phrases or fewer.");
+    expect(alert.id).toBe("method-service-phrases-error");
+  });
+
+  it("shows the warning when the save went through but PubMed could not be checked", async () => {
+    writeResponse = {
+      status: 200,
+      body: { ok: true, changed: true, warning: "pubmed_unavailable", service: { ...WITH_PHRASE, coauthoredPmids: [] } },
+    };
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(phraseBox(), { target: { value: "Example Health Sciences Library" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    const warning = await screen.findByTestId("method-service-warning");
+    expect(warning.textContent).toBe("Could not check PubMed for co-authors; try saving again");
+    // The save itself succeeded.
+    expect(screen.getByText("Saved Example review service.")).toBeTruthy();
+    expect(writes()).toEqual([
+      { op: "update", id: 5, affiliationPhrases: ["Example Health Sciences Library"] },
+    ]);
+  });
+
+  it("says how far the PubMed check has got when a long list needs another save", async () => {
+    writeResponse = {
+      status: 200,
+      body: {
+        ok: true,
+        changed: true,
+        warning: "pubmed_incomplete",
+        pubmed: { checked: 1800, total: 3200 },
+        service: WITH_PHRASE,
+      },
+    };
+    renderSection({ services: [WITH_PHRASE] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    const warning = await screen.findByTestId("method-service-warning");
+    expect(warning.textContent).toBe(
+      "Checked PubMed for co-authors on 1,800 of 3,200 supported publications so far; save again to check the rest",
+    );
+  });
+
+  it("saving again re-sends the unchanged phrases, which is what asks PubMed again, and clears the warning", async () => {
+    writeResponse = {
+      status: 200,
+      body: { ok: true, changed: false, warning: "pubmed_unavailable", service: WITH_PHRASE },
+    };
+    renderSection({ services: [WITH_PHRASE] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    await screen.findByTestId("method-service-warning");
+
+    writeResponse = { status: 200, body: { ok: true, changed: true, service: WITH_PHRASE } };
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByTestId("method-service-warning")).toBeNull());
+    expect(writes()).toEqual([
+      { op: "update", id: 5, affiliationPhrases: ["Example Health Sciences Library"] },
+      { op: "update", id: 5, affiliationPhrases: ["Example Health Sciences Library"] },
+    ]);
+  });
+
+  it("a service with no phrases sends none when something else changes", async () => {
+    writeResponse = { status: 200, body: { ok: true, changed: true, service: { ...SERVICE, name: "Renamed" } } };
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(nameInput(), { target: { value: "Renamed" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText("Saved Renamed.")).toBeTruthy());
+    expect(writes()).toEqual([{ op: "update", id: 5, name: "Renamed" }]);
+  });
+
+  it("clearing the phrases sends the empty list", async () => {
+    writeResponse = {
+      status: 200,
+      body: { ok: true, changed: true, service: { ...WITH_PHRASE, affiliationPhrases: [], coauthoredPmids: [] } },
+    };
+    renderSection({ services: [WITH_PHRASE] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(phraseBox(), { target: { value: "  \n" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText("Saved Example review service.")).toBeTruthy());
+    expect(writes()).toEqual([{ op: "update", id: 5, affiliationPhrases: [] }]);
   });
 });
 
@@ -470,7 +617,7 @@ describe("MethodServicesSection: edit", () => {
     expect(writes()).toEqual([{ op: "update", id: 5, name: "Renamed service", supportedPmids: ["111"] }]);
     const row = within(screen.getByTestId("method-service-5"));
     expect(row.getByText("Renamed service")).toBeTruthy();
-    expect(row.getByText("1 publication on your supported list")).toBeTruthy();
+    expect(row.getByText("1 publication on the supported list")).toBeTruthy();
     expect(form().getByRole("heading", { level: 3, name: "Add a service" })).toBeTruthy();
     expect(mockRefresh).toHaveBeenCalledTimes(1);
     await waitFor(() =>

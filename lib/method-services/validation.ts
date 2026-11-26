@@ -33,6 +33,11 @@ export type MethodServiceView = {
   supportedPmids: string[];
   excludedPmids: string[];
   countStaffPapers: boolean;
+  /** Text that identifies the unit's authors in a PubMed affiliation. */
+  affiliationPhrases: string[];
+  /** The supported PMIDs with an author whose PubMed affiliation contains one
+   *  of the phrases. Worked out by the server on save, never sent by a client. */
+  coauthoredPmids: string[];
 };
 
 /** One row of the family picker (`GET /api/edit/method-families`). */
@@ -45,6 +50,9 @@ export type MethodFamilyOption = MethodServiceFamily & {
 export const SERVICE_NAME_MAX_LENGTH = 255;
 export const SERVICE_FAMILIES_MAX = 25;
 export const SERVICE_PMIDS_MAX = 5000;
+export const SERVICE_PHRASES_MAX = 10;
+export const SERVICE_PHRASE_MIN_LENGTH = 3;
+export const SERVICE_PHRASE_MAX_LENGTH = 120;
 /** `scholar_family.supercategory` / `.family_label` column widths. */
 const SUPERCATEGORY_MAX_LENGTH = 128;
 const FAMILY_LABEL_MAX_LENGTH = 255;
@@ -176,4 +184,39 @@ export function validatePmidList(
   if (invalid.length > 0) return { ok: false, error: "invalid_pmids" };
   if (pmids.length > SERVICE_PMIDS_MAX) return { ok: false, error: "too_many_pmids" };
   return { ok: true, value: pmids };
+}
+
+/** The editor's textarea: one affiliation phrase per line, blank lines dropped. */
+export function parsePhraseBlock(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Affiliation phrases as the API receives them: an array of 0 to 10 strings,
+ * each 3 to 120 characters once trimmed and with runs of whitespace collapsed.
+ * Duplicates (ignoring case) collapse to the first. An empty string is an
+ * error, never silently dropped.
+ */
+export function validateAffiliationPhrases(
+  input: unknown,
+): Result<string[], "invalid_value" | "phrase_too_short" | "phrase_too_long" | "too_many_phrases"> {
+  if (!Array.isArray(input) || !input.every((v) => typeof v === "string")) {
+    return { ok: false, error: "invalid_value" };
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input as string[]) {
+    const phrase = raw.replace(/\s+/g, " ").trim();
+    if (phrase.length < SERVICE_PHRASE_MIN_LENGTH) return { ok: false, error: "phrase_too_short" };
+    if (phrase.length > SERVICE_PHRASE_MAX_LENGTH) return { ok: false, error: "phrase_too_long" };
+    const key = phrase.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(phrase);
+  }
+  if (out.length > SERVICE_PHRASES_MAX) return { ok: false, error: "too_many_phrases" };
+  return { ok: true, value: out };
 }

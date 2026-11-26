@@ -1589,9 +1589,13 @@ export type MethodPublicationHit = {
     /** #1168 — WS-C badge: "appears" (generic mention) vs "used" (default). */
     usage: "used" | "appears";
   }>;
-  /** METHOD_SERVICES — ids of the page's services whose unit collaborated on
-   *  this paper (the row's "{Unit} collaboration" badges). Absent when none. */
+  /** METHOD_SERVICES — ids of the page's services this paper is counted for
+   *  (the row's "{Unit} collaboration" / "{Unit} support" badges). Absent
+   *  when none. */
   serviceIds?: number[];
+  /** METHOD_SERVICES — the subset of `serviceIds` whose unit supported the
+   *  paper without authoring it ("{Unit} support"). Absent when none. */
+  supportServiceIds?: number[];
 };
 
 const PUB_SELECT = {
@@ -1749,10 +1753,17 @@ export type MethodPublicationsResult = {
   totalResearchOnly: number;
   page: number;
   pageSize: number;
-  /** METHOD_SERVICES — the page's visible services, each with its collaboration
-   *  count under the active publication-type filter. Absent when the flag is
-   *  off or the family has no visible service, so the payload is unchanged. */
-  services?: Array<{ id: number; label: string; count: number }>;
+  /** METHOD_SERVICES — the page's visible services, each with its counts under
+   *  the active publication-type filter: `count` is everything counted for
+   *  the service, `collaborations` + `support`. Absent when the flag is off or
+   *  the family has no visible service, so the payload is unchanged. */
+  services?: Array<{
+    id: number;
+    label: string;
+    count: number;
+    collaborations: number;
+    support: number;
+  }>;
 };
 
 /** One service in the method page's "WCM services for this method" block. */
@@ -1766,9 +1777,13 @@ export type FamilyServiceEntry = {
   unitHref: string | null;
   /** What the filter and the badge call the service (the unit's name). */
   label: string;
-  /** Collaborations among the publications the page lists by default: the N
-   *  beside the page's own research-article total. */
+  /** Everything counted for the service among the publications the page
+   *  lists by default: `collaborations` + `support`. */
   count: number;
+  /** The N of the sentence: someone from the unit is an author. */
+  collaborations: number;
+  /** The S of the sentence: supported without authorship. */
+  support: number;
 };
 
 /**
@@ -1797,6 +1812,8 @@ export async function getFamilyServices(
     unitHref: s.unitHref,
     label: s.label,
     count: s.researchCount,
+    collaborations: s.researchCollaborations,
+    support: s.researchSupport,
   }));
 }
 
@@ -1834,8 +1851,8 @@ export async function getFamilyPublications(
     /** TAXONOMY_FEED_LOAD_MORE — rows per page (route-validated: whole 20-row
      *  chunks, at most 200); `page` is 0-indexed in units of it. Default 20. */
     pageSize?: number;
-    /** METHOD_SERVICES — restrict the feed to the papers this service's unit
-     *  collaborated on. Like `entityId`, the family-level denominators stay
+    /** METHOD_SERVICES — restrict the feed to the papers counted for this
+     *  service (its unit's collaborations and support). Like `entityId`, the family-level denominators stay
      *  over the whole family. An id that is not a visible service of this
      *  family (unknown, another family's, a hidden unit's) yields an empty
      *  feed. Ignored while the flag is off. */
@@ -1956,8 +1973,14 @@ export async function getFamilyPublications(
         includeImpact,
         withAbstract.has(r.pmid),
       );
-      const serviceIds = services.filter((s) => s.marked.has(r.pmid)).map((s) => s.id);
-      if (serviceIds.length > 0) hit.serviceIds = serviceIds;
+      const counted = services.filter((s) => s.marked.has(r.pmid));
+      if (counted.length > 0) {
+        hit.serviceIds = counted.map((s) => s.id);
+        const support = counted
+          .filter((s) => s.marked.get(r.pmid)?.kind === "support")
+          .map((s) => s.id);
+        if (support.length > 0) hit.supportServiceIds = support;
+      }
       const usageFacts = factsByPmid?.get(r.pmid);
       return usageFacts?.length
         ? {
@@ -1983,6 +2006,8 @@ export async function getFamilyPublications(
             id: s.id,
             label: s.label,
             count: filter === "all" ? s.allCount : s.researchCount,
+            collaborations: filter === "all" ? s.allCollaborations : s.researchCollaborations,
+            support: filter === "all" ? s.allSupport : s.researchSupport,
           })),
         }
       : {}),

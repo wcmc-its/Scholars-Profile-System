@@ -127,7 +127,8 @@ export function CoreEditSections({
     },
   ];
   if (methodServices) {
-    // After Basics, as on a department's page.
+    // After Basics, as on a department's page. The page passes the list to a
+    // superuser only, who alone manages method services.
     sections.splice(1, 0, {
       id: "method-services",
       label: "Method services",
