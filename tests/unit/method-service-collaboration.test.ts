@@ -29,6 +29,7 @@ const base = {
   supportedPmids: [] as string[],
   excludedPmids: [] as string[],
   coauthoredPmids: [] as string[],
+  nameMatchedPmids: [] as string[],
   countStaffPapers: false,
   staffPmids: new Set<string>(),
   confirmedPmids: undefined as Set<string> | undefined,
@@ -146,6 +147,29 @@ describe("computeCollaboration: collaboration or support", () => {
     const input = { supportedPmids: ["101"], coauthoredPmids: ["101"] };
     expect(kinds(input)).toEqual({ "101": "collaboration" });
     expect(marked(input)).toEqual({ "101": "affiliation" });
+  });
+
+  it("author_name: a match found by a named author is a collaboration with its own reason", () => {
+    const input = {
+      supportedPmids: ["101", "102"],
+      coauthoredPmids: ["101", "102"],
+      nameMatchedPmids: ["102"],
+    };
+    expect(kinds(input)).toEqual({ "101": "collaboration", "102": "collaboration" });
+    expect(marked(input)).toEqual({ "101": "affiliation", "102": "author_name" });
+  });
+
+  it("author_name: a unit member in Scholars still wins, and a pmid off the supported list is not marked", () => {
+    expect(
+      marked({
+        supportedPmids: ["101"],
+        coauthoredPmids: ["101", "102"],
+        nameMatchedPmids: ["101", "102"],
+        staffPmids: new Set(["101"]),
+      }),
+    ).toEqual({ "101": "staff" });
+    // Not in the stored matches at all: the name list alone decides nothing.
+    expect(marked({ supportedPmids: ["101"], nameMatchedPmids: ["101"] })).toEqual({ "101": "supported" });
   });
 
   it("supported: on the supported list with no matching author, so it is support", () => {

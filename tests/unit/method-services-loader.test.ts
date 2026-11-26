@@ -42,7 +42,9 @@ const ROW = {
   excludedPmids: [],
   countStaffPapers: true,
   affiliationPhrases: ["Example Imaging Core"],
+  authorNames: ["Rivera Stone B"],
   coauthoredPmids: ["111"],
+  nameMatchedPmids: [],
 };
 
 beforeEach(() => {
@@ -92,6 +94,8 @@ describe("toMethodServiceView", () => {
         excludedPmids: ["222", 333, null],
         affiliationPhrases: null,
         coauthoredPmids: ["222", 7],
+        authorNames: "Rivera Stone B",
+        nameMatchedPmids: undefined,
       }),
     ).toMatchObject({
       families: [FAM],
@@ -99,6 +103,8 @@ describe("toMethodServiceView", () => {
       excludedPmids: ["222"],
       affiliationPhrases: [],
       coauthoredPmids: ["222"],
+      authorNames: [],
+      nameMatchedPmids: [],
     });
   });
 

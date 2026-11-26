@@ -4,8 +4,8 @@
  * MethodServicesSection — the "Method services" section of a department's and
  * a core's edit page: the services the unit offers for a research method
  * (name, https link, the method families it supports, an optional list of
- * supported PMIDs, and the affiliation text that tells which of those the
- * unit's own people co-authored).
+ * supported PMIDs, and the affiliation text and author names that tell which
+ * of those the unit's own people co-authored).
  *
  * SUPERUSER ONLY: the edit pages render it for a superuser and for nobody
  * else, and `/api/edit/method-service` refuses everyone else. A unit's own
@@ -41,6 +41,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { withArticle } from "@/lib/method-services/collaboration";
 import {
+  SERVICE_AUTHOR_NAMES_MAX,
+  SERVICE_AUTHOR_NAME_MAX_LENGTH,
+  SERVICE_AUTHOR_NAME_MIN_LENGTH,
   SERVICE_FAMILIES_MAX,
   SERVICE_NAME_MAX_LENGTH,
   SERVICE_PHRASES_MAX,
@@ -52,6 +55,7 @@ import {
   parsePhraseBlock,
   parsePmidBlock,
   validateAffiliationPhrases,
+  validateAuthorNames,
   validateServiceFamilies,
   validateServiceName,
   validateServiceUrl,
@@ -72,7 +76,7 @@ export type MethodServicesSectionProps = {
   headingId?: string;
 };
 
-type FieldKey = "name" | "url" | "families" | "pmids" | "phrases";
+type FieldKey = "name" | "url" | "families" | "pmids" | "phrases" | "authors";
 type Draft = {
   name: string;
   url: string;
@@ -80,6 +84,8 @@ type Draft = {
   pmidText: string;
   /** Affiliation phrases, one per line. */
   phraseText: string;
+  /** The unit's authors as PubMed lists them, one per line. */
+  authorText: string;
   countStaffPapers: boolean;
 };
 
@@ -101,7 +107,14 @@ export function pubmedWarningText(warning: string, progress?: PubMedProgress): s
 
 /** Rejected tokens listed in full up to this many; the rest are counted. */
 const INVALID_SHOWN = 12;
-const FIELD_ORDER: ReadonlyArray<FieldKey> = ["name", "url", "families", "pmids", "phrases"];
+const FIELD_ORDER: ReadonlyArray<FieldKey> = [
+  "name",
+  "url",
+  "families",
+  "pmids",
+  "phrases",
+  "authors",
+];
 const LABEL_CLASS = "text-foreground mb-1.5 block text-sm font-medium";
 const HINT_CLASS = "text-muted-foreground font-normal";
 const NOTE_CLASS = "text-muted-foreground mt-1.5 text-[12.5px]";
@@ -136,6 +149,7 @@ export function MethodServicesSection({
       families: [],
       pmidText: "",
       phraseText: "",
+      authorText: "",
       countStaffPapers: defaultCountStaffPapers(entityType),
     }),
     [entityType],
@@ -178,6 +192,7 @@ export function MethodServicesSection({
   const familiesRef = React.useRef<HTMLInputElement | null>(null);
   const pmidsRef = React.useRef<HTMLTextAreaElement | null>(null);
   const phrasesRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const authorsRef = React.useRef<HTMLTextAreaElement | null>(null);
   const editButtons = React.useRef(new Map<number, HTMLButtonElement>());
   /** Where focus goes once the list has re-rendered after a write. */
   const [focusAfter, setFocusAfter] = React.useState<
@@ -195,6 +210,7 @@ export function MethodServicesSection({
         families: familiesRef,
         pmids: pmidsRef,
         phrases: phrasesRef,
+        authors: authorsRef,
       };
       refs[focusAfter.field].current?.focus();
     } else {
@@ -217,6 +233,7 @@ export function MethodServicesSection({
         families: editing.families,
         pmidText: editing.supportedPmids.join("\n"),
         phraseText: editing.affiliationPhrases.join("\n"),
+        authorText: editing.authorNames.join("\n"),
         countStaffPapers: editing.countStaffPapers,
       }
     : emptyDraft();
@@ -225,6 +242,7 @@ export function MethodServicesSection({
     draft.url !== baseline.url ||
     draft.pmidText !== baseline.pmidText ||
     draft.phraseText !== baseline.phraseText ||
+    draft.authorText !== baseline.authorText ||
     draft.countStaffPapers !== baseline.countStaffPapers ||
     !sameFamilies(draft.families, baseline.families);
 
@@ -249,6 +267,7 @@ export function MethodServicesSection({
       families: [...service.families],
       pmidText: service.supportedPmids.join("\n"),
       phraseText: service.affiliationPhrases.join("\n"),
+      authorText: service.authorNames.join("\n"),
       countStaffPapers: service.countStaffPapers,
     });
     setErrors({});
@@ -315,16 +334,18 @@ export function MethodServicesSection({
     const url = validateServiceUrl(draft.url);
     const families = validateServiceFamilies(draft.families);
     const phrases = validateAffiliationPhrases(parsePhraseBlock(draft.phraseText));
+    const authors = validateAuthorNames(parsePhraseBlock(draft.authorText));
     const found: Partial<Record<FieldKey, string>> = {};
     if (!name.ok) found.name = errorMessage(name.error);
     if (!url.ok) found.url = errorMessage(url.error);
     if (!families.ok) found.families = errorMessage(families.error);
     if (tooManyPmids) found.pmids = errorMessage("too_many_pmids");
     if (!phrases.ok) found.phrases = errorMessage(phrases.error);
+    if (!authors.ok) found.authors = errorMessage(authors.error);
     setErrors(found);
     setFormError(null);
     const firstInvalid = FIELD_ORDER.find((k) => found[k]);
-    if (firstInvalid || !name.ok || !url.ok || !families.ok || !phrases.ok) {
+    if (firstInvalid || !name.ok || !url.ok || !families.ok || !phrases.ok || !authors.ok) {
       if (firstInvalid) setFocusAfter({ field: firstInvalid });
       return;
     }
@@ -348,6 +369,11 @@ export function MethodServicesSection({
       if (phrases.value.length > 0 || !sameList(phrases.value, editing.affiliationPhrases)) {
         payload.affiliationPhrases = phrases.value;
       }
+      // The same for the names: with names and no phrases, this is what makes
+      // "save again" carry on.
+      if (authors.value.length > 0 || !sameList(authors.value, editing.authorNames)) {
+        payload.authorNames = authors.value;
+      }
     } else {
       payload = {
         op: "create",
@@ -359,6 +385,7 @@ export function MethodServicesSection({
         supportedPmids: parsed.pmids,
         countStaffPapers: draft.countStaffPapers,
         affiliationPhrases: phrases.value,
+        authorNames: authors.value,
       };
     }
 
@@ -709,12 +736,43 @@ export function MethodServicesSection({
           <p id="method-service-phrases-hint" className={NOTE_CLASS}>
             This catches staff who are not faculty and people who have left. A publication on the
             supported list counts as a collaboration when an author’s PubMed affiliation contains
-            one of these phrases, or when someone in your unit in Scholars is an author; otherwise
-            it counts as support.
+            one of these phrases, when an author is one of the people named below, or when someone
+            in your unit in Scholars is an author; otherwise it counts as support.
           </p>
           {errors.phrases && (
             <p id="method-service-phrases-error" role="alert" className={ERROR_CLASS}>
               {errors.phrases}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="method-service-authors" className={LABEL_CLASS}>
+            Authors from your unit, as PubMed lists them{" "}
+            <span className={HINT_CLASS}>(optional; one per line)</span>
+          </label>
+          <textarea
+            ref={authorsRef}
+            id="method-service-authors"
+            rows={3}
+            value={draft.authorText}
+            disabled={busy}
+            spellCheck={false}
+            aria-invalid={errors.authors ? true : undefined}
+            aria-describedby={describe(
+              "method-service-authors-hint",
+              errors.authors && "method-service-authors-error",
+            )}
+            onChange={(e) => patch({ authorText: e.target.value }, "authors")}
+            className="border-apollo-border-strong text-foreground bg-background focus-visible:ring-apollo-maroon w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+          />
+          <p id="method-service-authors-hint" className={NOTE_CLASS}>
+            Family name then first initial, for example Rivera Stone B. Use this for people whose
+            affiliation is written differently from paper to paper.
+          </p>
+          {errors.authors && (
+            <p id="method-service-authors-error" role="alert" className={ERROR_CLASS}>
+              {errors.authors}
             </p>
           )}
         </div>
@@ -763,8 +821,9 @@ export function MethodServicesSection({
             </p>
           </div>
           <p className={NOTE_CLASS}>
-            The counts are worked out from the unit’s people, the supported list and the
-            affiliation text, and are filled in on the public page. A half that is zero is left out.
+            The counts are worked out from the unit’s people, the supported list, the affiliation
+            text and the author names, and are filled in on the public page. A half that is zero is
+            left out.
           </p>
         </div>
 
@@ -840,6 +899,8 @@ function serverField(field: string | undefined): FieldKey | null {
       return "pmids";
     case "affiliationPhrases":
       return "phrases";
+    case "authorNames":
+      return "authors";
     default:
       return null;
   }
@@ -872,6 +933,14 @@ function errorMessage(code: string): string {
       return `Keep each phrase to ${SERVICE_PHRASE_MAX_LENGTH} characters or fewer.`;
     case "too_many_phrases":
       return `Use ${SERVICE_PHRASES_MAX} phrases or fewer.`;
+    case "author_name_too_short":
+      return `Each name needs at least ${SERVICE_AUTHOR_NAME_MIN_LENGTH} characters.`;
+    case "author_name_too_long":
+      return `Keep each name to ${SERVICE_AUTHOR_NAME_MAX_LENGTH} characters or fewer.`;
+    case "author_name_no_initial":
+      return "Each name needs a family name then a first initial, for example Rivera Stone B.";
+    case "too_many_author_names":
+      return `Use ${SERVICE_AUTHOR_NAMES_MAX} names or fewer.`;
     case "not_superuser":
     case "impersonation_readonly":
       return "Only a superuser can change method services. Refresh the page and try again.";

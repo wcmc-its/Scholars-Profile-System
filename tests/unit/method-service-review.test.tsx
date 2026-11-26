@@ -56,7 +56,7 @@ const SERVICE: MethodServiceView = {
   excludedPmids: ["104"],
   countStaffPapers: true,
   affiliationPhrases: [],
-  coauthoredPmids: [],
+  coauthoredPmids: [], authorNames: [], nameMatchedPmids: [],
 };
 
 describe("loadServiceReview", () => {
@@ -108,6 +108,20 @@ describe("loadServiceReview", () => {
     expect(r.support).toBe(0);
     expect(r.marked.map((p) => [p.pmid, p.kind, p.reason])).toEqual([
       ["103", "collaboration", "affiliation"],
+      ["102", "collaboration", "staff"],
+      ["101", "collaboration", "affiliation"],
+    ]);
+  });
+
+  it("a match by a named author says so; the other matches stay by affiliation", async () => {
+    const r = await loadServiceReview({
+      ...SERVICE,
+      coauthoredPmids: ["101", "103"],
+      nameMatchedPmids: ["103"],
+    });
+    expect(r.collaborations).toBe(2);
+    expect(r.marked.map((p) => [p.pmid, p.kind, p.reason])).toEqual([
+      ["103", "collaboration", "author_name"],
       ["102", "collaboration", "staff"],
       ["101", "collaboration", "affiliation"],
     ]);
@@ -209,6 +223,7 @@ describe("MethodServicesSection: review", () => {
         pub("102", { kind: "collaboration", reason: "staff" }),
         pub("103", { kind: "collaboration", reason: "affiliation" }),
         pub("104", { reason: "confirmed" }),
+        pub("105", { kind: "collaboration", reason: "author_name" }),
       ],
       excluded: [],
     };
@@ -300,8 +315,9 @@ describe("MethodServicesSection: review", () => {
     expect(says("102")).toContain("Collaboration: unit member in Scholars");
     expect(says("103")).toContain("Collaboration: affiliation in PubMed");
     expect(says("104")).toContain("Support: confirmed core publication");
-    expect(screen.getByText("Counted as collaboration or support (4)")).toBeTruthy();
-    expect(marked.getAllByText(/Example Journal · 2024 · PMID 10[1-4]/)).toHaveLength(4);
+    expect(says("105")).toContain("Collaboration: named author in PubMed");
+    expect(screen.getByText("Counted as collaboration or support (5)")).toBeTruthy();
+    expect(marked.getAllByText(/Example Journal · 2024 · PMID 10[1-5]/)).toHaveLength(5);
     fireEvent.click(toggle);
     expect(screen.queryByTestId("method-service-review-5")).toBeNull();
   });

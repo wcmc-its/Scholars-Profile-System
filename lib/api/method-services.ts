@@ -29,7 +29,9 @@ export const METHOD_SERVICE_SELECT = {
   excludedPmids: true,
   countStaffPapers: true,
   affiliationPhrases: true,
+  authorNames: true,
   coauthoredPmids: true,
+  nameMatchedPmids: true,
   affiliationCheckedPmids: true,
 } as const;
 
@@ -44,7 +46,11 @@ export type MethodServiceRow = {
   excludedPmids: unknown;
   countStaffPapers: boolean;
   affiliationPhrases: unknown;
+  /** Absent on a row read without it; a view then has no names. */
+  authorNames?: unknown;
   coauthoredPmids: unknown;
+  /** Absent on a row read without it; a view then has none. */
+  nameMatchedPmids?: unknown;
   /** Server-only bookkeeping, not part of the view: see
    *  {@link affiliationCheckedPmidsOf}. Absent on a row read without it. */
   affiliationCheckedPmids?: unknown;
@@ -63,7 +69,7 @@ function familiesOf(value: unknown): MethodServiceFamily[] {
   return out;
 }
 
-/** A stored JSON list of strings (PMIDs, affiliation phrases). */
+/** A stored JSON list of strings (PMIDs, affiliation phrases, author names). */
 function pmidsOf(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
@@ -91,7 +97,9 @@ export function toMethodServiceView(row: MethodServiceRow): MethodServiceView | 
     excludedPmids: pmidsOf(row.excludedPmids),
     countStaffPapers: row.countStaffPapers,
     affiliationPhrases: pmidsOf(row.affiliationPhrases),
+    authorNames: pmidsOf(row.authorNames),
     coauthoredPmids: pmidsOf(row.coauthoredPmids),
+    nameMatchedPmids: pmidsOf(row.nameMatchedPmids),
   };
 }
 

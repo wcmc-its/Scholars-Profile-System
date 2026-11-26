@@ -332,7 +332,9 @@ describe("POST /api/edit/method-service: create", () => {
         supportedPmids: ["111", "222"],
         excludedPmids: [],
         affiliationPhrases: [],
+        authorNames: [],
         coauthoredPmids: [],
+        nameMatchedPmids: [],
         affiliationCheckedPmids: [],
         countStaffPapers: false,
         addedBy: ACTOR, // the EFFECTIVE actor
@@ -424,6 +426,17 @@ describe("POST /api/edit/method-service: create", () => {
       "affiliationPhrases",
     ],
     ["phrases that are not strings", { affiliationPhrases: [1] }, "invalid_value", "affiliationPhrases"],
+    ["nameMatchedPmids from the client", { nameMatchedPmids: ["111"] }, "invalid_value", "nameMatchedPmids"],
+    ["an author name with no initial", { authorNames: ["Rivera Stone"] }, "author_name_no_initial", "authorNames"],
+    ["an author name under 2 characters", { authorNames: ["R"] }, "author_name_too_short", "authorNames"],
+    ["an author name over 80 characters", { authorNames: [`${"x".repeat(79)} B`] }, "author_name_too_long", "authorNames"],
+    [
+      "more than 50 author names",
+      { authorNames: Array.from({ length: 51 }, (_, i) => `Exampl${"e".repeat(i + 1)} B`) },
+      "too_many_author_names",
+      "authorNames",
+    ],
+    ["author names that are not strings", { authorNames: [1] }, "invalid_value", "authorNames"],
   ])("400s %s", async (_label, over, error, field) => {
     const res = await call({ ...CREATE, ...over }, SU);
     expect(res.status).toBe(400);
@@ -1190,5 +1203,157 @@ describe("POST /api/edit/method-service: co-authors from PubMed affiliations", (
       expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
       expect(m.transaction).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("POST /api/edit/method-service: co-authors from PubMed author names", () => {
+  const NAME = "Rivera Stone B";
+  const PHRASE = "Example Health Sciences Library";
+  const ELSEWHERE = ["Department of Examples, Example University."];
+  type Known = Record<string, { affiliations?: string[]; authors?: Array<[string, string]> }>;
+  /** What `fetchAuthorAffiliations` hands back for the PMIDs in `known`. */
+  const answers = (known: Known) => async (pmids: string[]) => {
+    const got = pmids.filter((p) => p in known);
+    return {
+      affiliations: new Map(got.map((p) => [p, known[p].affiliations ?? ELSEWHERE])),
+      authors: new Map(
+        got.map((p) => [p, (known[p].authors ?? []).map(([lastName, initials]) => ({ lastName, initials }))]),
+      ),
+      complete: got.length === pmids.length,
+    };
+  };
+  const PUBMED: Known = {
+    "111": { authors: [["Okafor", "CA"], ["Rivera-Stone", "BK"]] },
+    "222": { authors: [["Rivera Stone", "K"]] },
+  };
+  const namedRow = (over: Record<string, unknown> = {}) =>
+    row({
+      authorNames: [NAME],
+      coauthoredPmids: ["111"],
+      nameMatchedPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+      ...over,
+    });
+  beforeEach(() => {
+    defaultSession = SUPERUSER;
+    m.fetchAffiliations.mockImplementation(answers(PUBMED));
+  });
+
+  it("a service with names and no phrases is checked, and a name match is stored as one", async () => {
+    const res = await call({ ...CREATE, supportedPmids: ["111", "222"], authorNames: [` ${NAME} `] });
+    expect(res.status).toBe(200);
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+      affiliationPhrases: [],
+      authorNames: [NAME],
+      coauthoredPmids: ["111"],
+      nameMatchedPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+    });
+    const body = await res.json();
+    expect(body.service).toMatchObject({ authorNames: [NAME], coauthoredPmids: ["111"] });
+    expect(m.appendAuditRow.mock.calls[0][1].afterValues).toMatchObject({
+      authorNames: [NAME],
+      coauthoredPmidCount: 1,
+      nameMatchedPmidCount: 1,
+    });
+  });
+
+  it("an update that only adds the first name runs the check on the stored list", async () => {
+    m.serviceFindUnique.mockResolvedValue(row());
+    const res = await call({ op: "update", id: 5, authorNames: [NAME] });
+    expect(res.status).toBe(200);
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      authorNames: [NAME],
+      coauthoredPmids: ["111"],
+      nameMatchedPmids: ["111"],
+      affiliationCheckedPmids: ["111", "222"],
+    });
+  });
+
+  it("an affiliation match is not recorded as a name match, even when the name matches too", async () => {
+    m.fetchAffiliations.mockImplementation(
+      answers({ "111": { affiliations: [`${PHRASE}, Example City.`], authors: [["Rivera Stone", "B"]] } }),
+    );
+    await call({ ...CREATE, supportedPmids: ["111"], affiliationPhrases: [PHRASE], authorNames: [NAME] });
+    expect(m.txCreate.mock.calls[0][0].data).toMatchObject({
+      coauthoredPmids: ["111"],
+      nameMatchedPmids: [],
+    });
+  });
+
+  it("the same names on a fully checked list ask PubMed nothing", async () => {
+    m.serviceFindUnique.mockResolvedValue(namedRow());
+    const res = await call({ op: "update", id: 5, authorNames: [NAME] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    expect(await res.json()).toMatchObject({ changed: false });
+  });
+
+  it("changing a name starts the check again", async () => {
+    m.serviceFindUnique.mockResolvedValue(namedRow());
+    await call({ op: "update", id: 5, authorNames: ["Rivera Stone K"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toMatchObject({
+      authorNames: ["Rivera Stone K"],
+      coauthoredPmids: ["222"],
+      nameMatchedPmids: ["222"],
+    });
+  });
+
+  it("removing one of two names starts the check again", async () => {
+    m.serviceFindUnique.mockResolvedValue(
+      namedRow({ authorNames: [NAME, "Okafor C"], coauthoredPmids: ["111"], nameMatchedPmids: ["111"] }),
+    );
+    await call({ op: "update", id: 5, authorNames: ["Okafor C"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toMatchObject({ authorNames: ["Okafor C"] });
+  });
+
+  it("removing the only name, with no phrases, clears the matches without asking PubMed", async () => {
+    m.serviceFindUnique.mockResolvedValue(namedRow());
+    await call({ op: "update", id: 5, authorNames: [] });
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      authorNames: [],
+      coauthoredPmids: [],
+      nameMatchedPmids: [],
+      affiliationCheckedPmids: [],
+    });
+  });
+
+  it("adding a name keeps the matches already found and re-checks the rest", async () => {
+    m.serviceFindUnique.mockResolvedValue(namedRow());
+    await call({ op: "update", id: 5, authorNames: [NAME, "Rivera Stone K"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toMatchObject({
+      authorNames: [NAME, "Rivera Stone K"],
+      coauthoredPmids: ["111", "222"],
+      nameMatchedPmids: ["111", "222"],
+    });
+  });
+
+  it("adding a name to a service with a phrase keeps its affiliation matches as they were", async () => {
+    m.serviceFindUnique.mockResolvedValue(
+      row({
+        affiliationPhrases: [PHRASE],
+        coauthoredPmids: ["111"],
+        affiliationCheckedPmids: ["111", "222"],
+      }),
+    );
+    await call({ op: "update", id: 5, authorNames: ["Rivera Stone K"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["222"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toMatchObject({
+      coauthoredPmids: ["111", "222"],
+      nameMatchedPmids: ["222"],
+    });
+  });
+
+  it("the client cannot set nameMatchedPmids on an update", async () => {
+    m.serviceFindUnique.mockResolvedValue(namedRow());
+    const res = await call({ op: "update", id: 5, name: "Renamed", nameMatchedPmids: ["222"] });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_value", field: "nameMatchedPmids" });
+    expect(m.transaction).not.toHaveBeenCalled();
   });
 });

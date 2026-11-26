@@ -146,6 +146,7 @@ export function ServiceReviewSummary({
 const REASON_TEXT: Record<CollaborationReason, string> = {
   staff: "Collaboration: unit member in Scholars",
   affiliation: "Collaboration: affiliation in PubMed",
+  author_name: "Collaboration: named author in PubMed",
   supported: "Support: supported list",
   confirmed: "Support: confirmed core publication",
 };

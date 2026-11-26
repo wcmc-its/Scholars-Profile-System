@@ -4,11 +4,11 @@
  * method families. Body: `{ op: "create" | "update" | "delete", ... }`.
  *
  *   - create: `{ entityType, entityId, name, url, families, supportedPmids?,
- *     countStaffPapers?, affiliationPhrases? }`. `countStaffPapers` defaults to
- *     true for a core and false for a department.
+ *     countStaffPapers?, affiliationPhrases?, authorNames? }`.
+ *     `countStaffPapers` defaults to true for a core and false for a department.
  *   - update: `{ id, name?, url?, families?, supportedPmids?, excludedPmids?,
- *     countStaffPapers?, affiliationPhrases? }`. Only the fields present are
- *     changed. The owning unit of a row never changes: `entityType` /
+ *     countStaffPapers?, affiliationPhrases?, authorNames? }`. Only the fields
+ *     present are changed. The owning unit of a row never changes: `entityType` /
  *     `entityId` in an update body are ignored.
  *   - delete: `{ id }`. Hard delete; the history is the audit log.
  *   - exclude: `{ id, pmid }`. "Not ours": adds one PMID to `excludedPmids`,
@@ -20,19 +20,23 @@
  *     (`changed: false`, no audit row) when the list already says so.
  *
  * `coauthoredPmids` is the server's own: the supported PMIDs with an author
- * whose PubMed affiliation contains one of the service's `affiliationPhrases`
+ * whose PubMed affiliation contains one of the service's `affiliationPhrases`,
+ * or whose family name and first initial are one of its `authorNames`
  * (`matchCoauthoredPmids`), which is what makes a supported publication a
- * collaboration and not support. A body that carries it is a 400. A create,
- * and an update whose body has `supportedPmids` or `affiliationPhrases`, asks
- * PubMed for the author affiliations of the supported PMIDs it has not yet
- * checked against the current phrases, and stores the result. Which PMIDs have
- * been checked is stored too (`affiliationCheckedPmids`, server-only), so:
+ * collaboration and not support. `nameMatchedPmids`, the ones among them found
+ * by a name and not by an affiliation, is the server's own too, kept so the
+ * review list can say why. A body that carries either is a 400. A create, and
+ * an update whose body has `supportedPmids`, `affiliationPhrases` or
+ * `authorNames`, asks PubMed for the authors of the supported PMIDs it has not
+ * yet checked against the current phrases and names, and stores the result.
+ * Phrases, names or both: either is enough for the check to run. Which PMIDs
+ * have been checked is stored too (`affiliationCheckedPmids`, server-only), so:
  *   - a service whose list is fully checked costs no PubMed request on a later
  *     save, whatever else that save changes;
  *   - a list too long for one request's deadline is finished over several
  *     saves: each keeps what it read and the next asks only for the rest;
- *   - changing or removing a phrase starts the check again; adding one keeps
- *     the matches already found and re-checks the rest.
+ *   - changing or removing a phrase or a name starts the check again; adding
+ *     one keeps the matches already found and re-checks the rest.
  * The save always goes through. When some supported PMIDs are still unchecked
  * afterwards the response carries a warning and `pubmed: { checked, total }`:
  * `"pubmed_incomplete"` when this save checked some more (save again to carry
@@ -104,6 +108,7 @@ import {
   pmidsToCheck,
   type AffiliationProgress,
 } from "@/lib/method-services/affiliation";
+import type { PubMedAuthorName } from "@/lib/method-services/author-names";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import {
   SERVICE_PMIDS_MAX,
@@ -111,6 +116,7 @@ import {
   isMethodServiceEntityType,
   methodFamilyKey,
   validateAffiliationPhrases,
+  validateAuthorNames,
   validatePmidList,
   validateServiceFamilies,
   validateServiceName,
@@ -150,7 +156,9 @@ function auditShape(row: MethodServiceRow): Record<string, unknown> {
     excludedPmidCount: excluded.length,
     ...(excluded.length <= AUDIT_PMID_LIST_MAX ? { excludedPmids: excluded } : {}),
     affiliationPhrases: view?.affiliationPhrases ?? [],
+    authorNames: view?.authorNames ?? [],
     coauthoredPmidCount: coauthored.length,
+    nameMatchedPmidCount: view?.nameMatchedPmids.length ?? 0,
     affiliationCheckedPmidCount: affiliationCheckedPmidsOf(row).length,
   };
 }
@@ -200,32 +208,48 @@ type PubMedOutcome = AffiliationProgress & {
 /**
  * Bring a service's PubMed check as far as one request allows. `carried` is
  * what is already known (`carriedAffiliationProgress`); only the supported
- * PMIDs outside it are asked for, and what PubMed answers is added to it. No
- * phrases, no supported PMIDs or nothing left to check makes no request.
+ * PMIDs outside it are asked for, and what PubMed answers is added to it.
+ * Neither phrases nor names, no supported PMIDs or nothing left to check makes
+ * no request.
  * Never throws: an unreadable PubMed leaves `carried` as the result.
  */
 async function coauthoredFromPubMed(
   supportedPmids: ReadonlyArray<string>,
   phrases: ReadonlyArray<string>,
+  authorNames: ReadonlyArray<string>,
   carried: AffiliationProgress,
 ): Promise<PubMedOutcome> {
-  if (supportedPmids.length === 0 || phrases.length === 0) {
-    return { checked: [], coauthored: [], warned: {} };
+  if (supportedPmids.length === 0 || (phrases.length === 0 && authorNames.length === 0)) {
+    return { checked: [], coauthored: [], nameMatched: [], warned: {} };
   }
   const todo = pmidsToCheck(supportedPmids, carried);
   let affiliations: ReadonlyMap<string, ReadonlyArray<string>> = new Map();
+  let authors: ReadonlyMap<string, ReadonlyArray<PubMedAuthorName>> = new Map();
   let error: string | undefined;
   if (todo.length > 0) {
     try {
       const lookup = await fetchAuthorAffiliations(todo);
       affiliations = lookup.affiliations;
+      authors = lookup.authors;
       error = lookup.error;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
   }
-  const merged = mergeAffiliationLookup(supportedPmids, phrases, carried, affiliations);
-  if (merged.complete) return { checked: merged.checked, coauthored: merged.coauthored, warned: {} };
+  const merged = mergeAffiliationLookup(
+    supportedPmids,
+    phrases,
+    carried,
+    affiliations,
+    authorNames,
+    authors,
+  );
+  const progress = {
+    checked: merged.checked,
+    coauthored: merged.coauthored,
+    nameMatched: merged.nameMatched,
+  };
+  if (merged.complete) return { ...progress, warned: {} };
   const total = new Set(supportedPmids).size;
   const before = total - todo.length;
   console.warn(
@@ -239,8 +263,7 @@ async function coauthoredFromPubMed(
     }),
   );
   return {
-    checked: merged.checked,
-    coauthored: merged.coauthored,
+    ...progress,
     warned: {
       warning: merged.checked.length > before ? PUBMED_INCOMPLETE : PUBMED_UNAVAILABLE,
       pubmed: { checked: merged.checked.length, total },
@@ -256,6 +279,7 @@ type Fields = {
   excludedPmids?: string[];
   countStaffPapers?: boolean;
   affiliationPhrases?: string[];
+  authorNames?: string[];
 };
 
 /** Validate the fields PRESENT in the body. Returns the clean values, or the
@@ -298,6 +322,11 @@ function readFields(
     const r = validateAffiliationPhrases(body.affiliationPhrases);
     if (!r.ok) return fail(r.error, "affiliationPhrases");
     fields.affiliationPhrases = r.value;
+  }
+  if ("authorNames" in body) {
+    const r = validateAuthorNames(body.authorNames);
+    if (!r.ok) return fail(r.error, "authorNames");
+    fields.authorNames = r.value;
   }
   return { ok: true, fields };
 }
@@ -396,6 +425,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if ("excludedPmids" in body) return editError(400, "invalid_value", "excludedPmids");
     if ("coauthoredPmids" in body) return editError(400, "invalid_value", "coauthoredPmids");
+    if ("nameMatchedPmids" in body) return editError(400, "invalid_value", "nameMatchedPmids");
     const read = readFields(body);
     if (!read.ok) return read.response;
     const { name, url, families } = read.fields;
@@ -407,11 +437,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     const supportedPmids = read.fields.supportedPmids ?? [];
     const affiliationPhrases = read.fields.affiliationPhrases ?? [];
+    const authorNames = read.fields.authorNames ?? [];
     // Before the transaction: a slow PubMed must not hold a connection.
     const pubmed = await coauthoredFromPubMed(
       supportedPmids,
       affiliationPhrases,
-      carriedAffiliationProgress(null, { supportedPmids, phrases: affiliationPhrases }),
+      authorNames,
+      carriedAffiliationProgress(null, {
+        supportedPmids,
+        phrases: affiliationPhrases,
+        authorNames,
+      }),
     );
 
     let saved: MethodServiceRow;
@@ -427,7 +463,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             supportedPmids,
             excludedPmids: [],
             affiliationPhrases,
+            authorNames,
             coauthoredPmids: pubmed.coauthored,
+            nameMatchedPmids: pubmed.nameMatched,
             affiliationCheckedPmids: pubmed.checked,
             countStaffPapers: read.fields.countStaffPapers ?? defaultCountStaffPapers(entityType),
             addedBy: session.cwid,
@@ -539,10 +577,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // update — only the fields present, and only those that differ.
   if ("coauthoredPmids" in body) return editError(400, "invalid_value", "coauthoredPmids");
+  if ("nameMatchedPmids" in body) return editError(400, "invalid_value", "nameMatchedPmids");
   const read = readFields(body);
   if (!read.ok) return read.response;
   const current = toMethodServiceView(existing);
-  const data: Fields & { coauthoredPmids?: string[]; affiliationCheckedPmids?: string[] } = {};
+  const data: Fields & {
+    coauthoredPmids?: string[];
+    nameMatchedPmids?: string[];
+    affiliationCheckedPmids?: string[];
+  } = {};
   for (const key of Object.keys(read.fields) as Array<keyof Fields>) {
     if (!sameValue(read.fields[key], current?.[key])) {
       Object.assign(data, { [key]: read.fields[key] });
@@ -551,31 +594,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (data.families && (await findNonPublicFamilies(data.families)).length > 0) {
     return editError(400, "unknown_family", "families");
   }
-  // Either list in the body brings the PubMed check up to date: it asks for
-  // the supported PMIDs not yet checked against these phrases, and for none
+  // Any of the three lists in the body brings the PubMed check up to date: it
+  // asks for the supported PMIDs not yet checked against these phrases and
+  // names, and for none
   // when all are. That is also how an editor carries on after a save that
   // could not finish the check. Before the transaction, so a slow PubMed does
   // not hold a connection.
   let warned: PubMedOutcome["warned"] = {};
-  if (read.fields.supportedPmids !== undefined || read.fields.affiliationPhrases !== undefined) {
+  if (
+    read.fields.supportedPmids !== undefined ||
+    read.fields.affiliationPhrases !== undefined ||
+    read.fields.authorNames !== undefined
+  ) {
     const supportedPmids = read.fields.supportedPmids ?? current?.supportedPmids ?? [];
     const phrases = read.fields.affiliationPhrases ?? current?.affiliationPhrases ?? [];
+    const authorNames = read.fields.authorNames ?? current?.authorNames ?? [];
     const storedChecked = affiliationCheckedPmidsOf(existing);
     const pubmed = await coauthoredFromPubMed(
       supportedPmids,
       phrases,
+      authorNames,
       carriedAffiliationProgress(
         {
           phrases: current?.affiliationPhrases ?? [],
+          authorNames: current?.authorNames ?? [],
           checked: storedChecked,
           coauthored: current?.coauthoredPmids ?? [],
+          nameMatched: current?.nameMatchedPmids ?? [],
         },
-        { supportedPmids, phrases },
+        { supportedPmids, phrases, authorNames },
       ),
     );
     warned = pubmed.warned;
     if (!sameValue(pubmed.coauthored, current?.coauthoredPmids)) {
       data.coauthoredPmids = pubmed.coauthored;
+    }
+    if (!sameValue(pubmed.nameMatched, current?.nameMatchedPmids)) {
+      data.nameMatchedPmids = pubmed.nameMatched;
     }
     if (!sameValue(pubmed.checked, storedChecked)) data.affiliationCheckedPmids = pubmed.checked;
   }

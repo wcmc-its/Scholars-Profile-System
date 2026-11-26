@@ -103,6 +103,7 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
         supportedPmids: service.supportedPmids,
         excludedPmids: service.excludedPmids,
         coauthoredPmids: service.coauthoredPmids,
+        nameMatchedPmids: service.nameMatchedPmids,
         countStaffPapers: service.countStaffPapers,
         staffPmids,
         confirmedPmids: [...confirmed.values()][0],

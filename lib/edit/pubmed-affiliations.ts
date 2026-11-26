@@ -14,6 +14,8 @@
  */
 import { DOMParser, type Element as XmlElement } from "@xmldom/xmldom";
 
+import type { PubMedAuthorName } from "@/lib/method-services/author-names";
+
 const EFETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi";
 /** IDs per EFetch POST; NCBI recommends no more than 200 per request. */
 const ID_BATCH = 200;
@@ -96,41 +98,73 @@ export async function fetchExternalAuthorFlags(
  *  chapter (`PubmedBookArticle`), which carries its authors the same way. */
 const RECORD_TAGS = ["PubmedArticle", "PubmedBookArticle"] as const;
 
-function affiliationsInDocument(doc: ReturnType<DOMParser["parseFromString"]>): Map<string, string[]> {
-  const out = new Map<string, string[]>();
+/** What one EFetch record says about its authors. */
+type AuthorRecord = {
+  /** Every author's affiliations, as PubMed prints them. */
+  affiliations: string[];
+  /** Every author with a family name: `LastName`, and `Initials` (or, for the
+   *  rare author without them, the first letter of `ForeName`). A collective
+   *  name is not a person and is left out. */
+  authors: PubMedAuthorName[];
+};
+
+/** The text of an author's own child element (`LastName`, `Initials`). */
+function childText(author: XmlElement, tag: string): string {
+  const el = author.getElementsByTagName(tag)[0];
+  return el ? text(el) : "";
+}
+
+function authorsInDocument(doc: ReturnType<DOMParser["parseFromString"]>): Map<string, AuthorRecord> {
+  const out = new Map<string, AuthorRecord>();
   for (const tag of RECORD_TAGS) {
     for (const article of Array.from(doc.getElementsByTagName(tag))) {
       // The first PMID is the record's own; later ones are cited references.
       const pmid = article.getElementsByTagName("PMID")[0];
       if (!pmid) continue;
       const affiliations: string[] = [];
+      const authors: PubMedAuthorName[] = [];
       for (const list of Array.from(article.getElementsByTagName("AuthorList"))) {
         for (const author of Array.from(list.getElementsByTagName("Author"))) {
+          const lastName = childText(author, "LastName");
+          if (lastName) {
+            const initials =
+              childText(author, "Initials") || childText(author, "ForeName").charAt(0);
+            authors.push({ lastName, initials });
+          }
           for (const aff of Array.from(author.getElementsByTagName("Affiliation"))) {
             const value = text(aff);
             if (value) affiliations.push(value);
           }
         }
       }
-      out.set(text(pmid), affiliations);
+      out.set(text(pmid), { affiliations, authors });
     }
   }
   return out;
 }
 
+const affiliationsOf = (records: ReadonlyMap<string, AuthorRecord>): Map<string, string[]> =>
+  new Map([...records].map(([pmid, r]) => [pmid, r.affiliations]));
+
 /** pmid -> every author's affiliations, as PubMed prints them. A PMID with no
  *  affiliation at all maps to an empty list. */
 export function authorAffiliationsByPmid(xml: string): Map<string, string[]> {
-  return affiliationsInDocument(new DOMParser().parseFromString(xml, "text/xml"));
+  return affiliationsOf(authorsInDocument(new DOMParser().parseFromString(xml, "text/xml")));
+}
+
+/** pmid -> every author's family name and initials, in PubMed's order. */
+export function authorNamesByPmid(xml: string): Map<string, PubMedAuthorName[]> {
+  const records = authorsInDocument(new DOMParser().parseFromString(xml, "text/xml"));
+  return new Map([...records].map(([pmid, r]) => [pmid, r.authors]));
 }
 
 /**
- * {@link authorAffiliationsByPmid} for an EFetch answer that must be one:
+ * The author records of an EFetch answer that must be one:
  * throws unless the body is a well-formed `PubmedArticleSet`. An error
  * document, an HTML page or a cut-off body answered with a 200 is a failure,
  * never "no records".
  */
-function parseEfetchAnswer(xml: string): Map<string, string[]> {
+function parseEfetchAnswer(xml: string): Map<string, AuthorRecord> {
   let doc: ReturnType<DOMParser["parseFromString"]>;
   let broken = false;
   try {
@@ -146,7 +180,7 @@ function parseEfetchAnswer(xml: string): Map<string, string[]> {
   if (doc.documentElement?.nodeName !== "PubmedArticleSet") {
     throw new Error("EFetch answer is not a PubmedArticleSet");
   }
-  return affiliationsInDocument(doc);
+  return authorsInDocument(doc);
 }
 
 /** With an API key NCBI allows 10 requests a second, else 3. */
@@ -163,6 +197,10 @@ export type AuthorAffiliationLookup = {
    *  A PMID PubMed has no record of (asked twice) maps to an empty list. A
    *  PMID with no entry was NOT looked up: nothing is known about it. */
   affiliations: Map<string, string[]>;
+  /** pmid -> every author's family name and initials, from the same answers
+   *  (no extra request). It has an entry for exactly the PMIDs `affiliations`
+   *  has one for. */
+  authors: Map<string, PubMedAuthorName[]>;
   /** Every requested PMID has an entry. */
   complete: boolean;
   /** Why the lookup stopped early, when it did. */
@@ -170,7 +208,7 @@ export type AuthorAffiliationLookup = {
 };
 
 /**
- * EFetch every author's affiliations for the PMIDs, for a request handler (the
+ * EFetch every author's affiliations, family name and initials for the PMIDs, for a request handler (the
  * method services save): POST, batches of 200, `NCBI_API_KEY` when set, and
  * one deadline for the whole lookup.
  *
@@ -190,8 +228,8 @@ export async function fetchAuthorAffiliations(
 ): Promise<AuthorAffiliationLookup> {
   const fetchFn = opts.fetchFn ?? fetch;
   const ids = [...new Set(pmids)];
-  const affiliations = new Map<string, string[]>();
-  if (ids.length === 0) return { affiliations, complete: true };
+  const records = new Map<string, AuthorRecord>();
+  if (ids.length === 0) return { affiliations: new Map(), authors: new Map(), complete: true };
 
   const signal = AbortSignal.timeout(opts.timeoutMs ?? AFFILIATION_FETCH_TIMEOUT_MS);
   const apiKey = process.env.NCBI_API_KEY;
@@ -235,7 +273,7 @@ export async function fetchAuthorAffiliations(
         const got = await efetch(batch);
         for (const pmid of batch) {
           const value = got.get(pmid);
-          if (value) affiliations.set(pmid, value);
+          if (value) records.set(pmid, value);
           else absent.push(pmid);
         }
       } catch (err) {
@@ -252,12 +290,19 @@ export async function fetchAuthorAffiliations(
     const batch = absent.slice(i, i + ID_BATCH);
     try {
       const got = await efetch(batch);
-      for (const pmid of batch) affiliations.set(pmid, got.get(pmid) ?? []);
+      for (const pmid of batch) {
+        records.set(pmid, got.get(pmid) ?? { affiliations: [], authors: [] });
+      }
     } catch (err) {
       fail(err);
     }
   }
 
-  const complete = ids.every((pmid) => affiliations.has(pmid));
-  return { affiliations, complete, ...(error === undefined ? {} : { error }) };
+  const complete = ids.every((pmid) => records.has(pmid));
+  return {
+    affiliations: affiliationsOf(records),
+    authors: new Map([...records].map(([pmid, r]) => [pmid, r.authors])),
+    complete,
+    ...(error === undefined ? {} : { error }),
+  };
 }

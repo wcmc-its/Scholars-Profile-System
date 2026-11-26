@@ -315,7 +315,7 @@ describe("fetchAuthorAffiliations", () => {
   it("asks nothing for an empty list", async () => {
     const fetchFn = vi.fn();
     const out = await run([], fetchFn);
-    expect(out).toEqual({ affiliations: new Map(), complete: true });
+    expect(out).toEqual({ affiliations: new Map(), authors: new Map(), complete: true });
     expect(fetchFn).not.toHaveBeenCalled();
   });
 });
@@ -332,7 +332,7 @@ describe("the resumable PubMed check", () => {
   it("the same phrases carry everything checked that is still supported", () => {
     expect(
       carriedAffiliationProgress(stored(), { supportedPmids: ["101", "103", "104"], phrases: ["example  LIBRARY"] }),
-    ).toEqual({ checked: ["101", "103"], coauthored: ["101"] });
+    ).toEqual({ checked: ["101", "103"], coauthored: ["101"], nameMatched: [] });
   });
 
   it("an added phrase carries the matches only: the rest must be compared again", () => {
@@ -341,14 +341,14 @@ describe("the resumable PubMed check", () => {
         supportedPmids: ["101", "102", "103"],
         phrases: [PHRASE, "Example Core"],
       }),
-    ).toEqual({ checked: ["101"], coauthored: ["101"] });
+    ).toEqual({ checked: ["101"], coauthored: ["101"], nameMatched: [] });
   });
 
   it("a removed or reworded phrase, no phrases, or a new service carries nothing", () => {
     const next = { supportedPmids: ["101", "102"], phrases: ["Example Core"] };
-    expect(carriedAffiliationProgress(stored(), next)).toEqual({ checked: [], coauthored: [] });
-    expect(carriedAffiliationProgress(stored(), { ...next, phrases: [] })).toEqual({ checked: [], coauthored: [] });
-    expect(carriedAffiliationProgress(null, next)).toEqual({ checked: [], coauthored: [] });
+    expect(carriedAffiliationProgress(stored(), next)).toEqual({ checked: [], coauthored: [], nameMatched: [] });
+    expect(carriedAffiliationProgress(stored(), { ...next, phrases: [] })).toEqual({ checked: [], coauthored: [], nameMatched: [] });
+    expect(carriedAffiliationProgress(null, next)).toEqual({ checked: [], coauthored: [], nameMatched: [] });
   });
 
   it("a stored match with no checked record behind it is not carried", () => {
@@ -357,38 +357,38 @@ describe("the resumable PubMed check", () => {
         supportedPmids: ["101"],
         phrases: [PHRASE],
       }),
-    ).toEqual({ checked: [], coauthored: [] });
+    ).toEqual({ checked: [], coauthored: [], nameMatched: [] });
   });
 
   it("pmidsToCheck: the supported pmids not yet checked, once each", () => {
-    expect(pmidsToCheck(["101", "102", "102", "103"], { checked: ["102"], coauthored: [] })).toEqual(["101", "103"]);
+    expect(pmidsToCheck(["101", "102", "102", "103"], { checked: ["102"], coauthored: [], nameMatched: [] })).toEqual(["101", "103"]);
   });
 
   it("merging adds what PubMed answered and leaves the unanswered unchecked", () => {
     const merged = mergeAffiliationLookup(
       ["104", "101", "102", "103"],
       [PHRASE],
-      { checked: ["101", "102"], coauthored: ["101"] },
+      { checked: ["101", "102"], coauthored: ["101"], nameMatched: [] },
       new Map([["104", ["Example Library, Example City."]]]),
     );
-    expect(merged).toEqual({ checked: ["104", "101", "102"], coauthored: ["104", "101"], complete: false });
+    expect(merged).toEqual({ checked: ["104", "101", "102"], coauthored: ["104", "101"], nameMatched: [], complete: false });
   });
 
   it("an answer for an already checked pmid changes nothing; all checked is complete", () => {
     const merged = mergeAffiliationLookup(
       ["101", "102"],
       [PHRASE],
-      { checked: ["101", "102"], coauthored: ["101"] },
+      { checked: ["101", "102"], coauthored: ["101"], nameMatched: [] },
       // 101 answered again with no match: the stored match is not re-judged.
       new Map([["101", []]]),
     );
-    expect(merged).toEqual({ checked: ["101", "102"], coauthored: ["101"], complete: true });
+    expect(merged).toEqual({ checked: ["101", "102"], coauthored: ["101"], nameMatched: [], complete: true });
   });
 
   it("a list of 5,000 is finished over several part-way lookups, losing nothing", () => {
     const supported = Array.from({ length: 5000 }, (_, i) => String(10000 + i));
     const affiliationOf = (pmid: string) => (Number(pmid) % 10 === 0 ? ["Example Library"] : ["Elsewhere"]);
-    let progress = { checked: [] as string[], coauthored: [] as string[] };
+    let progress = { checked: [] as string[], coauthored: [] as string[], nameMatched: [] as string[] };
     let rounds = 0;
     for (; rounds < 10; rounds += 1) {
       const todo = pmidsToCheck(supported, progress);

@@ -8,6 +8,7 @@
  * split, for the same `lib/edit/manageable-units.ts` reason).
  */
 import { validateUnitUrl } from "@/lib/edit/validators";
+import { authorNameKey } from "@/lib/method-services/author-names";
 
 /** The unit kinds that may own a method service. */
 export const METHOD_SERVICE_ENTITY_TYPES = ["department", "core"] as const;
@@ -35,9 +36,15 @@ export type MethodServiceView = {
   countStaffPapers: boolean;
   /** Text that identifies the unit's authors in a PubMed affiliation. */
   affiliationPhrases: string[];
+  /** The unit's authors as PubMed lists them: family name then first initial. */
+  authorNames: string[];
   /** The supported PMIDs with an author whose PubMed affiliation contains one
-   *  of the phrases. Worked out by the server on save, never sent by a client. */
+   *  of the phrases, or who is one of the named authors. Worked out by the
+   *  server on save, never sent by a client. */
   coauthoredPmids: string[];
+  /** The ones among `coauthoredPmids` found by an author name and not by an
+   *  affiliation. Worked out by the server on save, never sent by a client. */
+  nameMatchedPmids: string[];
 };
 
 /** One row of the family picker (`GET /api/edit/method-families`). */
@@ -53,6 +60,9 @@ export const SERVICE_PMIDS_MAX = 5000;
 export const SERVICE_PHRASES_MAX = 10;
 export const SERVICE_PHRASE_MIN_LENGTH = 3;
 export const SERVICE_PHRASE_MAX_LENGTH = 120;
+export const SERVICE_AUTHOR_NAMES_MAX = 50;
+export const SERVICE_AUTHOR_NAME_MIN_LENGTH = 2;
+export const SERVICE_AUTHOR_NAME_MAX_LENGTH = 80;
 /** `scholar_family.supercategory` / `.family_label` column widths. */
 const SUPERCATEGORY_MAX_LENGTH = 128;
 const FAMILY_LABEL_MAX_LENGTH = 255;
@@ -186,7 +196,8 @@ export function validatePmidList(
   return { ok: true, value: pmids };
 }
 
-/** The editor's textarea: one affiliation phrase per line, blank lines dropped. */
+/** The editor's textareas: one affiliation phrase, or one author name, per
+ *  line, blank lines dropped. */
 export function parsePhraseBlock(text: string): string[] {
   return text
     .split(/\r?\n/)
@@ -218,5 +229,46 @@ export function validateAffiliationPhrases(
     out.push(phrase);
   }
   if (out.length > SERVICE_PHRASES_MAX) return { ok: false, error: "too_many_phrases" };
+  return { ok: true, value: out };
+}
+
+/**
+ * Author names as the API receives them: an array of 0 to 50 strings, each 2
+ * to 80 characters once trimmed and with runs of whitespace collapsed, and
+ * each a family name followed by a first initial ("Rivera Stone B"). An entry
+ * with no initial is an error (`authorNameKey`), never silently dropped.
+ * Entries that name the same author (the same family-name letters and first
+ * initial) collapse to the first.
+ */
+export function validateAuthorNames(
+  input: unknown,
+): Result<
+  string[],
+  | "invalid_value"
+  | "author_name_too_short"
+  | "author_name_too_long"
+  | "author_name_no_initial"
+  | "too_many_author_names"
+> {
+  if (!Array.isArray(input) || !input.every((v) => typeof v === "string")) {
+    return { ok: false, error: "invalid_value" };
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input as string[]) {
+    const name = raw.replace(/\s+/g, " ").trim();
+    if (name.length < SERVICE_AUTHOR_NAME_MIN_LENGTH) {
+      return { ok: false, error: "author_name_too_short" };
+    }
+    if (name.length > SERVICE_AUTHOR_NAME_MAX_LENGTH) {
+      return { ok: false, error: "author_name_too_long" };
+    }
+    const key = authorNameKey(name);
+    if (key === null) return { ok: false, error: "author_name_no_initial" };
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  if (out.length > SERVICE_AUTHOR_NAMES_MAX) return { ok: false, error: "too_many_author_names" };
   return { ok: true, value: out };
 }

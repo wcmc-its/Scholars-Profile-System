@@ -20,7 +20,9 @@
  *     unit member in Scholars (reason `staff`), or the pmid is on the
  *     supported list AND in the service's stored `coauthoredPmids`, the
  *     supported pmids with an author whose PubMed affiliation matches one of
- *     the service's phrases (reason `affiliation`);
+ *     the service's phrases (reason `affiliation`) or who is one of the
+ *     service's named authors (reason `author_name`, for the pmids also in
+ *     the stored `nameMatchedPmids`);
  *   - "support" otherwise: on the supported list with no matching author
  *     (reason `supported`), or a core's confirmed publication with no unit
  *     author (reason `confirmed`).
@@ -34,9 +36,14 @@ import { methodFamilyKey, type MethodServiceFamily } from "@/lib/method-services
 export type CollaborationKind = "collaboration" | "support";
 
 /** Why a publication is counted. When several apply: `staff`, then
- *  `affiliation`, then `supported`, then `confirmed`. The first two make it a
- *  collaboration, the last two support. */
-export type CollaborationReason = "staff" | "affiliation" | "supported" | "confirmed";
+ *  `affiliation`, then `author_name`, then `supported`, then `confirmed`. The
+ *  first three make it a collaboration, the last two support. */
+export type CollaborationReason =
+  | "staff"
+  | "affiliation"
+  | "author_name"
+  | "supported"
+  | "confirmed";
 
 export type CollaborationMark = { kind: CollaborationKind; reason: CollaborationReason };
 
@@ -44,12 +51,13 @@ export type CollaborationMark = { kind: CollaborationKind; reason: Collaboration
 export const COLLABORATION_REASON_RANK: Record<CollaborationReason, number> = {
   staff: 0,
   affiliation: 1,
-  supported: 2,
-  confirmed: 3,
+  author_name: 2,
+  supported: 3,
+  confirmed: 4,
 };
 
 export function kindOfReason(reason: CollaborationReason): CollaborationKind {
-  return reason === "staff" || reason === "affiliation" ? "collaboration" : "support";
+  return reason === "supported" || reason === "confirmed" ? "support" : "collaboration";
 }
 
 export type CollaborationInput = {
@@ -58,9 +66,13 @@ export type CollaborationInput = {
   supportedPmids: ReadonlyArray<string>;
   excludedPmids: ReadonlyArray<string>;
   /** The supported pmids with an author whose PubMed affiliation matches the
-   *  unit (server-computed on save). Only counts for a pmid that is still on
-   *  the supported list. */
+   *  unit, or who is one of its named authors (server-computed on save). Only
+   *  counts for a pmid that is still on the supported list. */
   coauthoredPmids?: ReadonlyArray<string>;
+  /** The ones among `coauthoredPmids` found by an author name and not by an
+   *  affiliation. It only chooses between the reasons `affiliation` and
+   *  `author_name`: a caller that does not show the reason may leave it out. */
+  nameMatchedPmids?: ReadonlyArray<string>;
   /** The service's automatic co-authorship toggle: whether a publication is
    *  counted on a unit member's authorship alone. */
   countStaffPapers: boolean;
@@ -85,6 +97,7 @@ export function computeCollaboration(input: CollaborationInput): CollaborationRe
   const { pagePmids } = input;
   const excluded = new Set(input.excludedPmids);
   const coauthored = new Set(input.coauthoredPmids ?? []);
+  const nameMatched = new Set(input.nameMatchedPmids ?? []);
   const reasons = new Map<string, CollaborationReason>();
   const offer = (pmid: string, reason: CollaborationReason) => {
     if (!pagePmids.has(pmid) || excluded.has(pmid)) return;
@@ -99,7 +112,10 @@ export function computeCollaboration(input: CollaborationInput): CollaborationRe
   let supportedOnPage = 0;
   for (const pmid of new Set(input.supportedPmids)) {
     if (pagePmids.has(pmid)) supportedOnPage += 1;
-    offer(pmid, coauthored.has(pmid) ? "affiliation" : "supported");
+    offer(
+      pmid,
+      !coauthored.has(pmid) ? "supported" : nameMatched.has(pmid) ? "author_name" : "affiliation",
+    );
   }
   for (const pmid of input.confirmedPmids ?? []) offer(pmid, "confirmed");
   // Last, so "already counted" below means by the list or the core's record.
