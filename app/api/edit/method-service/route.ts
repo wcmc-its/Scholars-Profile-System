@@ -47,19 +47,32 @@
  *
  * GET /api/edit/method-service?id=<id> — the numbers under a saved service and
  * its "Review publications" list (`loadServiceReview`): `{ ok: true, review }`.
- * Read-only, so no audit row, but gated exactly as a write is. Always
+ * Read-only, so no audit row, but gated as an exclude / restore is. Always
  * `no-store`.
  *
- * Authorization: a SUPERUSER only, on every op and on the GET. The site owner
- * manages every service himself; a unit's Owner or Curator, a comms steward,
- * a content editor and the Cores director all get 403 `not_superuser`. The
- * check is `session.isSuperuser` on the EFFECTIVE session, as on every other
- * superuser-only `/api/edit/*` route (`/api/edit/effective-flags`, the
- * structural ops of `/api/edit/unit`): under "View as" it is the verdict of
- * the person being viewed, so viewing as someone who is not a superuser
- * refuses, and `readEditRequest` has already refused a write under an overlay
- * that must be read-only. It runs before anything is looked up, so nobody
- * else can probe for a service or a unit.
+ * Authorization draws one line: connecting a unit to a method is the site
+ * owner's decision, keeping the list of publications up to date is the unit's
+ * job.
+ *   - SUPERUSER ONLY: create, delete, and any update that carries `name`,
+ *     `url`, `families`, `countStaffPapers`, `affiliationPhrases` or
+ *     `authorNames` (anything, in fact, but `supportedPmids`).
+ *   - ALSO a person who may edit the service's unit (`mayEditServiceUnit`: a
+ *     department's Owner / Curator, a core's Owner / Curator, a comms steward,
+ *     a content editor): an update whose body carries, besides `op` and `id`,
+ *     ONLY `supportedPmids`; exclude; restore; and the GET. The unit is always
+ *     the STORED row's. Such an update with any other key in its body is
+ *     refused whole with 403 (never saved with the extra fields dropped). What
+ *     this caller gets back leaves out `affiliationPhrases` and `authorNames`.
+ * Both verdicts are read off the EFFECTIVE session, as on every other
+ * `/api/edit/*` route: under "View as" they are the verdicts of the person
+ * being viewed, and `readEditRequest` has already refused a write under an
+ * overlay that must be read-only. The GET strips the observer and
+ * content-editor read views first, as a write does.
+ * Someone who is not a superuser gets the SAME 403 `not_superuser` whatever
+ * the reason: an op or a field that is not theirs (refused before anything is
+ * looked up), a malformed id, a service that does not exist, a service whose
+ * unit is gone, or a service of a unit they cannot edit. So nobody can probe
+ * for a service or a unit. Only a superuser sees the 400s and 404s below.
  * For update and delete the unit is the STORED row's, never the body's. Any
  * other `entityType` is a 400; a unit that does not exist is a 404.
  *
@@ -83,6 +96,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { bustMethodServiceCache } from "@/lib/api/method-service-collaborations";
+import { mayEditServiceUnit } from "@/lib/api/method-service-access";
 import { loadServiceReview } from "@/lib/api/method-service-review";
 import {
   METHOD_SERVICE_SELECT,
@@ -117,6 +131,7 @@ import {
   defaultCountStaffPapers,
   isMethodServiceEntityType,
   methodFamilyKey,
+  toPublicationsView,
   validateAffiliationPhrases,
   validateAuthorNames,
   validatePmidList,
@@ -125,6 +140,7 @@ import {
   validateServiceUrl,
   type MethodServiceEntityType,
   type MethodServiceFamily,
+  type MethodServiceView,
 } from "@/lib/method-services/validation";
 
 const PATH = "/api/edit/method-service";
@@ -165,20 +181,78 @@ function auditShape(row: MethodServiceRow): Record<string, unknown> {
   };
 }
 
+/** The ops a person who may edit the service's unit can send. */
+const UNIT_EDITOR_OPS: ReadonlySet<string> = new Set(["update", "exclude", "restore"]);
+/** Every key such a person's update may carry. Anything else is the superuser's. */
+const UNIT_EDITOR_UPDATE_KEYS: ReadonlySet<string> = new Set(["op", "id", "supportedPmids"]);
+
 /**
- * Superuser only: 403 `not_superuser` (and a logged denial) for anyone else,
- * `null` to proceed. `session` is the EFFECTIVE session, so "View as" a person
- * who is not a superuser is refused like that person would be.
+ * The one refusal anyone but a superuser ever gets: 403 `not_superuser`, the
+ * same body whatever was wrong, so it says nothing about whether a service or
+ * a unit exists. The real reason goes to the denial log only.
  */
-function denyNonSuperuser(session: EditSession): NextResponse | null {
-  if (session.isSuperuser) return null;
+function deny(
+  session: EditSession,
+  reason: string = "not_superuser",
+  unit?: { entityType: MethodServiceEntityType; entityId: string },
+): NextResponse {
   logEditDenial({
     actorCwid: session.cwid,
-    targetCwid: session.cwid,
+    targetCwid: unit?.entityId ?? session.cwid,
     path: PATH,
-    reason: "not_superuser",
+    reason,
+    ...(unit ? { targetEntityType: unit.entityType, targetEntityId: unit.entityId } : {}),
   });
   return editError(403, "not_superuser");
+}
+
+/**
+ * The stored service a request names, and the caller's right to act on it.
+ * A superuser gets the plain 400 / 404 for a bad id, a missing row or a
+ * missing unit. Anyone else must be able to edit the STORED row's unit, and
+ * gets the one {@link deny} for every other outcome.
+ */
+async function loadAuthorizedService(
+  session: EditSession,
+  id: number | null,
+): Promise<
+  | {
+      ok: true;
+      existing: MethodServiceRow;
+      view: MethodServiceView;
+      unit: { entityType: MethodServiceEntityType; entityId: string };
+    }
+  | { ok: false; response: NextResponse }
+> {
+  const superuser = session.isSuperuser;
+  const refuse = (status: number, error: string, field: string) => ({
+    ok: false as const,
+    response: superuser ? editError(status, error, field) : deny(session),
+  });
+  if (id === null) return refuse(400, "invalid_value", "id");
+  // The stored row decides which unit this is. Read on the writer: a service
+  // created a moment ago may not have reached the reader yet.
+  const existing = await db.write.methodService.findUnique({
+    where: { id },
+    select: METHOD_SERVICE_SELECT,
+  });
+  if (!existing) return refuse(404, "service_not_found", "id");
+  const view = toMethodServiceView(existing);
+  if (!view) return refuse(400, "invalid_entity_type", "id");
+  const unit = { entityType: view.entityType, entityId: view.entityId };
+  const missing = await unitMissing(unit.entityType, unit.entityId);
+  if (missing) return { ok: false, response: superuser ? missing : deny(session) };
+  if (!superuser) {
+    const authz = await mayEditServiceUnit(session, unit.entityType, unit.entityId);
+    if (!authz.ok) return { ok: false, response: deny(session, authz.reason, unit) };
+  }
+  return { ok: true, existing, view, unit };
+}
+
+/** A service as this caller may see it: all of it for a superuser, without
+ *  the affiliation phrases and author names for a unit's editor. */
+function forCaller(session: EditSession, view: MethodServiceView | null) {
+  return view === null || session.isSuperuser ? view : toPublicationsView(view);
 }
 
 /** The owning unit exists, else a 404 to send. `null` to proceed. */
@@ -351,22 +425,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // The identity a write is authorized against (`resolveEditIdentityForWrite`):
   // whoever may change the service is who may review it.
   const session = stripContentEditorView(stripObserverView(identity.session));
-  const notSuperuser = denyNonSuperuser(session);
-  if (notSuperuser) return notSuperuser;
 
   const idRaw = request.nextUrl.searchParams.get("id") ?? "";
-  if (!/^[1-9]\d{0,8}$/.test(idRaw)) return editError(400, "invalid_value", "id");
-  // The stored row decides which unit this is. Read on the writer, as the POST
-  // does: the section asks straight after it creates a service.
-  const existing = await db.write.methodService.findUnique({
-    where: { id: Number(idRaw) },
-    select: METHOD_SERVICE_SELECT,
-  });
-  if (!existing) return editError(404, "service_not_found", "id");
-  const view = toMethodServiceView(existing);
-  if (!view) return editError(400, "invalid_entity_type", "id");
-  const missing = await unitMissing(view.entityType, view.entityId);
-  if (missing) return missing;
+  const found = await loadAuthorizedService(
+    session,
+    /^[1-9]\d{0,8}$/.test(idRaw) ? Number(idRaw) : null,
+  );
+  if (!found.ok) return found.response;
+  const { view } = found;
 
   try {
     const review = await loadServiceReview(view);
@@ -383,8 +449,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request, { maxBytes: MAX_BODY_BYTES });
   if (!req.ok) return req.response;
   const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
-  const notSuperuser = denyNonSuperuser(session);
-  if (notSuperuser) return notSuperuser;
+  // Before anything is looked up: an op that is the superuser's alone, or an
+  // update carrying a field that is. The whole request is refused; a field is
+  // never dropped and the rest saved.
+  if (!session.isSuperuser) {
+    if (typeof body.op !== "string" || !UNIT_EDITOR_OPS.has(body.op)) return deny(session);
+    if (body.op === "update" && !Object.keys(body).every((k) => UNIT_EDITOR_UPDATE_KEYS.has(k))) {
+      return deny(session);
+    }
+  }
 
   if (typeof body.op !== "string" || !(OPS as readonly string[]).includes(body.op)) {
     return editError(400, "invalid_op", "op");
@@ -490,23 +563,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // ---------------------------------------------------------- update / delete
-  if (typeof body.id !== "number" || !Number.isInteger(body.id) || body.id <= 0) {
-    return editError(400, "invalid_value", "id");
-  }
-  // The stored row decides which unit this is. Read on the writer: a service
-  // created a moment ago may not have reached the reader yet.
-  const existing = await db.write.methodService.findUnique({
-    where: { id: body.id },
-    select: METHOD_SERVICE_SELECT,
-  });
-  if (!existing) return editError(404, "service_not_found", "id");
-  if (!isMethodServiceEntityType(existing.entityType)) {
-    return editError(400, "invalid_entity_type", "id");
-  }
-  const unit = { entityType: existing.entityType, entityId: existing.entityId };
-  const missing = await unitMissing(unit.entityType, unit.entityId);
-  if (missing) return missing;
+  // ------------------------------------- update / delete / exclude / restore
+  const found = await loadAuthorizedService(
+    session,
+    typeof body.id === "number" && Number.isInteger(body.id) && body.id > 0 ? body.id : null,
+  );
+  if (!found.ok) return found.response;
+  const { existing, unit, view: current } = found;
 
   if (op === "delete") {
     try {
@@ -573,7 +636,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editOk({
       op,
       changed: outcome.kind === "saved",
-      service: toMethodServiceView(outcome.row),
+      service: forCaller(session, toMethodServiceView(outcome.row)),
     });
   }
 
@@ -582,7 +645,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if ("nameMatchedPmids" in body) return editError(400, "invalid_value", "nameMatchedPmids");
   const read = readFields(body);
   if (!read.ok) return read.response;
-  const current = toMethodServiceView(existing);
   const data: Fields & {
     coauthoredPmids?: string[];
     nameMatchedPmids?: string[];
@@ -637,7 +699,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!sameValue(pubmed.checked, storedChecked)) data.affiliationCheckedPmids = pubmed.checked;
   }
   if (Object.keys(data).length === 0) {
-    return editOk({ op, changed: false, service: current, ...warned });
+    return editOk({ op, changed: false, service: forCaller(session, current), ...warned });
   }
 
   let saved: MethodServiceRow;
@@ -656,5 +718,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(500, "write_failed");
   }
   bustMethodServiceCache();
-  return editOk({ op, changed: true, service: toMethodServiceView(saved), ...warned });
+  return editOk({
+    op,
+    changed: true,
+    service: forCaller(session, toMethodServiceView(saved)),
+    ...warned,
+  });
 }

@@ -47,6 +47,42 @@ export type MethodServiceView = {
   nameMatchedPmids: string[];
 };
 
+/**
+ * A service as a unit's own editor gets it: everything but the affiliation
+ * phrases and author names, which only a superuser sees or sets.
+ */
+export type MethodServicePublicationsView = Omit<
+  MethodServiceView,
+  "affiliationPhrases" | "authorNames"
+>;
+
+/** Drop what a unit's editor is not sent. */
+export function toPublicationsView(view: MethodServiceView): MethodServicePublicationsView {
+  // Named one by one: a field added to the full view later is not sent to a
+  // unit's editor until someone decides it should be.
+  return {
+    id: view.id,
+    entityType: view.entityType,
+    entityId: view.entityId,
+    name: view.name,
+    url: view.url,
+    families: view.families,
+    supportedPmids: view.supportedPmids,
+    excludedPmids: view.excludedPmids,
+    countStaffPapers: view.countStaffPapers,
+    coauthoredPmids: view.coauthoredPmids,
+    nameMatchedPmids: view.nameMatchedPmids,
+  };
+}
+
+/**
+ * What an edit page hands the Method services section: the whole editor for a
+ * superuser (`manage`), or the unit's own part of it (`publications`).
+ */
+export type MethodServicesForViewer =
+  | { mode: "manage"; services: ReadonlyArray<MethodServiceView> }
+  | { mode: "publications"; services: ReadonlyArray<MethodServicePublicationsView> };
+
 /** One row of the family picker (`GET /api/edit/method-families`). */
 export type MethodFamilyOption = MethodServiceFamily & {
   supercategoryLabel: string;

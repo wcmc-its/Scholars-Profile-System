@@ -20,7 +20,11 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import type { ServiceReview, ServiceReviewPublication } from "@/lib/api/method-service-review";
 import type { CollaborationReason } from "@/lib/method-services/collaboration";
-import type { MethodServiceView } from "@/lib/method-services/validation";
+import type { MethodServicePublicationsView } from "@/lib/method-services/validation";
+
+/** Everything the review half reads of a service: never its affiliation
+ *  phrases or author names, so a unit editor's reduced view fits too. */
+type MethodServiceView = MethodServicePublicationsView;
 
 const plural = (n: number, one: string, many: string) =>
   `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;

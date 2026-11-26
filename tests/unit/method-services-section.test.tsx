@@ -108,7 +108,7 @@ describe("MethodServicesSection: list", () => {
     );
     const help = screen.getByText(/Services this unit offers for a research method\./).textContent ?? "";
     // Says who manages it, and never that it is the unit's own to maintain.
-    expect(help).toContain("Only a superuser can see or change this section");
+    expect(help).toContain("Only a superuser can add, change or remove a service");
     expect(help).not.toMatch(/your unit|your service/);
   });
 
