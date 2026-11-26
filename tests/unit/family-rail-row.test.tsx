@@ -68,6 +68,33 @@ describe("TaxonomyRail (family configuration)", () => {
     expect(screen.getByText("T1 · T2")).toBeTruthy();
   });
 
+  it("a family with no exemplar tools (systematic-review-rule rows only) gets no tool line at all", () => {
+    const noTools: FamilyRailItem = {
+      familyId: "fam_0003",
+      familyLabel: "Example review methods",
+      scholarCount: 12,
+      pubCount: 30,
+      exemplarTools: [],
+    };
+    expect(familyRailRow(noTools).descriptor).toBeNull();
+    render(
+      <TaxonomyRail
+        items={[familyRailRow(noTools)]}
+        selectedId={null}
+        onSelect={() => {}}
+        railLabel="Method families"
+        headerText="FAMILIES (1)"
+        filterPlaceholder="Filter families…"
+        noMatchNoun="families"
+        variant="captioned"
+      />,
+    );
+    const row = screen.getByText("Example review methods").closest("li, button, a")!;
+    // No empty descriptor element and no stray separator.
+    expect(row.textContent).not.toContain("·");
+    expect([...row.querySelectorAll("*")].filter((el) => el.children.length === 0 && el.textContent === "")).toEqual([]);
+  });
+
   it("selecting a family row invokes onSelect with its familyId; re-clicking toggles off", () => {
     const onSelect = vi.fn();
     const { rerender } = render(<FamilyRail activeFamilyId={null} onSelect={onSelect} />);

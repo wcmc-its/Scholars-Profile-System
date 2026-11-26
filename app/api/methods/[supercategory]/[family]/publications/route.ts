@@ -24,6 +24,10 @@
  *                                    the same empty feed. Flag off ⇒ ignored.
  *   rows per page (TAXONOMY_FEED_LOAD_MORE) → `parseFeedLimit` (whole 20-row
  *                                    chunks, at most 200). Flag off ⇒ ignored.
+ *   service filter (METHOD_SERVICES) → `parseServiceParam` (a positive integer
+ *                                    of at most 9 digits); the loader answers an
+ *                                    id that is not a visible service of this
+ *                                    family with an empty feed. Flag off ⇒ ignored.
  *
  * The overlay gate (#800 suppression / #801 sensitivity) + master lens gate live
  * in the loader (`getFamilyPublications`), which returns null for a gated/unknown
@@ -41,6 +45,8 @@ import {
   type MethodPublicationFilter,
 } from "@/lib/api/methods";
 import { CWID_PATTERN } from "@/lib/cwid";
+import { parseServiceParam } from "@/lib/method-services/collaboration";
+import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxonomy-flags";
 import { FEED_CHUNK, clampFeedPage, parseFeedLimit } from "@/lib/taxonomy/feed-load-more";
 
@@ -142,6 +148,20 @@ export async function GET(
     }
   }
 
+  // METHOD_SERVICES — optional "{Unit} collaborations" filter, validated only
+  // while the flag is on (off ⇒ ignored, the pre-flag behavior).
+  let serviceId: number | undefined;
+  if (isMethodServicesEnabled()) {
+    const serviceRaw = sp.get("service");
+    if (serviceRaw !== null) {
+      const parsed = parseServiceParam(serviceRaw);
+      if (parsed === null) {
+        return apiError("invalid service", 400);
+      }
+      serviceId = parsed;
+    }
+  }
+
   // Resolve the family to its stable (supercategory, familyLabel) identity —
   // re-derives slugs over the live set, applies the overlay gate, null on miss.
   const resolved = await getFamily(supercategory, family);
@@ -158,6 +178,7 @@ export async function GET(
       filter,
       entityId,
       ...(cwid ? { cwid } : {}),
+      ...(serviceId !== undefined ? { serviceId } : {}),
       ...(pageSize !== FEED_CHUNK ? { pageSize } : {}),
     },
   );

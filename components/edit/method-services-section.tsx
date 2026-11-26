@@ -12,6 +12,9 @@
  * response (the reader replica can lag a refresh), and the page is refreshed
  * so the section nav's count follows.
  *
+ * Under each saved service: its collaboration numbers and a "Review
+ * publications" panel with "Not ours" / "Undo" (`method-service-review.tsx`).
+ *
  * Imports only types and pure validation from `lib/method-services/validation`
  * (no `@/lib/db`).
  */
@@ -20,12 +23,18 @@ import { useRouter } from "next/navigation";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { MethodFamilyPicker } from "@/components/edit/method-family-picker";
+import {
+  ServiceReviewPanel,
+  ServiceReviewSummary,
+  useServiceReviews,
+} from "@/components/edit/method-service-review";
 import { SectionHeader } from "@/components/edit/unit-basics-section";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { withArticle } from "@/lib/method-services/collaboration";
 import {
   SERVICE_FAMILIES_MAX,
   SERVICE_NAME_MAX_LENGTH,
@@ -76,11 +85,6 @@ const byName = (a: MethodServiceView, b: MethodServiceView) =>
 const plural = (n: number, one: string, many: string) =>
   `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
-/** "the Example Library", never "the The Example Library". */
-function withArticle(unitName: string): string {
-  return `the ${unitName.replace(/^the\s+/i, "")}`;
-}
-
 const sameFamilies = (
   a: ReadonlyArray<MethodServiceFamily>,
   b: ReadonlyArray<MethodServiceFamily>,
@@ -120,6 +124,23 @@ export function MethodServicesSection({
   const [removing, setRemoving] = React.useState<MethodServiceView | null>(null);
   /** The row whose Edit was pressed over unsaved changes, awaiting a confirm. */
   const [pendingEdit, setPendingEdit] = React.useState<MethodServiceView | null>(null);
+
+  // "Review publications": the numbers under each service, which panel is
+  // open, and where focus goes once a "Not ours" / "Undo" has been re-read.
+  const { reviews } = useServiceReviews(services);
+  const [reviewOpen, setReviewOpen] = React.useState<number | null>(null);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const reviewToggles = React.useRef(new Map<number, HTMLButtonElement>());
+  const reviewFocus = React.useRef<{ id: number; action: string; stale: unknown } | null>(null);
+  React.useEffect(() => {
+    const pending = reviewFocus.current;
+    if (!pending || busy || reviews.get(pending.id) === pending.stale) return;
+    reviewFocus.current = null;
+    const target =
+      rootRef.current?.querySelector<HTMLElement>(`[data-review-action="${pending.action}"]`) ??
+      reviewToggles.current.get(pending.id);
+    target?.focus();
+  }, [reviews, busy]);
 
   const nameRef = React.useRef<HTMLInputElement | null>(null);
   const urlRef = React.useRef<HTMLInputElement | null>(null);
@@ -326,13 +347,42 @@ export function MethodServicesSection({
     router.refresh();
   }
 
+  /** "Not ours" (exclude) or its undo (restore) for one publication. */
+  async function movePmid(service: MethodServiceView, op: "exclude" | "restore", pmid: string) {
+    if (busy) return;
+    setBusy(true);
+    setFormError(null);
+    setStatus("");
+    const result = await post({ op, id: service.id, pmid });
+    setBusy(false);
+    if (!result.ok || !result.service) {
+      setFormError(errorMessage(result.error ?? ""));
+      return;
+    }
+    const saved = result.service;
+    // The button pressed is about to leave the list: once the numbers have
+    // been re-read, focus its counterpart (Undo for Not ours, and back).
+    reviewFocus.current = {
+      id: service.id,
+      action: `${op === "exclude" ? "restore" : "exclude"}-${service.id}-${pmid}`,
+      stale: reviews.get(service.id),
+    };
+    // A new service object, so `useServiceReviews` re-reads its numbers.
+    setServices((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
+    setStatus(
+      op === "exclude"
+        ? `PMID ${pmid} no longer counts as a collaboration of ${unit}.`
+        : `PMID ${pmid} counts again.`,
+    );
+  }
+
   const unit = withArticle(unitName);
   const previewName = draft.name.trim() || "Service name";
   const describe = (...ids: Array<string | false | undefined>) =>
     ids.filter(Boolean).join(" ") || undefined;
 
   return (
-    <div className="flex flex-col gap-3.5" data-slot="method-services-section">
+    <div ref={rootRef} className="flex flex-col gap-3.5" data-slot="method-services-section">
       <UnsavedChangesGuard dirty={dirty} />
       <SectionHeader
         id={headingId}
@@ -352,12 +402,16 @@ export function MethodServicesSection({
           className="border-apollo-border divide-apollo-border divide-y overflow-hidden rounded-[10px] border"
           data-testid="method-services-list"
         >
-          {services.map((s) => (
+          {services.map((s) => {
+            const review = reviews.get(s.id);
+            const panelId = `method-service-review-${s.id}`;
+            return (
             <li
               key={s.id}
-              className="flex flex-col gap-2 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+              className="flex flex-col gap-2 px-3.5 py-3"
               data-testid={`method-service-${s.id}`}
             >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <div className="flex min-w-0 flex-col gap-1">
                 <span className="text-[15px] font-semibold">{s.name}</span>
                 <a
@@ -378,15 +432,17 @@ export function MethodServicesSection({
                     </li>
                   ))}
                 </ul>
-                {s.supportedPmids.length > 0 && (
-                  <span
-                    className="text-muted-foreground mt-1 text-[13px]"
-                    data-testid={`method-service-supported-${s.id}`}
-                  >
-                    {plural(s.supportedPmids.length, "publication", "publications")} on your
-                    supported list
-                  </span>
-                )}
+                <ServiceReviewSummary
+                  service={s}
+                  review={review}
+                  open={reviewOpen === s.id}
+                  onToggle={() => setReviewOpen((cur) => (cur === s.id ? null : s.id))}
+                  panelId={panelId}
+                  toggleRef={(node) => {
+                    if (node) reviewToggles.current.set(s.id, node);
+                    else reviewToggles.current.delete(s.id);
+                  }}
+                />
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <Button
@@ -414,8 +470,20 @@ export function MethodServicesSection({
                   Remove
                 </Button>
               </div>
+            </div>
+            {reviewOpen === s.id && review && (
+              <ServiceReviewPanel
+                service={s}
+                review={review}
+                panelId={panelId}
+                busy={busy}
+                onExclude={(pmid) => void movePmid(s, "exclude", pmid)}
+                onRestore={(pmid) => void movePmid(s, "restore", pmid)}
+              />
+            )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 

@@ -8,6 +8,7 @@ import {
   getRepresentativePubsForFamily,
   getFamilyCellLineEntities,
   getDistinctPmidCountForFamily,
+  getFamilyServices,
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -17,6 +18,7 @@ import { isTaxonomyFeedLoadMoreOn, isTaxonomyScholarCardsOn } from "@/lib/taxono
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
 import { FamilyEntityRailLayout } from "@/components/method/family-entity-rail-layout";
+import { MethodServicesBlock } from "@/components/method/method-services-block";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -75,6 +77,7 @@ export default async function FamilyPage({
     representativePubs,
     cellLineEntities,
     distinctPmidTotal,
+    services,
   ] = await Promise.all([
     getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
     getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
@@ -89,7 +92,12 @@ export default async function FamilyPage({
     // (the feed's `totalResearchOnly` denominator), used for the rail copy + the
     // Spotlight volume gate. 0 when the lens is off / family gated / no pmids.
     getDistinctPmidCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
+    // METHOD_SERVICES — the units offering a service for this method, each with
+    // the publications it collaborated on ([] with no query when the flag is
+    // off; a failed read drops the block, the filter and the badges together).
+    getFamilyServices(resolved.supercategory, resolved.familyLabel).catch(() => []),
   ]);
+  const feedServices = services.map((s) => ({ id: s.id, label: s.label, count: s.count }));
 
   // #1166 — when the family resolves to specific cell lines, the master-detail
   // cell-line rail (Surface B §5.1) sits in the left column of the publications
@@ -197,6 +205,15 @@ export default async function FamilyPage({
           </div>
         )}
 
+        {/* METHOD_SERVICES — "WCM services for this method", under the definition. */}
+        {services.length > 0 && (
+          <MethodServicesBlock
+            services={services}
+            total={distinctPmidTotal}
+            familyPath={`/methods/${resolved.supercategorySlug}/${resolved.familySlug}`}
+          />
+        )}
+
         {/* TopScholarsChipRow's built-in "+ N more" link is hardcoded to
             `/topics/{slug}/scholars`; on a method page the enumerative list
             lives at `/methods/[sc]/[fam]/scholars`, so we render the chips
@@ -262,6 +279,7 @@ export default async function FamilyPage({
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
             loadMore={feedLoadMore}
+            services={feedServices}
           />
         ) : (
           <FamilyPublicationLayout
@@ -270,6 +288,7 @@ export default async function FamilyPage({
             familyLabel={resolved.familyLabel}
             cellLineLabels={cellLineLabels}
             loadMore={feedLoadMore}
+            services={feedServices}
           />
         )}
       </section>

@@ -755,6 +755,59 @@ describe("getPublicationDetail — method families (#917)", () => {
     ]);
   });
 
+  it("takes the tools from a co-author's row when the row kept first has none (a systematic-review-rule row)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }, { cwid: "aaa1002" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      // The rule's row: same family, the paper's pmid, no exemplar tools.
+      {
+        supercategory: "evidence_synthesis",
+        familyLabel: "Example review methods",
+        familyId: "fam_0200",
+        pmids: ["12345"],
+        exemplarTools: [],
+        exemplarContexts: {},
+        exemplarContextPmids: {},
+      },
+      {
+        supercategory: "evidence_synthesis",
+        familyLabel: "Example review methods",
+        familyId: "fam_0200",
+        pmids: ["12345"],
+        exemplarTools: ["Example Screener"],
+        exemplarContexts: {},
+        exemplarContextPmids: {},
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toHaveLength(1);
+    expect(r?.methodFamilies[0].tools).toEqual([
+      { name: "Example Screener", context: null, sourcePmid: null },
+    ]);
+  });
+
+  it("yields no tools when every row of the family is a rule row", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }, { cwid: "aaa1002" }]);
+    const ruleRow = {
+      supercategory: "evidence_synthesis",
+      familyLabel: "Example review methods",
+      familyId: "fam_0200",
+      pmids: ["12345"],
+      exemplarTools: [],
+      exemplarContexts: {},
+      exemplarContextPmids: {},
+    };
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([ruleRow, { ...ruleRow }]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toHaveLength(1);
+    expect(r?.methodFamilies[0].tools).toEqual([]);
+  });
+
   it("yields no tools for a family with no exemplar tools (chip-only, as in Phase 1)", async () => {
     process.env.METHODS_LENS_ENABLED = "on";
     process.env.METHODS_LENS_PUB_MODAL = "on";

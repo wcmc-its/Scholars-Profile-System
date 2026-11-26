@@ -7,7 +7,7 @@
  * family rail + panel lives in `supercategory-rail-layout.tsx`.
  */
 import { Suspense } from "react";
-import { FamilyPublicationFeed } from "@/components/taxonomy/publication-feed";
+import { FamilyPublicationFeed, type FeedService } from "@/components/taxonomy/publication-feed";
 
 export function FamilyPublicationLayout({
   supercategorySlug,
@@ -16,6 +16,7 @@ export function FamilyPublicationLayout({
   cellLineLabels,
   embedded = false,
   loadMore = false,
+  services,
 }: {
   supercategorySlug: string;
   familySegment: string;
@@ -28,6 +29,8 @@ export function FamilyPublicationLayout({
   embedded?: boolean;
   /** TAXONOMY_FEED_LOAD_MORE. */
   loadMore?: boolean;
+  /** METHOD_SERVICES — the page's visible services (filter + row badge). */
+  services?: ReadonlyArray<FeedService>;
 }) {
   const feed = (
     // The feed reads `?entity=` via useSearchParams (#1166) — Suspense lets the
@@ -39,6 +42,7 @@ export function FamilyPublicationLayout({
         familyLabel={familyLabel}
         cellLineLabels={cellLineLabels}
         loadMore={loadMore}
+        services={services}
       />
     </Suspense>
   );

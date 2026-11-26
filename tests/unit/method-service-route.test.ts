@@ -25,12 +25,17 @@ const m = vi.hoisted(() => ({
   txDelete: vi.fn(),
   appendAuditRow: vi.fn(),
   logEditDenial: vi.fn(),
+  resolveEditIdentity: vi.fn(),
+  loadServiceReview: vi.fn(),
 }));
 
 vi.mock("@/lib/edit/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/request")>()),
   readEditRequest: m.readEditRequest,
+  resolveEditIdentity: m.resolveEditIdentity,
 }));
+// The review loader has its own tests; here only who may read it matters.
+vi.mock("@/lib/api/method-service-review", () => ({ loadServiceReview: m.loadServiceReview }));
 vi.mock("@/lib/edit/authz", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/authz")>()),
   logEditDenial: m.logEditDenial,
@@ -54,7 +59,7 @@ vi.mock("@/lib/db", () => {
   };
 });
 
-import { POST } from "@/app/api/edit/method-service/route";
+import { GET, POST } from "@/app/api/edit/method-service/route";
 
 const ACTOR = "act0001";
 const DEPT_A = "DEPTA";
@@ -637,5 +642,216 @@ describe("POST /api/edit/method-service: delete", () => {
     const res = await call({ op: "delete", id: 5 });
     expect(res.status).toBe(403);
     expect(m.txDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/edit/method-service: exclude (Not ours) and restore (undo)", () => {
+  beforeEach(() => grantDepartment(DEPT_A, "curator"));
+
+  it("exclude adds the PMID to the stored excluded list and audits it in the same transaction", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: ["900"] }));
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: true, op: "exclude", changed: true });
+    expect(body.service.excludedPmids).toEqual(["900", "111"]);
+
+    expect(m.transaction).toHaveBeenCalledTimes(1);
+    expect(m.txUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 5 }, data: { excludedPmids: ["900", "111"] } }),
+    );
+    // Audited with the transaction's own client, reusing roster_change on the unit.
+    expect(m.appendAuditRow).toHaveBeenCalledTimes(1);
+    const [tx, audit] = m.appendAuditRow.mock.calls[0];
+    expect(tx).toBe(fakeTx);
+    expect(audit).toMatchObject({
+      actorCwid: ACTOR,
+      targetEntityType: "department",
+      targetEntityId: DEPT_A,
+      action: "roster_change",
+      fieldsChanged: ["method_services"],
+    });
+    expect(audit.beforeValues).toMatchObject({ excludedPmidCount: 1, excludedPmids: ["900"] });
+    expect(audit.afterValues).toMatchObject({
+      excludedPmidCount: 2,
+      excludedPmids: ["900", "111"],
+      excludedPmid: "111",
+    });
+  });
+
+  it("exclude leaves the supported list alone: excluded wins at read time", async () => {
+    await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ excludedPmids: ["111"] });
+  });
+
+  it("restore removes the PMID again and audits which one", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: ["900", "111"] }));
+    const res = await call({ op: "restore", id: 5, pmid: "111" });
+    expect(res.status).toBe(200);
+    expect((await res.json()).service.excludedPmids).toEqual(["900"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ excludedPmids: ["900"] });
+    expect(m.appendAuditRow.mock.calls[0][1].afterValues).toMatchObject({
+      excludedPmidCount: 1,
+      restoredPmid: "111",
+    });
+  });
+
+  it("reads `PMID: 111` and a leading zero as the same PMID", async () => {
+    await call({ op: "exclude", id: 5, pmid: "PMID: 0111" });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ excludedPmids: ["111"] });
+  });
+
+  it("is a no-op, with no write and no audit row, when the list already says so", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: ["111"] }));
+    const again = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(await again.json()).toMatchObject({ ok: true, changed: false });
+    const never = await call({ op: "restore", id: 5, pmid: "222" });
+    expect(await never.json()).toMatchObject({ ok: true, changed: false });
+    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 111, "", "abc", "111 222", ["111"]])("400s pmid %j", async (pmid) => {
+    const res = await call({ op: "exclude", id: 5, pmid });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_pmids", field: "pmid" });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("400s rather than grow the excluded list past 5000", async () => {
+    m.serviceFindUnique.mockResolvedValue(
+      row({ excludedPmids: Array.from({ length: 5000 }, (_, i) => String(700000 + i)) }),
+    );
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "too_many_pmids" });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("an outsider gets 403 for exclude and for restore, logged, with no write", async () => {
+    m.unitAdminFindMany.mockResolvedValue([]);
+    for (const op of ["exclude", "restore"]) {
+      const res = await call({ op, id: 5, pmid: "111" });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ ok: false, error: "not_curator" });
+    }
+    expect(m.logEditDenial).toHaveBeenCalledTimes(2);
+    expect(m.logEditDenial).toHaveBeenCalledWith(
+      expect.objectContaining({ actorCwid: ACTOR, targetEntityType: "department", targetEntityId: DEPT_A }),
+    );
+    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.appendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("is authorized against the STORED row: department A's editor cannot exclude from department B's service, whatever the body names", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
+    const res = await call({
+      op: "exclude",
+      id: 5,
+      pmid: "111",
+      entityType: "department",
+      entityId: DEPT_A,
+    });
+    expect(res.status).toBe(403);
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("a department editor cannot exclude from a core's service", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ entityType: "core", entityId: CORE }));
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "not_core_owner" });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("404s an id with no row", async () => {
+    m.serviceFindUnique.mockResolvedValue(null);
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(404);
+  });
+
+  it("500s write_failed when the transaction throws", async () => {
+    m.transaction.mockRejectedValue(new Error("boom"));
+    const res = await call({ op: "exclude", id: 5, pmid: "111" });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "write_failed" });
+  });
+});
+
+describe("GET /api/edit/method-service: the review numbers", () => {
+  const REVIEW = { collaborations: 2, supportedListed: 2, supportedOnPage: 1, perMethod: [], marked: [], excluded: [] };
+  const get = (query = "?id=5") =>
+    GET(new NextRequest(`http://localhost/api/edit/method-service${query}`));
+  const signIn = (session: Record<string, unknown> = {}) =>
+    m.resolveEditIdentity.mockResolvedValue({
+      session: { cwid: ACTOR, ...NOBODY, ...session },
+      realCwid: ACTOR,
+      impersonatedCwid: null,
+    });
+
+  beforeEach(() => {
+    signIn();
+    m.loadServiceReview.mockResolvedValue(REVIEW);
+  });
+
+  it("404s while the flag is off, before resolving anyone", async () => {
+    vi.stubEnv("METHOD_SERVICES", "off");
+    expect((await get()).status).toBe(404);
+    expect(m.resolveEditIdentity).not.toHaveBeenCalled();
+  });
+
+  it("401s with no session", async () => {
+    m.resolveEditIdentity.mockResolvedValue(null);
+    expect((await get()).status).toBe(401);
+    expect(m.loadServiceReview).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "?id=0", "?id=abc", "?id=5%20OR%201"])("400s query %j", async (query) => {
+    expect((await get(query)).status).toBe(400);
+    expect(m.serviceFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("the unit's editor gets the review, uncached", async () => {
+    grantDepartment(DEPT_A, "curator");
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ ok: true, review: REVIEW });
+    expect(m.loadServiceReview).toHaveBeenCalledWith(expect.objectContaining({ id: 5, entityId: DEPT_A }));
+  });
+
+  it("an outsider gets 403 and the review is never loaded", async () => {
+    const res = await get();
+    expect(res.status).toBe(403);
+    expect(m.loadServiceReview).not.toHaveBeenCalled();
+    expect(m.logEditDenial).toHaveBeenCalled();
+  });
+
+  it("is authorized against the stored row's unit, not the caller's", async () => {
+    grantDepartment(DEPT_A, "owner");
+    m.serviceFindUnique.mockResolvedValue(row({ entityId: DEPT_B }));
+    expect((await get()).status).toBe(403);
+    expect(m.loadServiceReview).not.toHaveBeenCalled();
+  });
+
+  it("an observer's read-only steward view does not open it, as it does not open a write", async () => {
+    signIn({ isCommsSteward: true, isObserver: true });
+    const res = await get();
+    expect(res.status).toBe(403);
+    expect(m.loadServiceReview).not.toHaveBeenCalled();
+  });
+
+  it("404s an id with no row", async () => {
+    grantDepartment(DEPT_A, "curator");
+    m.serviceFindUnique.mockResolvedValue(null);
+    expect((await get()).status).toBe(404);
+  });
+
+  it("500s read_failed when the loader throws", async () => {
+    grantDepartment(DEPT_A, "curator");
+    m.loadServiceReview.mockRejectedValue(new Error("boom"));
+    const res = await get();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "read_failed" });
   });
 });

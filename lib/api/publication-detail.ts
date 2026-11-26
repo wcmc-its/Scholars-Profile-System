@@ -452,7 +452,21 @@ async function resolveMethodFamilies(
       continue;
     }
     const key = `${row.supercategory}::${row.familyLabel}`;
-    if (byKey.has(key)) continue;
+    const kept = byKey.get(key);
+    if (kept) {
+      // A row the systematic-review rule added (etl/tools/systematic-review-rule.ts)
+      // carries no exemplar tools. When that was the row kept, take the tools
+      // from the first co-author row that has some, so the family's tools line
+      // does not depend on row order.
+      if (kept.tools.length === 0) {
+        kept.tools = resolveFamilyTools(
+          row.exemplarTools,
+          row.exemplarContexts,
+          row.exemplarContextPmids,
+        );
+      }
+      continue;
+    }
     byKey.set(key, {
       supercategory: row.supercategory,
       familyLabel: row.familyLabel,

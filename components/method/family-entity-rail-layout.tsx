@@ -18,6 +18,7 @@ import type { TaxonomyRailItem } from "@/components/taxonomy/taxonomy-rail";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
 import { entityKindNoun, entityKindNounForCount } from "@/lib/methods/entity-kind-noun";
 import type { CellLineEntity } from "@/lib/api/methods";
+import type { FeedService } from "@/components/taxonomy/publication-feed";
 
 /** CellLineEntity → rail row: lineage/organism descriptor beneath the label,
  *  usage count captioned "papers", selectable only when evidenced + specific. */
@@ -42,6 +43,7 @@ export function FamilyEntityRailLayout({
   familyLabel,
   cellLineLabels,
   loadMore = false,
+  services,
 }: {
   entities: CellLineEntity[];
   supercategorySlug: string;
@@ -50,6 +52,8 @@ export function FamilyEntityRailLayout({
   cellLineLabels: Record<string, string>;
   /** TAXONOMY_FEED_LOAD_MORE. */
   loadMore?: boolean;
+  /** METHOD_SERVICES — the page's visible services (filter + row badge). */
+  services?: ReadonlyArray<FeedService>;
 }) {
   // #1168: the noun follows the family's dominant entity kind (shared by all
   // entities in a family), so a reagent family doesn't read "Cell lines".
@@ -87,6 +91,7 @@ export function FamilyEntityRailLayout({
           cellLineLabels={cellLineLabels}
           embedded
           loadMore={loadMore}
+          services={services}
         />
       )}
     </RailLayout>
