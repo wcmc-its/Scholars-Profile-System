@@ -17,13 +17,16 @@
  *
  * What the filters do:
  *   - `type`, `unit`, `person`, `pos`, `basis` + `from` / `to` pick the
- *     authorships, and so the publications.
- *   - `body`, `cfrom` / `cto` pick which citing documents are counted, in
- *     every number on the page.
- *   - `level` picks which publications and people are LISTED (one with a
- *     counted document at a ticked level); the counts and the tiles still
- *     cover all four levels. A bare URL lists the three above reviews.
- *   - `view`, `sort`, `pub` (the expanded row) are view state, not filters.
+ *     authorships, and so the publications. A bare URL starts at
+ *     `DEFAULT_FROM`.
+ *   - `body`, `cfrom` / `cto`, `excl` (hide excluded-study citations) pick
+ *     which citing documents are counted, in every number on the page.
+ *   - `level` picks which publications, citing documents and people are
+ *     LISTED (one with a counted document at a ticked level); the counts and
+ *     the tiles still cover all four levels. A bare URL lists the three above
+ *     reviews.
+ *   - `view`, `sort`, `dsort`, `q` (the tab's search) and `page` are view
+ *     state, not filters.
  *
  * A citing document counts once per publication however many journals printed
  * it (`dedup_key`). Server-only (`@/lib/db`).
@@ -53,13 +56,34 @@ export const LEVEL_LABEL: Record<Level, string> = {
   consensus: "Consensus statements",
   review: "Systematic reviews",
 };
+export const LEVEL_ONE: Record<Level, string> = {
+  authority: "Health authority",
+  guideline: "Clinical guideline",
+  consensus: "Consensus statement",
+  review: "Systematic review",
+};
 
 /** What a bare URL lists: everything above systematic reviews. */
-const DEFAULT_LEVELS: readonly Level[] = ["authority", "guideline", "consensus"];
+/** The levels with few enough links to list and chart by citing document. */
+export const DOC_LEVELS = ["authority", "guideline", "consensus"] as const;
+export type DocLevel = (typeof DOC_LEVELS)[number];
+const DEFAULT_LEVELS: readonly Level[] = DOC_LEVELS;
+/** What a bare URL starts at: publications from this calendar year on. */
+export const DEFAULT_FROM = 2020;
+/** Rows per page, on every tab. */
+export const POLICY_PAGE_SIZE = 50;
 
 export const BODIES: readonly string[] = [...new Set(ISSUING_BODIES.map(([, body]) => body))];
 /** WHO's documents include IARC's (`ISSUING_BODIES`). */
 export const bodyLabel = (body: string) => (body === "WHO" ? "WHO (including IARC)" : body);
+/** The line under a body's short name. */
+export const BODY_NAME: Record<string, string> = {
+  WHO: "World Health Organization, including its cancer agency IARC",
+  NICE: "National Institute for Health and Care Excellence (UK)",
+  CDC: "Centers for Disease Control and Prevention (US)",
+  AHRQ: "Agency for Healthcare Research and Quality (US)",
+  "National Academies": "National Academies of Sciences, Engineering, and Medicine (US)",
+};
 
 export const POSITION_LABEL = {
   first: "First author",
@@ -69,15 +93,21 @@ export const POSITION_LABEL = {
 export type Position = keyof typeof POSITION_LABEL;
 
 export const SORT_LABEL = {
-  ranked: "Highest-level citations first",
-  guidelines: "Most clinical guidelines",
-  reviews: "Most systematic reviews",
+  ranked: "Highest level, most distinct documents",
+  guidelines: "Most guidelines",
   recent: "Most recently cited",
   year: "Publication year",
 } as const;
 export type PolicySort = keyof typeof SORT_LABEL;
 
-export type PolicyView = "publications" | "people";
+export const DOC_SORT_LABEL = {
+  recent: "Most recent first",
+  papers: "Most WCM papers cited",
+  body: "Issuing body",
+} as const;
+export type DocSort = keyof typeof DOC_SORT_LABEL;
+
+export type PolicyView = "publications" | "documents" | "people";
 
 export type PolicyCitationParams = {
   /** Raw roleCategory values (`type`). */
@@ -92,6 +122,8 @@ export type PolicyCitationParams = {
   levels: Level[];
   /** `body`; empty = any issuing body. */
   bodies: string[];
+  /** `excl=1`: links that only list the paper as an excluded study do not count. */
+  hideExcluded: boolean;
   basis: YearBasis;
   /** Publication years (`from` / `to`); null = open. */
   from: number | null;
@@ -101,20 +133,24 @@ export type PolicyCitationParams = {
   cto: number | null;
   view: PolicyView;
   sort: PolicySort;
-  /** The expanded publication's PMID (`pub`). */
-  pub: string | null;
+  /** The By citing document tab's order (`dsort`). */
+  docSort: DocSort;
+  /** The current tab's search (`q`); "" = none. */
+  q: string;
+  /** 1-based (`page`). */
+  page: number;
   /** The viewer's units (`resolvePolicyCitationParams`): null = everything,
    *  [] = nothing. Never from the URL. */
   scope: string[] | null;
 };
 
-const VIEW_KEYS = new Set(["view", "sort", "pub"]);
+const VIEW_KEYS = new Set(["view", "sort", "dsort", "q", "page"]);
 
 /** Every param is optional; a stray value is dropped. A bare URL (nothing but
- *  view state) gets `DEFAULT_LEVELS`; any filter in the URL means the form
- *  was submitted and the URL is taken as-is (no level ticked = every level).
- *  The rail always submits `basis`, so unticking everything never brings the
- *  default back. */
+ *  view state) gets `DEFAULT_LEVELS` and `DEFAULT_FROM`; any filter in the URL
+ *  means the form was submitted and the URL is taken as-is (no level ticked =
+ *  every level, no `from` = any year). The rail always submits `basis`, so
+ *  clearing everything never brings the defaults back. */
 export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationParams {
   const bare = ![...sp.keys()].some((k) => !VIEW_KEYS.has(k));
   const person = parsePersonFilter(sp);
@@ -135,7 +171,7 @@ export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationPa
   };
   const [from, to] = range("from", "to");
   const [cfrom, cto] = range("cfrom", "cto");
-  const pub = sp.get("pub")?.trim() ?? "";
+  const page = Number.parseInt(sp.get("page") ?? "", 10);
   return {
     types: person.types,
     units: person.unitValues,
@@ -143,23 +179,26 @@ export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationPa
     positions: among("pos", Object.keys(POSITION_LABEL) as Position[]),
     levels: bare ? [...DEFAULT_LEVELS] : among("level", LEVELS),
     bodies: among("body", BODIES),
+    hideExcluded: sp.get("excl") === "1",
     basis: one("basis", Object.keys(BASIS_LABEL) as YearBasis[], "cy"),
-    from,
+    from: bare ? DEFAULT_FROM : from,
     to,
     cfrom,
     cto,
-    view: one("view", ["publications", "people"] as const, "publications"),
+    view: one("view", ["publications", "documents", "people"] as const, "publications"),
     sort: one("sort", Object.keys(SORT_LABEL) as PolicySort[], "ranked"),
-    pub: /^[\w.:-]{1,32}$/.test(pub) ? pub : null,
+    docSort: one("dsort", Object.keys(DOC_SORT_LABEL) as DocSort[], "recent"),
+    q: (sp.get("q") ?? "").trim().slice(0, 100),
+    page: Number.isFinite(page) ? Math.min(100_000, Math.max(1, page)) : 1,
     scope: [],
   };
 }
 
 /** The canonical query string: the download link, the chips, the tabs and
  *  the row links build on it. Always carries `basis`, so it is never bare.
- *  `pub` rides only when asked for. */
+ *  `page` rides only when asked for: any other change starts at page 1. */
 export function policyCitationQueryString(p: PolicyCitationParams, over: Partial<PolicyCitationParams> = {}): string {
-  const x = { ...p, pub: null, ...over };
+  const x = { ...p, page: 1, ...over };
   const q = new URLSearchParams();
   for (const t of x.types) q.append("type", t);
   for (const u of x.units) q.append("unit", u);
@@ -167,18 +206,22 @@ export function policyCitationQueryString(p: PolicyCitationParams, over: Partial
   for (const v of x.positions) q.append("pos", v);
   for (const l of x.levels) q.append("level", l);
   for (const b of x.bodies) q.append("body", b);
+  if (x.hideExcluded) q.set("excl", "1");
   q.set("basis", x.basis);
   for (const k of ["from", "to", "cfrom", "cto"] as const) if (x[k] !== null) q.set(k, String(x[k]));
   if (x.view !== "publications") q.set("view", x.view);
   if (x.sort !== "ranked") q.set("sort", x.sort);
-  if (x.pub) q.set("pub", x.pub);
+  if (x.docSort !== "recent") q.set("dsort", x.docSort);
+  if (x.q) q.set("q", x.q);
+  if (x.page > 1) q.set("page", String(x.page));
   return q.toString();
 }
 
 /** Nothing set beyond what a bare URL gets (the "Reset to defaults" test). */
 export function isPolicyCitationDefault(p: PolicyCitationParams): boolean {
   const d = parsePolicyCitationParams(new URLSearchParams());
-  const filters = (x: PolicyCitationParams) => policyCitationQueryString(x, { view: "publications", sort: "ranked" });
+  const filters = (x: PolicyCitationParams) =>
+    policyCitationQueryString(x, { view: "publications", sort: "ranked", docSort: "recent", q: "" });
   return filters(p) === filters(d);
 }
 
@@ -228,10 +271,29 @@ const yearWindow = (expr: Prisma.Sql, lo: number | null, hi: number | null): Pri
         ? Prisma.sql`AND ${expr} <= ${hi}`
         : Prisma.empty;
 
-/** Which citing documents are counted (`d` = `citing_document`). */
+/** An excluded-study citation: a link whose every location names an
+ *  excluded-studies list (a review's "Excluded Studies" appendix), so the
+ *  document looked at the paper and set it aside. */
+export function isExcludedStudyCitation(locations: readonly { label: string }[]): boolean {
+  return locations.length > 0 && locations.every((x) => /excluded/i.test(x.label));
+}
+
+/** The same test on `l` (`publication_citing_document`), negated: keeps a
+ *  link unless every label matches. `JSON_SEARCH` returns one path or an array
+ *  of them (`JSON_LENGTH` 1 or n) and NULL for no match or no locations, which
+ *  keeps the link. JSON text compares case-sensitively, hence the `LOWER`.
+ *  ponytail: computed per link, so it needs the live aggregate. Staging
+ *  (Aurora MySQL 8.0, 390,000 links, 4,329 of them excluded-study,
+ *  2026-11-25): the per-publication pass takes 4.6 s with it, 3.6 s for the
+ *  live aggregate alone, 0.4 s off the rollups. A flag on the link, set by
+ *  `etl:policy-citations` and folded into the rollups, is the upgrade. */
+const NOT_EXCLUDED_SQL = Prisma.sql`AND COALESCE(JSON_LENGTH(JSON_SEARCH(LOWER(CAST(l.locations AS CHAR)), 'all', '%excluded%', NULL, '$[*].label')) = JSON_LENGTH(l.locations), 0) = 0`;
+
+/** Which citing documents are counted (`d` = `citing_document`, `l` = the link). */
 function docSql(p: PolicyCitationParams): Prisma.Sql {
   return Prisma.sql`${p.bodies.length > 0 ? Prisma.sql`AND d.issuing_body IN (${Prisma.join(p.bodies)})` : Prisma.empty}
-       ${yearWindow(Prisma.sql`d.year`, p.cfrom, p.cto)}`;
+       ${yearWindow(Prisma.sql`d.year`, p.cfrom, p.cto)}
+       ${p.hideExcluded ? NOT_EXCLUDED_SQL : Prisma.empty}`;
 }
 
 const POSITION_SQL: Record<Position, Prisma.Sql> = {
@@ -240,18 +302,21 @@ const POSITION_SQL: Record<Position, Prisma.Sql> = {
   middle: Prisma.sql`(pa.is_first = 0 AND pa.is_last = 0)`,
 };
 
+/** The viewer's units alone, as a condition on `s`. */
+const viewerScopeSql = (p: PolicyCitationParams): Prisma.Sql =>
+  p.scope === null
+    ? Prisma.empty
+    : p.scope.length === 0
+      ? Prisma.sql`AND 1 = 0`
+      : personFilterSql({ types: [], unitValues: p.scope }, { scholar: "s", centerMembership: "scm" });
+
 /** Which authorships count, as conditions on `pa` (`publication_author`) and
  *  `s` (`scholar`). The viewer's scope is its own `personFilterSql` clause,
  *  AND-ed with the URL's selection: a `unit` outside the scope matches nobody.
  *  `people: false` leaves the `person` filter out (the Person facet's own
  *  counts, which must not collapse to the people already ticked). */
 export function policyScopeSql(p: PolicyCitationParams, opts: { people?: boolean } = {}): Prisma.Sql {
-  const scope =
-    p.scope === null
-      ? Prisma.empty
-      : p.scope.length === 0
-        ? Prisma.sql`AND 1 = 0`
-        : personFilterSql({ types: [], unitValues: p.scope }, { scholar: "s", centerMembership: "scm" });
+  const scope = viewerScopeSql(p);
   const listCwids = opts.people !== false && p.people.length > 0 ? p.people : null;
   return Prisma.sql`pa.is_confirmed = 1
        AND s.deleted_at IS NULL AND s.status = 'active'
@@ -271,8 +336,10 @@ const hasAuthorSql = (p: PolicyCitationParams, pmid: Prisma.Sql): Prisma.Sql =>
 const pubYearSql = (p: PolicyCitationParams): Prisma.Sql =>
   yearWindow(articleYearExpr({ basis: p.basis, added: null }), p.from, p.to);
 
-/** A filter on the citing documents themselves (issuing body, citing year). */
-const hasDocFilter = (p: PolicyCitationParams): boolean => p.bodies.length > 0 || p.cfrom !== null || p.cto !== null;
+/** A filter on the citing documents themselves (issuing body, citing year,
+ *  excluded-study citations hidden). */
+const hasDocFilter = (p: PolicyCitationParams): boolean =>
+  p.bodies.length > 0 || p.cfrom !== null || p.cto !== null || p.hideExcluded;
 
 /**
  * `x`: one row per cited publication, its counted documents per level, with
@@ -307,15 +374,14 @@ export function citedSql(p: PolicyCitationParams): Prisma.Sql {
          GROUP BY l.pmid) x`;
 }
 
-/** `ok`: the publications in scope that the rollups say an authority cites,
- *  so the who clause is tested once per publication and never per link. The
- *  rollup is unfiltered, so it can only over-include; the caller's own
- *  document filters do the rest. */
-const authorityPubsSql = (p: PolicyCitationParams): Prisma.Sql => Prisma.sql`(SELECT p.pmid
+/** `ok`: these publications, less any the viewer may not see. The PMIDs come
+ *  from a listing that was already narrowed; testing the who clause again
+ *  here, once per publication and never per link, keeps every query scoped on
+ *  its own. */
+const scopedPubsSql = (p: PolicyCitationParams, pmids: readonly string[]): Prisma.Sql => Prisma.sql`(SELECT p.pmid
           FROM publication p
-         WHERE p.authority_count > 0
-           AND ${hasAuthorSql(p, Prisma.sql`p.pmid`)}
-           ${pubYearSql(p)}) ok`;
+         WHERE p.pmid IN (${Prisma.join([...pmids])})
+           AND ${hasAuthorSql(p, Prisma.sql`p.pmid`)}) ok`;
 
 /** `COUNT(CASE WHEN x.<level> > 0 THEN 1 END) AS <level>`, per level: the
  *  rows of `x` cited at each level. */
@@ -345,7 +411,10 @@ export type PubCounts = LevelCounts & {
 
 /** Authority documents first, then guidelines, then consensus statements,
  *  then reviews: each level only breaks a tie in the one above. Never shown
- *  as a number. */
+ *  as a number.
+ *  ponytail: the counts are per `dedup_key`, so six editions of one authority
+ *  document rank as six; the rows group them (`groupEditions`). Ranking on
+ *  grouped documents needs an edition key stored by `etl:policy-citations`. */
 export function compareRanked(a: LevelCounts, b: LevelCounts): number {
   for (const l of LEVELS) if (a[l] !== b[l]) return b[l] - a[l];
   return 0;
@@ -358,7 +427,6 @@ export function sortPublications<T extends PubCounts>(rows: readonly T[], sort: 
   const lead: Record<PolicySort, (a: T, b: T) => number> = {
     ranked: () => 0,
     guidelines: (a, b) => b.guideline - a.guideline,
-    reviews: (a, b) => b.review - a.review,
     recent: (a, b) => (b.latest ?? 0) - (a.latest ?? 0),
     year: (a, b) => (b.year ?? 0) - (a.year ?? 0),
   };
@@ -371,16 +439,10 @@ export function listedAt<T extends LevelCounts>(rows: readonly T[], levels: read
   return rows.filter((r) => want.some((l) => r[l] > 0));
 }
 
-export type PolicyTiles = { authority: number; guideline: number; either: number; review: number };
-
-export function policyTiles(rows: readonly LevelCounts[]): PolicyTiles {
-  const n = (test: (r: LevelCounts) => boolean) => rows.filter(test).length;
-  return {
-    authority: n((r) => r.authority > 0),
-    guideline: n((r) => r.guideline > 0),
-    either: n((r) => r.authority > 0 || r.guideline > 0),
-    review: n((r) => r.review > 0),
-  };
+/** Papers cited at each level, one tile per level. */
+export function policyTiles(rows: readonly LevelCounts[]): LevelCounts {
+  const n = (l: Level) => rows.filter((r) => r[l] > 0).length;
+  return { authority: n("authority"), guideline: n("guideline"), consensus: n("consensus"), review: n("review") };
 }
 
 /** One row per cited publication in scope, every level, unsorted: fetched
@@ -423,6 +485,27 @@ export async function loadPublicationCounts(p: PolicyCitationParams): Promise<Pu
     latest: r.latest === null ? null : Number(r.latest),
     ...toCounts(r),
   }));
+}
+
+const likeArg = (q: string) => `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+
+/** The cited publications in scope matching the By publication search: the
+ *  PMID exactly, or the text in the title or in a matching author's name.
+ *  Reads the rollups whatever the document filters are (it can only
+ *  over-include; the caller intersects it with the listing). */
+export async function searchPublications(p: PolicyCitationParams, q: string): Promise<Set<string>> {
+  const like = likeArg(q);
+  const raw = await db.read.$queryRaw<{ pmid: string }[]>`
+    SELECT STRAIGHT_JOIN p.pmid
+      FROM publication p
+      JOIN publication_author pa ON pa.pmid = p.pmid
+      JOIN scholar s ON s.cwid = pa.cwid
+     WHERE (p.authority_count > 0 OR p.guideline_count > 0 OR p.consensus_count > 0 OR p.review_count > 0)
+       AND ${policyScopeSql(p)}
+       ${pubYearSql(p)}
+       AND (p.pmid = ${q} OR p.title LIKE ${like} OR s.preferred_name LIKE ${like})
+     GROUP BY p.pmid`;
+  return new Set(raw.map((r) => r.pmid));
 }
 
 export type PersonRow = LevelCounts & {
@@ -478,7 +561,8 @@ export type PubRow = PubCounts & {
   title: string;
   journal: string | null;
   doi: string | null;
-  /** Every confirmed, active WCM author, in byline order. */
+  /** The confirmed, active WCM authors the viewer may see (everyone for a
+   *  superuser, their units' people for a unit administrator), in byline order. */
   authors: { cwid: string; name: string; position: Position }[];
   /** Counted authority documents per issuing body, most first. */
   bodies: { body: string; count: number }[];
@@ -507,6 +591,7 @@ async function withDetails(p: PolicyCitationParams, rows: PubCounts[]): Promise<
        WHERE p.pmid IN (${pmids})
          AND pa.is_confirmed = 1
          AND s.deleted_at IS NULL AND s.status = 'active'
+         ${viewerScopeSql(p)}
        ORDER BY p.pmid, pa.position`,
     db.read.$queryRaw<{ pmid: string; body: string | null; n: Num }[]>`
       SELECT l.pmid, d.issuing_body AS body, COUNT(DISTINCT d.dedup_key) AS n
@@ -570,12 +655,43 @@ export function dedupeDocs<T extends { dedupKey: string }>(docs: readonly T[]): 
 
 const NCBI = "https://www.ncbi.nlm.nih.gov/";
 
-/** The counted citing documents of one publication, highest level first,
- *  newest first within a level. The caller checks the PMID is one the viewer
- *  may see (it is only called for a listed row). */
-export async function loadCitingDocuments(p: PolicyCitationParams, pmid: string): Promise<CitingDoc[]> {
+/** A link's `locations` as stored. MariaDB hands a JSON column back as text
+ *  through a raw query. Only NCBI links are kept. */
+function parseLocations(raw: unknown): { url: string; label: string }[] {
+  let locations = raw;
+  if (typeof locations === "string") {
+    try {
+      locations = JSON.parse(locations);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(locations)
+    ? (locations as { url?: unknown; label?: unknown }[]).flatMap((x) =>
+        typeof x?.url === "string" && x.url.startsWith(NCBI) && typeof x.label === "string"
+          ? [{ url: x.url, label: x.label }]
+          : [],
+      )
+    : [];
+}
+
+/** Systematic reviews listed under one publication on the page; the row's
+ *  count is the full number and the spreadsheet's Citations sheet has the rest. */
+export const REVIEWS_SHOWN = 20;
+
+/** The counted citing documents of these publications (one page of rows),
+ *  per PMID, highest level first, newest first within a level; at most
+ *  `REVIEWS_SHOWN` reviews each. One query for the page, and only for
+ *  publications the viewer may see (`scopedPubsSql`). */
+export async function loadCitingDocuments(
+  p: PolicyCitationParams,
+  pmids: readonly string[],
+): Promise<Map<string, CitingDoc[]>> {
+  const out = new Map<string, CitingDoc[]>();
+  if (pmids.length === 0) return out;
   const raw = await db.read.$queryRaw<
     {
+      pmid: string;
       id: number;
       dedup_key: string;
       level: string;
@@ -596,54 +712,396 @@ export async function loadCitingDocuments(p: PolicyCitationParams, pmid: string)
       locations: unknown;
     }[]
   >`
-    SELECT d.id, d.dedup_key, d.level, d.title, d.year, d.url, d.issuing_body, d.authors, d.journal,
-           d.journal_abbrev, d.volume, d.issue, d.pages, d.doi, d.publisher, d.source, d.external_id,
-           l.locations
-      FROM publication_citing_document l
-      JOIN citing_document d ON d.id = l.citing_document_id
-     WHERE l.pmid = ${pmid}
-       ${docSql(p)}
-     ORDER BY d.year DESC, d.id`;
-  const docs = raw.flatMap((r): CitingDoc[] => {
+    SELECT t.*
+      FROM (SELECT ok.pmid, d.id, d.dedup_key, d.level, d.title, d.year, d.url, d.issuing_body, d.authors, d.journal,
+                   d.journal_abbrev, d.volume, d.issue, d.pages, d.doi, d.publisher, d.source, d.external_id,
+                   l.locations,
+                   ROW_NUMBER() OVER (PARTITION BY ok.pmid, d.level ORDER BY d.year DESC, d.id) AS rn
+              FROM ${scopedPubsSql(p, pmids)}
+              JOIN publication_citing_document l ON l.pmid = ok.pmid
+              JOIN citing_document d ON d.id = l.citing_document_id
+             WHERE 1 = 1
+               ${docSql(p)}) t
+     WHERE t.level <> 'review' OR t.rn <= ${REVIEWS_SHOWN}
+     ORDER BY t.year DESC, t.id`;
+  for (const r of raw) {
     const level = LEVELS.find((l) => l === r.level);
-    if (!level) return [];
-    // MariaDB hands a JSON column back as text through a raw query.
-    let locations: unknown = r.locations;
-    if (typeof locations === "string") {
-      try {
-        locations = JSON.parse(locations);
-      } catch {
-        locations = null;
-      }
-    }
+    if (!level) continue;
     const vip = formatVolIssuePages(r.volume, r.issue, r.pages);
+    const docs = out.get(r.pmid) ?? [];
+    out.set(r.pmid, docs);
+    docs.push({
+      id: Number(r.id),
+      dedupKey: r.dedup_key,
+      level,
+      title: r.title,
+      year: r.year === null ? null : Number(r.year),
+      url: r.url,
+      issuingBody: r.issuing_body,
+      authors: r.authors,
+      journal: r.journal_abbrev ?? r.journal,
+      cite: [r.year, vip].filter(Boolean).join(";"),
+      doi: r.doi,
+      publisher: r.publisher,
+      pmid: r.source === "pubmed" ? r.external_id : null,
+      bookshelfId: r.source === "bookshelf" ? r.external_id : null,
+      locations: parseLocations(r.locations),
+    });
+  }
+  for (const [pmid, docs] of out) {
+    out.set(pmid, dedupeDocs(docs).sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level)));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Editions, and how a document cites a paper
+// ---------------------------------------------------------------------------
+
+/** A title less what marks an edition: case-folded, and any trailing year
+ *  or "update" phrase dropped ("…: 2025 Update", "… – Update 2019", "…: An
+ *  Update", "… 2021" all fold to "…"). */
+export function editionTitle(title: string): string {
+  let t = title.toLowerCase().replace(/\s+/g, " ").trim();
+  for (let prev = ""; prev !== t; ) {
+    prev = t;
+    t = t
+      .replace(/[\s:;,.()[\]–—-]+$/, "")
+      .replace(/\b(19|20)\d{2}$/, "")
+      .replace(/\b(an? )?((final|evidence|review|partial) )?update[sd]?$/, "");
+  }
+  return t;
+}
+
+/** Authority documents that are editions of one document (same issuing body,
+ *  same `editionTitle`) fold into one group, newest first; every other
+ *  document is a group of its own. Groups keep first-seen order.
+ *  ponytail: grouped at read time from the title alone. An edition retitled
+ *  beyond a year or "update" stays separate; a stored edition key in
+ *  `etl:policy-citations` is the upgrade. */
+export function groupEditions<
+  T extends { level: Level; issuingBody: string | null; title: string | null; year: number | null; dedupKey: string },
+>(docs: readonly T[]): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const d of docs) {
+    const key =
+      d.level === "authority" && d.title !== null
+        ? `${d.issuingBody ?? ""}|${editionTitle(d.title)}`
+        : `|${d.level}|${d.dedupKey}`;
+    const g = groups.get(key);
+    if (g) g.push(d);
+    else groups.set(key, [d]);
+  }
+  return [...groups.values()].map((g) => g.sort((a, b) => (b.year ?? 0) - (a.year ?? 0)));
+}
+
+/** "2021–2025", "2023", or "" when no edition has a year. */
+export function yearRange(lo: number | null, hi: number | null): string {
+  return lo === null || hi === null ? "" : lo === hi ? String(lo) : `${lo}–${hi}`;
+}
+
+/** The "How it cites this paper" line for one document, from its editions'
+ *  locations: "listed as an excluded study in 5 editions, and cited in 2
+ *  chapters or sections". null when no edition says where. */
+export function howCited(editions: readonly { locations: readonly { label: string }[] }[]): string | null {
+  const excluded = editions.filter((e) => isExcludedStudyCitation(e.locations)).length;
+  const cited = [
+    ...new Set(editions.flatMap((e) => e.locations.map((x) => x.label).filter((label) => !/excluded/i.test(label)))),
+  ];
+  const parts = [
+    excluded === 0
+      ? null
+      : editions.length === 1
+        ? "listed as an excluded study"
+        : `listed as an excluded study in ${excluded} ${excluded === 1 ? "edition" : "editions"}`,
+    cited.length === 0
+      ? null
+      : cited.length <= 2
+        ? `cited in ${cited.join(" and ")}`
+        : `cited in ${cited.length} chapters or sections`,
+  ].filter((x): x is string => x !== null);
+  return parts.length > 0 ? `${parts.join(", and ")}.` : null;
+}
+
+// ---------------------------------------------------------------------------
+// By citing document, and the two summary cards
+// ---------------------------------------------------------------------------
+
+/** One citation of a publication in scope by a document at one of
+ *  `DOC_LEVELS`. `title` is carried for authority documents only (it is what
+ *  groups editions). */
+export type DocLink = {
+  id: number;
+  dedupKey: string;
+  level: Level;
+  year: number | null;
+  issuingBody: string | null;
+  title: string | null;
+  pmid: string;
+};
+
+/** Every such link, ungrouped: the By citing document tab, the chart and the
+ *  issuing-body card are all folded from it in Node. Driven from the
+ *  documents (`citing_document` is indexed on `level`, the links on
+ *  `citing_document_id`), the who clause behind an `EXISTS`: the shape the
+ *  guideline chart already had (2.0 s on staging, 2026-11-25, against 14.8 s
+ *  starting from the publications).
+ *  ponytail: systematic reviews are never read here. They are five links in
+ *  six, and this shape took 10 to 56 s over them; listing reviews by citing
+ *  document needs a rollup table first. */
+export async function loadDocLinks(p: PolicyCitationParams): Promise<DocLink[]> {
+  const raw = await db.read.$queryRaw<
+    { id: number; dedup_key: string; level: string; year: number | null; issuing_body: string | null; title: string | null; pmid: string }[]
+  >`
+    SELECT STRAIGHT_JOIN d.id, d.dedup_key, d.level, d.year, d.issuing_body,
+           CASE WHEN d.level = 'authority' THEN d.title END AS title, l.pmid
+      FROM citing_document d
+      JOIN publication_citing_document l ON l.citing_document_id = d.id
+      JOIN publication p ON p.pmid = l.pmid
+     WHERE d.level IN (${Prisma.join([...DOC_LEVELS])})
+       ${docSql(p)}
+       ${pubYearSql(p)}
+       AND ${hasAuthorSql(p, Prisma.sql`l.pmid`)}`;
+  return raw.flatMap((r) => {
+    const level = DOC_LEVELS.find((l) => l === r.level);
+    return level
+      ? [
+          {
+            id: Number(r.id),
+            dedupKey: r.dedup_key,
+            level,
+            year: r.year === null ? null : Number(r.year),
+            issuingBody: r.issuing_body,
+            title: r.title,
+            pmid: r.pmid,
+          },
+        ]
+      : [];
+  });
+}
+
+/** One row of the By citing document tab: a document, or the editions of one. */
+export type DocGroup = {
+  /** The newest edition's `dedupKey`. */
+  key: string;
+  level: Level;
+  body: string | null;
+  /** One per edition, newest first. */
+  docs: { id: number; year: number | null }[];
+  yearMin: number | null;
+  yearMax: number | null;
+  /** The distinct publications in scope it cites, over every edition. */
+  pmids: string[];
+};
+
+/** Links to documents (one per `dedupKey`, the lowest id standing for it) to
+ *  edition groups. */
+export function groupDocLinks(links: readonly DocLink[]): DocGroup[] {
+  const docs = new Map<string, Omit<DocLink, "pmid"> & { pmids: Set<string> }>();
+  for (const { pmid, ...d } of links) {
+    const doc = docs.get(d.dedupKey);
+    if (!doc) docs.set(d.dedupKey, { ...d, pmids: new Set([pmid]) });
+    else {
+      doc.pmids.add(pmid);
+      if (d.id < doc.id) doc.id = d.id;
+    }
+  }
+  return groupEditions([...docs.values()]).map((editions) => {
+    const years = editions.flatMap((d) => (d.year === null ? [] : [d.year]));
+    return {
+      key: editions[0].dedupKey,
+      level: editions[0].level,
+      body: editions[0].issuingBody,
+      docs: editions.map((d) => ({ id: d.id, year: d.year })),
+      yearMin: years.length > 0 ? Math.min(...years) : null,
+      yearMax: years.length > 0 ? Math.max(...years) : null,
+      pmids: [...new Set(editions.flatMap((d) => [...d.pmids]))],
+    };
+  });
+}
+
+/** Every sort falls back to newest first, then most papers. */
+export function sortDocGroups(groups: readonly DocGroup[], sort: DocSort): DocGroup[] {
+  const recent = (a: DocGroup, b: DocGroup) =>
+    (b.yearMax ?? 0) - (a.yearMax ?? 0) || b.pmids.length - a.pmids.length || a.key.localeCompare(b.key);
+  const lead: Record<DocSort, (a: DocGroup, b: DocGroup) => number> = {
+    recent: () => 0,
+    papers: (a, b) => b.pmids.length - a.pmids.length,
+    // Authority documents by body, A to Z; everything else (no body) after.
+    body: (a, b) => (a.body === null ? 1 : 0) - (b.body === null ? 1 : 0) || (a.body ?? "").localeCompare(b.body ?? ""),
+  };
+  return [...groups].sort((a, b) => lead[sort](a, b) || recent(a, b));
+}
+
+export type PolicySummary = {
+  /** Authority documents (editions grouped) and the papers they cite, per
+   *  issuing body, most documents first. */
+  bodies: { body: string; documents: number; papers: number }[];
+  /** Citing documents per citing-document year, ascending, per charted
+   *  level. Each edition counts in its own year. */
+  years: Record<DocLevel, { year: number; count: number }[]>;
+};
+
+export function policySummary(groups: readonly DocGroup[]): PolicySummary {
+  const bodies = new Map<string, { documents: number; pmids: Set<string> }>();
+  const years = new Map<Level, Map<number, number>>(DOC_LEVELS.map((l) => [l, new Map()]));
+  for (const g of groups) {
+    if (g.level === "authority" && g.body) {
+      const b = bodies.get(g.body) ?? { documents: 0, pmids: new Set<string>() };
+      bodies.set(g.body, b);
+      b.documents += 1;
+      for (const pmid of g.pmids) b.pmids.add(pmid);
+    }
+    const byYear = years.get(g.level);
+    for (const d of g.docs) if (byYear && d.year !== null) byYear.set(d.year, (byYear.get(d.year) ?? 0) + 1);
+  }
+  const series = (l: Level) =>
+    [...(years.get(l) ?? [])].map(([year, count]) => ({ year, count })).sort((a, b) => a.year - b.year);
+  return {
+    bodies: [...bodies]
+      .map(([body, b]) => ({ body, documents: b.documents, papers: b.pmids.size }))
+      .sort((a, b) => b.documents - a.documents || a.body.localeCompare(b.body)),
+    years: { authority: series("authority"), guideline: series("guideline"), consensus: series("consensus") },
+  };
+}
+
+/** Papers listed under one citing document on the page; the row's count is
+ *  the full number. */
+export const DOC_PAPERS_SHOWN = 25;
+
+export type DocRow = DocGroup & {
+  /** The newest edition's. */
+  title: string;
+  url: string;
+  journal: string | null;
+  bookshelf: boolean;
+  /** The first `DOC_PAPERS_SHOWN` of `pmids`, newest first. */
+  papers: { pmid: string; title: string; journal: string | null; year: number | null }[];
+};
+
+async function withDocDetails(p: PolicyCitationParams, groups: DocGroup[]): Promise<DocRow[]> {
+  if (groups.length === 0) return [];
+  const shown = new Map(groups.map((g) => [g.key, g.pmids.slice(0, DOC_PAPERS_SHOWN)]));
+  const [docs, pubs] = await Promise.all([
+    // Document metadata only, for ids a scoped listing produced: nothing here
+    // depends on who the viewer is.
+    db.read.$queryRaw<
+      { id: number; title: string; url: string; journal: string | null; journal_abbrev: string | null; source: string }[]
+    >`
+      SELECT d.id, d.title, d.url, d.journal, d.journal_abbrev, d.source
+        FROM citing_document d
+       WHERE d.id IN (${Prisma.join(groups.map((g) => g.docs[0].id))})`,
+    db.read.$queryRaw<{ pmid: string; title: string; journal: string | null; year: number | null }[]>`
+      SELECT p.pmid, p.title, p.journal, p.year
+        FROM publication p
+       WHERE p.pmid IN (${Prisma.join([...new Set([...shown.values()].flat())])})
+         AND ${hasAuthorSql(p, Prisma.sql`p.pmid`)}`,
+  ]);
+  const doc = new Map(docs.map((d) => [Number(d.id), d]));
+  const pub = new Map(pubs.map((r) => [r.pmid, { ...r, year: r.year === null ? null : Number(r.year) }]));
+  return groups.map((g) => {
+    const d = doc.get(g.docs[0].id);
+    return {
+      ...g,
+      title: d?.title ?? "",
+      url: d?.url ?? "",
+      journal: d ? (d.journal_abbrev ?? d.journal) : null,
+      bookshelf: d?.source === "bookshelf",
+      papers: (shown.get(g.key) ?? [])
+        .flatMap((pmid) => pub.get(pmid) ?? [])
+        .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.pmid.localeCompare(b.pmid)),
+    };
+  });
+}
+
+export type PolicyDocuments = {
+  summary: PolicySummary;
+  /** Documents listed (at a ticked level; reviews never). */
+  docTotal: number;
+  /** One page of them, in the chosen order; empty off the documents tab. */
+  docs: DocRow[];
+};
+
+/** Page only: the By citing document tab and the summary cards, from one
+ *  pass over the links. The cards cover every charted level whatever `level`
+ *  lists, like the tiles. */
+export async function loadPolicyDocuments(p: PolicyCitationParams): Promise<PolicyDocuments> {
+  const groups = groupDocLinks(await loadDocLinks(p));
+  const want = p.levels.length > 0 ? p.levels : LEVELS;
+  const listed = sortDocGroups(groups.filter((g) => want.includes(g.level)), p.docSort);
+  const offset = (p.page - 1) * POLICY_PAGE_SIZE;
+  return {
+    summary: policySummary(groups),
+    docTotal: listed.length,
+    docs: p.view === "documents" ? await withDocDetails(p, listed.slice(offset, offset + POLICY_PAGE_SIZE)) : [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The download's Citations sheet
+// ---------------------------------------------------------------------------
+
+/** The Citations sheet carries at most this many rows; systematic reviews
+ *  are the first to go. The Criteria sheet says so when it cuts. */
+export const POLICY_CITATIONS_CAP = 20_000;
+
+export type CitationPair = {
+  pmid: string;
+  pubTitle: string;
+  level: Level;
+  body: string | null;
+  title: string;
+  year: number | null;
+  /** Bookshelf: the chapters and sections citing the paper, "; "-joined. */
+  where: string;
+  url: string;
+};
+
+/** One row per publication and counted citing document, at the listed
+ *  levels, for the publications on the Publications sheet (so the same scope
+ *  and filters, tested again in `scopedPubsSql`), in that sheet's order. */
+export async function loadCitationPairs(
+  p: PolicyCitationParams,
+  pubs: readonly Pick<PubRow, "pmid" | "title">[],
+  cap: number = POLICY_CITATIONS_CAP,
+): Promise<{ rows: CitationPair[]; more: boolean }> {
+  if (pubs.length === 0) return { rows: [], more: false };
+  const levels = p.levels.length > 0 ? p.levels : LEVELS;
+  const raw = await db.read.$queryRaw<
+    { pmid: string; dedup_key: string; level: string; issuing_body: string | null; title: string; year: number | null; url: string; locations: unknown }[]
+  >`
+    SELECT ok.pmid, d.dedup_key, d.level, d.issuing_body, d.title, d.year, d.url, l.locations
+      FROM ${scopedPubsSql(p, pubs.map((r) => r.pmid))}
+      JOIN publication_citing_document l ON l.pmid = ok.pmid
+      JOIN citing_document d ON d.id = l.citing_document_id
+     WHERE d.level IN (${Prisma.join([...levels])})
+       ${docSql(p)}
+     ORDER BY FIELD(d.level, 'authority', 'guideline', 'consensus', 'review'), ok.pmid, d.year DESC, d.id
+     LIMIT ${cap + 1}`;
+  const order = new Map(pubs.map((r, i) => [r.pmid, i]));
+  const title = new Map(pubs.map((r) => [r.pmid, r.title]));
+  const seen = new Set<string>();
+  const rows = raw.slice(0, cap).flatMap((r): CitationPair[] => {
+    const level = LEVELS.find((l) => l === r.level);
+    const key = `${r.pmid}|${r.dedup_key}`;
+    if (!level || seen.has(key)) return [];
+    seen.add(key);
     return [
       {
-        id: Number(r.id),
-        dedupKey: r.dedup_key,
+        pmid: r.pmid,
+        pubTitle: title.get(r.pmid) ?? "",
         level,
+        body: r.issuing_body,
         title: r.title,
         year: r.year === null ? null : Number(r.year),
+        where: parseLocations(r.locations).map((x) => x.label).join("; "),
         url: r.url,
-        issuingBody: r.issuing_body,
-        authors: r.authors,
-        journal: r.journal_abbrev ?? r.journal,
-        cite: [r.year, vip].filter(Boolean).join(";"),
-        doi: r.doi,
-        publisher: r.publisher,
-        pmid: r.source === "pubmed" ? r.external_id : null,
-        bookshelfId: r.source === "bookshelf" ? r.external_id : null,
-        locations: Array.isArray(locations)
-          ? (locations as { url?: unknown; label?: unknown }[]).flatMap((x) =>
-              typeof x?.url === "string" && x.url.startsWith(NCBI) && typeof x.label === "string"
-                ? [{ url: x.url, label: x.label }]
-                : [],
-            )
-          : [],
       },
     ];
   });
-  return dedupeDocs(docs).sort((a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level));
+  // Stable: within a publication the SQL order (level, then newest) holds.
+  rows.sort((a, b) => (order.get(a.pmid) ?? 0) - (order.get(b.pmid) ?? 0));
+  return { rows, more: raw.length > cap };
 }
 
 // ---------------------------------------------------------------------------
@@ -658,144 +1116,46 @@ export type PolicyCitationData = {
   /** Cited publications in scope, at any level. */
   cited: number;
   /** Over every cited publication in scope, whatever `level` lists. */
-  tiles: PolicyTiles;
+  tiles: LevelCounts;
   /** Publications listed (a counted document at a ticked level). */
   pubTotal: number;
-  /** The first `limit` of them, in the chosen order. */
+  /** Those the search keeps (`pubTotal` without one): what the pages run over. */
+  pubMatched: number;
+  /** `limit` of them from `offset`, in the chosen order. */
   pubs: PubRow[];
-  /** Every listed person, ranked (the `person` filter applied). */
+  /** Every listed person, ranked (the `person` filter and the search applied). */
   people: PersonRow[];
   /** The Person facet: everyone in scope ignoring the `person` filter, by
    *  authority-cited papers. */
   facetPeople: PersonRow[];
 };
 
-export async function loadPolicyCitations(p: PolicyCitationParams, limit: number): Promise<PolicyCitationData> {
-  const [counts, everyone] = await Promise.all([loadPublicationCounts(p), loadPersonCounts(p)]);
+/** `q` searches the tab it was typed on: publications by title, PMID or
+ *  author; people by name or CWID. */
+export async function loadPolicyCitations(
+  p: PolicyCitationParams,
+  limit: number,
+  offset = 0,
+): Promise<PolicyCitationData> {
+  const [counts, everyone, hits] = await Promise.all([
+    loadPublicationCounts(p),
+    loadPersonCounts(p),
+    p.q && p.view === "publications" ? searchPublications(p, p.q) : null,
+  ]);
   const listed = sortPublications(listedAt(counts, p.levels), p.sort);
+  const matched = hits ? listed.filter((r) => hits.has(r.pmid)) : listed;
   const picked = p.people.length > 0 ? everyone.filter((r) => p.people.includes(r.cwid)) : everyone;
+  const needle = p.view === "people" ? p.q.toLowerCase() : "";
   return {
     cited: counts.length,
     tiles: policyTiles(counts),
     pubTotal: listed.length,
-    pubs: await withDetails(p, listed.slice(0, limit)),
-    people: listedAt(picked, p.levels),
-    facetPeople: everyone,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Summary cards (page only)
-// ---------------------------------------------------------------------------
-
-export type PolicySummary = {
-  /** Authority documents and the papers they cite, per issuing body. */
-  bodies: { body: string; documents: number; papers: number }[];
-  /** Citing guidelines per citing-document year, ascending. */
-  guidelineYears: { year: number; count: number }[];
-  newly: {
-    /** When citations were first recorded; null = nothing recorded yet. */
-    firstImport: Date | null;
-    /** The window's start: 30 days back, or the day after the first import
-     *  if that is later, so the first import's backfill never counts as new. */
-    since: Date;
-    /** True while the first import, not the 30 days, bounds the window. */
-    sinceFirstImport: boolean;
-    documents: number;
-    items: { title: string; url: string; year: number | null; journal: string | null; pmid: string; pubTitle: string }[];
-  };
-};
-
-export const NEWLY_CITED_DAYS = 30;
-const DAY_MS = 86_400_000;
-
-export async function loadPolicySummary(p: PolicyCitationParams, now: Date = new Date()): Promise<PolicySummary> {
-  const levels = p.levels.length > 0 ? p.levels : LEVELS;
-  const [first] = await db.read.$queryRaw<{ first: Date | null }[]>`
-    SELECT MIN(first_seen_at) AS first FROM publication_citing_document`;
-  const firstImport = first?.first ?? null;
-  const windowStart = new Date(now.getTime() - NEWLY_CITED_DAYS * DAY_MS);
-  const afterImport = firstImport === null ? windowStart : new Date(firstImport.getTime() + DAY_MS);
-  const sinceFirstImport = afterImport > windowStart;
-  const since = sinceFirstImport ? afterImport : windowStart;
-  // The recent links are picked first, by date alone; everything else is
-  // tested only on those.
-  const recent = Prisma.sql`
-          FROM (SELECT pmid, citing_document_id, first_seen_at
-                  FROM publication_citing_document
-                 WHERE first_seen_at >= ${since}) l
-          JOIN citing_document d ON d.id = l.citing_document_id
-          JOIN publication p ON p.pmid = l.pmid
-         WHERE d.level IN (${Prisma.join([...levels])})
-           ${docSql(p)}
-           ${pubYearSql(p)}
-           AND ${hasAuthorSql(p, Prisma.sql`l.pmid`)}`;
-  type NewRow = {
-    dedup_key: string;
-    title: string;
-    url: string;
-    year: number | null;
-    journal_abbrev: string | null;
-    journal: string | null;
-    pmid: string;
-    pub_title: string;
-  };
-  const [bodies, years, count, items] = await Promise.all([
-    db.read.$queryRaw<{ body: string | null; documents: Num; papers: Num }[]>`
-      SELECT d.issuing_body AS body, COUNT(DISTINCT d.dedup_key) AS documents, COUNT(DISTINCT l.pmid) AS papers
-        FROM ${authorityPubsSql(p)}
-        JOIN publication_citing_document l ON l.pmid = ok.pmid
-        JOIN citing_document d ON d.id = l.citing_document_id
-       WHERE d.level = 'authority'
-         ${docSql(p)}
-       GROUP BY d.issuing_body
-       ORDER BY documents DESC, body`,
-    // Driven from the documents: `citing_document` is indexed on `level`
-    // and the links on `citing_document_id`, and there are only about 55,000
-    // guideline links. Staging, 2026-11-25: 2.0 s this way, 14.8 s starting
-    // from the publications the rollup says a guideline cites.
-    db.read.$queryRaw<{ y: number; n: Num }[]>`
-      SELECT STRAIGHT_JOIN d.year AS y, COUNT(DISTINCT d.dedup_key) AS n
-        FROM citing_document d
-        JOIN publication_citing_document l ON l.citing_document_id = d.id
-        JOIN publication p ON p.pmid = l.pmid
-       WHERE d.level = 'guideline' AND d.year IS NOT NULL
-         ${docSql(p)}
-         ${pubYearSql(p)}
-         AND ${hasAuthorSql(p, Prisma.sql`l.pmid`)}
-       GROUP BY d.year
-       ORDER BY d.year`,
-    db.read.$queryRaw<{ n: Num }[]>`SELECT COUNT(DISTINCT d.dedup_key) AS n ${recent}`,
-    // ponytail: over-fetches 40 rows so five distinct documents survive a
-    // document that cites several papers or was printed in several journals;
-    // one with more than 40 such rows would show fewer than five.
-    db.read.$queryRaw<NewRow[]>`
-      SELECT d.dedup_key, d.title, d.url, d.year, d.journal_abbrev, d.journal, p.pmid, p.title AS pub_title
-      ${recent}
-       ORDER BY l.first_seen_at DESC, d.year DESC, d.id
-       LIMIT 40`,
-  ]);
-  return {
-    bodies: bodies.flatMap((r) =>
-      r.body ? [{ body: r.body, documents: Number(r.documents), papers: Number(r.papers) }] : [],
+    pubMatched: matched.length,
+    pubs: await withDetails(p, matched.slice(offset, offset + limit)),
+    people: listedAt(picked, p.levels).filter(
+      (r) => !needle || r.name.toLowerCase().includes(needle) || r.cwid.toLowerCase() === needle,
     ),
-    guidelineYears: years.map((r) => ({ year: Number(r.y), count: Number(r.n) })),
-    newly: {
-      firstImport,
-      since,
-      sinceFirstImport,
-      documents: Number(count[0]?.n ?? 0),
-      items: dedupeDocs(items.map((r) => ({ ...r, dedupKey: r.dedup_key })))
-        .slice(0, 5)
-        .map((r) => ({
-          title: r.title,
-          url: r.url,
-          year: r.year === null ? null : Number(r.year),
-          journal: r.journal_abbrev ?? r.journal,
-          pmid: r.pmid,
-          pubTitle: r.pub_title,
-        })),
-    },
+    facetPeople: everyone,
   };
 }
 
@@ -858,6 +1218,9 @@ export function policyCitationChips(
   facet("Author", p.positions, (k) => POSITION_LABEL[k], (keep) => ({ positions: p.positions.filter(keep) }));
   facet("Level", p.levels, (l) => LEVEL_LABEL[l], (keep) => ({ levels: p.levels.filter(keep) }));
   facet("Issuing body", p.bodies, bodyLabel, (keep) => ({ bodies: p.bodies.filter(keep) }));
+  if (p.hideExcluded) {
+    chips.push({ group: "Excluded-study citations", value: "Hidden", removeQuery: qs({ hideExcluded: false }) });
+  }
   const published = yearSpan(p.from, p.to, fiscalLabel(p));
   if (published) chips.push({ group: "Published", value: published, removeQuery: qs({ from: null, to: null }) });
   const citing = yearSpan(p.cfrom, p.cto);
@@ -896,6 +1259,12 @@ export function describePolicyCitationCriteria(
     ],
     ["Issuing body", list(p.bodies.map(bodyLabel))],
     [
+      "Excluded-study citations",
+      p.hideExcluded
+        ? "Hidden: a citation does not count when the document only lists the paper among its excluded studies"
+        : "Counted",
+    ],
+    [
       "Publication year basis",
       p.basis === "fy"
         ? "Fiscal year, July 1 – June 30, named by the ending calendar year, by the date the article was added to PubMed"
@@ -904,6 +1273,7 @@ export function describePolicyCitationCriteria(
     ["Publication years", yearSpan(p.from, p.to) ?? "All"],
     ["Citing document year", yearSpan(p.cfrom, p.cto) ?? "All"],
     ["Order", SORT_LABEL[p.sort]],
+    ...(p.q ? ([[p.view === "people" ? "Search (people)" : "Search (publications)", p.q]] as [string, string][]) : []),
     [
       "Counting rule",
       "A citing document counts once per publication, however many journals printed it. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.",
@@ -912,7 +1282,7 @@ export function describePolicyCitationCriteria(
 }
 
 /**
- * The workbook: Publications, People, Criteria.
+ * The workbook: Publications, People, Citations, Criteria.
  *
  * The People sheet lists EVERY matching person. This report is a decided,
  * named exception to the 50-scholar export cap (`SCHOLAR_EXPORT_CAP`,
@@ -926,6 +1296,7 @@ export async function buildPolicyCitationWorkbook(
   data: PolicyCitationData,
   generatedAt: Date,
   labels?: ReadonlyMap<string, string>,
+  citations: { rows: CitationPair[]; more: boolean } = { rows: [], more: false },
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const levelHeaders = ["Health authority documents", "Clinical guidelines", "Consensus statements", "Systematic reviews"];
@@ -969,6 +1340,24 @@ export async function buildPolicyCitationWorkbook(
   }
   for (const [i, w] of [28, 10, 30, 22, 28, 16, 14, 16, 14].entries()) people.getColumn(i + 1).width = w;
 
+  const pairs = wb.addWorksheet("Citations");
+  pairs.addRow(["PMID", "Paper title", "Level", "Issuing body", "Citing document", "Year", "Where cited", "Link"]);
+  boldRow(pairs, 1);
+  pairs.views = [{ state: "frozen", ySplit: 1 }];
+  for (const r of citations.rows) {
+    pairs.addRow([
+      r.pmid,
+      htmlToPlainText(r.pubTitle, Number.POSITIVE_INFINITY),
+      LEVEL_ONE[r.level],
+      r.body,
+      htmlToPlainText(r.title, Number.POSITIVE_INFINITY),
+      r.year,
+      r.where,
+      r.url,
+    ]);
+  }
+  for (const [i, w] of [12, 60, 20, 18, 70, 8, 40, 46].entries()) pairs.getColumn(i + 1).width = w;
+
   addCriteriaSheet(wb, [
     ...describePolicyCitationCriteria(p, generatedAt, labels),
     [
@@ -976,6 +1365,14 @@ export async function buildPolicyCitationWorkbook(
       data.pubTotal > data.pubs.length
         ? `Lists the first ${data.pubs.length.toLocaleString()} of ${data.pubTotal.toLocaleString()} publications in the order above. Narrow the filters to list the rest.`
         : `Lists all ${data.pubTotal.toLocaleString()} publications.`,
+    ],
+    [
+      "Citations sheet",
+      `One row per publication on the Publications sheet and citing document, at the levels above. ${
+        citations.more
+          ? `Lists the first ${POLICY_CITATIONS_CAP.toLocaleString()} rows, health authorities first and systematic reviews last. Narrow the filters to list the rest.`
+          : `Lists all ${citations.rows.length.toLocaleString()} rows (the limit is ${POLICY_CITATIONS_CAP.toLocaleString()}).`
+      }`,
     ],
     [
       "People sheet",

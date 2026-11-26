@@ -336,7 +336,19 @@ export default async function EditReportPage({
           &larr; {partner ? "Back" : "All reports"}
         </Link>
       )}
-      <ReportHeader n={n} session={session} access={access} underCoreHeader={coreHeader !== null}>
+      <ReportHeader
+        n={n}
+        session={session}
+        access={access}
+        underCoreHeader={coreHeader !== null}
+        aside={
+          def.gate === "admin" && def.headerAside ? (
+            <Suspense key={bodyKey} fallback={null}>
+              <RenderedPart rendered={rendered} part="aside" />
+            </Suspense>
+          ) : undefined
+        }
+      >
         <Suspense key={bodyKey} fallback={<Skeleton className="h-4 w-96 max-w-full" />}>
           <RenderedPart rendered={rendered} part="subtitle" />
         </Suspense>
