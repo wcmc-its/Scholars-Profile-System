@@ -6,10 +6,19 @@
  *   - create: `{ entityType, entityId, name, url, families, supportedPmids?,
  *     countStaffPapers?, affiliationPhrases?, authorNames? }`.
  *     `countStaffPapers` defaults to true for a core and false for a department.
- *   - update: `{ id, name?, url?, families?, supportedPmids?, excludedPmids?,
- *     countStaffPapers?, affiliationPhrases?, authorNames? }`. Only the fields
+ *   - update: `{ id, name?, url?, families?, supportedPmids?,
+ *     baseSupportedPmids?, excludedPmids?, countStaffPapers?,
+ *     affiliationPhrases?, authorNames? }`. Only the fields
  *     present are changed. The owning unit of a row never changes: `entityType` /
  *     `entityId` in an update body are ignored.
+ *     `baseSupportedPmids` (only with `supportedPmids`) is the supported list
+ *     the editor's page was showing. With it, the save applies what the editor
+ *     added and removed to the list as it is stored now (`applyPmidEdits`), so
+ *     a page left open does not undo what someone else saved since. Both
+ *     editors send it. A save that changes the supported list or its PubMed
+ *     check also re-reads the row under its lock, and is refused with 409
+ *     `changed_elsewhere` (nothing written) when another save landed while it
+ *     was working; sending the same body again then succeeds.
  *   - delete: `{ id }`. Hard delete; the history is the audit log.
  *   - exclude: `{ id, pmid }`. "Not ours": adds one PMID to `excludedPmids`,
  *     which takes it off the unit's count, filter and badge on the method page.
@@ -59,7 +68,8 @@
  *   - ALSO a person who may edit the service's unit (`mayEditServiceUnit`: a
  *     department's Owner / Curator, a core's Owner / Curator, a comms steward,
  *     a content editor): an update whose body carries, besides `op` and `id`,
- *     ONLY `supportedPmids`; exclude; restore; and the GET. The unit is always
+ *     ONLY `supportedPmids` and `baseSupportedPmids`; exclude; restore; and
+ *     the GET. The unit is always
  *     the STORED row's. Such an update with any other key in its body is
  *     refused whole with 403 (never saved with the extra fields dropped). What
  *     this caller gets back leaves out `affiliationPhrases` and `authorNames`.
@@ -128,6 +138,7 @@ import type { PubMedAuthorName } from "@/lib/method-services/author-names";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import {
   SERVICE_PMIDS_MAX,
+  applyPmidEdits,
   defaultCountStaffPapers,
   isMethodServiceEntityType,
   methodFamilyKey,
@@ -184,7 +195,12 @@ function auditShape(row: MethodServiceRow): Record<string, unknown> {
 /** The ops a person who may edit the service's unit can send. */
 const UNIT_EDITOR_OPS: ReadonlySet<string> = new Set(["update", "exclude", "restore"]);
 /** Every key such a person's update may carry. Anything else is the superuser's. */
-const UNIT_EDITOR_UPDATE_KEYS: ReadonlySet<string> = new Set(["op", "id", "supportedPmids"]);
+const UNIT_EDITOR_UPDATE_KEYS: ReadonlySet<string> = new Set([
+  "op",
+  "id",
+  "supportedPmids",
+  "baseSupportedPmids",
+]);
 
 /**
  * The one refusal anyone but a superuser ever gets: 403 `not_superuser`, the
@@ -413,6 +429,29 @@ function sameValue(a: Fields[keyof Fields], b: Fields[keyof Fields]): boolean {
   const norm = (v: Fields[keyof Fields]) =>
     Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : methodFamilyKey(x))) : v;
   return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+}
+
+/** The fields a PubMed check reads or writes. */
+const PUBMED_STATE_KEYS = [
+  "supportedPmids",
+  "affiliationPhrases",
+  "authorNames",
+  "coauthoredPmids",
+  "nameMatchedPmids",
+  "affiliationCheckedPmids",
+] as const;
+
+/** Those fields of a stored row as one comparable string. */
+function pubmedState(row: MethodServiceRow): string {
+  const view = toMethodServiceView(row);
+  return JSON.stringify([
+    view?.supportedPmids,
+    view?.affiliationPhrases,
+    view?.authorNames,
+    view?.coauthoredPmids,
+    view?.nameMatchedPmids,
+    affiliationCheckedPmidsOf(row),
+  ]);
 }
 
 const NO_STORE = { "cache-control": "no-store" } as const;
@@ -645,6 +684,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if ("nameMatchedPmids" in body) return editError(400, "invalid_value", "nameMatchedPmids");
   const read = readFields(body);
   if (!read.ok) return read.response;
+  // The editor's page may be older than the stored list: apply what they
+  // added and removed to the list as it is now, never their whole copy.
+  if ("baseSupportedPmids" in body) {
+    const base = validatePmidList(body.baseSupportedPmids);
+    if (!base.ok) return editError(400, base.error, "baseSupportedPmids");
+    if (read.fields.supportedPmids === undefined) {
+      return editError(400, "invalid_value", "baseSupportedPmids");
+    }
+    const merged = applyPmidEdits(
+      base.value,
+      read.fields.supportedPmids,
+      current?.supportedPmids ?? [],
+    );
+    if (merged.length > SERVICE_PMIDS_MAX) {
+      return editError(400, "too_many_pmids", "supportedPmids");
+    }
+    read.fields.supportedPmids = merged;
+  }
   const data: Fields & {
     coauthoredPmids?: string[];
     nameMatchedPmids?: string[];
@@ -702,9 +759,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editOk({ op, changed: false, service: forCaller(session, current), ...warned });
   }
 
-  let saved: MethodServiceRow;
+  // The supported list and its PubMed check were worked out from the read at
+  // the top, and PubMed can take seconds. So such a write re-reads the row
+  // under its lock and goes ahead only if those are still what it started
+  // from; otherwise nothing is written and the caller sends the save again.
+  const guarded = PUBMED_STATE_KEYS.some((k) => k in data);
+  let saved: MethodServiceRow | null;
   try {
     saved = await db.write.$transaction(async (tx) => {
+      if (guarded) {
+        await tx.$queryRaw`SELECT id FROM method_service WHERE id = ${existing.id} FOR UPDATE`;
+        const locked = await tx.methodService.findUnique({
+          where: { id: existing.id },
+          select: METHOD_SERVICE_SELECT,
+        });
+        if (!locked || pubmedState(locked) !== pubmedState(existing)) return null;
+      }
       const row = await tx.methodService.update({
         where: { id: existing.id },
         data,
@@ -717,6 +787,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
+  if (saved === null) return editError(409, "changed_elsewhere");
   bustMethodServiceCache();
   return editOk({
     op,

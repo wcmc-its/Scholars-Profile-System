@@ -837,6 +837,122 @@ describe("POST /api/edit/method-service: update", () => {
   });
 });
 
+describe("POST /api/edit/method-service: a supported list saved from a stale page", () => {
+  const SU = { isSuperuser: true };
+  const STORED = ["111", "222", "801", "802", "803"];
+  // The page was loaded when the list was 111, 222. Someone else has since
+  // added 801, 802 and 803.
+  const BASE = ["111", "222"];
+
+  it.each([
+    ["a superuser", SU],
+    ["an editor of the unit", NOBODY],
+  ])("%s adding one PMID keeps what was added since", async (_who, session) => {
+    grantDepartment(DEPT_A, "curator");
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: STORED }));
+    const res = await call(
+      { op: "update", id: 5, supportedPmids: ["111", "222", "333"], baseSupportedPmids: BASE },
+      session,
+    );
+    expect(res.status).toBe(200);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      supportedPmids: ["111", "222", "801", "802", "803", "333"],
+    });
+  });
+
+  it("an unchanged stale list writes nothing", async () => {
+    grantDepartment(DEPT_A, "curator");
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: STORED }));
+    const res = await call({ op: "update", id: 5, supportedPmids: BASE, baseSupportedPmids: BASE });
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      changed: false,
+      service: { supportedPmids: STORED },
+    });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("removes only what the editor removed, and does not put back what someone else removed", async () => {
+    grantDepartment(DEPT_A, "curator");
+    // Someone else removed 222 and added 801.
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: ["111", "801"] }));
+    await call({ op: "update", id: 5, supportedPmids: ["222", "333"], baseSupportedPmids: BASE });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ supportedPmids: ["801", "333"] });
+  });
+
+  it("with a base that is the stored list, saves the list as sent", async () => {
+    grantDepartment(DEPT_A, "curator");
+    await call({ op: "update", id: 5, supportedPmids: ["333", "111"], baseSupportedPmids: BASE });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ supportedPmids: ["333", "111"] });
+  });
+
+  it("400s on a base that is not a PMID list, or one with no supportedPmids", async () => {
+    const bad = await call(
+      { op: "update", id: 5, supportedPmids: ["111"], baseSupportedPmids: ["abc"] },
+      SU,
+    );
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: "invalid_pmids", field: "baseSupportedPmids" });
+    const alone = await call({ op: "update", id: 5, baseSupportedPmids: BASE }, SU);
+    expect(alone.status).toBe(400);
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("400s when the merged list is over the limit", async () => {
+    const stored = Array.from({ length: 5000 }, (_, i) => String(10000 + i));
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: stored }));
+    const res = await call({ op: "update", id: 5, supportedPmids: ["111"], baseSupportedPmids: [] }, SU);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "too_many_pmids" });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("locks the row and re-reads it before writing the list", async () => {
+    const order: string[] = [];
+    m.txQueryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      order.push(`lock:${strings.join("?")}:${values.join(",")}`);
+      return [{ id: 5 }];
+    });
+    m.txFindUnique.mockImplementation(async () => {
+      order.push("read");
+      return row();
+    });
+    m.txUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => {
+      order.push("write");
+      return { ...row(), ...args.data };
+    });
+    await call({ op: "update", id: 5, supportedPmids: ["111", "222", "333"] }, SU);
+    expect(order).toEqual([
+      "lock:SELECT id FROM method_service WHERE id = ? FOR UPDATE:5",
+      "read",
+      "write",
+    ]);
+  });
+
+  it("409s and writes nothing when another save landed while this one was working", async () => {
+    grantDepartment(DEPT_A, "curator");
+    // The first read saw 111, 222; by the time the row is locked it holds more.
+    m.txFindUnique.mockResolvedValue(row({ supportedPmids: STORED }));
+    const res = await call({
+      op: "update",
+      id: 5,
+      supportedPmids: ["111", "222", "333"],
+      baseSupportedPmids: BASE,
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "changed_elsewhere" });
+    expect(m.txUpdate).not.toHaveBeenCalled();
+    expect(m.appendAuditRow).not.toHaveBeenCalled();
+    expect(m.bustCache).not.toHaveBeenCalled();
+  });
+
+  it("does not lock for a change that leaves the list and its check alone", async () => {
+    const res = await call({ op: "update", id: 5, url: "https://example.org/new" }, SU);
+    expect(res.status).toBe(200);
+    expect(m.txQueryRaw).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/edit/method-service: delete", () => {
   it("hard-deletes and audits the row that was there", async () => {
     const res = await call({ op: "delete", id: 5 }, SUPERUSER);

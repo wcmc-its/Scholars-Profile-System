@@ -14,8 +14,14 @@
  * sent to this viewer.
  *
  * Every write is a POST to `/api/edit/method-service`, which allows this
- * viewer exactly these three: an update carrying only `supportedPmids`,
- * `exclude` and `restore`.
+ * viewer exactly these three: an update carrying only `supportedPmids` and
+ * `baseSupportedPmids`, `exclude` and `restore`.
+ *
+ * The box is a copy of the list as it was when this page last heard from the
+ * server, and other people save the same list. So a save also sends that copy
+ * (`baseSupportedPmids`) and the server applies only what was added and
+ * removed here to the list as it is now. What comes back is the list as
+ * stored, with anyone else's additions in it.
  *
  * Imports only types and pure validation from `lib/method-services/validation`
  * (no `@/lib/db`).
@@ -192,8 +198,15 @@ export function MethodServicePublicationsSection({
     setWarning(null);
     setFailure(null);
     // Sent even when unchanged: its presence is what makes the server carry on
-    // with a PubMed check an earlier save could not finish.
-    const result = await post({ op: "update", id: service.id, supportedPmids: parsed.pmids });
+    // with a PubMed check an earlier save could not finish. The base is the
+    // list this box started from, so the server changes only what was added
+    // or removed here and a stale page never replaces the stored list.
+    const result = await post({
+      op: "update",
+      id: service.id,
+      supportedPmids: parsed.pmids,
+      baseSupportedPmids: service.supportedPmids,
+    });
     setBusy(false);
     if (!result.ok || !result.service) {
       setFailure({ id: service.id, message: errorMessage(result.error ?? "") });
@@ -208,7 +221,16 @@ export function MethodServicePublicationsSection({
       next.delete(saved.id);
       return next;
     });
-    setStatus(`Saved the publications for ${saved.name}.`);
+    // PMIDs in the saved list that were neither typed here nor on this page
+    // before: someone else's, added while the page was open.
+    const known = new Set([...parsed.pmids, ...service.supportedPmids]);
+    const others = saved.supportedPmids.filter((p) => !known.has(p)).length;
+    setStatus(
+      `Saved the publications for ${saved.name}.` +
+        (others > 0
+          ? ` The list also has ${plural(others, "PMID", "PMIDs")} someone else added while this page was open.`
+          : ""),
+    );
     router.refresh();
   }
 
@@ -401,6 +423,8 @@ function errorMessage(code: string): string {
       return "Some of these are not PMIDs. Remove them and try again.";
     case "too_many_pmids":
       return `Use ${SERVICE_PMIDS_MAX.toLocaleString("en-US")} PMIDs or fewer.`;
+    case "changed_elsewhere":
+      return "Someone else saved this service at the same moment, so your changes weren’t saved. Save again.";
     case "not_superuser":
     case "impersonation_readonly":
       return "You can’t change this service’s publications. Refresh the page and try again.";

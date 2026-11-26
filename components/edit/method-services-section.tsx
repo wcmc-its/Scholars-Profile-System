@@ -358,7 +358,13 @@ export function MethodServicesSection({
       if (name.value !== editing.name) payload.name = name.value;
       if (url.value !== editing.url) payload.url = url.value;
       if (!sameFamilies(families.value, editing.families)) payload.families = families.value;
-      if (!sameList(parsed.pmids, editing.supportedPmids)) payload.supportedPmids = parsed.pmids;
+      if (!sameList(parsed.pmids, editing.supportedPmids)) {
+        payload.supportedPmids = parsed.pmids;
+        // The list this form started from: the server applies only what was
+        // added or removed here, so a stale form does not undo someone
+        // else's save.
+        payload.baseSupportedPmids = editing.supportedPmids;
+      }
       if (draft.countStaffPapers !== editing.countStaffPapers) {
         payload.countStaffPapers = draft.countStaffPapers;
       }
@@ -947,6 +953,8 @@ function errorMessage(code: string): string {
       return "Only a superuser can change method services. Refresh the page and try again.";
     case "service_not_found":
       return "That service no longer exists. Refresh the page and try again.";
+    case "changed_elsewhere":
+      return "Someone else saved this service at the same moment, so your changes weren’t saved. Save again.";
     default:
       return "Something went wrong — your changes weren’t saved. Please try again.";
   }

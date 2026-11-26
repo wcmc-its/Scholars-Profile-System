@@ -163,13 +163,18 @@ describe("MethodServicePublicationsSection: what a unit's editor sees", () => {
 });
 
 describe("MethodServicePublicationsSection: saving the supported list", () => {
-  it("posts an update that carries op, id and supportedPmids, and nothing else", async () => {
+  it("posts an update that carries op, id, supportedPmids and the list the box started from, and nothing else", async () => {
     renderSection();
     fireEvent.change(pmidBox(), { target: { value: "111, 333\nPMID: 555" } });
     writeResponse.body = { ok: true, changed: true, service: { ...SERVICE, supportedPmids: ["111", "333", "555"] } };
     fireEvent.click(saveButton());
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect(writes()[0]).toEqual({ op: "update", id: 5, supportedPmids: ["111", "333", "555"] });
+    expect(writes()[0]).toEqual({
+      op: "update",
+      id: 5,
+      supportedPmids: ["111", "333", "555"],
+      baseSupportedPmids: ["111", "222"],
+    });
     expect(await screen.findByText("Saved the publications for Example review service.")).toBeTruthy();
     expect(pmidBox().value).toBe("111\n333\n555");
     expect(mockRefresh).toHaveBeenCalledTimes(1);
@@ -188,8 +193,44 @@ describe("MethodServicePublicationsSection: saving the supported list", () => {
     fireEvent.change(pmidBox(6), { target: { value: "777" } });
     writeResponse.body = { ok: true, changed: true, service: { ...OTHER, supportedPmids: ["777"] } };
     fireEvent.click(saveButton(6));
-    await waitFor(() => expect(writes()).toEqual([{ op: "update", id: 6, supportedPmids: ["777"] }]));
+    await waitFor(() =>
+      expect(writes()).toEqual([
+        { op: "update", id: 6, supportedPmids: ["777"], baseSupportedPmids: [] },
+      ]),
+    );
     expect(pmidBox(5).value).toBe("111\n222");
+  });
+
+  it("a page left open: shows the list as stored, and says others added to it", async () => {
+    renderSection();
+    fireEvent.change(pmidBox(), { target: { value: "111\n222\n333" } });
+    // Someone else added 800 and 900 after this page loaded; the server kept them.
+    writeResponse.body = {
+      ok: true,
+      changed: true,
+      service: { ...SERVICE, supportedPmids: ["111", "222", "800", "900", "333"] },
+    };
+    fireEvent.click(saveButton());
+    expect(
+      await screen.findByText(
+        "Saved the publications for Example review service. The list also has 2 PMIDs someone else added while this page was open.",
+      ),
+    ).toBeTruthy();
+    expect(pmidBox().value).toBe("111\n222\n800\n900\n333");
+    // The next save starts from the list as stored.
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(writes()).toHaveLength(2));
+    expect(writes()[1].baseSupportedPmids).toEqual(["111", "222", "800", "900", "333"]);
+  });
+
+  it("says to save again when another save landed at the same moment", async () => {
+    renderSection();
+    fireEvent.change(pmidBox(), { target: { value: "111\n222\n333" } });
+    writeResponse.status = 409;
+    writeResponse.body = { ok: false, error: "changed_elsewhere" };
+    fireEvent.click(saveButton());
+    expect((await screen.findByRole("alert")).textContent).toContain("Save again");
+    expect(pmidBox().value).toBe("111\n222\n333");
   });
 
   it("shows the PubMed warning of a save that could not finish the check", async () => {

@@ -232,6 +232,29 @@ export function validatePmidList(
   return { ok: true, value: pmids };
 }
 
+/**
+ * An editor's changes to a PMID list, applied to the list as it is stored NOW.
+ * `base` is the list the editor's page was showing and `edited` what they
+ * sent: what they added is `edited` minus `base`, what they removed is `base`
+ * minus `edited`. Only those are applied to `stored`, so a PMID someone else
+ * added after the page loaded stays, and one someone else removed is not put
+ * back. With `base` equal to `stored` the result is `edited` as sent. Pure.
+ */
+export function applyPmidEdits(
+  base: ReadonlyArray<string>,
+  edited: ReadonlyArray<string>,
+  stored: ReadonlyArray<string>,
+): string[] {
+  if (base.length === stored.length && base.every((p, i) => p === stored[i])) return [...edited];
+  const inBase = new Set(base);
+  const inEdited = new Set(edited);
+  const inStored = new Set(stored);
+  return [
+    ...stored.filter((p) => !inBase.has(p) || inEdited.has(p)),
+    ...edited.filter((p) => !inBase.has(p) && !inStored.has(p)),
+  ];
+}
+
 /** The editor's textareas: one affiliation phrase, or one author name, per
  *  line, blank lines dropped. */
 export function parsePhraseBlock(text: string): string[] {
