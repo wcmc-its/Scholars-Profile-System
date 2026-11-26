@@ -608,7 +608,7 @@ describe("UnitEditPage — Method services", () => {
     excludedPmids: [],
     countStaffPapers: false,
     affiliationPhrases: [],
-    coauthoredPmids: [],
+    coauthoredPmids: [], authorNames: [], nameMatchedPmids: [],
   };
 
   it("no section when the page passes no list (flag off)", () => {

@@ -42,7 +42,7 @@ const SERVICE: MethodServiceView = {
   excludedPmids: [],
   countStaffPapers: false,
   affiliationPhrases: [],
-  coauthoredPmids: [],
+  coauthoredPmids: [], authorNames: [], nameMatchedPmids: [],
 };
 
 const fetchMock = vi.fn();
@@ -187,7 +187,7 @@ describe("MethodServicesSection: form", () => {
     );
     fireEvent.change(nameInput(), { target: { value: "Data consultations" } });
     expect(preview.textContent).toContain("Data consultations ↗");
-    expect(screen.getByText(/worked out from the unit’s people, the supported list and the\s+affiliation text/)).toBeTruthy();
+    expect(screen.getByText(/worked out from the unit’s people, the supported list, the affiliation\s+text and the author names/)).toBeTruthy();
   });
 
   it("does not double the article for a unit named 'The …'", () => {
@@ -383,7 +383,7 @@ describe("MethodServicesSection: add", () => {
       excludedPmids: [],
       countStaffPapers: true,
       affiliationPhrases: ["Example Health Sciences Library", "Example Library"],
-      coauthoredPmids: ["111"],
+      coauthoredPmids: ["111"], authorNames: [], nameMatchedPmids: [],
     };
     writeResponse = { status: 200, body: { ok: true, changed: true, service: created } };
     renderSection();
@@ -411,6 +411,7 @@ describe("MethodServicesSection: add", () => {
         supportedPmids: ["111", "222"],
         countStaffPapers: true,
         affiliationPhrases: ["Example Health Sciences Library", "Example Library"],
+        authorNames: [],
       },
     ]);
     // Never the server's own field.
@@ -461,6 +462,80 @@ describe("MethodServicesSection: add", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(
       /Only a superuser can change method services/,
     );
+  });
+});
+
+describe("MethodServicesSection: the unit's author names", () => {
+  const authorBox = () =>
+    screen.getByLabelText(/^Authors from your unit, as PubMed lists them/) as HTMLTextAreaElement;
+  const WITH_NAME: MethodServiceView = {
+    ...SERVICE,
+    authorNames: ["Rivera Stone B"],
+    coauthoredPmids: ["111"],
+    nameMatchedPmids: ["111"],
+  };
+
+  it("sits under the affiliation phrases, with its hint", () => {
+    renderSection();
+    expect(
+      phraseBox().compareDocumentPosition(authorBox()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(document.getElementById("method-service-authors-hint")!.textContent).toBe(
+      "Family name then first initial, for example Rivera Stone B. Use this for people whose affiliation is written differently from paper to paper.",
+    );
+    expect(authorBox().getAttribute("aria-describedby")).toBe("method-service-authors-hint");
+  });
+
+  it("Edit loads the stored names, one per line, and a change makes the form dirty", () => {
+    renderSection({ services: [{ ...WITH_NAME, authorNames: ["Rivera Stone B", "Okafor C"] }] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    expect(authorBox().value).toBe("Rivera Stone B\nOkafor C");
+    expect(isDirty()).toBe(false);
+    fireEvent.change(authorBox(), { target: { value: "Okafor C" } });
+    expect(isDirty()).toBe(true);
+  });
+
+  it("sends the names, one per line, and never the server's own lists", async () => {
+    writeResponse = { status: 200, body: { ok: true, changed: true, service: WITH_NAME } };
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(authorBox(), { target: { value: " Rivera  Stone B \n\nOkafor C\n" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    await screen.findByText("Saved Example review service.");
+    expect(writes()).toEqual([{ op: "update", id: 5, authorNames: ["Rivera Stone B", "Okafor C"] }]);
+  });
+
+  it("sends the stored names again on a save that changes nothing, so the check carries on", async () => {
+    writeResponse = { status: 200, body: { ok: true, changed: false, service: WITH_NAME } };
+    renderSection({ services: [WITH_NAME] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    await screen.findByText("Saved Example review service.");
+    expect(writes()).toEqual([{ op: "update", id: 5, authorNames: ["Rivera Stone B"] }]);
+  });
+
+  it("refuses a name with no initial before sending, on its own field", () => {
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(authorBox(), { target: { value: "Rivera Stone" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    expect(writes()).toEqual([]);
+    expect(authorBox().getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById("method-service-authors-error")!.textContent).toBe(
+      "Each name needs a family name then a first initial, for example Rivera Stone B.",
+    );
+    expect(document.activeElement).toBe(authorBox());
+  });
+
+  it("a server error on authorNames lands on that field", async () => {
+    writeResponse = { status: 400, body: { ok: false, error: "too_many_author_names", field: "authorNames" } };
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Example review service" }));
+    fireEvent.change(authorBox(), { target: { value: "Okafor C" } });
+    fireEvent.click(form().getByRole("button", { name: "Save changes" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Use 50 names or fewer.");
+    expect(alert.id).toBe("method-service-authors-error");
   });
 });
 

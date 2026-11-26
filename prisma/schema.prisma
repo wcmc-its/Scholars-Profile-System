@@ -4055,12 +4055,21 @@ model MethodService {
   /// Short strings (0 to 10) that identify the unit's authors in a PubMed
   /// affiliation, entered by a superuser. The column defaults to `[]` in SQL.
   affiliationPhrases Json     @map("affiliation_phrases")
+  /// The unit's authors as PubMed lists them (0 to 50), each "family name then
+  /// first initial", entered by a superuser. The column defaults to `[]` in
+  /// SQL.
+  authorNames      Json       @map("author_names")
   /// The supported PMIDs with an author whose PubMed affiliation contains one
-  /// of the phrases. Computed by the route on save, never sent by a client.
-  /// The column defaults to `[]` in SQL.
+  /// of the phrases, or who is one of the named authors. Computed by the route
+  /// on save, never sent by a client. The column defaults to `[]` in SQL.
   coauthoredPmids  Json       @map("coauthored_pmids")
-  /// The supported PMIDs whose author affiliations have been read from PubMed
-  /// and compared with the current phrases; `coauthoredPmids` is the subset
+  /// The ones among `coauthoredPmids` found by an author name and not by an
+  /// affiliation, kept only so the editor's review list can say why. Computed
+  /// by the route on save, never sent by a client. The column defaults to `[]`
+  /// in SQL.
+  nameMatchedPmids Json       @map("name_matched_pmids")
+  /// The supported PMIDs whose authors have been read from PubMed and compared
+  /// with the current phrases and names; `coauthoredPmids` is the subset
   /// that matched. A save asks PubMed only for supported PMIDs not in here.
   /// Server-only, never sent to or by a client. The column defaults to `[]`
   /// in SQL.
