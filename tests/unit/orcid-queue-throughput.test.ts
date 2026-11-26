@@ -102,7 +102,7 @@ describe("bulkEligible: Cornell Ithaca", () => {
     expect(bulkEligible(ith({ nameAgrees: false }), r)).toBe(false);
   });
   it("is unchanged by the WCM controls: two iDs, a differing name and byline papers", () => {
-    const loose = { ...ORCID_BULK_RULE_DEFAULT, allowMultiple: true, allowNameDiffers: true };
+    const loose = { ...ORCID_BULK_RULE_DEFAULT, allowMultiple: true };
     const c = cand({ shared: 0, worksTotal: 12, sources: ["cornell_affiliation_manager"] });
     const ith = (over: Partial<OrcidQueueSummary>) => summary({ campus: "ithaca", ...over });
     expect(bulkBlocker(ith({ candidates: [c, cand({ orcid: "x" })] }), loose)).toBe("multiple");
@@ -208,14 +208,14 @@ describe("bulkBlocker: the two routes through the WCM floor", () => {
     ).toBe("threshold");
   });
 
-  it("One candidate iD and Name agrees can be unchecked; the rest stays locked", () => {
+  it("One candidate iD can be unchecked; name agrees and the rest stay locked", () => {
     const two = summary({ candidates: [cand(), cand({ orcid: "x", band: "weak" })] });
     const differs = one({ nameAgrees: false });
     expect(bulkBlocker(two, ANY)).toBe("multiple");
     expect(bulkBlocker(two, { ...ANY, allowMultiple: true })).toBeNull();
     expect(bulkBlocker(differs, ANY)).toBe("name");
-    expect(bulkBlocker(differs, { ...ANY, allowNameDiffers: true })).toBeNull();
-    const loose = { ...ANY, allowMultiple: true, allowNameDiffers: true };
+    expect(bulkBlocker(differs, { ...ANY, allowMultiple: true })).toBe("name");
+    const loose = { ...ANY, allowMultiple: true };
     expect(bulkBlocker(one({ competitor: true, bylinePapers: 4 }), loose)).toBe("competitor");
     expect(bulkBlocker(summary({ conflict: true }), loose)).toBe("on_file");
     expect(

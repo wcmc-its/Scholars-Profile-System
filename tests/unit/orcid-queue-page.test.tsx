@@ -1978,13 +1978,16 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
     expect(screen.getByTestId("orcid-bulk-row-re0001")).toBeTruthy();
     fireEvent.change(passesBy, { target: { value: "either" } });
 
-    // One candidate iD and Name agrees can be unchecked; the rows are marked.
+    // One candidate iD can be unchecked; the row is marked. Name agrees is locked:
+    // there is no control for it and a differing name never lists.
     fireEvent.click(screen.getByTestId("orcid-bulk-rule-one"));
     expect(row("mu0005")).toContain("Best of 2 iDs");
-    fireEvent.click(screen.getByTestId("orcid-bulk-rule-name"));
-    expect(row("nd0006")).toContain("Name differs");
-    expect(row("re0001")).not.toContain("Name differs");
-    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe("5 of 6 Strong scholars match");
+    expect(screen.queryByTestId("orcid-bulk-rule-name")).toBeNull();
+    const locked = screen.getByLabelText("Name agrees") as HTMLInputElement;
+    expect(locked.checked && locked.disabled).toBe(true);
+    expect(screen.queryByTestId("orcid-bulk-row-nd0006")).toBeNull();
+    expect(why()).toContain("1The name on ORCID differs");
+    expect(screen.getByTestId("orcid-bulk-count").textContent).toBe("4 of 6 Strong scholars match");
 
     fireEvent.click(screen.getByTestId("orcid-bulk-confirm"));
     fireEvent.click(screen.getByTestId("orcid-bulk-confirm-yes"));
@@ -1994,14 +1997,12 @@ describe("throughput: keyboard, undo, list summaries, Weak split, bulk review", 
       minShared: 5,
       maxOnlyOrcid: 1,
       allowMultiple: true,
-      allowNameDiffers: true,
       passesBy: "either",
     });
     expect((posts()[0]!.body.pairs as Array<{ cwid: string }>).map((x) => x.cwid).sort()).toEqual([
       "bo0003",
       "by0002",
       "mu0005",
-      "nd0006",
       "re0001",
     ]);
   });

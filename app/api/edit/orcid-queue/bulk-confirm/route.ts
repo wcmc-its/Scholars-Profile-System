@@ -3,12 +3,13 @@
  * (`/edit/orcid-queue`, Bulk review).
  *
  * Body `{ pairs: [{ cwid, orcid }], rule: { minShared, maxOnlyOrcid,
- * allowMultiple?, allowNameDiffers?, passesBy? } }`, at most `ORCID_BULK_MAX`
+ * allowMultiple?, passesBy? } }`, at most `ORCID_BULK_MAX`
  * pairs. The librarian picks the pairs in the browser under an adjustable rule
- * (`bulkEligible`); the rule is recorded on each confirm's audit row. Two of its
- * flags loosen the floor for WCM pairs, and only when sent as `true`:
- * `allowMultiple` (the scholar's best iD of several) and `allowNameDiffers`.
- * Without them the floor is as strict as it gets. The server does not trust the
+ * (`bulkEligible`); the rule is recorded on each confirm's audit row. One flag
+ * loosens the floor for WCM pairs, and only when sent as `true`:
+ * `allowMultiple` (the scholar's best iD of several). Without it the floor is
+ * as strict as it gets. Any other key in `rule` is ignored: a name that does
+ * not agree is always refused. The server does not trust the
  * selection: each pair must also pass `assertBulkConfirmable` (the same
  * verified rule as `etl:bulk-confirm-strong`) and then goes through `confirmPair`, the same write as a single
  * Confirm, in its own transaction. A refused pair is skipped with its code; it
@@ -46,7 +47,7 @@ export const dynamic = "force-dynamic";
 
 const PATH = "/api/edit/orcid-queue/bulk-confirm";
 const RULE_KEYS = ["minShared", "maxOnlyOrcid"] as const;
-const RULE_FLAGS = ["allowMultiple", "allowNameDiffers"] as const;
+const RULE_FLAGS = ["allowMultiple"] as const;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isOrcidLibrarianQueueEnabled()) return new NextResponse(null, { status: 404 });
@@ -103,10 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return editError(400, "invalid_body", "rule");
     rule.passesBy = ruleRaw.passesBy as string;
   }
-  const floorRule = {
-    allowMultiple: rule.allowMultiple === true,
-    allowNameDiffers: rule.allowNameDiffers === true,
-  };
+  const floorRule = { allowMultiple: rule.allowMultiple === true };
 
   const dryRun = body.dryRun === true;
   const ts = new Date();

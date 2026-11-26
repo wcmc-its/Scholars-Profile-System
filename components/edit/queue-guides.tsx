@@ -125,14 +125,21 @@ export function OrcidQueueGuide() {
         <QueueTerm term="Undo">
           On an iD confirmed automatically, takes it off file and marks it Not this person.
         </QueueTerm>
+        <QueueTerm term="After a decision">
+          Every night WCM Identity is brought in step with Scholars: newly confirmed iDs, replaced
+          iDs and iDs that were ruled out, not just that day&rsquo;s confirmations. A confirmed iD
+          shows on the person&rsquo;s Manage Profile page in Publication Manager the next day, and
+          ReCiter uses it the next time it scores that person&rsquo;s papers, usually within a day
+          or two.
+        </QueueTerm>
         <QueueTerm term="Bulk approval">{BULK_NOTE}</QueueTerm>
         <QueueTerm term="Bulk review">
           Confirms many Strong matches at once, for scholars with no decision yet. A match must have
-          no competitor and pass one of two ways: by the ORCID record (3 or more shared works and a
+          no competitor and names that agree, and pass one of two ways: by the ORCID record (3 or more shared works and a
           Cornell or WCM affiliation or email on the record) or by bylines (the iD printed on 2 or
           more of the scholar&rsquo;s accepted papers, with nothing contesting it). The settings in
-          the filter row narrow or widen the list: one candidate iD, name agrees, which way a match
-          passes, shared works, and works only on ORCID. Cornell Ithaca matches qualify by a
+          the filter row narrow or widen the list: one candidate iD, which way a match passes,
+          shared works, and works only on ORCID. Cornell Ithaca matches qualify by a
           verified email, Affiliation Manager or a faculty web page instead.
         </QueueTerm>
         <QueueTerm term="Who can decide">Administrators only.</QueueTerm>

@@ -891,19 +891,19 @@ describe("bulk-confirm", () => {
       return ((await res.json()) as { results: Array<{ blocker?: string }> }).results[0]!.blocker;
     };
     expect(await one(RULE)).toBe("ithaca_source");
-    // The WCM flags loosen nothing for Ithaca.
+    // The WCM flag loosens nothing for Ithaca.
     h.state.sources = [{ cwid: "it0001", orcid: ITH, source: "web_page_seed" }];
     h.state.evidence = [
       { cwid: "it0001", orcid: ITH, band: "strong", nameAgrees: false },
       { cwid: "it0001", orcid: OTHER, band: "weak" },
     ];
-    expect(await one({ ...RULE, allowMultiple: true, allowNameDiffers: true })).toBe("multiple");
+    expect(await one({ ...RULE, allowMultiple: true })).toBe("multiple");
     h.state.evidence = [{ cwid: "it0001", orcid: ITH, band: "strong", nameAgrees: false }];
-    expect(await one({ ...RULE, allowMultiple: true, allowNameDiffers: true })).toBe("name");
+    expect(await one({ ...RULE, allowMultiple: true })).toBe("name");
     expect(h.scholarUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("takes a scholar's best iD of several, or a differing name, only when the rule says so", async () => {
+  it("takes a scholar's best iD of several only when the rule says so; never a differing name", async () => {
     h.state.evidence = [
       { cwid: "jd0001", orcid: ORCID, band: "strong" },
       { cwid: "jd0001", orcid: OTHER, band: "weak" },
@@ -919,7 +919,10 @@ describe("bulk-confirm", () => {
     h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong", nameAgrees: false }];
     expect(await blockerOf()).toBe("name");
     expect(await blockerOf({ ...RULE, allowMultiple: true })).toBe("name");
-    expect(await blockerOf({ ...RULE, allowNameDiffers: true }, true)).toBeNull();
+    // A retired flag from an old client is an unknown key: ignored, so still refused.
+    expect(await blockerOf({ ...RULE, allowNameDiffers: true })).toBe("name");
+    expect(await blockerOf({ ...RULE, allowNameDiffers: true }, true)).toBe("name");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
     h.state.evidence = [
       { cwid: "jd0001", orcid: ORCID, band: "strong" },
       { cwid: "jd0001", orcid: OTHER, band: "weak" },
@@ -931,7 +934,7 @@ describe("bulk-confirm", () => {
   });
 
   it("400 on a rule flag that is not a boolean, or an unknown Passes by", async () => {
-    for (const extra of [{ allowMultiple: "yes" }, { allowNameDiffers: 1 }, { passesBy: "name" }])
+    for (const extra of [{ allowMultiple: "yes" }, { passesBy: "name" }])
       expect(
         (await bulkConfirm(req({ pairs: [{ cwid: "jd0001", orcid: ORCID }], rule: { ...RULE, ...extra } })))
           .status,

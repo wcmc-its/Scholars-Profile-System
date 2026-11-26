@@ -760,8 +760,6 @@ export type OrcidBulkRule = {
   /** WCM: also take a scholar with more than one candidate iD, for their best
    *  one. Absent = one candidate iD only. */
   allowMultiple?: boolean;
-  /** WCM: also take a pair whose name does not agree. Absent = name agrees. */
-  allowNameDiffers?: boolean;
   /** WCM: the route a pair must pass by. Absent = either. */
   passesBy?: OrcidBulkRoute;
 };
@@ -822,7 +820,7 @@ export function bulkBlocker(s: OrcidQueueSummary, rule: OrcidBulkRule): OrcidBul
   if (s.candidates.length !== 1 && !(wcm && rule.allowMultiple)) return "multiple";
   if (s.decisions) return "decided";
   if (c.competitor) return "competitor";
-  if (!c.nameAgrees && !(wcm && rule.allowNameDiffers)) return "name";
+  if (!c.nameAgrees) return "name";
   // Cornell Ithaca: no SPS publications, so the work/source thresholds can't
   // apply. An email-verified pair qualifies (Ithaca is never auto-confirmed), and
   // a Strong one from an `isIthacaBulkSource`. The server floor does the rest; at

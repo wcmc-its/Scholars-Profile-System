@@ -549,11 +549,11 @@ export async function dismissOthers(
  *    have no SPS publications, so the work checks can't apply; their iDs are
  *    never pushed to Identity.
  * Anything else is refused (`not_bulk_eligible`) and stays in the queue.
- * `rule` loosens two WCM checks, and only when the request says so:
- * `allowMultiple` takes the scholar's best open iD when they have several, and
- * `allowNameDiffers` a pair whose name does not agree.
+ * `rule` loosens one WCM check, and only when the request says so:
+ * `allowMultiple` takes the scholar's best open iD when they have several. A
+ * name that does not agree is always refused.
  */
-type BulkFloorRule = Pick<OrcidBulkRule, "allowMultiple" | "allowNameDiffers">;
+type BulkFloorRule = Pick<OrcidBulkRule, "allowMultiple">;
 export async function assertBulkConfirmable(
   tx: Tx,
   pair: { cwid: string; orcid: string },
@@ -654,7 +654,7 @@ export async function bulkConfirmableMany(
       !emptyList(mine.competitorOrcids)
     )
       return notEligible("competitor");
-    if (!mine.nameAgrees && !(wcm && rule.allowNameDiffers)) return notEligible("name");
+    if (!mine.nameAgrees) return notEligible("name");
     if (wcm) {
       const detail = mine.evidenceDetail as {
         workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };

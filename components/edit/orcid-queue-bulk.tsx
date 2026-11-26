@@ -4,20 +4,20 @@
  * ORCID queue — Bulk review (`/edit/orcid-queue`, the "Bulk review" mode).
  *
  * Lists every unassigned scholar in the current view who qualifies under an
- * adjustable rule (`bulkEligible`). The fixed part: Strong, no competitor,
- * nothing on file, no decision on file, and for WCM one of two routes through the
+ * adjustable rule (`bulkEligible`). The fixed part: Strong, no competitor, name
+ * agrees, nothing on file, no decision on file, and for WCM one of two routes through the
  * floor (`bulkRoutes`): the ORCID record (3+ shared works and an institution
  * match) or the bylines (the iD printed on 2+ of the scholar's accepted papers,
  * uncontested). The adjustable part (`OrcidBulkRuleControls`, set in the page's
- * filter row): one candidate iD, name agrees, which route, shared works, works
- * only on ORCID. Only pairs that also pass the server's floor
+ * filter row): one candidate iD, which route, shared works, works only on
+ * ORCID. Only pairs that also pass the server's floor
  * (`assertBulkConfirmable`, asked once via a `dryRun` post) are listed. Cornell
  * Ithaca rows (Affiliation Manager and web-page pairs, and email-verified ones)
  * skip the WCM controls and are capped at `ORCID_BULK_ITHACA_MAX` per batch: the
  * rest wait, unchecked, for the next one. "Why the rest don't match" counts
  * everyone else in the view by the first check they fail. Each row can be
- * unchecked; a row with any work only on ORCID is tinted so it gets a look first,
- * and a row whose name differs is tagged. "Confirm N iDs" asks once more, then
+ * unchecked; a row with any work only on ORCID is tinted so it gets a look
+ * first. "Confirm N iDs" asks once more, then
  * posts in chunks of `ORCID_BULK_MAX` to `POST /api/edit/orcid-queue/bulk-confirm`,
  * which re-checks the fixed part per pair and skips anything that no longer
  * qualifies. The page's toast offers Undo for the whole batch.
@@ -64,12 +64,7 @@ const PAGE = 100;
 /** Dry-run batches in flight at once (the server checks 4 pairs at a time each). */
 const DRY_RUN_IN_FLIGHT = 3;
 /** The fixed client floor only: the adjustable rule at its loosest. */
-const ANY_RULE: OrcidBulkRule = {
-  minShared: 0,
-  maxOnlyOrcid: 10_000,
-  allowMultiple: true,
-  allowNameDiffers: true,
-};
+const ANY_RULE: OrcidBulkRule = { minShared: 0, maxOnlyOrcid: 10_000, allowMultiple: true };
 const keyOf = (s: OrcidQueueSummary) => `${s.cwid}|${s.candidates[0]!.orcid}`;
 const fmt = (n: number) => n.toLocaleString("en-US");
 
@@ -172,8 +167,8 @@ export function OrcidBulkReview({
       if (inBulkBand(s)) inBand += 1;
       const blocker = bulkBlocker(s, ANY_RULE);
       const f = blocker ? undefined : floor?.get(keyOf(s));
-      // What the librarian's own settings rule out: more than one iD, a name that
-      // differs, the route or a threshold.
+      // What the librarian's own settings rule out: more than one iD, the route or
+      // a threshold.
       const mine = bulkBlocker(s, rule);
       const emailOk = !needEmail || s.campus !== "ithaca" || !!f?.verifiedEmail;
       if (f?.ok && !mine && emailOk) {
@@ -286,7 +281,7 @@ export function OrcidBulkReview({
             ? " With One candidate iD off, a scholar's best iD is confirmed and their other iDs stay in the queue under Different iD on file."
             : null}
           {hasIthaca
-            ? " One candidate iD, Name agrees, Passes by, shared works and only on ORCID apply to WCM scholars only."
+            ? " One candidate iD, Passes by, shared works and only on ORCID apply to WCM scholars only."
             : null}
         </span>
         {floor && why.length > 0 ? (
@@ -410,13 +405,10 @@ export function OrcidBulkReview({
                       </span>
                     ) : null}
                   </span>
-                  <span role="cell" className="flex min-w-0 flex-col">
-                    <span className="truncate">
-                      {floor?.get(keyOf(s))?.orcidName ?? (
-                        <span className="text-muted-foreground">Name not public</span>
-                      )}
-                    </span>
-                    {!c.nameAgrees ? <span className={TAG}>Name differs</span> : null}
+                  <span role="cell" className="min-w-0 truncate">
+                    {floor?.get(keyOf(s))?.orcidName ?? (
+                      <span className="text-muted-foreground">Name not public</span>
+                    )}
                   </span>
                   <span role="cell" className="flex flex-col tabular-nums">
                     {compared(s) ? (
@@ -566,9 +558,9 @@ const TAG =
 
 /**
  * Bulk review's rule, set in the page's filter row (one row of controls). "No
- * competitor" is locked: the server enforces it. The rest can be unchecked; the
- * server validates what the request then sends (`allowMultiple`,
- * `allowNameDiffers`). The verified-email box only shows, and only applies, where
+ * competitor" and "Name agrees" are locked: the server enforces them. The rest
+ * can be unchecked; the server validates what the request then sends
+ * (`allowMultiple`). The verified-email box only shows, and only applies, where
  * the view has Cornell Ithaca scholars.
  */
 export function OrcidBulkRuleControls({
@@ -599,18 +591,6 @@ export function OrcidBulkRuleControls({
   const BOX = "accent-apollo-slate size-4";
   const SELECT =
     "border-apollo-border-strong bg-apollo-surface rounded-md border px-1 py-0.5 text-[13px] font-semibold tabular-nums disabled:opacity-50";
-  const flag = (k: "allowMultiple" | "allowNameDiffers", label: string, testId: string) => (
-    <label className={CHIP}>
-      <input
-        type="checkbox"
-        checked={!rule[k]}
-        onChange={() => onRule({ ...rule, [k]: !rule[k] })}
-        className={BOX}
-        data-testid={testId}
-      />
-      {label}
-    </label>
-  );
   const threshold = (k: Threshold, before: string, label: string) => (
     <label className={CHIP}>
       <input
@@ -642,12 +622,23 @@ export function OrcidBulkRuleControls({
   );
   return (
     <>
-      {flag("allowMultiple", "One candidate iD", "orcid-bulk-rule-one")}
-      <label className={CHIP} title="Always required">
-        <input type="checkbox" checked disabled className={BOX} />
-        No competitor
+      <label className={CHIP}>
+        <input
+          type="checkbox"
+          checked={!rule.allowMultiple}
+          onChange={() => onRule({ ...rule, allowMultiple: !rule.allowMultiple })}
+          className={BOX}
+          data-testid="orcid-bulk-rule-one"
+        />
+        One candidate iD
       </label>
-      {flag("allowNameDiffers", "Name agrees", "orcid-bulk-rule-name")}
+      {/* The fixed part: the server enforces these, so they can't be unchecked. */}
+      {["No competitor", "Name agrees"].map((t) => (
+        <label key={t} className={CHIP} title="Always required">
+          <input type="checkbox" checked disabled className={BOX} />
+          {t}
+        </label>
+      ))}
       <label className={CHIP}>
         Passes by
         <select
