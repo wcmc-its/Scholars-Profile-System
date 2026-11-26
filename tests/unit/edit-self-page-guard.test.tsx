@@ -88,7 +88,7 @@ vi.mock("@/lib/auth/global-roles", () => ({
     honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
     data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
     development: { href: "/edit/grant-matcha", label: "Grant Matcha" },
-    program_roster_editor: { href: "/edit/program-roster", label: "Program roster" },
+    program_roster_editor: { href: "/edit/center/meyer_cancer_center/program-roster", label: "Program roster" },
   },
 }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
@@ -228,7 +228,7 @@ describe("/edit (self) — global-role landing (#2482, widened 2026-08-19)", () 
     ["honors_curator", "/edit/honors-queue"],
     ["data_sharing_viewer", "/edit/data-sharing"],
     ["development", "/edit/grant-matcha"],
-    ["program_roster_editor", "/edit/program-roster"],
+    ["program_roster_editor", "/edit/center/meyer_cancer_center/program-roster"],
   ] as const)("no self-profile + %s → redirect to %s", async (role, home) => {
     mockLoadEditContext.mockResolvedValue(null);
     mockResolveGlobalRole.mockResolvedValue(role);

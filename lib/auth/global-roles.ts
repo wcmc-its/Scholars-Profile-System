@@ -73,7 +73,7 @@ export const GLOBAL_ROLE_HOME: Record<GlobalRole, { href: string; label: string 
   honors_curator: { href: "/edit/honors-queue", label: "Honors queue" },
   data_sharing_viewer: { href: "/edit/data-sharing", label: "Data sharing" },
   research_security_viewer: { href: "/edit/research-security", label: "Research security" },
-  program_roster_editor: { href: "/edit/program-roster", label: "Program roster" },
+  program_roster_editor: { href: "/edit/center/meyer_cancer_center/program-roster", label: "Program roster" },
   // Matcha is the front door; its console nav reaches Grant Matcha too.
   development: { href: "/edit/matcha", label: "Matcha: Open search" },
   content_editor: { href: "/edit/profiles", label: "Profiles" },
