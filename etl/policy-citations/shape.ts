@@ -3,6 +3,7 @@
  * directly (tests/unit/policy-citations.test.ts).
  */
 import { issuingBody } from "@/lib/citations/issuing-bodies";
+import type { PatentDetails } from "../patent-citations/shape";
 
 export type Level = "authority" | "guideline" | "consensus" | "review";
 
@@ -22,13 +23,14 @@ export type TrialDetails = {
 };
 
 export interface CitingDoc {
-  source: "pubmed" | "bookshelf" | "ctgov";
+  /** "ros" is the Reliance on Science patent dataset (etl/patent-citations). */
+  source: "pubmed" | "bookshelf" | "ctgov" | "ros";
   externalId: string;
   title: string;
   year: number | null;
   url: string;
-  /** "trial" is not a ranked level (see `POLICY_LEVELS`, lib/citations/policy-rollup.ts). */
-  level: Level | "trial";
+  /** "trial" and "patent" are not ranked levels (see `POLICY_LEVELS`, lib/citations/policy-rollup.ts). */
+  level: Level | "trial" | "patent";
   issuingBody: string | null;
   dedupKey: string;
   /** Citation fields. PubMed fills all but `publisher`; Bookshelf fills only that. */
@@ -40,8 +42,8 @@ export interface CitingDoc {
   pages: string | null;
   doi: string | null;
   publisher: string | null;
-  /** Trials only. */
-  details?: TrialDetails;
+  /** Trials and patents only. */
+  details?: TrialDetails | PatentDetails;
 }
 
 /** The fields an existing row is back-filled with. */

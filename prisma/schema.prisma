@@ -866,13 +866,13 @@ model PublicationCiting {
 /// them (`POLICY_LEVELS`, lib/citations/policy-rollup.ts) and so skips it.
 model CitingDocument {
   id          Int     @id @default(autoincrement())
-  /// "pubmed" | "bookshelf" | "ctgov"
+  /// "pubmed" | "bookshelf" | "ctgov" | "ros" (Reliance on Science: patents)
   source      String  @db.VarChar(16)
   externalId  String  @map("external_id") @db.VarChar(32)
   title       String  @db.Text
   year        Int?
   url         String  @db.VarChar(255)
-  /// "authority" | "guideline" | "consensus" | "review" | "trial"
+  /// "authority" | "guideline" | "consensus" | "review" | "trial" | "patent"
   level       String  @db.VarChar(16)
   /// Health authority that issued it (lib/citations/issuing-bodies.ts); NULL for
   /// PubMed-indexed documents.
@@ -889,10 +889,13 @@ model CitingDocument {
   /// Bookshelf only: the publication statement, "Geneva: World Health Organization; 2017 Feb."
   publisher     String? @db.VarChar(512)
   /// Normalized title + year. The same guideline printed in several journals
-  /// shares a key, and counts once.
+  /// shares a key, and counts once. A patent document's key is its family, so
+  /// the documents of one invention count once.
   dedupKey    String  @map("dedup_key") @db.VarChar(191)
   /// Trials only: `{ phase, sponsor, sponsorClass, status, studyType, startDate }`
-  /// as ClinicalTrials.gov gives them, refreshed each run. NULL otherwise.
+  /// as ClinicalTrials.gov gives them, refreshed each run. Patents: `{ kind,
+  /// grantDate, publicationDate, filingDate, familyKey, familySize, assignees,
+  /// inventors, metadataRelease }` (etl/patent-citations/shape.ts). NULL otherwise.
   details     Json?
 
   publications PublicationCitingDocument[]
@@ -914,13 +917,31 @@ model PublicationCitingDocument {
   locations        Json?
   /// Trials only: `{ ownTrial: true }` when a confirmed WCM author of the paper
   /// is an investigator on the citing trial. Such a link is stored and left out
-  /// of `publication.trial_count`. NULL otherwise.
+  /// of `publication.trial_count`. Patents: `{ score, where, release }`, plus
+  /// `sharedId` when a tie-break decided the paper. NULL otherwise.
   evidence         Json?
   citingDocument   CitingDocument @relation(fields: [citingDocumentId], references: [id], onDelete: Cascade)
 
   @@id([pmid, citingDocumentId])
   @@index([citingDocumentId])
   @@map("publication_citing_document")
+}
+
+/// An OpenAlex work id of a PubMed-keyed publication. The patent dataset names
+/// papers by OpenAlex id, and a paper can have two, so this is a side table and
+/// not a column. Filled by `etl:patent-citations:import`. No FK to Publication:
+/// the reciter ETL can drop and re-add a publication.
+model PublicationOpenalex {
+  pmid       String   @db.VarChar(32)
+  /// "W9000000001"
+  openalexId String   @map("openalex_id") @db.VarChar(32)
+  /// "api" | "crosswalk-2023"
+  source     String   @db.VarChar(16)
+  checkedAt  DateTime @default(now()) @map("checked_at")
+
+  @@id([pmid, openalexId])
+  @@index([openalexId])
+  @@map("publication_openalex")
 }
 
 /// A publication that PubMed's own systematic review filter (`systematic[sb]`)
@@ -2195,6 +2216,10 @@ model Publication {
   /// reference, less the authors' own trials. Kept apart from the four ranked
   /// levels above: `latestCitingYear` and report 24 do not see trials.
   trialCount            Int       @default(0) @map("trial_count")
+  /// Distinct inventions (patent families) with a US patent document citing
+  /// this paper. Not a ranked level either. Kept by etl:patent-citations:import
+  /// and the weekly rollup.
+  patentFamilyCount     Int       @default(0) @map("patent_family_count")
   /// When `etl:policy-citations` last asked NCBI Bookshelf which books cite this
   /// paper. Drives the rolling pass (never-checked first, then oldest).
   bookshelfCheckedAt    DateTime? @map("bookshelf_checked_at")
@@ -2224,6 +2249,7 @@ model Publication {
   /// Covers report 24's read of the policy rollups (the cited publications are
   /// a small share of a wide table).
   @@index([authorityCount, guidelineCount, consensusCount, reviewCount, latestCitingYear], map: "publication_policy_rollup_idx")
+  @@index([patentFamilyCount])
   @@map("publication")
 }
 

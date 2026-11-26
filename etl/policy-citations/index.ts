@@ -24,7 +24,8 @@
  *      is stored, flagged on the link (`evidence.ownTrial`), and not counted.
  *      If this pass fails, the rollup still runs and the run then fails.
  *   4. Recompute the rollups on `publication`: `authority_bodies`, a count per
- *      level, the newest ranked citing document's year, and `trial_count`.
+ *      level, the newest ranked citing document's year, `trial_count`, and
+ *      `patent_family_count` (citing patents are loaded by etl/patent-citations).
  *
  * Writes only ever add: a document or link is inserted if new and left alone
  * otherwise, so `first_seen_at` is the date we first saw a citation and a
@@ -445,6 +446,9 @@ async function rollup(): Promise<void> {
   // the newest citing year is NULL for a paper nothing cites. A trial is not a
   // ranked level: it has its own count, and its year never reaches
   // `latest_citing_year`, which report 24 sorts on. Own trials are not counted.
+  // Nor is a patent: `patent_family_count` is distinct inventions, since a patent
+  // document's dedup key is its family (etl/patent-citations, which loads them
+  // and keeps this one column current between weekly runs).
   const counts = await db.write.$executeRaw`
     UPDATE publication p
       LEFT JOIN (
@@ -455,6 +459,7 @@ async function rollup(): Promise<void> {
                COUNT(DISTINCT CASE WHEN d.level = 'review' THEN d.dedup_key END) AS r,
                COUNT(DISTINCT CASE WHEN d.level = 'trial'
                      AND COALESCE(JSON_CONTAINS(l.evidence, 'true', '$.ownTrial'), 0) = 0 THEN d.dedup_key END) AS t,
+               COUNT(DISTINCT CASE WHEN d.level = 'patent' THEN d.dedup_key END) AS pf,
                MAX(CASE WHEN d.level IN ('authority', 'guideline', 'consensus', 'review') THEN d.year END) AS y
           FROM publication_citing_document l
           JOIN citing_document d ON d.id = l.citing_document_id
@@ -462,10 +467,12 @@ async function rollup(): Promise<void> {
       ) x ON x.pmid = p.pmid
        SET p.authority_count = COALESCE(x.a, 0), p.guideline_count = COALESCE(x.g, 0),
            p.consensus_count = COALESCE(x.c, 0), p.review_count = COALESCE(x.r, 0),
-           p.latest_citing_year = x.y, p.trial_count = COALESCE(x.t, 0)
+           p.latest_citing_year = x.y, p.trial_count = COALESCE(x.t, 0),
+           p.patent_family_count = COALESCE(x.pf, 0)
      WHERE p.authority_count <> COALESCE(x.a, 0) OR p.guideline_count <> COALESCE(x.g, 0)
         OR p.consensus_count <> COALESCE(x.c, 0) OR p.review_count <> COALESCE(x.r, 0)
-        OR NOT (p.latest_citing_year <=> x.y) OR p.trial_count <> COALESCE(x.t, 0)`;
+        OR NOT (p.latest_citing_year <=> x.y) OR p.trial_count <> COALESCE(x.t, 0)
+        OR p.patent_family_count <> COALESCE(x.pf, 0)`;
 
   const authority = await db.write.publicationCitingDocument.findMany({
     where: { citingDocument: { level: "authority" } },
