@@ -6,7 +6,7 @@
  * Same pure-function shape as `lib/api/profile.ts` etc. — the route file
  * (`app/api/publications/[pmid]/route.ts`) is a thin delegator.
  */
-import { policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { parseLocations, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
@@ -191,13 +191,7 @@ export async function readPolicyCitations(
         publisher: d.publisher,
         pmid: d.source === "pubmed" ? d.externalId : null,
         bookshelfId: d.source === "bookshelf" ? d.externalId : null,
-        locations: Array.isArray(locations)
-          ? (locations as Array<{ url?: unknown; label?: unknown }>).flatMap((l) =>
-              typeof l?.url === "string" && l.url.startsWith("https://www.ncbi.nlm.nih.gov/") && typeof l.label === "string"
-                ? [{ url: l.url, label: l.label }]
-                : [],
-            )
-          : [],
+        locations: parseLocations(locations),
       });
     }
     return docs.length > 0 ? { docs, reviewTotal } : undefined;

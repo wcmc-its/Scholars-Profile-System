@@ -31,6 +31,7 @@
  * A citing document counts once per publication however many journals printed
  * it (`dedup_key`). Server-only (`@/lib/db`).
  */
+import { parseLocations } from "@/lib/citations/policy-rollup";
 import ExcelJS from "exceljs";
 
 import type { EditSession } from "@/lib/auth/superuser";
@@ -651,28 +652,6 @@ export type CitingDoc = {
 export function dedupeDocs<T extends { dedupKey: string }>(docs: readonly T[]): T[] {
   const seen = new Set<string>();
   return docs.filter((d) => !seen.has(d.dedupKey) && seen.add(d.dedupKey));
-}
-
-const NCBI = "https://www.ncbi.nlm.nih.gov/";
-
-/** A link's `locations` as stored. MariaDB hands a JSON column back as text
- *  through a raw query. Only NCBI links are kept. */
-function parseLocations(raw: unknown): { url: string; label: string }[] {
-  let locations = raw;
-  if (typeof locations === "string") {
-    try {
-      locations = JSON.parse(locations);
-    } catch {
-      return [];
-    }
-  }
-  return Array.isArray(locations)
-    ? (locations as { url?: unknown; label?: unknown }[]).flatMap((x) =>
-        typeof x?.url === "string" && x.url.startsWith(NCBI) && typeof x.label === "string"
-          ? [{ url: x.url, label: x.label }]
-          : [],
-      )
-    : [];
 }
 
 /** Systematic reviews listed under one publication on the page; the row's

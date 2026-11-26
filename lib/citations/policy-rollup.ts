@@ -63,3 +63,32 @@ export function policyDocCitation(d: {
     .map((part) => `${String(part).replace(/\.$/, "")}.`)
     .join(" ");
 }
+
+/**
+ * A link's stored `locations` (JSON, or JSON text from a raw query), tidied for
+ * display: NCBI links only, one entry per label, and no bare chapter link when
+ * a section of the same page is already listed.
+ */
+export function parseLocations(raw: unknown): { url: string; label: string }[] {
+  let locations = raw;
+  if (typeof locations === "string") {
+    try {
+      locations = JSON.parse(locations);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(locations)) return [];
+  const all = (locations as { url?: unknown; label?: unknown }[]).flatMap((x) =>
+    typeof x?.url === "string" && x.url.startsWith("https://www.ncbi.nlm.nih.gov/") && typeof x.label === "string"
+      ? [{ url: x.url, label: x.label }]
+      : [],
+  );
+  const anchoredPages = new Set(all.filter((x) => x.url.includes("#")).map((x) => x.url.split("#")[0]));
+  const labels = new Set<string>();
+  return all.filter((x) => {
+    if (!x.url.includes("#") && anchoredPages.has(x.url)) return false;
+    const key = x.label.toLowerCase();
+    return !labels.has(key) && labels.add(key);
+  });
+}
