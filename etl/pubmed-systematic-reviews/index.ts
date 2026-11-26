@@ -19,7 +19,8 @@
  * week to week.
  *
  * Usage: `npm run etl:pubmed-systematic-reviews`
- * Env: optional NCBI_API_KEY.
+ * Env: optional NCBI_SHARED_API_KEY (the deployed job; a key borrowed from
+ * ReCiter, see cdk/lib/etl-stack.ts) or NCBI_API_KEY.
  */
 import { db } from "../../lib/db";
 import { fetchSystematicReviewPmids } from "./fetcher";
@@ -47,7 +48,7 @@ async function main() {
     const { flagged, asked, batches } = await fetchSystematicReviewPmids(
       corpus.map((p) => p.pmid),
       {
-        apiKey: process.env.NCBI_API_KEY,
+        apiKey: process.env.NCBI_SHARED_API_KEY ?? process.env.NCBI_API_KEY,
         onBatch: (done, total) => {
           if (done % PROGRESS_EVERY === 0) console.log(`ESearch batch ${done}/${total}...`);
         },

@@ -985,6 +985,18 @@ export class EtlStack extends Stack {
           parameterName: `/sps/${env}/etl/openalex-api-key`,
         }),
       ),
+      // NCBI E-utilities key, BORROWED from ReCiter (there is no Scholars key), so
+      // it is deliberately not named NCBI_API_KEY: the other PubMed steps read that
+      // name and would start spending ReCiter's 10 requests a second at whatever
+      // hour they run. Only etl:pubmed-systematic-reviews reads this one, and it is
+      // the first weekly step (Sunday 12:00 UTC) because ReCiter's daily retrieval
+      // starts at 17:30 UTC. The SecureString must exist in SSM before deploy or
+      // every ETL task fails to start.
+      NCBI_SHARED_API_KEY: ecs.Secret.fromSsmParameter(
+        ssm.StringParameter.fromSecureStringParameterAttributes(this, "NcbiApiKey", {
+          parameterName: `/sps/${env}/etl/ncbi-api-key`,
+        }),
+      ),
     };
     // Internal-ALB origin (http://<dns>), read once from the App stack's SSM
     // param; feeds SCHOLARS_BASE_URL and SCHOLARS_INTERNAL_ALB_ORIGIN (#1478).
@@ -2282,6 +2294,20 @@ export class EtlStack extends Stack {
       { id: "IntegrityNightly", npmScript: "etl:integrity", external: false, tier: "abort" },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
+      // PubMed systematic review flags (etl/pubmed-systematic-reviews) — asks PubMed
+      // which corpus PMIDs its own systematic review filter matches and keeps that
+      // set in pubmed_systematic_review. Public NCBI E-utilities over NAT egress and
+      // the SPS database only, so external:false (not in SOURCES_SCRIPTS). One call
+      // per 100 PMIDs across the whole corpus every week. `continue` — a miss leaves
+      // last week's flags in place; its own guards abort before a bad write. FIRST on
+      // purpose: it uses the NCBI key borrowed from ReCiter (NCBI_SHARED_API_KEY),
+      // and 12:00 UTC is well clear of ReCiter's 17:30 UTC daily retrieval.
+      {
+        id: "PubMedSystematicReviewsWeekly",
+        npmScript: "etl:pubmed-systematic-reviews",
+        external: false,
+        tier: "continue",
+      },
       { id: "Completeness", npmScript: "etl:completeness", external: false, tier: "continue" },
       // Data Quality dashboard headshot signal (docs/data-quality-dashboard-spec.md).
       // Probes the PUBLIC WCM directory (`identityImageEndpoint`, which 404s when no
@@ -2480,18 +2506,6 @@ export class EtlStack extends Stack {
       // etl/policy-citations/index.ts), so the step runs about 40 minutes every week by design.
       // `continue` — writes only add rows, so a miss just delays new citations a week.
       { id: "PolicyCitationsWeekly", npmScript: "etl:policy-citations", external: true, tier: "continue" },
-      // PubMed systematic review flags (etl/pubmed-systematic-reviews) — asks PubMed
-      // which corpus PMIDs its own systematic review filter matches and keeps that
-      // set in pubmed_systematic_review. Public NCBI E-utilities over NAT egress and
-      // the SPS database only, so external:false (not in SOURCES_SCRIPTS). One call
-      // per 100 PMIDs across the whole corpus every week. `continue` — a miss leaves
-      // last week's flags in place; its own guards abort before a bad write.
-      {
-        id: "PubMedSystematicReviewsWeekly",
-        npmScript: "etl:pubmed-systematic-reviews",
-        external: false,
-        tier: "continue",
-      },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
