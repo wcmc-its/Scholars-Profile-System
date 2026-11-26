@@ -467,7 +467,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         curator added or removed a scholar-entered training
 --                         row; target_entity_type='training' (added below),
 --                         target_entity_id the row external_id). Appended LAST.
---   Program roster (/edit/program-roster): + roster_program_change ·
+--   Program roster (/edit/center/meyer_cancer_center/program-roster): + roster_program_change ·
 --                         roster_entry_change (a program or one person's entry
 --                         created, edited or deleted;
 --                         target_entity_type='roster_program' / 'roster_entry'

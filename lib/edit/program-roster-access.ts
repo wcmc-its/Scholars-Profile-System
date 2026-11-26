@@ -16,6 +16,8 @@ import type { EditSession } from "@/lib/auth/superuser";
 /** The center whose editor page links the roster. ponytail: one office uses it;
  *  a center column on `roster_program` when a second one asks. */
 export const PROGRAM_ROSTER_CENTER = "meyer_cancer_center";
+/** The roster page, under that center (Paul Albert, 2026-11-26). */
+export const PROGRAM_ROSTER_PATH = `/edit/center/${PROGRAM_ROSTER_CENTER}/program-roster`;
 
 type Viewer = Pick<EditSession, "isSuperuser" | "isProgramRosterEditor" | "sensitiveDashboardsBlocked">;
 

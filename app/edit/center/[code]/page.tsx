@@ -32,7 +32,7 @@ import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { stripObserverView } from "@/lib/auth/observer-view";
-import { canViewProgramRoster, PROGRAM_ROSTER_CENTER } from "@/lib/edit/program-roster-access";
+import { canViewProgramRoster, PROGRAM_ROSTER_CENTER, PROGRAM_ROSTER_PATH } from "@/lib/edit/program-roster-access";
 
 export const dynamic = "force-dynamic";
 
@@ -111,7 +111,7 @@ export default async function EditCenterPage({
       orgUnitsNavVisible={consoleTabs.units}
       readOnly={readOnly}
       programRosterHref={
-        code === PROGRAM_ROSTER_CENTER && canViewProgramRoster(session) ? "/edit/program-roster" : undefined
+        code === PROGRAM_ROSTER_CENTER && canViewProgramRoster(session) ? PROGRAM_ROSTER_PATH : undefined
       }
     />
   );

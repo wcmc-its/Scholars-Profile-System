@@ -40,8 +40,8 @@ beforeEach(() => {
 
 describe("the program roster link", () => {
   it("shows for a roster editor and a superuser on the Meyer page", async () => {
-    expect(await href(EDITOR)).toBe("/edit/program-roster");
-    expect(await href({ ...CURATOR, isSuperuser: true })).toBe("/edit/program-roster");
+    expect(await href(EDITOR)).toBe("/edit/center/meyer_cancer_center/program-roster");
+    expect(await href({ ...CURATOR, isSuperuser: true })).toBe("/edit/center/meyer_cancer_center/program-roster");
   });
 
   it("not for a Meyer curator, an observer, a blocked View as, another center, or with the flag off", async () => {
@@ -55,8 +55,8 @@ describe("the program roster link", () => {
 
   it("renders in the header only when there is one", () => {
     const props = { name: "Center", kindLabel: "Center", orgUnitsNavVisible: true, actorRole: "curator" as const, sections: [] };
-    const { unmount } = render(<UnitEditSections {...props} programRosterHref="/edit/program-roster" />);
-    expect(screen.getByTestId("edit-program-roster-link").getAttribute("href")).toBe("/edit/program-roster");
+    const { unmount } = render(<UnitEditSections {...props} programRosterHref="/edit/center/meyer_cancer_center/program-roster" />);
+    expect(screen.getByTestId("edit-program-roster-link").getAttribute("href")).toBe("/edit/center/meyer_cancer_center/program-roster");
     unmount();
     render(<UnitEditSections {...props} reportsHref="/edit/reports" />);
     expect(screen.queryByTestId("edit-program-roster-link")).toBeNull();

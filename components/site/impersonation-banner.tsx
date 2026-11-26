@@ -111,7 +111,7 @@ export const ROLE_LINKS: Record<SubjectRole, ReadonlyArray<{ label: string; href
   honors_curator: [{ label: "Honors queue", href: "/edit/honors-queue" }],
   data_sharing_viewer: [{ label: "Data sharing", href: "/edit/data-sharing" }],
   research_security_viewer: [{ label: "Research security", href: "/edit/research-security" }],
-  program_roster_editor: [{ label: "Program roster", href: "/edit/program-roster" }],
+  program_roster_editor: [{ label: "Program roster", href: "/edit/center/meyer_cancer_center/program-roster" }],
   development: [
     { label: "Matcha: Open search", href: "/edit/matcha" },
     { label: "Matcha: Grants", href: "/edit/grant-matcha" },

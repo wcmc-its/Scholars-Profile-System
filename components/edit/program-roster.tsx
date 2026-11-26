@@ -1,5 +1,5 @@
 /**
- * The internal program roster (`/edit/program-roster`): one tab per open
+ * The internal program roster (`/edit/center/meyer_cancer_center/program-roster`): one tab per open
  * program, its people with year, mentors and research program, and the dialogs
  * that add, edit, paste and remove them. The Mentors view counts each mentor's
  * trainees. Every write is one POST to `/api/edit/program-roster`; the saved
