@@ -2238,6 +2238,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "s3",
               },
               {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "off",
+              },
+              {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
@@ -3005,6 +3009,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "s3",
               },
               {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "off",
+              },
+              {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
@@ -3709,6 +3717,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "s3",
               },
               {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "off",
+              },
+              {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
@@ -4342,6 +4354,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TOOL_SOURCE",
                 "Value": "s3",
+              },
+              {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "off",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -5416,6 +5432,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TOOL_SOURCE",
                 "Value": "s3",
+              },
+              {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "off",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -15066,6 +15086,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "s3",
               },
               {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "on",
+              },
+              {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
@@ -15833,6 +15857,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "s3",
               },
               {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "on",
+              },
+              {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
@@ -16537,6 +16565,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "s3",
               },
               {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "on",
+              },
+              {
                 "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
@@ -17170,6 +17202,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TOOL_SOURCE",
                 "Value": "s3",
+              },
+              {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -18244,6 +18280,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TOOL_SOURCE",
                 "Value": "s3",
+              },
+              {
+                "Name": "METHOD_FAMILY_SR_RULE",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
