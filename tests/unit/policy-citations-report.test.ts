@@ -1,8 +1,10 @@
-/** Report 24 (Guideline and policy citations): the param parser, the ranked
- *  sort, what Level lists, the scope narrowing for a unit administrator (in
- *  the lib and through the download route), de-dup by `dedupKey`, and the
- *  workbook's Criteria sheet and People sheet (no cap, no contact column).
- *  Fixture people and units are invented. */
+/** Report 24 (Guideline and policy citations): the param parser and its
+ *  defaults, the ranked sort, what Level lists, the scope narrowing for a unit
+ *  administrator (in the lib, in every query, and through the download
+ *  route), de-dup by `dedupKey`, excluded-study citations, edition grouping,
+ *  the By citing document fold, and the workbook's sheets (People: no cap, no
+ *  contact column; Citations; Criteria). Fixture people, units and documents
+ *  are invented. */
 import ExcelJS from "exceljs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,13 +31,27 @@ import {
   compareRanked,
   dedupeDocs,
   describePolicyCitationCriteria,
+  editionTitle,
+  groupDocLinks,
+  groupEditions,
+  howCited,
+  isExcludedStudyCitation,
   isPolicyCitationDefault,
   listedAt,
+  loadCitationPairs,
   loadCitingDocuments,
+  loadDocLinks,
   loadPersonCounts,
   loadPolicyCitations,
-  loadPolicySummary,
+  loadPolicyDocuments,
   loadPublicationCounts,
+  POLICY_CITATIONS_CAP,
+  policySummary,
+  REVIEWS_SHOWN,
+  searchPublications,
+  sortDocGroups,
+  yearRange,
+  type DocLink,
   parsePolicyCitationParams,
   policyCitationChips,
   policyCitationQueryString,
@@ -75,7 +91,7 @@ beforeEach(() => {
 });
 
 describe("parsePolicyCitationParams", () => {
-  it("a bare URL lists everything above systematic reviews, by publication, ranked", () => {
+  it("a bare URL lists everything above systematic reviews published 2020 or later, by publication, ranked", () => {
     expect(parse()).toMatchObject({
       types: [],
       units: [],
@@ -83,34 +99,53 @@ describe("parsePolicyCitationParams", () => {
       positions: [],
       levels: ["authority", "guideline", "consensus"],
       bodies: [],
+      hideExcluded: false,
       basis: "cy",
-      from: null,
+      from: 2020,
       to: null,
       cfrom: null,
       cto: null,
       view: "publications",
       sort: "ranked",
-      pub: null,
+      docSort: "recent",
+      q: "",
+      page: 1,
     });
     // View state alone is still a bare URL.
-    expect(parse("view=people&sort=reviews&pub=12345")).toMatchObject({
+    expect(parse("view=documents&sort=recent&dsort=papers&q=%20stroke%20&page=3")).toMatchObject({
       levels: ["authority", "guideline", "consensus"],
-      view: "people",
-      sort: "reviews",
-      pub: "12345",
+      from: 2020,
+      view: "documents",
+      sort: "recent",
+      docSort: "papers",
+      q: "stroke",
+      page: 3,
     });
-    expect(isPolicyCitationDefault(parse("view=people"))).toBe(true);
+    expect(isPolicyCitationDefault(parse("view=people&q=abc&page=2&dsort=body"))).toBe(true);
+  });
+
+  it("Reset to defaults is 2020 or later: the same filters spelled out are the default, any year is not", () => {
+    const spelled = "basis=cy&from=2020&level=authority&level=guideline&level=consensus";
+    expect(isPolicyCitationDefault(parse(spelled))).toBe(true);
+    // The canonical string of the default keeps the year, so a tab or sort link does not lose it.
+    expect(policyCitationQueryString(parse())).toContain("from=2020");
+    expect(parse(policyCitationQueryString(parse())).from).toBe(2020);
+    // "Any" in the From select submits an empty `from` with the form: no default comes back.
+    expect(parse("basis=cy&from=&level=authority&level=guideline&level=consensus").from).toBeNull();
+    expect(isPolicyCitationDefault(parse("basis=cy&level=authority&level=guideline&level=consensus"))).toBe(false);
+    expect(isPolicyCitationDefault(parse(`${spelled}&excl=1`))).toBe(false);
   });
 
   it("a submitted form is taken as-is: no level ticked means every level, not the default", () => {
     expect(parse("basis=cy").levels).toEqual([]);
+    expect(parse("basis=cy").from).toBeNull();
     expect(parse("basis=cy&level=review&level=authority").levels).toEqual(["authority", "review"]);
     expect(isPolicyCitationDefault(parse("basis=cy"))).toBe(false);
   });
 
   it("drops what it does not know and keeps ranges in order", () => {
     const p = parse(
-      "level=bogus&body=WHO&body=Nobody&pos=last&pos=senior&person=abc1234&person=x'--&basis=fy&from=2020&to=2010&cfrom=abc&cto=2025&sort=score&view=grid&pub=1;drop",
+      "level=bogus&body=WHO&body=Nobody&pos=last&pos=senior&person=abc1234&person=x'--&basis=fy&from=2020&to=2010&cfrom=abc&cto=2025&sort=reviews&dsort=title&view=grid&excl=yes&page=-4",
     );
     expect(p).toMatchObject({
       levels: [],
@@ -123,9 +158,13 @@ describe("parsePolicyCitationParams", () => {
       cfrom: null,
       cto: 2025,
       sort: "ranked",
+      docSort: "recent",
       view: "publications",
-      pub: null,
+      hideExcluded: false,
+      page: 1,
     });
+    expect(parse("basis=cy&excl=1").hideExcluded).toBe(true);
+    expect(parse(`q=${"x".repeat(300)}`).q).toHaveLength(100);
   });
 
   it("takes the who-filter from the shared parser", () => {
@@ -141,12 +180,13 @@ describe("parsePolicyCitationParams", () => {
     expect(flat(policyScopeSql(p)).text).toContain("AND 1 = 0");
   });
 
-  it("the query string round-trips, always carries basis, and carries pub only when asked", () => {
-    const p = parse("type=full_time_faculty&unit=div:N2&person=abc1234&pos=first&level=guideline&body=NICE&basis=fy&from=2019&to=2024&cfrom=2023&view=people&sort=recent");
+  it("the query string round-trips, always carries basis, and carries page only when asked", () => {
+    const p = parse("type=full_time_faculty&unit=div:N2&person=abc1234&pos=first&level=guideline&body=NICE&excl=1&basis=fy&from=2019&to=2024&cfrom=2023&view=documents&sort=recent&dsort=body&q=asthma");
     expect(parse(policyCitationQueryString(p))).toEqual(p);
     expect(policyCitationQueryString(parse())).toContain("basis=cy");
-    expect(policyCitationQueryString(parse("pub=123"))).not.toContain("pub=");
-    expect(policyCitationQueryString(parse(), { pub: "123" })).toContain("pub=123");
+    // Any other change starts at page 1.
+    expect(policyCitationQueryString(parse("basis=cy&page=4"))).not.toContain("page=");
+    expect(policyCitationQueryString(parse(), { page: 4 })).toContain("page=4");
   });
 });
 
@@ -189,7 +229,6 @@ describe("ranked sort", () => {
   it("the other sorts lead with their column and fall back to the ranked order", () => {
     const rows = [row("a", 5, 1, 0, 1, 2010, 2019), row("b", 0, 9, 0, 2, 2022, 2026), row("c", 1, 9, 0, 80, 2018, 2021)];
     expect(sortPublications(rows, "guidelines").map((r) => r.pmid)).toEqual(["c", "b", "a"]);
-    expect(sortPublications(rows, "reviews").map((r) => r.pmid)).toEqual(["c", "b", "a"]);
     expect(sortPublications(rows, "recent").map((r) => r.pmid)).toEqual(["b", "c", "a"]);
     expect(sortPublications(rows, "year").map((r) => r.pmid)).toEqual(["b", "c", "a"]);
   });
@@ -199,7 +238,8 @@ describe("ranked sort", () => {
     expect(listedAt(rows, ["authority", "guideline"]).map((r) => r.pmid)).toEqual(["a", "b", "d"]);
     expect(listedAt(rows, ["review"]).map((r) => r.pmid)).toEqual(["a", "c"]);
     expect(listedAt(rows, [])).toHaveLength(4);
-    expect(policyTiles(rows)).toEqual({ authority: 2, guideline: 2, either: 3, review: 2 });
+    // One tile per level; no "either".
+    expect(policyTiles(rows)).toEqual({ authority: 2, guideline: 2, consensus: 0, review: 2 });
   });
 });
 
@@ -228,7 +268,17 @@ describe("where the per-publication counts come from", () => {
     expect(source("basis=cy&cto=2024").text).toContain("AND d.year <= ?");
     for (const qs of ["basis=cy&body=WHO", "basis=cy&cto=2024"]) {
       expect(source(qs).text).not.toMatch(/publication_author|scholar|authority_count/);
+      expect(source(qs).text).not.toContain("JSON_SEARCH");
     }
+  });
+
+  it("hiding excluded-study citations: the rollups cannot answer, so the live aggregate, the links tested inside", () => {
+    const excl = source("basis=cy&excl=1");
+    expect(excl.text).toMatch(LIVE);
+    expect(excl.text).toContain(
+      "AND COALESCE(JSON_LENGTH(JSON_SEARCH(LOWER(CAST(l.locations AS CHAR)), 'all', '%excluded%', NULL, '$[*].label')) = JSON_LENGTH(l.locations), 0) = 0 GROUP BY l.pmid",
+    );
+    expect(excl.text).not.toMatch(/authority_count/);
   });
 });
 
@@ -262,12 +312,55 @@ describe("query shape: counts per publication first, people attached afterwards"
       .mockResolvedValue([]); // details
     const data = await loadPolicyCitations({ ...parse(), scope: null }, 100);
     expect(data.cited).toBe(3);
-    expect(data.tiles).toEqual({ authority: 1, guideline: 1, either: 2, review: 2 });
+    expect(data.tiles).toEqual({ authority: 1, guideline: 1, consensus: 0, review: 2 });
     // The default levels leave the review-only paper out of the listing.
     expect(data.pubTotal).toBe(2);
+    expect(data.pubMatched).toBe(2);
     expect(data.pubs.map((r) => r.pmid)).toEqual(["1", "2"]);
     // Publications + people, then authors + bodies for the listed rows: no second pass over x.
     expect(h.queryRaw).toHaveBeenCalledTimes(4);
+  });
+
+  it("pages: `limit` rows from `offset`, details loaded for those rows only", async () => {
+    const pub = (pmid: string, a: number) => ({ pmid, year: 2021, latest: 2024, authority: a, guideline: 0, consensus: 0, review: 0 });
+    h.queryRaw.mockResolvedValueOnce([pub("1", 5), pub("2", 4), pub("3", 3), pub("4", 2), pub("5", 1)]).mockResolvedValue([]);
+    const data = await loadPolicyCitations({ ...parse(), scope: null }, 2, 2);
+    expect(data.pubTotal).toBe(5);
+    expect(data.pubs.map((r) => r.pmid)).toEqual(["3", "4"]);
+    expect(call(2).values).toEqual(["3", "4"]);
+  });
+
+  it("the search narrows the listing, not the tiles: publications by one more scoped query, people in memory", async () => {
+    const pub = (pmid: string) => ({ pmid, year: 2021, latest: 2024, authority: 1, guideline: 0, consensus: 0, review: 0 });
+    const who = (cwid: string, preferred_name: string) => ({ cwid, preferred_name, primary_department: null, role_category: null, primary_org_code: null, authority: 1n, guideline: 0n, consensus: 0n, review: 0n });
+    const people = [who("abc1234", "Example Person"), who("def5678", "Another Sample")];
+    h.queryRaw
+      .mockResolvedValueOnce([pub("1"), pub("2"), pub("3")])
+      .mockResolvedValueOnce(people)
+      .mockResolvedValueOnce([{ pmid: "2" }, { pmid: "999" }]) // the search; 999 is not listed
+      .mockResolvedValue([]);
+    const p = { ...parse("basis=cy&q=50%25_off"), scope: ["dept:N1"] };
+    const data = await loadPolicyCitations(p, 50);
+    expect(data.tiles.authority).toBe(3);
+    expect(data.pubTotal).toBe(3);
+    expect(data.pubMatched).toBe(1);
+    expect(data.pubs.map((r) => r.pmid)).toEqual(["2"]);
+    expect(data.people).toHaveLength(2);
+    const { text, values } = call(2);
+    expect(text.trim()).toMatch(
+      /^SELECT STRAIGHT_JOIN p\.pmid FROM publication p JOIN publication_author pa ON pa\.pmid = p\.pmid JOIN scholar s ON s\.cwid = pa\.cwid WHERE \(p\.authority_count > 0 OR .*\) AND pa\.is_confirmed = 1 .* AND \(p\.pmid = \? OR p\.title LIKE \? OR s\.preferred_name LIKE \?\) GROUP BY p\.pmid$/,
+    );
+    // The viewer's department is in the search too, and LIKE wildcards in the text are literal.
+    expect(values).toEqual(expect.arrayContaining(["N1", "50%_off", "%50\\%\\_off%"]));
+
+    // On the By person tab the same box filters people by name or CWID, with no query.
+    h.queryRaw.mockReset().mockResolvedValueOnce([pub("1")]).mockResolvedValueOnce(people).mockResolvedValue([]);
+    const byPerson = await loadPolicyCitations({ ...parse("basis=cy&view=people&q=SAMPLE"), scope: null }, 0);
+    expect(byPerson.people.map((r) => r.cwid)).toEqual(["def5678"]);
+    expect(byPerson.pubMatched).toBe(1);
+    expect(h.queryRaw).toHaveBeenCalledTimes(2);
+    expect((await searchPublications({ ...parse(), scope: [] }, "x")).size).toBe(0);
+    expect(call(2).text).toContain("AND 1 = 0");
   });
 
   it("people: x joined to authorships, papers counted per level, the person filter left out", async () => {
@@ -287,48 +380,17 @@ describe("query shape: counts per publication first, people attached afterwards"
     expect(values).not.toContain("abc1234");
   });
 
-  it("summary cards: the who clause is tested per publication; newly cited starts from the recent links", async () => {
-    const first = new Date("2026-11-24T21:00:00Z");
-    h.queryRaw.mockResolvedValueOnce([{ first }]).mockResolvedValue([]);
-    const now = new Date("2026-11-27T00:00:00Z");
-    const summary = await loadPolicySummary({ ...P, bodies: ["WHO"], scope: ["dept:N1"] }, now);
-    // The first import bounds the window: it starts a day after it, so the backfill is not "new".
-    expect(summary.newly).toMatchObject({ firstImport: first, sinceFirstImport: true, documents: 0, items: [] });
-    expect(summary.newly.since.toISOString()).toBe("2026-11-25T21:00:00.000Z");
-
-    expect(call(0).text.trim()).toBe("SELECT MIN(first_seen_at) AS first FROM publication_citing_document");
-    {
-      // Bodies: the who clause tested once per publication the rollup says an authority cites.
-      const { text, values } = call(1);
-      expect(text).toMatch(
-        /FROM \(SELECT p\.pmid FROM publication p WHERE p\.authority_count > 0 AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = p\.pmid AND .*\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid JOIN citing_document d ON d\.id = l\.citing_document_id WHERE d\.level = 'authority' AND d\.issuing_body IN \(\?\)/,
-      );
-      expect(text).not.toMatch(/JOIN publication_author pa ON/);
-      expect(values).toEqual(expect.arrayContaining(["N1", "WHO"]));
-    }
-    {
-      // Guideline years: driven from the documents, the who clause behind an EXISTS.
-      const { text, values } = call(2);
-      expect(text.trim()).toMatch(
-        /^SELECT STRAIGHT_JOIN d\.year AS y, COUNT\(DISTINCT d\.dedup_key\) AS n FROM citing_document d JOIN publication_citing_document l ON l\.citing_document_id = d\.id JOIN publication p ON p\.pmid = l\.pmid WHERE d\.level = 'guideline' AND d\.year IS NOT NULL AND d\.issuing_body IN \(\?\) AND YEAR\(DATE_ADD\(p\.date_added_to_entrez, INTERVAL 6 MONTH\)\) BETWEEN \? AND \? AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = l\.pmid AND .*\) GROUP BY d\.year ORDER BY d\.year$/,
-      );
-      expect(text).not.toMatch(/guideline_count|JOIN publication_author pa ON/);
-      expect(values).toEqual(expect.arrayContaining(["N1", "WHO"]));
-    }
-    for (const n of [3, 4]) {
-      const { text, values } = call(n);
-      expect(text).toMatch(
-        /FROM \(SELECT pmid, citing_document_id, first_seen_at FROM publication_citing_document WHERE first_seen_at >= \?\) l JOIN citing_document d ON d\.id = l\.citing_document_id JOIN publication p ON p\.pmid = l\.pmid WHERE d\.level IN \(\?\)/,
-      );
-      expect(values[0]).toEqual(summary.newly.since);
-      expect(values).toContain("N1");
-    }
-
-    // A long-running import: the plain 30-day window.
-    h.queryRaw.mockReset().mockResolvedValueOnce([{ first: new Date("2026-01-01T00:00:00Z") }]).mockResolvedValue([]);
-    const later = await loadPolicySummary(P, now);
-    expect(later.newly.sinceFirstImport).toBe(false);
-    expect(later.newly.since.toISOString()).toBe("2026-10-28T00:00:00.000Z");
+  it("citing documents: driven from the documents, never the reviews, the who clause behind an EXISTS", async () => {
+    await loadDocLinks({ ...P, bodies: ["WHO"], hideExcluded: true, scope: ["dept:N1"] });
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+    const { text, values } = call(0);
+    expect(text.trim()).toMatch(
+      /^SELECT STRAIGHT_JOIN d\.id, d\.dedup_key, d\.level, d\.year, d\.issuing_body, CASE WHEN d\.level = 'authority' THEN d\.title END AS title, l\.pmid FROM citing_document d JOIN publication_citing_document l ON l\.citing_document_id = d\.id JOIN publication p ON p\.pmid = l\.pmid WHERE d\.level IN \(\?,\?,\?\) AND d\.issuing_body IN \(\?\) AND COALESCE\(JSON_LENGTH\(JSON_SEARCH\(.*\) = 0 AND YEAR\(DATE_ADD\(p\.date_added_to_entrez, INTERVAL 6 MONTH\)\) BETWEEN \? AND \? AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = l\.pmid AND .*\)$/,
+    );
+    expect(text).not.toMatch(/guideline_count|JOIN publication_author pa ON/);
+    expect(values.slice(0, 3)).toEqual(["authority", "guideline", "consensus"]);
+    expect(values).not.toContain("review");
+    expect(values).toEqual(expect.arrayContaining(["N1", "WHO", "abc1234"]));
   });
 });
 
@@ -407,6 +469,71 @@ describe("scope narrowing", () => {
       expect(text).toContain("s.div_code IN (?)");
       expect(values).toEqual(expect.arrayContaining(["N5", "N2"]));
     }
+
+    // With publications to list: the author chips and the Citations sheet are narrowed too.
+    h.queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ pmid: "111", year: 2021, latest: 2024, authority: 0, guideline: 0, consensus: 0, review: 2 }])
+      .mockResolvedValue([]);
+    expect((await GET(new Request(url))).status).toBe(200);
+    // Publications, people, authors, bodies, citation pairs.
+    expect(h.queryRaw).toHaveBeenCalledTimes(5);
+    for (const n of [2, 4]) {
+      const { text, values } = call(n);
+      expect(text, String(n)).toContain("s.div_code IN (?)");
+      expect(values).toEqual(expect.arrayContaining(["N5", "111"]));
+    }
+  });
+
+  it("the Citations sheet's query: the listed publications re-tested against the scope, the ticked levels, capped", async () => {
+    const pubs = [
+      { pmid: "222", title: "Second <i>paper</i>" },
+      { pmid: "111", title: "First paper" },
+    ];
+    const pair = (pmid: string, level: string, dedup_key: string, over: Record<string, unknown> = {}) => ({
+      pmid,
+      dedup_key,
+      level,
+      issuing_body: null,
+      title: `Document ${dedup_key}`,
+      year: 2024,
+      url: `https://example.org/${dedup_key}`,
+      locations: null,
+      ...over,
+    });
+    h.queryRaw.mockResolvedValue([
+      pair("111", "authority", "a", { issuing_body: "WHO", locations: JSON.stringify([{ url: "https://www.ncbi.nlm.nih.gov/books/NBK000003/", label: "Chapter 4" }, { url: "https://www.ncbi.nlm.nih.gov/books/NBK000004/", label: "Annex 1" }]) }),
+      pair("222", "guideline", "g"),
+      pair("222", "guideline", "g"), // the same guideline in a second journal
+      pair("111", "guideline", "g"),
+      pair("222", "review", "r"),
+    ]);
+    const p = { ...parse("basis=cy&level=authority&level=guideline&excl=1"), scope: ["dept:N1"] };
+    const { rows, more } = await loadCitationPairs(p, pubs);
+    expect(more).toBe(false);
+    // The Publications sheet's order, then level; one row per paper and document.
+    expect(rows.map((r) => [r.pmid, r.level, r.title])).toEqual([
+      ["222", "guideline", "Document g"],
+      ["222", "review", "Document r"],
+      ["111", "authority", "Document a"],
+      ["111", "guideline", "Document g"],
+    ]);
+    expect(rows[2]).toMatchObject({ pubTitle: "First paper", body: "WHO", where: "Chapter 4; Annex 1", url: "https://example.org/a" });
+    const { text, values } = call(0);
+    expect(text).toMatch(
+      /FROM \(SELECT p\.pmid FROM publication p WHERE p\.pmid IN \(\?,\?\) AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = p\.pmid AND .*s\.dept_code IN \(\?\).*\)\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid JOIN citing_document d ON d\.id = l\.citing_document_id WHERE d\.level IN \(\?,\?\) .*JSON_SEARCH.* ORDER BY FIELD\(d\.level, 'authority', 'guideline', 'consensus', 'review'\), ok\.pmid, d\.year DESC, d\.id LIMIT \?$/,
+    );
+    expect(values).toEqual(expect.arrayContaining(["222", "111", "N1", "authority", "guideline", POLICY_CITATIONS_CAP + 1]));
+    expect(values).not.toContain("review");
+
+    // One row past the cap comes back: cut, and said so.
+    const cut = await loadCitationPairs(p, pubs, 2);
+    expect(cut.rows).toHaveLength(2);
+    expect(cut.more).toBe(true);
+    // No publications listed: no query at all.
+    h.queryRaw.mockClear();
+    expect(await loadCitationPairs(p, [])).toEqual({ rows: [], more: false });
+    expect(h.queryRaw).not.toHaveBeenCalled();
   });
 
   it("the scope is a chip that cannot be removed, and a Criteria row", () => {
@@ -436,6 +563,7 @@ describe("de-dup by dedupKey", () => {
 
   it("a guideline printed in two journals is listed once; documents sort highest level first", async () => {
     const doc = (id: number, level: string, dedup_key: string, over: Record<string, unknown> = {}) => ({
+      pmid: "12345",
       id,
       dedup_key,
       level,
@@ -457,6 +585,7 @@ describe("de-dup by dedupKey", () => {
       ...over,
     });
     h.queryRaw.mockResolvedValue([
+      doc(9, "review", "another paper's review", { pmid: "67890" }),
       doc(1, "review", "review 2024"),
       doc(2, "guideline", "same guideline 2024"),
       doc(3, "guideline", "same guideline 2024"),
@@ -476,7 +605,9 @@ describe("de-dup by dedupKey", () => {
       }),
       doc(5, "unknown-level", "x"),
     ]);
-    const docs = await loadCitingDocuments({ ...parse(), scope: null }, "12345");
+    const byPmid = await loadCitingDocuments({ ...parse(), scope: null }, ["12345"]);
+    expect([...byPmid.keys()].sort()).toEqual(["12345", "67890"]);
+    const docs = byPmid.get("12345")!;
     expect(docs.map((d) => d.id)).toEqual([4, 2, 1]);
     expect(docs[0]).toMatchObject({
       bookshelfId: "NBK000001",
@@ -485,6 +616,190 @@ describe("de-dup by dedupKey", () => {
       locations: [{ url: "https://www.ncbi.nlm.nih.gov/books/NBK000002/", label: "Chapter 3" }],
     });
     expect(docs[1]).toMatchObject({ pmid: "2", journal: "J Ex", cite: "2024;83(4):500-510" });
+    expect(byPmid.get("67890")!.map((d) => d.id)).toEqual([9]);
+  });
+
+  it("one query for the page's rows, the viewer's units tested again, reviews capped per paper", async () => {
+    expect((await loadCitingDocuments({ ...parse(), scope: null }, [])).size).toBe(0);
+    expect(h.queryRaw).not.toHaveBeenCalled();
+    await loadCitingDocuments({ ...parse("basis=cy&excl=1&person=abc1234"), scope: ["dept:N1"] }, ["111", "222"]);
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+    const { text, values } = call(0);
+    expect(text).toMatch(
+      /ROW_NUMBER\(\) OVER \(PARTITION BY ok\.pmid, d\.level ORDER BY d\.year DESC, d\.id\) AS rn FROM \(SELECT p\.pmid FROM publication p WHERE p\.pmid IN \(\?,\?\) AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = p\.pmid AND .*s\.dept_code IN \(\?\).*\)\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid JOIN citing_document d ON d\.id = l\.citing_document_id WHERE 1 = 1 .*JSON_SEARCH.*\) t WHERE t\.level <> 'review' OR t\.rn <= \? ORDER BY t\.year DESC, t\.id$/,
+    );
+    expect(values).toEqual(expect.arrayContaining(["111", "222", "N1", "abc1234", REVIEWS_SHOWN]));
+    // No unit: nothing, whatever PMIDs are asked for.
+    await loadCitingDocuments({ ...parse(), scope: [] }, ["111"]);
+    expect(call(1).text).toContain("AND 1 = 0");
+  });
+});
+
+describe("excluded-study citations", () => {
+  const loc = (...labels: string[]) => labels.map((label) => ({ label }));
+
+  it("a link is one when every location names an excluded-studies list, in any case", () => {
+    expect(isExcludedStudyCitation(loc("Excluded Studies List"))).toBe(true);
+    expect(isExcludedStudyCitation(loc("Appendix C. List of EXCLUDED studies", "excluded references"))).toBe(true);
+    // Cited in a chapter as well: a real citation.
+    expect(isExcludedStudyCitation(loc("Excluded Studies", "Chapter 3. Results"))).toBe(false);
+    expect(isExcludedStudyCitation(loc("References"))).toBe(false);
+    // No locations (every PubMed document): nothing says it was set aside.
+    expect(isExcludedStudyCitation([])).toBe(false);
+  });
+
+  it("ticked, it is a chip that can be removed and a Criteria row; unticked, neither filter nor chip", () => {
+    const on = { ...parse("basis=cy&excl=1"), scope: null };
+    expect(policyCitationChips(on)).toContainEqual({ group: "Excluded-study citations", value: "Hidden", removeQuery: "basis=cy" });
+    expect(Object.fromEntries(describePolicyCitationCriteria(on, new Date(0)))["Excluded-study citations"]).toMatch(/^Hidden/);
+    const off = { ...parse("basis=cy"), scope: null };
+    expect(policyCitationChips(off).map((c) => c.group)).not.toContain("Excluded-study citations");
+    expect(Object.fromEntries(describePolicyCitationCriteria(off, new Date(0)))["Excluded-study citations"]).toBe("Counted");
+  });
+
+  it("how a document cites a paper, from its editions' locations", () => {
+    const edition = (...labels: string[]) => ({ locations: loc(...labels) });
+    expect(howCited([edition("Excluded Studies")])).toBe("listed as an excluded study.");
+    expect(howCited([edition("Chapter 2"), edition("Chapter 2")])).toBe("cited in Chapter 2.");
+    expect(howCited([edition("Evidence Summary", "Results")])).toBe("cited in Evidence Summary and Results.");
+    expect(
+      howCited([edition("Excluded Studies List"), edition("List of Excluded Studies"), edition("Report 1", "Report 2", "Report 3")]),
+    ).toBe("listed as an excluded study in 2 editions, and cited in 3 chapters or sections.");
+    expect(howCited([edition("Excluded Studies", "Results"), edition()])).toBe("cited in Results.");
+    expect(howCited([edition()])).toBeNull();
+  });
+});
+
+describe("editions", () => {
+  it("the normalizer drops a trailing year or update phrase and folds case", () => {
+    const same = [
+      "Living Review of Example Treatments for Sample Pain",
+      "Living Review of Example Treatments for Sample Pain: 2025 Update",
+      "LIVING REVIEW OF EXAMPLE TREATMENTS FOR SAMPLE PAIN – Update 2019",
+      "Living Review of Example  Treatments for Sample Pain: An Update",
+      "Living Review of Example Treatments for Sample Pain (update)",
+      "Living Review of Example Treatments for Sample Pain: Final Update.",
+      "Living Review of Example Treatments for Sample Pain 2021",
+      "Living review of example treatments for sample pain, 2022 Evidence Update",
+    ];
+    for (const t of same) expect(editionTitle(t), t).toBe("living review of example treatments for sample pain");
+    // Only the tail goes: a year or "update" inside the title stays.
+    expect(editionTitle("Update on 2020 Sample Guidance for Clinics")).toBe("update on 2020 sample guidance for clinics");
+    expect(editionTitle("Sample Screening: An Updated Evidence Review")).toBe("sample screening: an updated evidence review");
+    expect(editionTitle("Example Guidance, Part 2")).toBe("example guidance, part 2");
+    expect(editionTitle("2020")).toBe("");
+  });
+
+  it("groups authority documents by body and normalized title, newest first; nothing else groups", () => {
+    const d = (id: number, level: "authority" | "guideline", issuingBody: string | null, title: string, year: number | null) => ({
+      id,
+      level,
+      issuingBody,
+      title,
+      year,
+      dedupKey: `k${id}`,
+    });
+    const groups = groupEditions([
+      d(1, "authority", "AHRQ", "Example Review: 2022 Update", 2022),
+      d(2, "guideline", null, "Example Review", 2024),
+      d(3, "authority", "AHRQ", "Example Review", 2021),
+      d(4, "authority", "WHO", "Example Review: 2023 Update", 2023),
+      d(5, "authority", "AHRQ", "Example Review: 2025 Update", 2025),
+      d(6, "guideline", null, "Example Review", 2024),
+      d(7, "authority", "AHRQ", "Another Example Review", null),
+    ]);
+    expect(groups.map((g) => g.map((x) => x.id))).toEqual([[5, 1, 3], [2], [4], [6], [7]]);
+    expect(yearRange(2021, 2025)).toBe("2021–2025");
+    expect(yearRange(2023, 2023)).toBe("2023");
+    expect(yearRange(null, null)).toBe("");
+  });
+});
+
+describe("by citing document", () => {
+  const link = (id: number, pmid: string, over: Partial<DocLink> = {}): DocLink => ({
+    id,
+    dedupKey: `doc ${id}`,
+    level: "guideline",
+    year: 2024,
+    issuingBody: null,
+    title: null,
+    pmid,
+    ...over,
+  });
+  const authority = (id: number, pmid: string, title: string, year: number, issuingBody = "AHRQ") =>
+    link(id, pmid, { level: "authority", issuingBody, title, year });
+  const LINKS = [
+    authority(1, "100", "Example Review", 2021),
+    authority(2, "100", "Example Review: 2023 Update", 2023),
+    authority(2, "200", "Example Review: 2023 Update", 2023),
+    authority(3, "300", "A Different Report", 2022, "WHO"),
+    link(4, "100"),
+    // The same guideline printed in a second journal: one document.
+    link(5, "200", { dedupKey: "doc 4" }),
+    link(6, "100", { level: "consensus", year: 2020 }),
+  ];
+
+  it("one row per document, editions grouped, papers distinct over the editions", () => {
+    const groups = groupDocLinks(LINKS);
+    expect(groups.map((g) => [g.level, g.docs.map((d) => d.id), yearRange(g.yearMin, g.yearMax), g.pmids])).toEqual([
+      ["authority", [2, 1], "2021–2023", ["100", "200"]],
+      ["authority", [3], "2022", ["300"]],
+      ["guideline", [4], "2024", ["100", "200"]],
+      ["consensus", [6], "2020", ["100"]],
+    ]);
+    expect(sortDocGroups(groups, "recent").map((g) => g.docs[0].id)).toEqual([4, 2, 3, 6]);
+    expect(sortDocGroups(groups, "papers").map((g) => g.docs[0].id)).toEqual([4, 2, 3, 6]);
+    expect(sortDocGroups(groups, "body").map((g) => g.docs[0].id)).toEqual([2, 3, 4, 6]);
+  });
+
+  it("the cards: documents (editions grouped) and papers per body; documents per year per level, each edition in its year", () => {
+    expect(policySummary(groupDocLinks(LINKS))).toEqual({
+      bodies: [
+        { body: "AHRQ", documents: 1, papers: 2 },
+        { body: "WHO", documents: 1, papers: 1 },
+      ],
+      years: {
+        authority: [
+          { year: 2021, count: 1 },
+          { year: 2022, count: 1 },
+          { year: 2023, count: 1 },
+        ],
+        guideline: [{ year: 2024, count: 1 }],
+        consensus: [{ year: 2020, count: 1 }],
+      },
+    });
+  });
+
+  it("the tab lists the ticked levels, a page at a time, and loads titles and papers for that page only, scoped", async () => {
+    const raw = LINKS.map((l) => ({ id: l.id, dedup_key: l.dedupKey, level: l.level, year: l.year, issuing_body: l.issuingBody, title: l.title, pmid: l.pmid }));
+    h.queryRaw.mockResolvedValueOnce(raw);
+    // Off the tab: the count and the cards, no detail queries.
+    const off = await loadPolicyDocuments({ ...parse("basis=cy&level=authority&level=review"), scope: ["dept:N1"] });
+    expect(off.docTotal).toBe(2);
+    expect(off.docs).toEqual([]);
+    expect(off.summary.years.guideline).toHaveLength(1);
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+
+    h.queryRaw
+      .mockReset()
+      .mockResolvedValueOnce(raw)
+      .mockResolvedValueOnce([{ id: 2, title: "Example Review: 2023 Update", url: "https://www.ncbi.nlm.nih.gov/books/NBK000002/", journal: null, journal_abbrev: null, source: "bookshelf" }])
+      .mockResolvedValueOnce([
+        { pmid: "200", title: "Paper two", journal: "J Ex", year: 2021 },
+        { pmid: "100", title: "Paper one", journal: "J Ex", year: 2022 },
+      ]);
+    const on = await loadPolicyDocuments({ ...parse("basis=cy&level=authority&view=documents&dsort=papers"), scope: ["dept:N1"] });
+    expect(on.docTotal).toBe(2);
+    expect(on.docs[0]).toMatchObject({ title: "Example Review: 2023 Update", bookshelf: true, body: "AHRQ", yearMin: 2021, yearMax: 2023 });
+    expect(on.docs[0].papers.map((r) => r.pmid)).toEqual(["100", "200"]);
+    expect(on.docs[1].papers).toEqual([]);
+    // Every query that reads publications carries the viewer's department.
+    for (const n of [0, 2]) {
+      expect(call(n).text).toMatch(/EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s/);
+      expect(call(n).values).toContain("N1");
+    }
+    expect(call(1).text.trim()).toBe("SELECT d.id, d.title, d.url, d.journal, d.journal_abbrev, d.source FROM citing_document d WHERE d.id IN (?,?)");
+    expect(call(2).values).toEqual(expect.arrayContaining(["100", "200", "300"]));
   });
 });
 
@@ -502,8 +817,9 @@ describe("the workbook", () => {
   });
   const data = (people: number, pubTotal = 1): PolicyCitationData => ({
     cited: pubTotal,
-    tiles: { authority: 1, guideline: 1, either: 1, review: 1 },
+    tiles: { authority: 1, guideline: 1, consensus: 1, review: 1 },
     pubTotal,
+    pubMatched: pubTotal,
     pubs: [
       {
         pmid: "12345",
@@ -570,7 +886,7 @@ describe("the workbook", () => {
     expect(Object.fromEntries(set)["Publication year basis"]).toMatch(/^Fiscal year/);
 
     const wb = await read(await buildPolicyCitationWorkbook(p, data(1), new Date(0)));
-    expect(wb.worksheets.map((w) => w.name)).toEqual(["Publications", "People", "Criteria"]);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Publications", "People", "Citations", "Criteria"]);
     expect(wb.getWorksheet("Criteria")!.getRow(2).values).toEqual([
       undefined,
       "Report",
@@ -654,5 +970,63 @@ describe("the workbook", () => {
     expect(criteria["Publications sheet"]).toBe(
       "Lists the first 1 of 7,000 publications in the order above. Narrow the filters to list the rest.",
     );
+  });
+
+  it("the Citations sheet: one row per paper and citing document, plain titles, and the Criteria sheet states the cap", async () => {
+    const p = { ...parse("basis=cy&level=authority"), scope: null };
+    const citations = {
+      rows: [
+        {
+          pmid: "12345",
+          pubTitle: "An <i>example</i> title",
+          level: "authority" as const,
+          body: "WHO",
+          title: "Example <i>Guidance</i>: 2024 Update",
+          year: 2024,
+          where: "Chapter 4; Annex 1",
+          url: "https://www.ncbi.nlm.nih.gov/books/NBK000001/",
+        },
+      ],
+      more: false,
+    };
+    const wb = await read(await buildPolicyCitationWorkbook(p, data(1), new Date(0), undefined, citations));
+    const sheet = wb.getWorksheet("Citations")!;
+    expect(sheet.getRow(1).values).toEqual([
+      undefined,
+      "PMID",
+      "Paper title",
+      "Level",
+      "Issuing body",
+      "Citing document",
+      "Year",
+      "Where cited",
+      "Link",
+    ]);
+    expect(sheet.getRow(2).values).toEqual([
+      undefined,
+      "12345",
+      "An example title",
+      "Health authority",
+      "WHO",
+      "Example Guidance: 2024 Update",
+      2024,
+      "Chapter 4; Annex 1",
+      "https://www.ncbi.nlm.nih.gov/books/NBK000001/",
+    ]);
+    const criteria = async (c: typeof citations) =>
+      Object.fromEntries(
+        (await read(await buildPolicyCitationWorkbook(p, data(1), new Date(0), undefined, c)))
+          .getWorksheet("Criteria")!
+          .getSheetValues()
+          .slice(2)
+          .map((r) => (r as unknown[]).slice(1, 3)),
+      )["Citations sheet"];
+    expect(await criteria(citations)).toBe(
+      "One row per publication on the Publications sheet and citing document, at the levels above. Lists all 1 rows (the limit is 20,000).",
+    );
+    expect(await criteria({ ...citations, more: true })).toMatch(/Lists the first 20,000 rows, health authorities first and systematic reviews last\./);
+    // Without citations (an older caller): the sheet is there, empty.
+    const bare = await read(await buildPolicyCitationWorkbook(p, data(1), new Date(0)));
+    expect(bare.getWorksheet("Citations")!.rowCount).toBe(1);
   });
 });

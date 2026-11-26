@@ -166,6 +166,9 @@ export type SuperuserReportProps = AdminReportProps;
  *  header. */
 export type ReportRender = {
   subtitle?: React.ReactNode;
+  /** The header's right-hand side (report 24's export button and its note).
+   *  Rendered only for a report whose def sets `headerAside`. */
+  aside?: React.ReactNode;
   main: React.ReactNode;
 };
 
@@ -193,6 +196,8 @@ export type ReportDef =
        *  the access badge's rule line. Set together. */
       canView?: (session: EditSession) => Promise<boolean>;
       accessRule?: string;
+      /** The body renders `ReportRender.aside` into the header. */
+      headerAside?: boolean;
       render: (props: AdminReportProps) => Promise<ReportRender>;
     }
   | {
@@ -265,6 +270,7 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     gate: "admin",
     canView: canViewPolicyCitationsReport,
     accessRule: POLICY_CITATIONS_ACCESS_RULE,
+    headerAside: true,
     render: renderPolicyCitationsReport,
   },
 };

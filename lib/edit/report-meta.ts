@@ -280,7 +280,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "policy-citations",
     name: "Guideline and policy citations",
     summary:
-      "Publications cited by health authorities (WHO, NICE, CDC, AHRQ, National Academies), clinical guidelines, consensus statements and systematic reviews, by publication or by person. Open to every unit administrator, for the units they administer.",
+      "Publications cited by health authorities (WHO, NICE, CDC, AHRQ, National Academies), clinical guidelines, consensus statements and systematic reviews, by publication, by citing document or by person. Open to every unit administrator, for the units they administer.",
     descriptionHtml: null,
   },
 };

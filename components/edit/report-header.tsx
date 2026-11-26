@@ -43,6 +43,9 @@ export type ReportHeaderProps = {
    *  and its selected tab already names the report, so the name here is a
    *  screen-reader-only `<h2>` and the badge rides the eyebrow row. */
   underCoreHeader?: boolean;
+  /** The body's own controls for the right-hand side (report 24's export
+   *  button), stacked under "Edit details". */
+  aside?: React.ReactNode;
 };
 
 export async function ReportHeader({
@@ -51,6 +54,7 @@ export async function ReportHeader({
   access,
   children,
   underCoreHeader = false,
+  aside,
 }: ReportHeaderProps) {
   const meta = await reportMetaFor(n);
   const canEditMeta = session.isSuperuser;
@@ -60,6 +64,20 @@ export async function ReportHeader({
     <span className="inline-flex" data-testid="report-header-access">
       <ReportAccessPopover {...access} />
     </span>
+  );
+  const sheet = (canEditMeta || canManageAccess) && access && (
+    <ReportDetailsSheet
+      n={n}
+      meta={{
+        slug: meta.slug,
+        name: meta.name,
+        summary: meta.summary,
+        descriptionHtml: meta.descriptionHtml,
+      }}
+      canEditMeta={canEditMeta}
+      request={request}
+      access={access}
+    />
   );
   return (
     <div className="flex flex-wrap items-start justify-between gap-6">
@@ -97,19 +115,13 @@ export async function ReportHeader({
           )}
         </div>
       </div>
-      {(canEditMeta || canManageAccess) && access && (
-        <ReportDetailsSheet
-          n={n}
-          meta={{
-            slug: meta.slug,
-            name: meta.name,
-            summary: meta.summary,
-            descriptionHtml: meta.descriptionHtml,
-          }}
-          canEditMeta={canEditMeta}
-          request={request}
-          access={access}
-        />
+      {aside ? (
+        <div className="flex max-w-[340px] flex-col items-end gap-1.5 text-right">
+          {aside}
+          {sheet}
+        </div>
+      ) : (
+        sheet
       )}
     </div>
   );

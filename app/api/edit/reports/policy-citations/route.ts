@@ -1,7 +1,9 @@
 /**
  * GET /api/edit/reports/policy-citations — report 24 (Guideline and policy
  * citations) as an `.xlsx`: Publications (the first `POLICY_LIST_CAP` in the
- * chosen order), People, Criteria. Same query string as the page
+ * chosen order), People, Citations (one row per publication on the first
+ * sheet and citing document, `POLICY_CITATIONS_CAP` at most), Criteria. Same
+ * query string as the page
  * (`parsePolicyCitationParams`), same narrowing: `resolvePolicyCitationParams`
  * pins the viewer's units from the session, so a `unit` in the URL can only
  * narrow within them. No session → 401 · no unit to see → 403. `no-store`.
@@ -21,6 +23,7 @@ import { db } from "@/lib/db";
 import { unitLabels } from "@/lib/edit/person-filter";
 import {
   buildPolicyCitationWorkbook,
+  loadCitationPairs,
   loadPolicyCitations,
   parsePolicyCitationParams,
   POLICY_LIST_CAP,
@@ -42,7 +45,8 @@ export async function GET(request: Request) {
   const data = await loadPolicyCitations(params, POLICY_LIST_CAP);
   const labels =
     params.units.length > 0 || params.scope !== null ? unitLabels(await loadDataQualityFacets(db.read)) : undefined;
-  const buffer = await buildPolicyCitationWorkbook(params, data, generatedAt, labels);
+  const citations = await loadCitationPairs(params, data.pubs);
+  const buffer = await buildPolicyCitationWorkbook(params, data, generatedAt, labels, citations);
   const filename = `Guideline and policy citations ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
 
   return new NextResponse(new Uint8Array(buffer), {
