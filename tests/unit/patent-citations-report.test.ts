@@ -27,7 +27,6 @@ import {
   canViewPatentCitationsReport,
   describePatentCitationCriteria,
   INVENTIONS_SHOWN,
-  inventionYears,
   isPatentCitationDefault,
   isPatentCitationsReportEnabled,
   loadAssigneeCounts,
@@ -38,7 +37,6 @@ import {
   loadPatentPersonCounts,
   loadPatentPublicationCounts,
   loadPersonInventions,
-  loadScopeTotals,
   parsePatentCitationParams,
   PATENT_INVENTIONS_CAP,
   PATENT_LIST_CAP,
@@ -334,20 +332,38 @@ describe("scope narrowing", () => {
 
   it("the counts: every query of the default page carries the scope", async () => {
     await loadPatentCitations(await scoped());
-    // Scope totals, publications, people, inventions, assignees.
-    expectEveryQueryScoped({ scoped: 5, patentFactsOnly: 0 });
+    // Publications, people, inventions, and the rail's assignee counts.
+    expectEveryQueryScoped({ scoped: 4, patentFactsOnly: 0 });
   });
 
   it("with patent filters, a search and the recent sort: still every query", async () => {
     const qs = "cfrom=2015&where=body&assignee=Example+Biotech&sort=recent";
     await loadPatentCitations(await scoped(`${qs}&q=kinase`));
-    // The five above, the rail's assignee options, and the publication search.
-    expectEveryQueryScoped({ scoped: 7, patentFactsOnly: 0 });
+    // The four above (the assignee counts are one query, filter or no filter) and the publication search.
+    expectEveryQueryScoped({ scoped: 5, patentFactsOnly: 0 });
     h.queryRaw.mockClear();
     await loadPatentCitations(await scoped(`${qs}&q=kinase&view=inventions`));
     // The invention search reads patent titles, numbers and assignees, and nothing else.
-    expectEveryQueryScoped({ scoped: 6, patentFactsOnly: 1 });
+    expectEveryQueryScoped({ scoped: 4, patentFactsOnly: 1 });
     expect(calls().filter((c) => !readsPeopleOrPapers(c.text))[0].text).toContain("SELECT DISTINCT d.dedup_key");
+  });
+
+  it("several people at once: papers by either, and every query still carries the scope", async () => {
+    const p = await scoped("person=abc1001&person=abc1002");
+    await loadPatentCitations(p);
+    expectEveryQueryScoped({ scoped: 4, patentFactsOnly: 0 });
+    // The listing keeps a paper by either person; the Person facet's own counts leave them out.
+    const withPeople = calls().filter((c) => c.text.includes("AND s.cwid IN (?,?)"));
+    expect(withPeople).toHaveLength(3);
+    for (const c of withPeople) expect(c.values).toEqual(expect.arrayContaining(["N5", "abc1001", "abc1002"]));
+    // One chip per person, by name, each removing that person alone; no bare CWID.
+    const chips = patentCitationChips(p, new Map(), new Map([["abc1001", "Example Person"]])).filter(
+      (c) => c.group === "Person",
+    );
+    expect(chips).toEqual([
+      { group: "Person", value: "Example Person", removeQuery: "person=abc1002&basis=cy" },
+      { group: "Person", value: "Unknown person", mono: "abc1002", removeQuery: "person=abc1001&basis=cy" },
+    ]);
   });
 
   it("the Person facet's counts keep the scope and leave the person filter out", async () => {
@@ -387,12 +403,23 @@ describe("scope narrowing", () => {
     expect(h.queryRaw).not.toHaveBeenCalled();
   });
 
-  it("the share-of-scope totals join publication only for a year window, scoped either way", async () => {
-    await loadScopeTotals(await scoped());
-    await loadScopeTotals(await scoped("from=2010"));
-    expect(call(0).text).not.toContain("JOIN publication p");
-    expect(call(1).text).toContain("JOIN publication p");
-    for (const n of [0, 1]) expect(call(n).values).toContain("N5");
+  it("the rail's assignee counts: scoped, under the who-filters and the other patent filters, never the assignee filter", async () => {
+    const p = await scoped("unit=dept:N2&type=full_time_faculty&person=abc1001&pos=last&cfrom=2015&where=front&assignee=Example+Biotech");
+    await loadAssigneeCounts(p);
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+    expectEveryQueryScoped({ scoped: 1, patentFactsOnly: 0 });
+    const { text, values } = call(0);
+    // Driven from the cited papers in scope (the rollup), then their links: the scope sits in that subquery.
+    expect(text).toMatch(/FROM \(SELECT STRAIGHT_JOIN p\.pmid FROM publication p JOIN publication_author pa ON pa\.pmid = p\.pmid JOIN scholar s ON s\.cwid = pa\.cwid WHERE p\.patent_family_count > 0 AND pa\.is_confirmed = 1 .*s\.div_code IN \(\?\).* GROUP BY p\.pmid\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid/);
+    expect(text).toContain("AND (pa.is_last = 1)");
+    expect(values).toEqual(expect.arrayContaining(["N5", "N2", "full_time_faculty", "abc1001", 2015, "front"]));
+    // The facet's own selection is not in the query.
+    expect(text).not.toContain("JSON_CONTAINS");
+    expect(values).not.toContain("Example Biotech");
+    // Someone with no unit: nothing to count.
+    h.queryRaw.mockClear();
+    await loadAssigneeCounts({ ...parse(), scope: [] });
+    expect(call(0).text).toContain("AND 1 = 0");
   });
 
   it("the download route pins the same scope and refuses a viewer with no unit", async () => {
@@ -420,8 +447,8 @@ describe("scope narrowing", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="Patent citations \d{4}-\d{2}-\d{2}\.xlsx"$/);
-    // Counts (5), then authors and everyone's inventions; the patent facts by id.
-    expectEveryQueryScoped({ scoped: 7, patentFactsOnly: 1 });
+    // Counts (4), then authors and everyone's inventions; the patent facts by id.
+    expectEveryQueryScoped({ scoped: 6, patentFactsOnly: 1 });
     // The Publications sheet's latest year comes from the links.
     expect(calls().some((c) => c.text.includes("MAX(x.latest) AS latest"))).toBe(true);
   });
@@ -573,7 +600,7 @@ describe("inventions: patent documents grouped by family", () => {
     expect(calls().some((c) => c.text.includes("citing_document"))).toBe(false);
   });
 
-  it("the invention listing: one row per dedup_key, sorted, and counted per year for the chart", async () => {
+  it("the invention listing: one row per dedup_key, sorted", async () => {
     h.queryRaw.mockResolvedValueOnce([
       { dedup_key: "15000001", papers: 4n, docs: 3n, rep: rep(false, 2019, 2) },
       { dedup_key: "17000002", papers: 9n, docs: 1n, rep: rep(true, 2022, 1) },
@@ -585,13 +612,6 @@ describe("inventions: patent documents grouped by family", () => {
     expect(rows[1]).toEqual({ key: "17000002", docId: 1, year: 2022, application: true, docs: 1, papers: 9 });
     expect(sortInventions(rows, "papers").map((r) => r.key)).toEqual(["17000002", "09000003", "15000001", "08000004"]);
     expect(sortInventions(rows, "recent").map((r) => r.key)).toEqual(["09000003", "17000002", "15000001", "08000004"]);
-    const years = inventionYears(rows);
-    expect(years.map((y) => y.year)).toEqual([2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]);
-    expect(years.filter((y) => y.count > 0)).toEqual([
-      { year: 2019, count: 1 },
-      { year: 2022, count: 1 },
-      { year: 2025, count: 1 },
-    ]);
   });
 
   it("an invention's papers: the newest 25, each paper once", async () => {
@@ -615,17 +635,20 @@ describe("inventions: patent documents grouped by family", () => {
     expect(call(1).text).not.toContain("d.external_id LIKE");
   });
 
-  it("the assignee card counts inventions and papers per printed name; the rail's options ignore the assignee filter", async () => {
+  it("the rail's assignee options count inventions per printed name, most first, and ignore the assignee filter", async () => {
     h.queryRaw.mockResolvedValue([
-      { name: "Example Biotech, Inc.", inventions: 12n, papers: 30n },
-      { name: null, inventions: 1n, papers: 1n },
+      { name: "Example Biotech, Inc.", inventions: 12n },
+      { name: null, inventions: 1n },
     ]);
     const p = { ...parse("assignee=Example+Biotech%2C+Inc."), scope: null };
-    expect(await loadAssigneeCounts(p)).toEqual([{ name: "Example Biotech, Inc.", inventions: 12, papers: 30 }]);
+    expect(await loadAssigneeCounts(p)).toEqual([{ name: "Example Biotech, Inc.", inventions: 12 }]);
     expect(call(0).text).toContain("JSON_TABLE(d.details, '$.assignees[*]'");
-    expect(call(0).text).toContain("JSON_CONTAINS");
-    await loadAssigneeCounts(p, { assignees: false });
-    expect(call(1).text).not.toContain("JSON_CONTAINS");
+    expect(call(0).text).toContain("COUNT(DISTINCT d.dedup_key) AS inventions");
+    expect(call(0).text).toContain("ORDER BY inventions DESC, a.name LIMIT ?");
+    expect(call(0).text).not.toContain("JSON_CONTAINS");
+    // The listing itself still applies the filter.
+    await loadInventionCounts(p);
+    expect(call(1).text).toContain("JSON_CONTAINS");
   });
 });
 

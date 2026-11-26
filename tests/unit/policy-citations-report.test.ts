@@ -1,8 +1,10 @@
 /** Report 24 (Guideline and policy citations): the param parser and its
- *  defaults, the ranked sort, what Level lists, the scope narrowing for a unit
- *  administrator (in the lib, in every query, and through the download
- *  route), de-dup by `dedupKey`, excluded-study citations, edition grouping,
- *  the By citing document fold, and the workbook's sheets (People: no cap, no
+ *  defaults, the ranked sort, what Type (`level`) lists, the rail's counts
+ *  per type and per issuing body and where they come from, the scope
+ *  narrowing for a unit administrator (in the lib, in every query, and
+ *  through the download route), de-dup by `dedupKey`, excluded-study
+ *  citations, edition grouping, the By citing document fold, and the
+ *  workbook's sheets (People: no cap, no
  *  contact column; Citations; Criteria). Fixture people, units and documents
  *  are invented. */
 import ExcelJS from "exceljs";
@@ -25,6 +27,7 @@ import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { REPORTS } from "@/lib/edit/report-registry";
 import {
+  bodyPaperCounts,
   buildPolicyCitationWorkbook,
   canViewPolicyCitationsReport,
   citedSql,
@@ -42,11 +45,12 @@ import {
   loadCitingDocuments,
   loadDocLinks,
   loadPersonCounts,
+  loadPersonNames,
   loadPolicyCitations,
   loadPolicyDocuments,
   loadPublicationCounts,
+  papersByLevel,
   POLICY_CITATIONS_CAP,
-  policySummary,
   REVIEWS_SHOWN,
   searchPublications,
   sortDocGroups,
@@ -56,7 +60,6 @@ import {
   policyCitationChips,
   policyCitationQueryString,
   policyScopeSql,
-  policyTiles,
   resolvePolicyCitationParams,
   sortPublications,
   type PersonRow,
@@ -233,13 +236,13 @@ describe("ranked sort", () => {
     expect(sortPublications(rows, "year").map((r) => r.pmid)).toEqual(["b", "c", "a"]);
   });
 
-  it("Level picks what is listed; the tiles cover every level", () => {
+  it("Type picks what is listed; the rail's counts cover every type", () => {
     const rows = [row("a", 1, 0, 0, 3), row("b", 0, 2, 0, 0), row("c", 0, 0, 0, 7), row("d", 1, 1, 0, 0)];
     expect(listedAt(rows, ["authority", "guideline"]).map((r) => r.pmid)).toEqual(["a", "b", "d"]);
     expect(listedAt(rows, ["review"]).map((r) => r.pmid)).toEqual(["a", "c"]);
     expect(listedAt(rows, [])).toHaveLength(4);
-    // One tile per level; no "either".
-    expect(policyTiles(rows)).toEqual({ authority: 2, guideline: 2, consensus: 0, review: 2 });
+    // One count per type; no "either".
+    expect(papersByLevel(rows)).toEqual({ authority: 2, guideline: 2, consensus: 0, review: 2 });
   });
 });
 
@@ -304,21 +307,60 @@ describe("query shape: counts per publication first, people attached afterwards"
     expect(text).not.toMatch(/authority_count|SELECT STRAIGHT_JOIN DISTINCT/);
   });
 
-  it("tiles and the listing come from that one pass", async () => {
+  it("the rail's Type counts and the listing come from that one pass, whatever Type is ticked", async () => {
     const pub = (pmid: string, a: number, g: number, r: number) => ({ pmid, year: 2020, latest: 2024, authority: a, guideline: g, consensus: 0, review: r });
     h.queryRaw
       .mockResolvedValueOnce([pub("1", 1, 0, 2), pub("2", 0, 3, 0), pub("3", 0, 0, 9)]) // publications
       .mockResolvedValueOnce([]) // people
       .mockResolvedValue([]); // details
     const data = await loadPolicyCitations({ ...parse(), scope: null }, 100);
-    expect(data.cited).toBe(3);
-    expect(data.tiles).toEqual({ authority: 1, guideline: 1, consensus: 0, review: 2 });
+    expect(data.levelPapers).toEqual({ authority: 1, guideline: 1, consensus: 0, review: 2 });
     // The default levels leave the review-only paper out of the listing.
     expect(data.pubTotal).toBe(2);
     expect(data.pubMatched).toBe(2);
+    // The header's aside: what the listing would hold with reviews ticked too.
+    expect(data.withReviews).toBe(3);
     expect(data.pubs.map((r) => r.pmid)).toEqual(["1", "2"]);
-    // Publications + people, then authors + bodies for the listed rows: no second pass over x.
+    // Publications + people, then authors + bodies for the listed rows: no second
+    // pass over x, and no query of their own for the rail's counts.
     expect(h.queryRaw).toHaveBeenCalledTimes(4);
+
+    // A facet does not count its own selection: one type ticked, the same counts.
+    h.queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([pub("1", 1, 0, 2), pub("2", 0, 3, 0), pub("3", 0, 0, 9)])
+      .mockResolvedValue([]);
+    const one = await loadPolicyCitations({ ...parse("basis=cy&level=guideline"), scope: null }, 100);
+    expect(one.levelPapers).toEqual(data.levelPapers);
+    expect(one.pubTotal).toBe(1);
+    expect(one.withReviews).toBe(3);
+    // Reviews already listed: nothing to add.
+    h.queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([pub("1", 1, 0, 2), pub("2", 0, 3, 0), pub("3", 0, 0, 9)])
+      .mockResolvedValue([]);
+    const all = await loadPolicyCitations({ ...parse("basis=cy"), scope: null }, 100);
+    expect(all.withReviews).toBe(all.pubTotal);
+  });
+
+  it("the rail's Type counts are read off the rollup columns, under the who-filters, with no link table", async () => {
+    await loadPolicyCitations(
+      { ...parse("basis=cy&level=guideline&unit=dept:N2&type=full_time_faculty&person=abc1234&pos=last"), scope: ["dept:N1"] },
+      0,
+    );
+    // The pass the counts are folded from: the viewer's scope, then each who-filter.
+    const { text, values } = call(0);
+    expect(text).toMatch(/^ ?SELECT STRAIGHT_JOIN p\.pmid AS pmid, .*MAX\(p\.authority_count\) AS authority, MAX\(p\.guideline_count\) AS guideline, MAX\(p\.consensus_count\) AS consensus, MAX\(p\.review_count\) AS review FROM publication p JOIN publication_author pa/);
+    expect(text).not.toMatch(/publication_citing_document|citing_document/);
+    expect(text.match(/s\.dept_code IN \(\?\)/g)).toHaveLength(2);
+    expect(text).toContain("AND (pa.is_last = 1)");
+    expect(values).toEqual(expect.arrayContaining(["N1", "N2", "full_time_faculty", "abc1234"]));
+    // The facet's own selection is not in the query at all.
+    expect(values).not.toContain("guideline");
+    // Someone with no unit: the counts match nothing.
+    h.queryRaw.mockClear();
+    await loadPolicyCitations({ ...parse(), scope: [] }, 0);
+    expect(call(0).text).toContain("AND 1 = 0");
   });
 
   it("pages: `limit` rows from `offset`, details loaded for those rows only", async () => {
@@ -330,7 +372,7 @@ describe("query shape: counts per publication first, people attached afterwards"
     expect(call(2).values).toEqual(["3", "4"]);
   });
 
-  it("the search narrows the listing, not the tiles: publications by one more scoped query, people in memory", async () => {
+  it("the search narrows the listing, not the rail's counts: publications by one more scoped query, people in memory", async () => {
     const pub = (pmid: string) => ({ pmid, year: 2021, latest: 2024, authority: 1, guideline: 0, consensus: 0, review: 0 });
     const who = (cwid: string, preferred_name: string) => ({ cwid, preferred_name, primary_department: null, role_category: null, primary_org_code: null, authority: 1n, guideline: 0n, consensus: 0n, review: 0n });
     const people = [who("abc1234", "Example Person"), who("def5678", "Another Sample")];
@@ -341,7 +383,7 @@ describe("query shape: counts per publication first, people attached afterwards"
       .mockResolvedValue([]);
     const p = { ...parse("basis=cy&q=50%25_off"), scope: ["dept:N1"] };
     const data = await loadPolicyCitations(p, 50);
-    expect(data.tiles.authority).toBe(3);
+    expect(data.levelPapers.authority).toBe(3);
     expect(data.pubTotal).toBe(3);
     expect(data.pubMatched).toBe(1);
     expect(data.pubs.map((r) => r.pmid)).toEqual(["2"]);
@@ -568,6 +610,14 @@ describe("scope narrowing", () => {
       "Limited to the units you administer: Department of Examples",
     ]);
   });
+
+  it("wording: the chips and the sort say type and health authorities, never level", () => {
+    const p = { ...parse("basis=cy&level=guideline&body=WHO"), scope: null };
+    const chips = policyCitationChips(p);
+    expect(chips).toContainEqual({ group: "Citing document type", value: "Clinical guidelines", removeQuery: "body=WHO&basis=cy" });
+    expect(describePolicyCitationCriteria(p, new Date(0))).toContainEqual(["Order", "Health authorities first, then most documents"]);
+    expect(JSON.stringify(chips.map((c) => [c.group, c.value]))).not.toMatch(/level/i);
+  });
 });
 
 describe("de-dup by dedupKey", () => {
@@ -771,32 +821,60 @@ describe("by citing document", () => {
     expect(sortDocGroups(groups, "body").map((g) => g.docs[0].id)).toEqual([2, 3, 4, 6]);
   });
 
-  it("the cards: documents (editions grouped) and papers per body; documents per year per level, each edition in its year", () => {
-    expect(policySummary(groupDocLinks(LINKS))).toEqual({
-      bodies: [
-        { body: "AHRQ", documents: 1, papers: 2 },
-        { body: "WHO", documents: 1, papers: 1 },
-      ],
-      years: {
-        authority: [
-          { year: 2021, count: 1 },
-          { year: 2022, count: 1 },
-          { year: 2023, count: 1 },
-        ],
-        guideline: [{ year: 2024, count: 1 }],
-        consensus: [{ year: 2020, count: 1 }],
-      },
-    });
+  it("the rail's Issuing body counts: distinct papers per body, most first, health authority documents only", () => {
+    // AHRQ: papers 100 and 200, over two editions, each paper once.
+    expect(bodyPaperCounts(LINKS)).toEqual([
+      { body: "AHRQ", papers: 2 },
+      { body: "WHO", papers: 1 },
+    ]);
+    expect(bodyPaperCounts([link(4, "100"), authority(9, "100", "No body named", 2020, "")])).toEqual([]);
+  });
+
+  it("the Issuing body counts come from the tab's one scoped pass, with the body filter left out of it", async () => {
+    const raw = LINKS.map((l) => ({ id: l.id, dedup_key: l.dedupKey, level: l.level, year: l.year, issuing_body: l.issuingBody, title: l.title, pmid: l.pmid }));
+    h.queryRaw.mockResolvedValueOnce(raw);
+    const p = {
+      ...parse("basis=cy&body=WHO&excl=1&cfrom=2019&unit=dept:N2&type=full_time_faculty&person=abc1234&pos=first"),
+      scope: ["dept:N1"],
+    };
+    const out = await loadPolicyDocuments(p);
+    // No query of its own: one pass for the tab's count and the rail's counts.
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+    const { text, values } = call(0);
+    // The viewer's scope and every who-filter, behind the EXISTS, never a join to authorships.
+    expect(text).toMatch(/AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = l\.pmid AND pa\.is_confirmed = 1/);
+    expect(text).not.toMatch(/JOIN publication_author pa ON/);
+    expect(text.match(/s\.dept_code IN \(\?\)/g)).toHaveLength(2);
+    expect(text).toContain("AND (pa.is_first = 1)");
+    expect(values).toEqual(expect.arrayContaining(["N1", "N2", "full_time_faculty", "abc1234"]));
+    // The other document filters count; the facet's own selection does not.
+    expect(text).toContain("AND d.year >= ?");
+    expect(text).toContain("JSON_SEARCH");
+    expect(text).not.toContain("d.issuing_body IN");
+    expect(values).not.toContain("WHO");
+    expect(values).not.toContain("review");
+    // So every body keeps its count while one is ticked...
+    expect(out.bodyPapers).toEqual([
+      { body: "AHRQ", papers: 2 },
+      { body: "WHO", papers: 1 },
+    ]);
+    // ...and the tab still lists the ticked body's documents only.
+    expect(out.docTotal).toBe(1);
+
+    // Someone with no unit: the pass, and so the counts, match nothing.
+    h.queryRaw.mockClear();
+    await loadPolicyDocuments({ ...parse("basis=cy&body=WHO"), scope: [] });
+    expect(call(0).text).toContain("AND 1 = 0");
   });
 
   it("the tab lists the ticked levels, a page at a time, and loads titles and papers for that page only, scoped", async () => {
     const raw = LINKS.map((l) => ({ id: l.id, dedup_key: l.dedupKey, level: l.level, year: l.year, issuing_body: l.issuingBody, title: l.title, pmid: l.pmid }));
     h.queryRaw.mockResolvedValueOnce(raw);
-    // Off the tab: the count and the cards, no detail queries.
+    // Off the tab: the count and the rail's counts, no detail queries.
     const off = await loadPolicyDocuments({ ...parse("basis=cy&level=authority&level=review"), scope: ["dept:N1"] });
     expect(off.docTotal).toBe(2);
     expect(off.docs).toEqual([]);
-    expect(off.summary.years.guideline).toHaveLength(1);
+    expect(off.bodyPapers.map((b) => b.body)).toEqual(["AHRQ", "WHO"]);
     expect(h.queryRaw).toHaveBeenCalledTimes(1);
 
     h.queryRaw
@@ -835,9 +913,9 @@ describe("the workbook", () => {
     review: 5,
   });
   const data = (people: number, pubTotal = 1): PolicyCitationData => ({
-    cited: pubTotal,
-    tiles: { authority: 1, guideline: 1, consensus: 1, review: 1 },
+    levelPapers: { authority: 1, guideline: 1, consensus: 1, review: 1 },
     pubTotal,
+    withReviews: pubTotal,
     pubMatched: pubTotal,
     pubs: [
       {
@@ -880,7 +958,7 @@ describe("the workbook", () => {
       "Department / division / center / institution",
       "Person (CWID)",
       "Author position",
-      "Level",
+      "Citing document type",
       "Issuing body",
       "Publication years",
       "Citing document year",
@@ -901,7 +979,9 @@ describe("the workbook", () => {
       "Publication years": "2020 or later",
       "Citing document year": "2025 or earlier",
     });
-    expect(Object.fromEntries(set).Level).toMatch(/^Health authorities \(/);
+    expect(Object.fromEntries(set)["Citing document type"]).toMatch(/^Health authorities \(lists the publications and people cited by these types of document/);
+    // "Level" is gone from the sheet's labels and values.
+    expect(set.flat().join(" ")).not.toMatch(/level/i);
     expect(Object.fromEntries(set)["Publication year basis"]).toMatch(/^Fiscal year/);
 
     const wb = await read(await buildPolicyCitationWorkbook(p, data(1), new Date(0)));
@@ -1018,7 +1098,7 @@ describe("the workbook", () => {
       undefined,
       "PMID",
       "Paper title",
-      "Level",
+      "Citing document type",
       "Issuing body",
       "Citing document",
       "Authors",
@@ -1053,11 +1133,84 @@ describe("the workbook", () => {
           .map((r) => (r as unknown[]).slice(1, 3)),
       )["Citations sheet"];
     expect(await criteria(citations)).toBe(
-      "One row per publication on the Publications sheet and citing document, at the levels above. Lists all 1 rows (the limit is 20,000).",
+      "One row per publication on the Publications sheet and citing document, of the types above. Lists all 1 rows (the limit is 20,000).",
     );
     expect(await criteria({ ...citations, more: true })).toMatch(/Lists the first 20,000 rows, health authorities first and systematic reviews last\./);
     // Without citations (an older caller): the sheet is there, empty.
     const bare = await read(await buildPolicyCitationWorkbook(p, data(1), new Date(0)));
     expect(bare.getWorksheet("Citations")!.rowCount).toBe(1);
+  });
+});
+
+describe("several people at once (the hover card's \"Show only this person's papers\")", () => {
+  it("papers by EITHER person, inside the viewer's units: both clauses are in the listing's query", async () => {
+    await loadPolicyCitations({ ...parse("basis=cy&person=abc1001&person=abc1002"), scope: ["dept:N1"] }, 0);
+    const { text, values } = call(0);
+    // One IN list, so an authorship by either person keeps the paper.
+    expect(text).toContain("AND s.cwid IN (?,?)");
+    expect(values).toEqual(expect.arrayContaining(["abc1001", "abc1002"]));
+    // The viewer's units are still there, ahead of the URL's selection.
+    expect(text).toContain("s.dept_code IN (?)");
+    expect(values.indexOf("N1")).toBeLessThan(values.indexOf("abc1001"));
+    // The Person facet's counts drop the people, never the scope.
+    const facet = call(1);
+    expect(facet.values).toContain("N1");
+    expect(facet.values).not.toContain("abc1001");
+  });
+
+  it("no unit at all: two people ticked still match nothing", async () => {
+    await loadPolicyCitations({ ...parse("basis=cy&person=abc1001&person=abc1002"), scope: [] }, 0);
+    expect(call(0).text).toContain("AND 1 = 0");
+    expect(call(1).text).toContain("AND 1 = 0");
+  });
+
+  it("chips: one per person however many, by name, each removing that person alone", () => {
+    const p = { ...parse("basis=cy&person=abc1001&person=abc1002&person=abc1003&person=abc1004"), scope: null };
+    const names = new Map([
+      ["abc1001", "Example Person"],
+      ["abc1002", "Sample Author"],
+      ["abc1003", "Invented Scholar"],
+      ["abc1004", "Fixture Fellow"],
+    ]);
+    const chips = policyCitationChips(p, new Map(), names).filter((c) => c.group === "Person");
+    expect(chips.map((c) => c.value)).toEqual(["Example Person", "Sample Author", "Invented Scholar", "Fixture Fellow"]);
+    expect(chips.every((c) => c.mono === undefined)).toBe(true);
+    expect(chips[1].removeQuery).toBe("person=abc1001&person=abc1003&person=abc1004&basis=cy");
+  });
+
+  it("chips: a CWID is never the name; one with no name says so, the CWID apart for monospace", () => {
+    const p = { ...parse("basis=cy&person=abc1001&person=zzz9999"), scope: null };
+    const chips = policyCitationChips(p, new Map(), new Map([["abc1001", "Example Person"]]));
+    expect(chips.filter((c) => c.group === "Person")).toEqual([
+      { group: "Person", value: "Example Person", removeQuery: "person=zzz9999&basis=cy" },
+      { group: "Person", value: "Unknown person", mono: "zzz9999", removeQuery: "person=abc1001&basis=cy" },
+    ]);
+    expect(chips.map((c) => c.value)).not.toContain("zzz9999");
+  });
+
+  it("names: the facet names everyone ticked, so nothing is read", async () => {
+    const p = { ...parse("basis=cy&person=abc1001"), scope: ["dept:N1"] };
+    const names = await loadPersonNames(p, [{ cwid: "abc1001", name: "Example Person" }]);
+    expect([...names]).toEqual([["abc1001", "Example Person"]]);
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("names: someone ticked beyond the facet is read from scholar, inside the viewer's units only", async () => {
+    h.queryRaw.mockResolvedValueOnce([{ cwid: "abc1002", preferred_name: "Sample Author" }]);
+    const p = { ...parse("basis=cy&person=abc1001&person=abc1002&person=zzz9999"), scope: ["dept:N1"] };
+    const names = await loadPersonNames(p, [{ cwid: "abc1001", name: "Example Person" }]);
+    expect(h.queryRaw).toHaveBeenCalledTimes(1);
+    const { text, values } = call(0);
+    expect(text).toContain("FROM scholar s WHERE s.cwid IN (?,?) AND s.deleted_at IS NULL");
+    expect(text).toContain("s.dept_code IN (?)");
+    expect(values).toEqual(["abc1002", "zzz9999", "N1"]);
+    expect([...names.keys()].sort()).toEqual(["abc1001", "abc1002"]);
+
+    // No unit: no name comes back. A superuser: no scope clause.
+    h.queryRaw.mockClear();
+    await loadPersonNames({ ...p, scope: [] }, []);
+    expect(call(0).text).toContain("AND 1 = 0");
+    await loadPersonNames({ ...p, scope: null }, []);
+    expect(call(1).text).not.toMatch(/dept_code|1 = 0/);
   });
 });

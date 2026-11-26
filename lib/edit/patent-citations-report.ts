@@ -73,9 +73,8 @@ export const INVENTION_PAPERS_SHOWN = 25;
  *  rows (the first ones in the chosen order); the Criteria sheet says so. */
 export const PATENT_LIST_CAP = 5000;
 export const PATENT_INVENTIONS_CAP = 20_000;
-/** Assignees offered in the rail, and the first of them shown in the card. */
+/** Assignees offered in the rail. */
 const ASSIGNEE_OPTIONS = 50;
-const ASSIGNEES_SHOWN = 10;
 /** Where the patent tables end.
  *  ponytail: a constant, true of the one release loaded so far (PatentsView,
  *  grants through 2025). The import storing its coverage end is the upgrade. */
@@ -213,8 +212,8 @@ function parseRep(rep: string): { id: number; year: number | null; application: 
 }
 
 /** A filter on the patents themselves. */
-const hasPatentFilter = (p: PatentCitationParams, opts: { assignees?: boolean } = {}): boolean =>
-  p.cfrom !== null || p.cto !== null || p.where !== "any" || (opts.assignees !== false && p.assignees.length > 0);
+const hasPatentFilter = (p: PatentCitationParams): boolean =>
+  p.cfrom !== null || p.cto !== null || p.where !== "any" || p.assignees.length > 0;
 
 /** Which patent documents are counted, after `d.level = 'patent'` (`d` =
  *  `citing_document`, `l` = the link). `assignees: false` leaves that filter
@@ -334,19 +333,6 @@ export function sortPatentPublications<T extends PatentPubCounts>(rows: readonly
   );
 }
 
-/** Papers and people in scope, cited or not: what the tiles' shares are of.
- *  `publication` is joined only for a year window. */
-export async function loadScopeTotals(p: PatentCitationParams): Promise<{ papers: number; people: number }> {
-  const [r] = await db.read.$queryRaw<{ papers: Num; people: Num }[]>`
-    SELECT COUNT(DISTINCT pa.pmid) AS papers, COUNT(DISTINCT s.cwid) AS people
-      FROM publication_author pa
-      JOIN scholar s ON s.cwid = pa.cwid
-      ${p.from !== null || p.to !== null ? Prisma.sql`JOIN publication p ON p.pmid = pa.pmid` : Prisma.empty}
-     WHERE ${policyScopeSql(p)}
-       ${pubYearSql(p)}`;
-  return { papers: Number(r?.papers ?? 0), people: Number(r?.people ?? 0) };
-}
-
 export type PatentPersonRow = {
   cwid: string;
   name: string;
@@ -464,8 +450,7 @@ export type InventionCounts = {
 
 /**
  * One row per invention citing a paper in scope, unsorted: the By invention
- * tab, its count, the Citing inventions tile and the chart all come from this
- * one pass over the links. Driven from the cited papers in scope (`ok`, off
+ * tab and its count come from this one pass over the links. Driven from the cited papers in scope (`ok`, off
  * the rollup), then their links by primary key. 1.7 s locally for 68,730
  * inventions (2026-11-26); starting from the patents with the who clause
  * behind an `EXISTS`, report 24's shape, took 2.5 s.
@@ -503,15 +488,6 @@ export function sortInventions<T extends InventionCounts>(rows: readonly T[], so
   );
 }
 
-/** Inventions per year, the ten years ending where the patent data ends. An
- *  invention with no granted patent counts in the year its application was
- *  published. */
-export function inventionYears(rows: readonly InventionCounts[], end: number = PATENT_DATA_END.year) {
-  const byYear = new Map<number, number>();
-  for (const r of rows) if (r.year !== null) byYear.set(r.year, (byYear.get(r.year) ?? 0) + 1);
-  return Array.from({ length: 10 }, (_, i) => ({ year: end - 9 + i, count: byYear.get(end - 9 + i) ?? 0 }));
-}
-
 /** The inventions with a patent document matching the By invention search:
  *  title, patent number or assignee. Patent facts only, so there is nothing to
  *  scope; the caller intersects it with the scoped listing. */
@@ -529,28 +505,24 @@ export async function searchInventions(q: string): Promise<Set<string>> {
   return new Set(raw.map((r) => r.dedup_key));
 }
 
-export type AssigneeCount = { name: string; inventions: number; papers: number };
+export type AssigneeCount = { name: string; inventions: number };
 
-/** Inventions and the papers they cite per assignee name, most inventions
- *  first. A name is counted as printed on any counted document of the
- *  invention, so one company can appear under several spellings. */
-export async function loadAssigneeCounts(
-  p: PatentCitationParams,
-  opts: { assignees?: boolean } = {},
-): Promise<AssigneeCount[]> {
-  const raw = await db.read.$queryRaw<{ name: string | null; inventions: Num; papers: Num }[]>`
-    SELECT STRAIGHT_JOIN a.name, COUNT(DISTINCT d.dedup_key) AS inventions, COUNT(DISTINCT l.pmid) AS papers
+/** The rail's Assignee options: inventions per assignee name, most first,
+ *  under every filter but the assignee filter itself (a facet does not count
+ *  its own selection). A name is counted as printed on any counted document
+ *  of the invention, so one company can appear under several spellings. */
+export async function loadAssigneeCounts(p: PatentCitationParams): Promise<AssigneeCount[]> {
+  const raw = await db.read.$queryRaw<{ name: string | null; inventions: Num }[]>`
+    SELECT STRAIGHT_JOIN a.name, COUNT(DISTINCT d.dedup_key) AS inventions
       FROM ${citedInScopeSql(p)}
       JOIN publication_citing_document l ON l.pmid = ok.pmid
       JOIN citing_document d ON d.id = l.citing_document_id
       JOIN JSON_TABLE(d.details, '$.assignees[*]' COLUMNS (name VARCHAR(255) PATH '$')) a
-     WHERE d.level = 'patent' ${patentSql(p, opts)}
+     WHERE d.level = 'patent' ${patentSql(p, { assignees: false })}
      GROUP BY a.name
      ORDER BY inventions DESC, a.name
      LIMIT ${ASSIGNEE_OPTIONS}`;
-  return raw.flatMap((r) =>
-    r.name ? [{ name: r.name, inventions: Number(r.inventions), papers: Number(r.papers) }] : [],
-  );
+  return raw.flatMap((r) => (r.name ? [{ name: r.name, inventions: Number(r.inventions) }] : []));
 }
 
 // ---------------------------------------------------------------------------
@@ -782,8 +754,6 @@ export async function withInventionDetails(
 // ---------------------------------------------------------------------------
 
 export type PatentCitationData = {
-  /** Papers and people in scope, cited or not. */
-  scope: { papers: number; people: number };
   /** Cited publications in scope. */
   pubTotal: number;
   /** Those the search keeps, in the chosen order: what the pages run over. */
@@ -792,11 +762,7 @@ export type PatentCitationData = {
   inventionTotal: number;
   /** Those the search keeps, in the chosen order. */
   inventions: InventionCounts[];
-  /** The chart: inventions per year, ten years. */
-  years: { year: number; count: number }[];
-  /** The card: most inventions first, under every filter. */
-  assignees: AssigneeCount[];
-  /** The rail's options: the same, ignoring the `assignee` filter. */
+  /** The rail's Assignee options, with their counts (`loadAssigneeCounts`). */
   assigneeOptions: AssigneeCount[];
   /** People in scope with a cited paper (the `person` filter applied). */
   peopleTotal: number;
@@ -814,20 +780,17 @@ export async function loadPatentCitations(
   p: PatentCitationParams,
   opts: { latest?: boolean } = {},
 ): Promise<PatentCitationData> {
-  const [scope, counts, everyone, inventions, assignees, assigneeOptions, pubHits, inventionHits] = await Promise.all([
-    loadScopeTotals(p),
+  const [counts, everyone, inventions, assigneeOptions, pubHits, inventionHits] = await Promise.all([
     loadPatentPublicationCounts(p, { latest: opts.latest === true || p.sort === "recent" }),
     loadPatentPersonCounts(p),
     loadInventionCounts(p),
     loadAssigneeCounts(p),
-    p.assignees.length > 0 ? loadAssigneeCounts(p, { assignees: false }) : null,
     p.q && p.view === "publications" ? searchPublications(p, p.q, IS_CITED_SQL) : null,
     p.q && p.view === "inventions" ? searchInventions(p.q) : null,
   ]);
   const picked = p.people.length > 0 ? everyone.filter((r) => p.people.includes(r.cwid)) : everyone;
   const needle = p.view === "people" ? p.q.toLowerCase() : "";
   return {
-    scope,
     pubTotal: counts.length,
     pubs: sortPatentPublications(pubHits ? counts.filter((r) => pubHits.has(r.pmid)) : counts, p.sort),
     inventionTotal: inventions.length,
@@ -835,9 +798,7 @@ export async function loadPatentCitations(
       inventionHits ? inventions.filter((r) => inventionHits.has(r.key)) : inventions,
       p.inventionSort,
     ),
-    years: inventionYears(inventions),
-    assignees: assignees.slice(0, ASSIGNEES_SHOWN),
-    assigneeOptions: assigneeOptions ?? assignees,
+    assigneeOptions,
     peopleTotal: picked.length,
     people: picked.filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.cwid.toLowerCase() === needle),
     facetPeople: everyone,

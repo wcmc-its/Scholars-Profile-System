@@ -63,7 +63,7 @@ export function ReportRail({
 }
 
 /** One rail section: an uppercase label, the current value as the summary
- *  line, a chevron; the controls below when open. */
+ *  line, a 20px chevron; the controls below when open. */
 export function RailSection({
   label,
   summary,
@@ -86,7 +86,7 @@ export function RailSection({
           </span>
           <span className="mt-0.5 block truncate text-sm">{summary}</span>
         </span>
-        <Caret dropdown className="text-muted-foreground" />
+        <Caret dropdown className="text-muted-foreground size-5" />
       </summary>
       <div className="flex flex-col gap-3 px-[18px] pt-0.5 pb-4">{children}</div>
     </details>
@@ -99,6 +99,8 @@ export type FilterChip = {
   /** The URL without this filter; null → a chip with no remove button
    *  (e.g. the year range, which always has a value). */
   removeHref: string | null;
+  /** A CWID shown after the value, in monospace. */
+  mono?: string;
 };
 
 /** The active filters as removable pills, above the tabs. */
@@ -108,15 +110,16 @@ export function FilterChips({ chips, testId = "report-chips" }: { chips: Readonl
     <ul className="flex flex-wrap gap-2" data-testid={testId}>
       {chips.map((c) => (
         <li
-          key={`${c.group}:${c.value}`}
+          key={`${c.group}:${c.value}:${c.mono ?? ""}`}
           className="bg-apollo-surface-2 border-apollo-border-strong inline-flex items-center gap-1.5 rounded-full border py-0.5 pr-1.5 pl-2.5 text-[13px]"
         >
           <span className="text-muted-foreground">{c.group}:</span>
           <span>{c.value}</span>
+          {c.mono && <span className="font-mono text-xs">{c.mono}</span>}
           {c.removeHref !== null && (
             <Link
               href={c.removeHref}
-              aria-label={`Remove ${c.group}: ${c.value}`}
+              aria-label={`Remove ${c.group}: ${c.value}${c.mono ? ` ${c.mono}` : ""}`}
               className="text-muted-foreground hover:text-foreground inline-grid size-4 place-items-center rounded-full"
             >
               <X size={12} aria-hidden />

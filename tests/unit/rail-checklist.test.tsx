@@ -49,6 +49,35 @@ describe("RailChecklist", () => {
     expect(within(list).getByText("Mentor A").closest("label")!.textContent).toBe("Mentor A12");
   });
 
+  it("an option with a title is a short name: dotted underline, the full name on hover or focus, still one labelled checkbox", () => {
+    const { container } = render(
+      <RailChecklist
+        name="body"
+        options={[
+          { value: "EXA", label: "EXA", title: "Example Agency (US)", count: 7 },
+          { value: "plain", label: "Plain option", count: 1 },
+        ]}
+        selected={[]}
+      />,
+    );
+    const q = within(container);
+    const abbr = container.querySelector("abbr")!;
+    expect(container.querySelectorAll("abbr")).toHaveLength(1);
+    expect(abbr.textContent).toBe("EXA");
+    expect(abbr.getAttribute("title")).toBe("Example Agency (US)");
+    expect(abbr.className).toContain("border-dotted");
+    expect(q.queryByRole("tooltip")).toBeNull();
+    fireEvent.focus(abbr);
+    expect(q.getByRole("tooltip").textContent).toBe("Example Agency (US)");
+    // The rail is narrow and clips: the tooltip wraps from the label's left edge.
+    expect(q.getByRole("tooltip").className).toContain("whitespace-normal");
+    expect(q.getByRole("tooltip").className).not.toContain("-translate-x-1/2");
+    expect(abbr.closest("label")!.textContent).toBe("EXAExample Agency (US)7");
+    fireEvent.blur(abbr);
+    expect(abbr.closest("label")!.textContent).toBe("EXA7");
+    expect(abbr.closest("label")!.querySelector("input")!.value).toBe("EXA");
+  });
+
   it("Show all / Show fewer toggles the cap", () => {
     const { list, shown } = renderList();
     fireEvent.click(within(list).getByRole("button", { name: "Show all 12" }));

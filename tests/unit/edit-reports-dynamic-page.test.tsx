@@ -108,6 +108,17 @@ vi.mock("@/lib/edit/mentored-publications-report", async (importOriginal) => {
     loadMentoredPublicationsReport: h.mockLoadMentoredReport,
   };
 });
+// Report 24's body hands back a `related` link (to report 25); its gate opens.
+vi.mock("@/lib/edit/policy-citations-report", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/edit/policy-citations-report")>()),
+  canViewPolicyCitationsReport: async () => true,
+}));
+vi.mock("@/components/edit/reports/policy-citations-body", () => ({
+  renderPolicyCitationsReport: async () => ({
+    related: <a href="/edit/reports/sister?unit=dept%3AN1">Sister report</a>,
+    main: <div data-testid="body-24" />,
+  }),
+}));
 vi.mock("@/lib/edit/honor-queue", () => ({
   isHonorsQueueTabVisible: () => false,
   countPendingHonors: vi.fn().mockResolvedValue(null),
@@ -159,6 +170,7 @@ vi.mock("@/components/ui/hover-tooltip", () => ({
 vi.mock("@/components/funding/expanded-grant", () => ({ LowerConfidenceBadge: () => null }));
 
 import EditReportPage, { generateMetadata } from "@/app/edit/reports/[report]/page";
+import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
 import { resolveSuspense } from "@/tests/util/resolve-suspense";
 
 const OWNER = { cwid: "owner01", isSuperuser: false, isCommsSteward: false };
@@ -366,6 +378,23 @@ describe("/edit/reports/[report] — the back link", () => {
     h.mockGetEditSession.mockResolvedValue(SUPERUSER);
     expect(renderBackHref(await page("mentors-and-mentees"))).toBe("/edit/reports");
   });
+
+  it("a body's related link sits on the back link's row, after it; a body without one adds nothing", async () => {
+    const tree = await page(REPORT_META_DEFAULTS["24"].slug, { unit: "dept:N1" });
+    expect(renderBackHref(tree)).toBe("/edit/reports");
+    const back = screen.getByText("← All reports");
+    const related = screen.getByRole("link", { name: "Sister report" });
+    expect(related.getAttribute("href")).toBe("/edit/reports/sister?unit=dept%3AN1");
+    expect(related.parentElement).toBe(back.parentElement);
+    expect(back.compareDocumentPosition(related) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Above the header, not in the body.
+    expect(related.compareDocumentPosition(screen.getByTestId("report-header")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    cleanup();
+    h.mockGetEditSession.mockResolvedValue(SUPERUSER);
+    render((await page("mentors-and-mentees")) as React.ReactElement);
+    expect(screen.getByText("← All reports").parentElement!.textContent).toBe("← All reports");
+  });
 });
 
 describe("/edit/reports/[report] — generateMetadata", () => {
@@ -418,7 +447,9 @@ describe("/edit/reports/[report] — Cornell Ithaca partner session", () => {
     expect(h.mockGetReportScopes).toHaveBeenCalledWith(PARTNER, "high-impact-publications");
     expect(h.mockListReportAccess).not.toHaveBeenCalled();
     expect(tree.type).toBe("main"); // not ConsoleShell
-    const back = tree.props.children.props.children[0] as React.ReactElement<{ href: string }>;
+    // The back link's row: the link, then the body's related link (none here).
+    const row = tree.props.children.props.children[0] as React.ReactElement<{ children: React.ReactElement[] }>;
+    const back = row.props.children[0] as React.ReactElement<{ href: string }>;
     expect(back.props.href).toBe("/edit/cornell");
   });
 

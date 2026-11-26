@@ -1,7 +1,9 @@
 /**
  * Report 25's page (`patent-citations-body.tsx`): the header sentence and
- * export note, the lag notice, the rail's two groups, the three tiles, the
- * assignee card and the year chart, the three tabs with counts, a By
+ * export note, the lag notice, the rail's two groups with the Assignee
+ * checklist open and counted, the table straight under the header (no tiles,
+ * no assignee card, no chart), the link to report 24, the three tabs with
+ * counts, a By
  * publication row and its expander (related patents, the no-assignee
  * fallback, a published application), the By invention and By person rows,
  * the pager, the sources line, and the flag backstop. The loaders are mocked;
@@ -17,6 +19,8 @@ const h = vi.hoisted(() => ({
   inventions: vi.fn(),
   personInventions: vi.fn(),
   scope: { value: null as string[] | null },
+  access: vi.fn(),
+  footers: new Map<string, ScholarCardFooter | undefined>(),
 }));
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
@@ -28,6 +32,10 @@ vi.mock("@/lib/api/data-quality", () => ({
     institutions: [],
   })),
 }));
+vi.mock("@/lib/edit/report-meta", async (actual) => ({
+  ...(await actual<typeof import("@/lib/edit/report-meta")>()),
+  reportMetaFor: async (key: string) => ({ key, slug: "policy-renamed", name: "Guideline and policy citations (renamed)" }),
+}));
 vi.mock("@/lib/edit/patent-citations-report", async (actual) => ({
   ...(await actual<typeof import("@/lib/edit/patent-citations-report")>()),
   resolvePatentCitationParams: async (p: object) => ({ ...p, scope: h.scope.value }),
@@ -36,8 +44,28 @@ vi.mock("@/lib/edit/patent-citations-report", async (actual) => ({
   withInventionDetails: h.inventions,
   loadPersonInventions: h.personInventions,
 }));
+vi.mock("@/lib/edit/policy-citations-report", async (actual) => ({
+  ...(await actual<typeof import("@/lib/edit/policy-citations-report")>()),
+  // The facet's names and no more: anyone ticked beyond it stays unnamed.
+  loadPersonNames: async (_p: object, known: { cwid: string; name: string }[]) =>
+    new Map(known.map((r) => [r.cwid, r.name])),
+}));
+vi.mock("@/lib/edit/bibliometrics-access", async (actual) => ({
+  ...(await actual<typeof import("@/lib/edit/bibliometrics-access")>()),
+  loadBibliometricsAccess: h.access,
+}));
+// The card opens on hover only; the mock keeps each person's footer for the tests to render.
+vi.mock("@/components/edit/scholar-hover-card", () => ({
+  ScholarHoverCard: (p: { cwid: string; children: ReactNode; footer?: ScholarCardFooter }) => {
+    h.footers.set(p.cwid, p.footer);
+    return p.children;
+  },
+}));
+
+import type { ReactNode } from "react";
 
 import { renderPatentCitationsReport } from "@/components/edit/reports/patent-citations-body";
+import type { ScholarCardFooter } from "@/components/edit/scholar-hover-card";
 import type {
   CitingInvention,
   InventionRow,
@@ -116,19 +144,14 @@ const PERSON: PatentPersonRow = {
 };
 const counts = (n: number) => Array.from({ length: n }, (_, i) => ({ pmid: String(10000001 + i), year: 2004, inventions: 1, latest: null }));
 const data = (over: Partial<PatentCitationData> = {}): PatentCitationData => ({
-  scope: { papers: 180000, people: 5400 },
   pubTotal: 24366,
   pubs: counts(120),
   inventionTotal: 68000,
   inventions: Array.from({ length: 70 }, (_, i) => ({ key: `k${i}`, docId: i + 1, year: 2019, application: false, docs: 1, papers: 1 })),
-  years: Array.from({ length: 10 }, (_, i) => ({ year: 2016 + i, count: 100 * (i + 1) })),
-  assignees: [
-    { name: "Example Biotech, Inc.", inventions: 630, papers: 514 },
-    { name: "Sample University", inventions: 120, papers: 200 },
-  ],
   assigneeOptions: [
-    { name: "Example Biotech, Inc.", inventions: 630, papers: 514 },
-    { name: "Sample University", inventions: 120, papers: 200 },
+    { name: "Example Biotech, Inc.", inventions: 630 },
+    { name: "Sample University", inventions: 120 },
+    ...Array.from({ length: 12 }, (_, i) => ({ name: `Invented Holdings ${i + 1}`, inventions: 100 - i })),
   ],
   peopleTotal: 2500,
   people: [PERSON],
@@ -143,12 +166,32 @@ async function page(query: Record<string, string | string[]> = {}) {
     <>
       <div data-testid="subtitle">{out.subtitle}</div>
       <div data-testid="aside">{out.aside}</div>
+      <div data-testid="related">{out.related}</div>
       {out.main}
     </>,
   );
 }
 
+
+/** A person's hover-card footer, as the page built it, rendered on its own. */
+function footerOf(cwid: string) {
+  const footer = h.footers.get(cwid);
+  expect(footer, `no card footer for ${cwid}`).toBeTruthy();
+  // Scoped to its own container: a test may render two people's footers.
+  return within(
+    render(
+      <div>
+        <div data-testid="action">{footer!.action}</div>
+        <div data-testid="link">{footer!.link}</div>
+      </div>,
+    ).container,
+  );
+}
+const queryOf = (href: string | null) => new URLSearchParams(href!.split("?")[1] ?? "");
+
 beforeEach(() => {
+  h.footers.clear();
+  h.access.mockReset().mockResolvedValue(new Set());
   vi.stubEnv("PATENT_CITATIONS_REPORT", "on");
   h.scope.value = null;
   h.citations.mockReset().mockResolvedValue(data());
@@ -253,30 +296,63 @@ describe("report 25 page", () => {
     }
   });
 
-  it("tiles: papers with their share of the scope, inventions, people out of the people in scope", async () => {
+  it("no summary block: no tiles, no assignee card, no chart; the results card follows the chips", async () => {
     const v = await page();
-    expect([...v.getByTestId("patent-citations-tiles").children].map((t) => t.textContent)).toEqual([
-      "Papers cited in a patent24,36613.5% of 180,000 papers in scope",
-      "Citing inventions68,000related patents counted once",
-      "People with a cited paper2,500of 5,400 in scope",
-    ]);
+    for (const id of ["patent-citations-tiles", "patent-citations-assignees", "patent-citations-years-chart"]) {
+      expect(v.queryByTestId(id), id).toBeNull();
+    }
+    expect(v.queryByRole("img")).toBeNull();
+    for (const gone of ["papers in scope", "By assignee", "Citing inventions by year granted"]) {
+      expect(v.container.textContent, gone).not.toContain(gone);
+    }
+    // A superuser with no filter has no chips: the card is the first thing under the header.
+    expect(v.queryByTestId("patent-citations-chips")).toBeNull();
+    cleanup();
+    const filtered = await page({ where: "front" });
+    const chips = filtered.getByTestId("patent-citations-chips");
+    expect(chips.nextElementSibling?.contains(filtered.getByRole("navigation", { name: "Report views" }))).toBe(true);
   });
 
-  it("the assignee card links each name to its filter; the chart reads its ten years aloud", async () => {
-    const v = await page();
-    const card = v.getByTestId("patent-citations-assignees");
-    const rows = within(card).getAllByRole("row").slice(1);
-    expect(rows.map((r) => r.textContent)).toEqual(["Example Biotech, Inc.630514", "Sample University120200"]);
-    expect(within(card).getByRole("link", { name: "Example Biotech, Inc." }).getAttribute("href")).toBe(
-      `${BASE}?assignee=Example+Biotech%2C+Inc.&basis=cy`,
+  it("the rail's Assignee checklist: open, the top names with their invention counts, the rest behind Show all", async () => {
+    const v = await page({ assignee: ["Invented Holdings 12", "Not Offered LLC"] });
+    const section = within(v.getAllByTestId("patent-citations-rail")[0]).getByTestId("patent-citations-assignee");
+    expect(section.hasAttribute("open")).toBe(true);
+    expect(section.querySelector('summary [data-slot="caret"]')?.getAttribute("class")).toContain("size-5");
+    const shown = [...section.querySelectorAll("li")].filter((li) => !li.hidden).map((li) => li.textContent);
+    // The ten with the most inventions, then whatever is ticked: one past the cut, one not offered at all.
+    expect(shown.slice(0, 3)).toEqual(["Example Biotech, Inc.630", "Sample University120", "Invented Holdings 1100"]);
+    expect(shown).toHaveLength(12);
+    expect(shown.slice(10)).toEqual(["Invented Holdings 1289", "Not Offered LLC0"]);
+    expect(section.textContent).toContain("Inventions");
+    expect(within(section).getByRole("button", { name: "Show all 15" })).toBeTruthy();
+    expect(section.textContent).toContain(
+      "The 14 assignees with the most citing inventions. Names are as USPTO records them, so one company can appear under several spellings.",
     );
-    expect(card.textContent).toContain("Top ten. Assignee names are as USPTO records them");
-    const chart = v.getByTestId("patent-citations-years-chart");
-    expect(within(chart).getByRole("heading").textContent).toBe("Citing inventions by year granted");
-    const label = within(chart).getByRole("img").getAttribute("aria-label")!;
-    expect(label).toContain("100 in 2016");
-    expect(label).toContain("1,000 in 2025");
-    expect(chart.textContent).toContain("The patent data ends at 31 December 2025.");
+  });
+
+  it("related: Guideline and policy citations beside All reports, by its current name and address, carrying the who-filters only", async () => {
+    const v = await page({
+      basis: "fy",
+      from: "2001",
+      cfrom: "2015",
+      where: "front",
+      assignee: "Example Biotech, Inc.",
+      unit: ["dept:N1", "center:C7"],
+      type: "full_time_faculty",
+      person: ["abc1001", "abc1002"],
+      pos: "last",
+      q: "kinase",
+      sort: "recent",
+    });
+    const related = v.getByTestId("patent-citations-related");
+    expect(related.textContent).toBe("· Related: Guideline and policy citations (renamed)");
+    const [path, query] = within(related).getByRole("link").getAttribute("href")!.split("?");
+    expect(path).toBe("/edit/reports/policy-renamed");
+    // The who-filters ride along; report 24 keeps its own defaults (its three types, 2020 or later) for the rest.
+    expect(query).toBe(
+      "type=full_time_faculty&unit=dept%3AN1&unit=center%3AC7&person=abc1001&person=abc1002&pos=last&level=authority&level=guideline&level=consensus&basis=cy&from=2020",
+    );
+    for (const gone of ["assignee", "where", "cfrom", "q=", "sort"]) expect(query, gone).not.toContain(gone);
   });
 
   it("tabs: three, with counts, the current one marked; fifty rows a page", async () => {
@@ -378,5 +454,80 @@ describe("report 25 page", () => {
     const v = await page({ basis: "cy", q: "nothing" });
     expect(v.getByText("No publications match the search.")).toBeTruthy();
     expect(v.getByTestId("patent-citations-pager").textContent).toContain("0 of 0");
+  });
+
+  it("person card: the name only opens the card; its button adds the person to those ticked and lands on By publication", async () => {
+    const v = await page({ basis: "cy", where: "front", sort: "recent", person: "abc1002", q: "sample" });
+    const pill = within(v.getByTestId("patent-citations-publications")).getByText("Example Person");
+    expect(pill.closest("a")).toBeNull();
+    expect(pill.closest("button")).toBeNull();
+    const f = footerOf("abc1001");
+    const button = within(f.getByTestId("action")).getByRole("link", { name: "Show only this person\u2019s papers" });
+    const q = queryOf(button.getAttribute("href"));
+    expect(button.getAttribute("href")!.split("?")[0]).toBe(BASE);
+    // Added to whoever was ticked (papers by either); the other filters, the sort and the search stay.
+    expect(q.getAll("person")).toEqual(["abc1002", "abc1001"]);
+    expect([q.get("where"), q.get("sort"), q.get("q"), q.get("view")]).toEqual(["front", "recent", "sample", null]);
+    expect(f.getByTestId("link").textContent).toBe("");
+    cleanup();
+
+    // From By person: back on By publication, the people search dropped.
+    await page({ basis: "cy", view: "people", q: "exam" });
+    const back = queryOf(within(footerOf("abc1001").getByTestId("action")).getByRole("link").getAttribute("href"));
+    expect(back.getAll("person")).toEqual(["abc1001"]);
+    expect([back.get("view"), back.get("q")]).toEqual([null, null]);
+  });
+
+  it("bibliometrics link, gate closed: asked once for the page's people, and offered for no one", async () => {
+    const second = { ...PUB, pmid: "10000002", authors: [...PUB.authors, { cwid: "abc1002", name: "Sample Author", position: "first" as const }] };
+    h.pubs.mockResolvedValue([PUB, second]);
+    const v = await page({ basis: "cy" });
+    expect(h.access).toHaveBeenCalledTimes(1);
+    expect(h.access.mock.calls[0][0]).toEqual(["abc1001", "abc1002"]);
+    expect(v.queryByText("Full bibliometrics report")).toBeNull();
+    expect(footerOf("abc1001").queryByText("Full bibliometrics report")).toBeNull();
+    cleanup();
+
+    // By invention names no one: nobody to ask about.
+    await page({ basis: "cy", view: "inventions" });
+    expect(h.access.mock.calls[1][0]).toEqual([]);
+  });
+
+  it("bibliometrics link, gate open for one person: on their card and their By person row, not the other's", async () => {
+    h.access.mockResolvedValue(new Set(["abc1001"]));
+    const other = { ...PERSON, cwid: "abc1002", name: "Sample Author" };
+    h.citations.mockResolvedValue(data({ people: [PERSON, other], facetPeople: [PERSON, other] }));
+    const v = await page({ basis: "cy", view: "people" });
+    expect(h.access).toHaveBeenCalledTimes(1);
+    expect(h.access.mock.calls[0][0]).toEqual(["abc1001", "abc1002"]);
+    const [mine, theirs] = v.getAllByTestId("patent-citations-person-row");
+    expect(within(mine).getByRole("link", { name: "Full bibliometrics report" }).getAttribute("href")).toBe(
+      "/edit/scholar/abc1001?attr=bibliometrics",
+    );
+    expect(within(theirs).queryByRole("link", { name: "Full bibliometrics report" })).toBeNull();
+    const f = footerOf("abc1001");
+    expect(within(f.getByTestId("link")).getByRole("link", { name: "Full bibliometrics report" }).getAttribute("href")).toBe(
+      "/edit/scholar/abc1001?attr=bibliometrics",
+    );
+    expect(footerOf("abc1002").getByTestId("link").textContent).toBe("");
+  });
+
+  it("chips: one removable chip per ticked person, by name; an unnamed CWID is marked and in mono", async () => {
+    const others = ["abc1002", "abc1003", "abc1004"].map((cwid, i) => ({ ...PERSON, cwid, name: `Sample Author ${i + 2}` }));
+    h.citations.mockResolvedValue(data({ facetPeople: [PERSON, ...others] }));
+    const v = await page({ basis: "cy", person: ["abc1001", "abc1002", "abc1003", "abc1004", "zzz9999"] });
+    const chips = within(v.getByTestId("patent-citations-chips"))
+      .getAllByRole("listitem")
+      .filter((li) => li.textContent!.startsWith("Person:"));
+    expect(chips.map((li) => li.textContent)).toEqual([
+      "Person:Example Person",
+      "Person:Sample Author 2",
+      "Person:Sample Author 3",
+      "Person:Sample Author 4",
+      "Person:Unknown personzzz9999",
+    ]);
+    const remove = queryOf(within(chips[0]).getByRole("link", { name: "Remove Person: Example Person" }).getAttribute("href"));
+    expect(remove.getAll("person")).toEqual(["abc1002", "abc1003", "abc1004", "zzz9999"]);
+    expect(within(chips[4]).getByText("zzz9999").className).toContain("font-mono");
   });
 });

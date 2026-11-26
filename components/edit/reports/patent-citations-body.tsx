@@ -3,8 +3,9 @@
  * 2026-11-26). Built from report 24's parts (`citation-report-parts.tsx`,
  * `report-ui.tsx`): the filter rail, the chips, the results card with its
  * three tabs, each with its own search or sort form and pages of
- * `PATENT_PAGE_SIZE`. Above the card: three tiles, the top assignees and
- * inventions per year. The export button rides the report header (`aside`).
+ * `PATENT_PAGE_SIZE`. The rail's Assignee checklist carries the invention
+ * counts. The export button rides the report header (`aside`), the link to
+ * report 24 the back-link row (`related`).
  *
  * Filters, search, sort, tab and page are the URL. The only client state is
  * which rows are open (`Disclosure`); what an open row shows is rendered
@@ -22,19 +23,19 @@ import { Download } from "lucide-react";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
 import {
   AuthorPills,
-  CARD,
-  CARD_TITLE,
   CitationRail,
   ExternalLink,
   LINK,
   LIST_HEAD,
   Pager,
   PersonCell,
+  personCardFooter,
   personFacetOptions,
   plural,
   PubMeta,
   RADIO,
   RADIO_INPUT,
+  RelatedReport,
   ReportTab,
   SearchField,
   SortSelect,
@@ -44,6 +45,7 @@ import {
   Toolbar,
   toSearchParams,
   YearRange,
+  type PersonFooter,
 } from "@/components/edit/reports/citation-report-parts";
 import { Disclosure } from "@/components/edit/reports/policy-citations-client";
 import { RailChecklist } from "@/components/edit/reports/rail-checklist";
@@ -52,6 +54,7 @@ import { PubTitle } from "@/components/publication/pub-html";
 import { Button } from "@/components/ui/button";
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { db } from "@/lib/db";
+import { bibliometricsHref, loadBibliometricsAccess } from "@/lib/edit/bibliometrics-access";
 import {
   INVENTION_SORT_LABEL,
   INVENTIONS_SHOWN,
@@ -60,7 +63,6 @@ import {
   loadPatentCitations,
   loadPersonInventions,
   parsePatentCitationParams,
-  PATENT_DATA_END,
   PATENT_INVENTIONS_CAP,
   PATENT_LAG_NOTICE,
   PATENT_LIST_CAP,
@@ -77,7 +79,6 @@ import {
   WHERE_LABEL,
   withInventionDetails,
   withPublicationDetails,
-  type AssigneeCount,
   type CitingInvention,
   type InventionRow,
   type InventionSort,
@@ -87,8 +88,15 @@ import {
   type PatentSort,
   type WhereCited,
 } from "@/lib/edit/patent-citations-report";
-import { fiscalLabel, yearSpan } from "@/lib/edit/policy-citations-report";
+import {
+  fiscalLabel,
+  loadPersonNames,
+  parsePolicyCitationParams,
+  policyCitationQueryString,
+  yearSpan,
+} from "@/lib/edit/policy-citations-report";
 import { unitLabels } from "@/lib/edit/person-filter";
+import { reportMetaFor } from "@/lib/edit/report-meta";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 import { cn } from "@/lib/utils";
 
@@ -98,98 +106,8 @@ const PUB_COLS = "grid grid-cols-[minmax(0,1fr)_100px_110px] gap-x-5 px-4";
 const INVENTION_COLS = "grid grid-cols-[minmax(0,1fr)_200px_90px_100px] gap-x-4 px-4";
 const EXPANDER = "col-span-full mt-2.5 min-h-9 justify-self-start";
 const MUTED = "text-muted-foreground text-[13px]";
-const BAR_PX = 110;
 
 const dot = (parts: (string | false | null)[]) => parts.filter(Boolean).join(" · ");
-
-function Tile({ label, value, note, testId }: { label: string; value: number; note: string; testId: string }) {
-  return (
-    <div className={cn(CARD, "px-4 py-3.5")} data-testid={testId}>
-      <span className="text-muted-foreground block text-[13px]">{label}</span>
-      <span className="block text-[28px] leading-[1.2] font-semibold tabular-nums">{value.toLocaleString()}</span>
-      <span className="text-muted-foreground block text-[13px]">{note}</span>
-    </div>
-  );
-}
-
-function AssigneeCard({ assignees, href }: { assignees: AssigneeCount[]; href: (name: string) => string }) {
-  return (
-    <div className={cn(CARD, "flex flex-col gap-2.5")} data-testid="patent-citations-assignees">
-      <h2 className={CARD_TITLE}>By assignee</h2>
-      {assignees.length === 0 ? (
-        <p className={MUTED}>No citing patent names an assignee.</p>
-      ) : (
-        <table className="w-full border-collapse tabular-nums">
-          <thead>
-            <tr className="text-muted-foreground text-left text-xs">
-              <th className="pb-1.5 font-normal">Assignee</th>
-              <th className="w-20 pb-1.5 text-right font-normal">Inventions</th>
-              <th className="w-[60px] pb-1.5 text-right font-normal">Papers</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assignees.map((a) => (
-              <tr key={a.name} className="align-top">
-                <td className="py-[5px] pr-3">
-                  <Link href={href(a.name)} className={LINK}>
-                    {a.name}
-                  </Link>
-                </td>
-                <td className="py-[5px] text-right">{a.inventions.toLocaleString()}</td>
-                <td className="py-[5px] text-right">{a.papers.toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <p className="text-muted-foreground text-xs">
-        Top ten. Assignee names are as USPTO records them, so one company can appear under several
-        spellings.
-      </p>
-    </div>
-  );
-}
-
-function YearChart({ years }: { years: { year: number; count: number }[] }) {
-  const max = Math.max(1, ...years.map((b) => b.count));
-  return (
-    <div className={cn(CARD, "flex flex-col")} data-testid="patent-citations-years-chart">
-      <h2 className={CARD_TITLE}>Citing inventions by year granted</h2>
-      <div
-        role="img"
-        aria-label={`Citing inventions by year granted: ${years
-          .map((b) => `${b.count.toLocaleString()} in ${b.year}`)
-          .join(", ")}`}
-        className="border-apollo-border-strong mt-3.5 flex h-[150px] items-end gap-0.5 border-b"
-      >
-        {years.map((b) => (
-          <div
-            key={b.year}
-            title={`${b.year}: ${plural(b.count, "invention", "inventions")}`}
-            className="flex flex-1 flex-col items-center gap-1"
-          >
-            <span className="text-muted-foreground text-xs tabular-nums">{b.count.toLocaleString()}</span>
-            <div
-              className="bg-apollo-slate w-[70%] max-w-11 rounded-t"
-              style={{ height: `${Math.round((b.count / max) * BAR_PX)}px` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="text-muted-foreground mt-1 flex gap-0.5 text-xs" aria-hidden>
-        {years.map((b) => (
-          <span key={b.year} className="flex-1 text-center">
-            {b.year}
-          </span>
-        ))}
-      </div>
-      <p className="text-muted-foreground mt-2 text-xs">
-        The patent data ends at {PATENT_DATA_END.label}. An invention with no granted patent yet is counted in
-        the year its application was published.
-      </p>
-    </div>
-  );
-}
 
 /** One citing invention under a publication: the patent that stands for it. */
 function InventionEntry({ d }: { d: CitingInvention }) {
@@ -211,7 +129,7 @@ function InventionEntry({ d }: { d: CitingInvention }) {
   );
 }
 
-function PublicationList({ pubs }: { pubs: PatentPubRow[] }) {
+function PublicationList({ pubs, footer }: { pubs: PatentPubRow[]; footer: PersonFooter }) {
   return (
     <div className="overflow-x-auto">
       <div className="min-w-[620px]" data-testid="patent-citations-publications">
@@ -233,7 +151,7 @@ function PublicationList({ pubs }: { pubs: PatentPubRow[] }) {
               <div className="text-muted-foreground mt-0.5 leading-normal">
                 <PubMeta pub={r} copy />
               </div>
-              <AuthorPills authors={r.authors} />
+              <AuthorPills authors={r.authors} footer={footer} />
             </div>
             <span className="text-right tabular-nums">{r.inventions.toLocaleString()}</span>
             <span className="text-right tabular-nums">{r.latest ?? "–"}</span>
@@ -324,10 +242,15 @@ function PeopleTable({
   people,
   inventions,
   papersHref,
+  footer,
+  bibliometrics,
 }: {
   people: PatentPersonRow[];
   inventions: ReadonlyMap<string, number>;
   papersHref: (cwid: string) => string;
+  footer: PersonFooter;
+  /** A person's Bibliometrics link, null when the viewer may not open it. */
+  bibliometrics: (cwid: string) => string | null;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -345,7 +268,7 @@ function PeopleTable({
         <tbody>
           {people.map((r) => (
             <tr key={r.cwid} className="border-apollo-border border-b" data-testid="patent-citations-person-row">
-              <PersonCell cwid={r.cwid} name={r.name} />
+              <PersonCell cwid={r.cwid} name={r.name} footer={footer} bibliometrics={bibliometrics(r.cwid)} />
               <td className={TD}>{r.orgUnit}</td>
               <td className={TD}>{r.personType}</td>
               <td className={TD}>{r.institution}</td>
@@ -377,7 +300,12 @@ export async function renderPatentCitationsReport({
   if (params.scope !== null && params.scope.length === 0) notFound();
   const { view } = params;
   const offset = (params.page - 1) * PATENT_PAGE_SIZE;
-  const [facets, data] = await Promise.all([loadDataQualityFacets(db.read), loadPatentCitations(params)]);
+  const [facets, data, policy] = await Promise.all([
+    loadDataQualityFacets(db.read),
+    loadPatentCitations(params),
+    // Report 24, for the link beside "All reports".
+    reportMetaFor("24"),
+  ]);
   const onPage = <T,>(rows: readonly T[]) => rows.slice(offset, offset + PATENT_PAGE_SIZE);
   // Details for this page's rows only; each loader tests the scope again.
   const people = view === "people" ? onPage(data.people) : [];
@@ -389,10 +317,29 @@ export async function renderPatentCitationsReport({
       people.map((r) => r.cwid),
     ),
   ]);
+  const [names, mayOpenBibliometrics] = await Promise.all([
+    loadPersonNames(params, data.facetPeople),
+    // One decision for everyone named on this page, not one per pill or row.
+    loadBibliometricsAccess(
+      view === "people" ? people.map((r) => r.cwid) : [...new Set(pubs.flatMap((r) => r.authors.map((a) => a.cwid)))],
+    ),
+  ]);
   const labels = unitLabels(facets);
-  const chips = patentCitationChips(params, labels, new Map(data.facetPeople.map((r) => [r.cwid, r.name])));
+  const chips = patentCitationChips(params, labels, names);
   const href = (q: string) => `${basePath}?${q}`;
   const qs = (over: Partial<PatentCitationParams> = {}) => href(patentCitationQueryString(params, over));
+  const bibliometrics = (cwid: string) => (mayOpenBibliometrics.has(cwid) ? bibliometricsHref(cwid) : null);
+  // The card's button adds the person to whoever is already ticked (papers by
+  // any of them) and lands on By publication; a search typed on another tab is dropped.
+  const personFooter: PersonFooter = (cwid) =>
+    personCardFooter(
+      qs({
+        view: "publications",
+        q: view === "publications" ? params.q : "",
+        people: [...new Set([...params.people, cwid])],
+      }),
+      bibliometrics(cwid),
+    );
   const resetHref = isPatentCitationDefault(params) ? null : view === "publications" ? basePath : href(`view=${view}`);
   const patentYear = yearSpan(params.cfrom, params.cto);
   const assigneeOptions = [
@@ -433,19 +380,24 @@ export async function renderPatentCitationsReport({
                 what="patent year"
               />
             </RailSection>
-            <RailSection label="Assignee" summary={summarize(params.assignees)} testId="patent-citations-assignee">
+            <RailSection
+              label="Assignee"
+              summary={summarize(params.assignees)}
+              defaultOpen
+              testId="patent-citations-assignee"
+            >
               <RailChecklist
                 name="assignee"
                 roomy
                 options={assigneeOptions}
                 selected={params.assignees}
                 searchPlaceholder="Search assignees…"
-                collapseAfter={8}
+                collapseAfter={10}
                 countLabel="Inventions"
               />
               <span className="text-muted-foreground text-xs">
-                The {data.assigneeOptions.length.toLocaleString()} assignees with the most citing inventions, as
-                USPTO spells them.
+                The {data.assigneeOptions.length.toLocaleString()} assignees with the most citing inventions.
+                Names are as USPTO records them, so one company can appear under several spellings.
               </span>
             </RailSection>
             <RailSection label="Where cited" summary={WHERE_LABEL[params.where]} testId="patent-citations-where">
@@ -472,6 +424,7 @@ export async function renderPatentCitationsReport({
         params.people,
         data.facetPeople.slice(0, FACET_PEOPLE),
         (r) => r.papers,
+        names,
       )}
       personNote={`The ${FACET_PEOPLE} people with the most papers cited in a patent. Anyone else: open them from the By person tab.`}
     />
@@ -502,8 +455,6 @@ export async function renderPatentCitationsReport({
     </p>
   );
   const published = yearSpan(params.from, params.to, fiscalLabel(params));
-  const share =
-    data.scope.papers > 0 ? `${((data.pubTotal / data.scope.papers) * 100).toFixed(1)}% of` : "No";
   const cut = (sheet: string, total: number, cap: number) =>
     total > cap && `${sheet} lists the first ${cap.toLocaleString()} of ${total.toLocaleString()}`;
   const overCap = [
@@ -512,6 +463,17 @@ export async function renderPatentCitationsReport({
   ];
 
   return {
+    // The who-filters both reports share ride along; report 24 keeps its own defaults for the rest.
+    related: (
+      <RelatedReport
+        name={policy.name}
+        href={`/edit/reports/${policy.slug}?${policyCitationQueryString(
+          parsePolicyCitationParams(new URLSearchParams()),
+          { types: params.types, units: params.units, people: params.people, positions: params.positions },
+        )}`}
+        testId="patent-citations-related"
+      />
+    ),
     subtitle: (
       <p className="text-muted-foreground text-sm" data-testid="patent-citations-subtitle">
         <strong className="text-foreground font-semibold">{plural(data.pubTotal, "paper", "papers")}</strong> cited
@@ -560,42 +522,15 @@ export async function renderPatentCitationsReport({
                 {rail}
               </FiltersSheet>
             </div>
-            <section
-              aria-label="Totals"
-              className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3"
-              data-testid="patent-citations-tiles"
-            >
-              <Tile
-                label="Papers cited in a patent"
-                value={data.pubTotal}
-                note={`${share} ${data.scope.papers.toLocaleString()} papers in scope`}
-                testId="patent-citations-tile-papers"
-              />
-              <Tile
-                label="Citing inventions"
-                value={data.inventionTotal}
-                note="related patents counted once"
-                testId="patent-citations-tile-inventions"
-              />
-              <Tile
-                label="People with a cited paper"
-                value={data.peopleTotal}
-                note={`of ${data.scope.people.toLocaleString()} in scope`}
-                testId="patent-citations-tile-people"
-              />
-            </section>
             <FilterChips
               chips={chips.map((c) => ({
                 group: c.group,
                 value: c.value,
+                mono: c.mono,
                 removeHref: c.removeQuery === null ? null : href(c.removeQuery),
               }))}
               testId="patent-citations-chips"
             />
-            <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3">
-              <AssigneeCard assignees={data.assignees} href={(name) => qs({ assignees: [name] })} />
-              <YearChart years={data.years} />
-            </section>
             <ReportCard className="overflow-hidden p-0 sm:p-0">
               <nav className="border-apollo-border flex flex-wrap gap-x-5 gap-y-1 border-b px-4" aria-label="Report views">
                 {tab("publications", `By publication (${data.pubTotal.toLocaleString()})`)}
@@ -611,7 +546,7 @@ export async function renderPatentCitationsReport({
                       <SortSelect<PatentSort> name="sort" value={params.sort} options={PATENT_SORT_LABEL} />
                     </>,
                   )}
-                  <PublicationList pubs={pubs} />
+                  <PublicationList pubs={pubs} footer={personFooter} />
                   {data.pubs.length === 0 && none("publications")}
                   {pager(data.pubs.length)}
                 </>
@@ -646,6 +581,8 @@ export async function renderPatentCitationsReport({
                     people={people}
                     inventions={personInventions}
                     papersHref={(cwid) => qs({ view: "publications", sort: "inventions", q: "", people: [cwid] })}
+                    footer={personFooter}
+                    bibliometrics={bibliometrics}
                   />
                   {data.people.length === 0 && none("people")}
                   {pager(data.people.length)}

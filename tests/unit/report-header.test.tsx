@@ -136,6 +136,24 @@ describe("ReportHeader", () => {
     );
   });
 
+  it("Edit details sits beside the access badge in the heading row, not in the right-hand column with the body's controls", async () => {
+    const q = await renderHeader({
+      n: "3",
+      session: SUPERUSER,
+      access: { mode: "unit" },
+      aside: <button data-testid="export">Export</button>,
+    });
+    const sheet = q.getByTestId("details-sheet");
+    const wrap = q.getByTestId("report-header-access");
+    expect(sheet.parentElement).toBe(q.getByRole("heading", { level: 1 }).parentElement);
+    expect(wrap.nextElementSibling).toBe(sheet);
+    expect(q.getByTestId("export").parentElement!.contains(sheet)).toBe(false);
+
+    // Under a core's header the badge rides the eyebrow row, and the link with it.
+    const core = await renderHeader({ n: "11", session: SUPERUSER, access: { mode: "unit" }, underCoreHeader: true });
+    expect(core.getByTestId("report-header-access").nextElementSibling).toBe(core.getByTestId("details-sheet"));
+  });
+
   it("a comms steward managing a row-granted report → the sheet for access only; the request record is never read", async () => {
     const q = await renderHeader({ n: "9", session: PLAIN, access: PERSON_ACCESS });
     expect(q.getByTestId("details-sheet").getAttribute("data-edit-meta")).toBe("false");

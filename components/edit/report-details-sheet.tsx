@@ -27,7 +27,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Lock, Pencil } from "lucide-react";
+import { Lock } from "lucide-react";
 
 import { DirectoryPeopleTypeahead, type DirectoryValue } from "@/components/edit/directory-people-typeahead";
 import { OverviewEditor } from "@/components/edit/overview-editor";
@@ -175,16 +175,15 @@ export function ReportDetailsSheet({ n, meta, canEditMeta, request, access }: Re
 
   return (
     <>
-      <Button
+      {/* A small text link beside the access badge, not a header button. */}
+      <button
         type="button"
-        variant="outline"
-        size="sm"
         onClick={openSheet}
+        className="text-apollo-slate text-xs hover:underline"
         data-testid="report-details-edit"
       >
-        <Pencil size={14} aria-hidden />
         {canEditMeta ? "Edit details" : "Manage access"}
-      </Button>
+      </button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="right"
