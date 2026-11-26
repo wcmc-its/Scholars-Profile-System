@@ -951,12 +951,20 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "TRIAL_CITATIONS_MODAL",
+                "Value": "off",
+              },
+              {
+                "Name": "PATENT_CITATIONS_MODAL",
+                "Value": "off",
+              },
+              {
                 "Name": "EDIT_PROGRAM_ROSTER",
                 "Value": "on",
               },
               {
                 "Name": "METHOD_SERVICES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_BIBLIOMETRICS",
@@ -6218,6 +6226,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "POLICY_CITATION_BADGES",
+                "Value": "on",
+              },
+              {
+                "Name": "TRIAL_CITATIONS_MODAL",
+                "Value": "on",
+              },
+              {
+                "Name": "PATENT_CITATIONS_MODAL",
                 "Value": "on",
               },
               {

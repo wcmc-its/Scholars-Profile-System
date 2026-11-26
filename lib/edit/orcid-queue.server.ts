@@ -24,16 +24,20 @@ import { loadSelectedDivisionRosterCwids, personFilterWhere } from "@/lib/edit/p
 import { formatPublishedName } from "@/lib/postnominal";
 
 import {
+  bulkBylinePapers,
+  bulkRoutes,
   compareCandidates,
   EMPTY_ORCID_QUEUE_FILTER,
   isIthacaBulkSource,
   isOrcidCandidateSource,
   isReciterWorkStatus,
+  ORCID_BULK_MIN_SHARED,
   ORCID_QUEUE_BANDS,
   ORCID_UNDO_WINDOW_MS,
   pairState,
   type OrcidCandidateSource,
   type OrcidBulkBlocker,
+  type OrcidBulkRule,
   type OrcidBylineContests,
   type OrcidBylineDetail,
   type OrcidEvidenceDetail,
@@ -137,6 +141,7 @@ type OpenPair = {
   newWorks: number;
   nameAgrees: boolean;
   competitor: boolean;
+  instMatch: boolean;
   state: "queue" | "conflict";
   onFile: string | null;
 };
@@ -210,6 +215,7 @@ async function loadQueueState(
       newWorks: true,
       nameAgrees: true,
       competitor: true,
+      instMatch: true,
     },
   });
   const cwids = [...new Set(all.map((r) => r.cwid))];
@@ -261,6 +267,7 @@ async function loadQueueState(
       newWorks: r.newWorks,
       nameAgrees: r.nameAgrees,
       competitor: r.competitor,
+      instMatch: r.instMatch,
       state,
       onFile: state === "conflict" ? onFile : null,
     });
@@ -292,7 +299,7 @@ type WriteMeta = {
   /** v3 B2: the iD was confirmed for this other scholar (belongs_to_other). */
   otherCwid?: string;
   /** A bulk confirm: the rule the librarian set, recorded on each confirm. */
-  bulkRule?: Record<string, number>;
+  bulkRule?: Record<string, number | boolean | string>;
 };
 
 /** The `orcid_dismissal` who/why columns for a dismissal made with `meta`. */
@@ -530,20 +537,29 @@ export async function dismissOthers(
  * campuses: nothing on file and no dismissal of any kind; Strong, the only open
  * candidate, no competitor (flag or lists), name agrees; an iD that no other
  * scholar holds or is a candidate for. Then per campus:
- *  - WCM (active): the rest of `etl:bulk-confirm-strong`'s verified rule
- *    (etl/bulk-confirm-strong/sql/orcid.sql): >= 3 shared works, institution
- *    match, a ReCiter read with zero rejected works, no rejected RPM pair.
+ *  - WCM (active): one of two routes (`bulkRoutes`): the ORCID record, i.e.
+ *    `etl:bulk-confirm-strong`'s verified rule (etl/bulk-confirm-strong/sql/orcid.sql:
+ *    >= 3 shared works and an institution match), or the bylines (the iD printed on
+ *    2 or more of the scholar's accepted papers with nothing contesting it, in
+ *    PubMed or Crossref, read from the stored `evidence_detail.byline`:
+ *    `bulkBylinePapers`). Either way: a ReCiter read with
+ *    zero rejected works, no rejected RPM pair.
  *  - Cornell Ithaca (external): a Cornell Affiliation Manager or web-page pair
  *    (`isIthacaBulkSource`), or an email-verified one. Ithaca rows
  *    have no SPS publications, so the work checks can't apply; their iDs are
  *    never pushed to Identity.
  * Anything else is refused (`not_bulk_eligible`) and stays in the queue.
+ * `rule` loosens one WCM check, and only when the request says so:
+ * `allowMultiple` takes the scholar's best open iD when they have several. A
+ * name that does not agree is always refused.
  */
+type BulkFloorRule = Pick<OrcidBulkRule, "allowMultiple">;
 export async function assertBulkConfirmable(
   tx: Tx,
   pair: { cwid: string; orcid: string },
+  rule: BulkFloorRule = {},
 ): Promise<void> {
-  const refused = (await bulkConfirmableMany(tx, [pair])).get(`${pair.cwid}|${pair.orcid}`);
+  const refused = (await bulkConfirmableMany(tx, [pair], rule)).get(`${pair.cwid}|${pair.orcid}`);
   if (refused) throw refused;
 }
 
@@ -555,6 +571,7 @@ export async function assertBulkConfirmable(
 export async function bulkConfirmableMany(
   tx: Tx,
   pairs: ReadonlyArray<{ cwid: string; orcid: string }>,
+  rule: BulkFloorRule = {},
 ): Promise<Map<string, OrcidQueueRefused | null>> {
   const cwids = [...new Set(pairs.map((p) => p.cwid))];
   const orcids = [...new Set(pairs.map((p) => p.orcid))];
@@ -604,6 +621,8 @@ export async function bulkConfirmableMany(
   const heldOrcids = new Set(holders.map((h) => h.orcid));
   const candidatesBy = group(candidates, (r) => `${r.cwid}|${r.orcid}`);
   const emptyList = (v: unknown) => !Array.isArray(v) || v.length === 0;
+  // The list's order (`pairsByScholar`), so "best" is the iD Bulk review shows.
+  const byBest = compareCandidates as (a: (typeof evidence)[0], b: (typeof evidence)[0]) => number;
   const notEligible = (blocker?: OrcidBulkBlocker) =>
     new OrcidQueueRefused(409, "not_bulk_eligible", blocker);
 
@@ -624,7 +643,11 @@ export async function bulkConfirmableMany(
     if (mine.band !== "strong" && !ithacaEmail) return notEligible("band");
     if (scholar.orcid !== null) return notEligible("on_file");
     if (dismissed.size > 0) return notEligible("decided");
-    if (open.length !== 1) return notEligible("multiple");
+    if (
+      open.length !== 1 &&
+      !(wcm && rule.allowMultiple && [...open].sort(byBest)[0]!.orcid === pair.orcid)
+    )
+      return notEligible("multiple");
     if (
       mine.competitor ||
       !emptyList(mine.competitorCwids) ||
@@ -633,13 +656,18 @@ export async function bulkConfirmableMany(
       return notEligible("competitor");
     if (!mine.nameAgrees) return notEligible("name");
     if (wcm) {
-      const work = (
-        mine.evidenceDetail as {
-          workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
-        } | null
-      )?.workStatus;
-      if (mine.shared < 3) return notEligible("shared");
-      if (!mine.instMatch) return notEligible("institution");
+      const detail = mine.evidenceDetail as {
+        workStatus?: { reciterRead?: unknown; counts?: { rejected?: unknown } };
+        byline?: unknown;
+      } | null;
+      const work = detail?.workStatus;
+      const routes = bulkRoutes({
+        shared: mine.shared,
+        instMatch: mine.instMatch,
+        bylinePapers: bulkBylinePapers(asByline(detail?.byline)),
+      });
+      if (!routes.record && !routes.byline)
+        return notEligible(mine.shared < ORCID_BULK_MIN_SHARED ? "shared" : "institution");
       if (work?.reciterRead !== true) return notEligible("reciter_unread");
       if (Number(work.counts?.rejected ?? 0) !== 0) return notEligible("reciter_rejected");
     }
@@ -870,7 +898,7 @@ const publishedName = (s: ScholarRow | undefined, cwid: string) =>
 type CardPair = Pick<
   OpenPair,
   "orcid" | "band" | "shared" | "worksTotal" | "nameAgrees" | "competitor" | "onFile"
-> & { state: OrcidQueueRow["state"]; newWorks?: number };
+> & { state: OrcidQueueRow["state"]; newWorks?: number; instMatch?: boolean };
 
 function pairsByScholar(
   st: QueueState,
@@ -913,10 +941,13 @@ const loadAutoConfirmed = (client: ReadClient, cwid?: string) =>
  * v3: every scholar in the queue under `filter`, as list summaries. A scholar
  * is in when any of their pairs passes the filter; their summary still carries
  * every pair, so the score and "Clearest winner" read the full set.
+ * `bylines: false` skips the byline read (`evidence_detail`, the table's
+ * heaviest column) for a caller that only counts scholars.
  */
 export async function loadOrcidQueue(
   client: Client,
   filter: OrcidQueueFilter = EMPTY_ORCID_QUEUE_FILTER,
+  { bylines = true }: { bylines?: boolean } = {},
 ): Promise<OrcidQueueData> {
   const [st, autoConfirmed] = await Promise.all([
     loadQueueState(client, filter),
@@ -930,8 +961,13 @@ export async function loadOrcidQueue(
     ps.some((p) => pairInFilter(st, cwid, p.orcid)),
   );
   // v3 B2: decisions (every dismissal, every librarian confirm), so a scholar
-  // with nothing left open still lists under the Decision filter.
-  const [dismissals, librarian] = await Promise.all([
+  // with nothing left open still lists under the Decision filter. And Bulk
+  // review's byline route: the stored byline facts of the Strong pairs of the
+  // scholars listed (not every Strong row in the table).
+  const strongCwids = bylines
+    ? inQueue.filter(([, ps]) => ps.some((p) => p.band === "strong")).map(([cwid]) => cwid)
+    : [];
+  const [dismissals, librarian, strong] = await Promise.all([
     client.orcidDismissal.findMany({
       select: { cwid: true, dismissedBy: true, dismissedAt: true },
     }),
@@ -944,7 +980,19 @@ export async function loadOrcidQueue(
       },
       select: { cwid: true, orcidConfirmedAt: true },
     }),
+    strongCwids.length > 0
+      ? client.orcidCandidateEvidence.findMany({
+          where: { band: "strong", cwid: { in: strongCwids } },
+          select: { cwid: true, orcid: true, evidenceDetail: true },
+        })
+      : [],
   ]);
+  const bylinePapers = new Map(
+    strong.map((r) => [
+      pairKey(r.cwid, r.orcid),
+      bulkBylinePapers(asByline((r.evidenceDetail as { byline?: unknown } | null)?.byline)),
+    ]),
+  );
   const decided = new Map<
     string,
     { byScholar: boolean; byStaff: boolean; librarian: boolean; at: string | null }
@@ -1003,7 +1051,7 @@ export async function loadOrcidQueue(
       surname: (s?.fullName ?? cwid).trim().split(/\s+/).pop()!.toLowerCase(),
       department: s?.primaryDepartment ?? null,
       candidates: ps.map(
-        ({ orcid, band, shared, worksTotal, newWorks, nameAgrees, competitor }) => ({
+        ({ orcid, band, shared, worksTotal, newWorks, nameAgrees, competitor, instMatch }) => ({
           orcid,
           band,
           shared,
@@ -1012,6 +1060,10 @@ export async function loadOrcidQueue(
           nameAgrees,
           competitor,
           sources: st.sources.get(pairKey(cwid, orcid)) ?? [],
+          ...(instMatch !== undefined ? { instMatch } : {}),
+          ...(bylinePapers.get(pairKey(cwid, orcid))
+            ? { bylinePapers: bylinePapers.get(pairKey(cwid, orcid)) }
+            : {}),
         }),
       ),
       conflict: ps.some((p) => p.state === "conflict"),
@@ -1058,7 +1110,7 @@ let pendingInFlight: Promise<number> | null = null;
 export async function countOrcidQueueUnassigned(client: Client): Promise<number | null> {
   const now = Date.now();
   if (pendingMemo && now - pendingMemo.at < ORCID_PENDING_TTL_MS) return pendingMemo.value;
-  const p = (pendingInFlight ??= loadOrcidQueue(client).then(
+  const p = (pendingInFlight ??= loadOrcidQueue(client, undefined, { bylines: false }).then(
     (d) => d.summaries.filter((s) => !s.autoConfirmed && s.candidates.length > 0).length,
   ));
   try {

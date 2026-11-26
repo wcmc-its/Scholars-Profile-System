@@ -29,6 +29,8 @@ const h = vi.hoisted(() => {
       reciterRead?: boolean;
       rejected?: number;
       competitorCwids?: string[];
+      /** `evidence_detail.byline` (absent = an earlier run's row). */
+      byline?: Record<string, unknown>;
     }>,
     /** `orcid_candidate` pairs with articles_rejected > 0 (`cwid|orcid`). */
     rpmRejected: new Set<string>(),
@@ -98,6 +100,7 @@ const h = vi.hoisted(() => {
                   reciterRead: r.reciterRead ?? true,
                   counts: { rejected: r.rejected ?? 0 },
                 },
+                ...(r.byline ? { byline: r.byline } : {}),
               },
             })),
       ),
@@ -796,7 +799,148 @@ describe("v2: confirm one iD, dismiss the scholar's others in the same action", 
 });
 
 describe("bulk-confirm", () => {
-  const RULE = { minShared: 5, maxOnlyOrcid: 1, minSources: 2 };
+  const RULE = { minShared: 5, maxOnlyOrcid: 1 };
+  const BYLINE = { papers: [], total: 2, rejected: 0, otherHolders: [], otherIds: [] };
+  const blockerOf = async (rule: Record<string, unknown> = RULE, dryRun = false) => {
+    const res = await bulkConfirm(
+      req({ pairs: [{ cwid: "jd0001", orcid: ORCID }], rule, ...(dryRun ? { dryRun } : {}) }),
+    );
+    const r = ((await res.json()) as { results: Array<{ ok: boolean; blocker?: string }> })
+      .results[0]!;
+    return r.ok ? null : r.blocker;
+  };
+
+  it.each([
+    ["2 shared works", { shared: 2 }],
+    ["no institution match", { instMatch: false }],
+  ])("byline route: confirms a Strong pair with %s when 2 accepted papers print the iD", async (_, extra) => {
+    h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong", ...extra, byline: BYLINE }];
+    expect(await blockerOf(RULE, true)).toBeNull();
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    expect(await blockerOf()).toBeNull();
+    expect(h.state.scholars.get("jd0001")).toMatchObject({
+      orcid: ORCID,
+      orcidConfirmMethod: "librarian",
+    });
+  });
+
+  it.each([
+    ["one byline paper", { total: 1 }, "shared"],
+    ["a rejected paper that prints the iD", { rejected: 1 }, "shared"],
+    ["another holder of the iD on a byline", { otherHolders: ["zz0009"] }, "shared"],
+    ["a second iD on the scholar's bylines", { otherIds: [OTHER] }, "shared"],
+    [
+      "a rejected paper only Crossref prints it on",
+      { uncountedContests: { rejected: 1, otherHolders: [], otherIds: [] } },
+      "shared",
+    ],
+    [
+      "another holder only Crossref shows",
+      { uncountedContests: { rejected: 0, otherHolders: ["zz0009"], otherIds: [] } },
+      "shared",
+    ],
+    ["a byline shape we do not know", { papers: undefined }, "shared"],
+  ])("byline route: %s does not pass the floor", async (_, over, blocker) => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong", shared: 2, byline: { ...BYLINE, ...over } },
+    ];
+    expect(await blockerOf()).toBe(blocker);
+    expect(await blockerOf(RULE, true)).toBe(blocker);
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("byline route: a failed record route with an institution match missing says so", async () => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong", instMatch: false, byline: { ...BYLINE, total: 1 } },
+    ];
+    expect(await blockerOf()).toBe("institution");
+  });
+
+  it("byline route: the other floor blockers still block", async () => {
+    const pair = { cwid: "jd0001", orcid: ORCID, band: "strong", shared: 2, byline: BYLINE };
+    h.state.evidence = [{ ...pair, rejected: 1 }];
+    expect(await blockerOf()).toBe("reciter_rejected");
+    h.state.evidence = [{ ...pair, reciterRead: false }];
+    expect(await blockerOf()).toBe("reciter_unread");
+    h.state.evidence = [{ ...pair, competitorCwids: ["xx0009"] }];
+    expect(await blockerOf()).toBe("competitor");
+    // The iD is a candidate for another scholar, then on file for one.
+    h.state.evidence = [pair, { cwid: "zz0002", orcid: ORCID, band: "weak" }];
+    expect(await blockerOf()).toBe("other_scholar");
+    h.state.evidence = [pair];
+    h.state.scholars.set("zz0002", { orcid: ORCID, orcidConfirmMethod: "self" });
+    expect(await blockerOf()).toBe("other_scholar");
+    h.state.scholars.delete("zz0002");
+    h.state.rpmRejected = new Set([`jd0001|${ORCID}`]);
+    expect(await blockerOf()).toBe("reciter_rejected");
+    h.state.rpmRejected = new Set();
+    h.state.scholars.set("jd0001", { orcid: OTHER, orcidConfirmMethod: "self" });
+    expect(await blockerOf()).toBe("on_file");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("byline route: never for Cornell Ithaca, whose floor is unchanged", async () => {
+    // Made up, with a valid check digit.
+    const ITH = "0000-0000-0000-0028";
+    h.state.evidence = [{ cwid: "it0001", orcid: ITH, band: "strong", byline: BYLINE }];
+    h.state.scholars = new Map([
+      ["it0001", { orcid: null, orcidConfirmMethod: null, campus: "ithaca", status: "external" }],
+    ]);
+    const one = async (rule: Record<string, unknown>) => {
+      const res = await bulkConfirm(req({ pairs: [{ cwid: "it0001", orcid: ITH }], rule }));
+      return ((await res.json()) as { results: Array<{ blocker?: string }> }).results[0]!.blocker;
+    };
+    expect(await one(RULE)).toBe("ithaca_source");
+    // The WCM flag loosens nothing for Ithaca.
+    h.state.sources = [{ cwid: "it0001", orcid: ITH, source: "web_page_seed" }];
+    h.state.evidence = [
+      { cwid: "it0001", orcid: ITH, band: "strong", nameAgrees: false },
+      { cwid: "it0001", orcid: OTHER, band: "weak" },
+    ];
+    expect(await one({ ...RULE, allowMultiple: true })).toBe("multiple");
+    h.state.evidence = [{ cwid: "it0001", orcid: ITH, band: "strong", nameAgrees: false }];
+    expect(await one({ ...RULE, allowMultiple: true })).toBe("name");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("takes a scholar's best iD of several only when the rule says so; never a differing name", async () => {
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "jd0001", orcid: OTHER, band: "weak" },
+    ];
+    expect(await blockerOf()).toBe("multiple");
+    expect(await blockerOf({ ...RULE, allowMultiple: false })).toBe("multiple");
+    // Not the best of the scholar's iDs: refused even when several are allowed.
+    const res = await bulkConfirm(
+      req({ pairs: [{ cwid: "jd0001", orcid: OTHER }], rule: { ...RULE, allowMultiple: true } }),
+    );
+    expect(((await res.json()) as { results: Array<{ ok: boolean }> }).results[0]!.ok).toBe(false);
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    h.state.evidence = [{ cwid: "jd0001", orcid: ORCID, band: "strong", nameAgrees: false }];
+    expect(await blockerOf()).toBe("name");
+    expect(await blockerOf({ ...RULE, allowMultiple: true })).toBe("name");
+    // A retired flag from an old client is an unknown key: ignored, so still refused.
+    expect(await blockerOf({ ...RULE, allowNameDiffers: true })).toBe("name");
+    expect(await blockerOf({ ...RULE, allowNameDiffers: true }, true)).toBe("name");
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+    h.state.evidence = [
+      { cwid: "jd0001", orcid: ORCID, band: "strong" },
+      { cwid: "jd0001", orcid: OTHER, band: "weak" },
+    ];
+    const rule = { ...RULE, allowMultiple: true, passesBy: "either" };
+    expect(await blockerOf(rule)).toBeNull();
+    expect(h.state.scholars.get("jd0001")).toMatchObject({ orcid: ORCID });
+    expect(audits().at(-1)).toMatchObject({ afterValues: { bulk: true, bulk_rule: rule } });
+  });
+
+  it("400 on a rule flag that is not a boolean, or an unknown Passes by", async () => {
+    for (const extra of [{ allowMultiple: "yes" }, { passesBy: "name" }])
+      expect(
+        (await bulkConfirm(req({ pairs: [{ cwid: "jd0001", orcid: ORCID }], rule: { ...RULE, ...extra } })))
+          .status,
+      ).toBe(400);
+    expect(h.scholarUpdateMany).not.toHaveBeenCalled();
+  });
 
   it("confirms each pair with confirmPair's write, the rule on each audit row; refuses what no longer qualifies", async () => {
     h.state.evidence = [

@@ -2070,6 +2070,15 @@ export class AppStack extends Stack {
         // tables the weekly `etl:policy-citations` step fills. On in staging
         // 2026-11-25; on in prod the same day, after the prod backfill.
         POLICY_CITATION_BADGES: "on",
+        // TRIAL_CITATIONS_MODAL / PATENT_CITATIONS_MODAL -- the two groups of the
+        // publication modal's "Trials and patents" section (registered trials
+        // from `etl:policy-citations`; US patents from
+        // `etl:patent-citations:import`). Render-only; each is === "on", and
+        // with both off the detail payload and the modal are unchanged.
+        // Staging on; prod off until the owner has reviewed the section there.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        TRIAL_CITATIONS_MODAL: envConfig.envName === "staging" ? "on" : "off",
+        PATENT_CITATIONS_MODAL: envConfig.envName === "staging" ? "on" : "off",
         // Internal program roster (trainees and mentors, some of them minors).
         //   EDIT_PROGRAM_ROSTER -- the page, its API and the
         //     `program_roster_editor` role; off = 404 and no directory check.
@@ -2088,7 +2097,7 @@ export class AppStack extends Stack {
         // routes 404. Editor only: no public page reads the table yet.
         // Staging on; prod off until the public method-page half ships.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        METHOD_SERVICES: envConfig.envName === "staging" ? "on" : "off",
+        METHOD_SERVICES: "on",
         // EDIT_BIBLIOMETRICS -- the per-scholar "Bibliometrics" tab on /edit
         // and GET /api/edit/bibliometrics (the report and its Word download),
         // read via isBibliometricsEnabled() (=== "on"); off = no rail item and
