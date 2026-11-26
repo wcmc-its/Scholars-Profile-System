@@ -959,6 +959,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "EDIT_BIBLIOMETRICS",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/program-roster-editor-role",
               },
@@ -6218,6 +6222,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHOD_SERVICES",
+                "Value": "on",
+              },
+              {
+                "Name": "EDIT_BIBLIOMETRICS",
                 "Value": "on",
               },
               {

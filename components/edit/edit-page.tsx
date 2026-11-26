@@ -72,6 +72,7 @@ import { isReciterRejectEnabled } from "@/lib/reciter/client";
 import { GrantRecsCard } from "@/components/edit/grant-recs-card";
 import { BiosketchTool } from "@/components/edit/biosketch-tool";
 import { CvTool } from "@/components/edit/cv-tool";
+import { BibliometricsTool } from "@/components/edit/bibliometrics-tool";
 import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prompt-versions";
 import { DEFAULT_GENERATE_MODEL } from "@/lib/llm/models";
 
@@ -100,6 +101,7 @@ type AttrKey =
   | "grant-recs"
   | "biosketch"
   | "cv"
+  | "bibliometrics"
   | "appointments"
   | "honors"
   | "identifiers-profiles"
@@ -186,6 +188,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // `authorizeOverviewWrite`), so a delegate can generate it on the scholar's
   // behalf. Grouped with the other Tools. Rail item appears only when the flag is on.
   { key: "cv", label: "CV (WCM format)", modes: ["self", "superuser"] },
+  // Bibliometrics (EDIT_BIBLIOMETRICS) — a read-only report calculated from the
+  // scholar's publications, with a Word download. Same audience as the CV
+  // export (`authorizeCvExport`). Rail item appears only when the flag is on.
+  { key: "bibliometrics", label: "Bibliometrics", modes: ["self", "superuser"] },
   { key: "appointments", label: "Positions & appointments", modes: ["self", "superuser"] },
   // Honors & distinctions (#1760) — a sibling of Appointments, NOT a sub-card of it.
   // An honor is its own content type with its own profile section; it is not an
@@ -288,7 +294,9 @@ function isReadOnlyMode(mode: EditMode): boolean {
  * since downloading a CV doesn't change the profile either.
  */
 function isContentInert(mode: EditMode, activeKey: AttrKey): boolean {
-  return mode === "read-only" && activeKey !== "cv";
+  // "bibliometrics" joins it for the same reason: the panel only reads, and its
+  // "More" toggles and Word download must stay usable for an observer.
+  return mode === "read-only" && activeKey !== "cv" && activeKey !== "bibliometrics";
 }
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
@@ -376,6 +384,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "biosketch",
   "grant-recs",
   "cv",
+  "bibliometrics",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   home: "owned",
@@ -399,6 +408,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   "grant-recs": "service",
   biosketch: "service",
   cv: "service",
+  bibliometrics: "service",
   appointments: "sourced",
   // Honors (#1760) — "owned", NOT "sourced": no WCM feed writes this table. Every
   // row is entered by the scholar or a curator on /edit. (Appointments is
@@ -462,6 +472,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "biosketch",
   "grant-recs",
   "cv",
+  "bibliometrics",
   "visibility",
   "proxy-editors",
   "profile-url",
@@ -494,6 +505,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   biosketch: { group: "Tools" },
   "grant-recs": { group: "Tools" },
   cv: { group: "Tools" },
+  bibliometrics: { group: "Tools" },
   visibility: { group: "Settings" },
   "proxy-editors": { group: "Settings" },
   "profile-url": { group: "Settings" },
@@ -546,6 +558,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "grant-recs",
   "biosketch",
   "cv",
+  "bibliometrics",
   "appointments",
   "honors",
   "identifiers-profiles",
@@ -653,6 +666,9 @@ export type EditPageProps = {
    *  (self, superuser, comms-steward, proxy, unit-admin — the shared
    *  `authorizeOverviewWrite`). */
   cvEnabled?: boolean;
+  /** `EDIT_BIBLIOMETRICS`: whether the "Bibliometrics" Tools rail item + panel
+   *  surface. Computed by the server page (env flag), like cvEnabled. */
+  bibliometricsEnabled?: boolean;
   /** `SELF_EDIT_RAIL_RESTRUCTURE`: when on, the self / proxy / unit-admin rail
    *  uses the restructured layout (floating Home, content-only "Yours to edit",
    *  "From WCM records" with Identity/Records sub-headers, "Tools", and a
@@ -685,6 +701,7 @@ export function visibleAttrKeys(
   profileLinksEnabled = false,
   // Last on purpose: callers and tests pass these positionally.
   hasMediaHighlights = false,
+  bibliometricsEnabled = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -711,6 +728,8 @@ export function visibleAttrKeys(
       // every-authorized-actor gate as biosketch (`attrsForMode` keeps "cv" for all
       // five surfaces), so the flag is the only remaining filter.
       .filter((a) => a.key !== "cv" || cvEnabled)
+      // EDIT_BIBLIOMETRICS — same every-authorized-actor gate as "cv".
+      .filter((a) => a.key !== "bibliometrics" || bibliometricsEnabled)
       // The "From your publications" item only exists when there are candidates to
       // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
       // candidates canonicalizes away (the page redirects to bare /edit) rather
@@ -772,6 +791,7 @@ export function EditPage({
   grantRecsFeedbackEnabled = false,
   biosketchEnabled = false,
   cvEnabled = false,
+  bibliometricsEnabled = false,
   railRestructureEnabled = false,
 }: EditPageProps) {
   // "From your publications" is conditionally present: self OR superuser, and only
@@ -846,6 +866,7 @@ export function EditPage({
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
     .filter((a) => a.key !== "cv" || showCv)
+    .filter((a) => a.key !== "bibliometrics" || bibliometricsEnabled)
     .filter((a) => a.key !== "technologies" || hasTechnologies)
     .filter((a) => a.key !== "news" || hasNews)
     .filter((a) => a.key !== "media-highlights" || hasMediaHighlights)
@@ -1239,6 +1260,10 @@ function renderPanel(
           model={BIOSKETCH_EFFECTIVE_MODEL}
         />
       );
+    case "bibliometrics":
+      // EDIT_BIBLIOMETRICS — the read-only report; the client island fetches
+      // GET /api/edit/bibliometrics for the resolved cwid.
+      return <BibliometricsTool entityId={cwid} />;
     case "home": {
       const hiddenPublications = ctx.publications.filter((p) => p.state !== "shown").length;
       const isHidden =

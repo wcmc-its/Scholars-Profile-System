@@ -44,3 +44,22 @@ export function authorityBadgeLabel(body: string, count: number): string {
 export function plural(n: number, one: string, many: string): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
+
+/** "Ghany MG, Morgan TR, et al. Hepatology. 2020;71(2):686-721." */
+export function policyDocCitation(d: {
+  publisher: string | null;
+  authors: string | null;
+  journal: string | null;
+  year: number | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+}): string {
+  if (d.publisher) return d.publisher;
+  const locator = [d.volume, d.issue ? `(${d.issue})` : "", d.pages ? `:${d.pages}` : ""].join("");
+  const dated = [d.year, locator].filter(Boolean).join(";");
+  return [d.authors, d.journal, dated]
+    .filter(Boolean)
+    .map((part) => `${String(part).replace(/\.$/, "")}.`)
+    .join(" ");
+}

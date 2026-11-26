@@ -55,6 +55,7 @@ import { DASHBOARD_HREF, DASHBOARDS, UNGRANTABLE_DASHBOARDS } from "@/lib/edit/f
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
+import { isBibliometricsEnabled } from "@/lib/edit/bibliometrics";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { countPendingHonors } from "@/lib/edit/honor-queue";
 import {
@@ -306,6 +307,8 @@ export default async function EditSelfPage({
     // Media highlights is valid only when the scholar has ≥1 approved clip (the
     // loader gates the array on MEDIA_HIGHLIGHTS_SECTION). Last positional arg.
     ctx.mediaHighlights.length > 0,
+    // EDIT_BIBLIOMETRICS — the "Bibliometrics" Tools item. Last positional arg.
+    isBibliometricsEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
@@ -500,6 +503,7 @@ export default async function EditSelfPage({
       grantRecsFeedbackEnabled={grantRecsFeedbackEnabled}
       biosketchEnabled={biosketchEnabled}
       cvEnabled={cvEnabled}
+      bibliometricsEnabled={isBibliometricsEnabled()}
       railRestructureEnabled={railRestructureEnabled}
     />
   );

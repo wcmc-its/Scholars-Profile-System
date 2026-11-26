@@ -20,6 +20,7 @@ import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { translationalStageDisplay } from "@/lib/translational-stage";
 import type { PolicyCitingDoc } from "@/lib/api/publication-detail";
+import { policyDocCitation } from "@/lib/citations/policy-rollup";
 import type {
   PublicationDetailCore,
   PublicationDetailMethodFamily,
@@ -1216,17 +1217,6 @@ function IdentifiersLine({
   );
 }
 
-/** "Ghany MG, Morgan TR, et al. Hepatology. 2020;71(2):686-721." */
-function policyDocCitation(d: PolicyCitingDoc): string {
-  if (d.publisher) return d.publisher;
-  const locator = [d.volume, d.issue ? `(${d.issue})` : "", d.pages ? `:${d.pages}` : ""].join("");
-  const dated = [d.year, locator].filter(Boolean).join(";");
-  return [d.authors, d.journal, dated]
-    .filter(Boolean)
-    .map((part) => `${String(part).replace(/\.$/, "")}.`)
-    .join(" ");
-}
-
 function PolicyDoc({ doc }: { doc: PolicyCitingDoc }) {
   const citation = policyDocCitation(doc);
   return (
@@ -1289,13 +1279,32 @@ const POLICY_GROUPS = [
 ] as const;
 
 function PolicySection({ docs, reviewTotal }: { docs: PolicyCitingDoc[]; reviewTotal: number }) {
+  return (
+    <section data-sec="policy" className="flex flex-col gap-3.5 pt-7">
+      <SectionHeading>Guidelines and policy</SectionHeading>
+      <PolicyCitationGroups docs={docs} reviewTotal={reviewTotal} />
+      <p className="text-muted-foreground text-xs leading-normal">
+        Sources: PubMed, NIH iCite and NCBI Bookshelf. Covers documents those sources index, so
+        some citing guidelines and reports are not listed.
+      </p>
+    </section>
+  );
+}
+
+/** The four groups of citing documents. Shared with the `/edit` Bibliometrics tab. */
+export function PolicyCitationGroups({
+  docs,
+  reviewTotal,
+}: {
+  docs: PolicyCitingDoc[];
+  reviewTotal: number;
+}) {
   const [showReviews, setShowReviews] = useState(false);
   const authority = docs.filter((d) => d.level === "authority");
   const reviews = docs.filter((d) => d.level === "review");
   const count = (n: number) => <span className="text-muted-foreground font-normal"> · {n}</span>;
   return (
-    <section data-sec="policy" className="flex flex-col gap-3.5 pt-7">
-      <SectionHeading>Guidelines and policy</SectionHeading>
+    <>
       {authority.length > 0 ? (
         <div className="flex flex-col gap-2.5 rounded-[10px] border border-[#d5e0ec] bg-[#ecf1f6] p-4 dark:border-zinc-700 dark:bg-zinc-800">
           <div className="flex items-center gap-[7px] text-sm font-semibold text-[#274158] dark:text-zinc-100">
@@ -1356,11 +1365,7 @@ function PolicySection({ docs, reviewTotal }: { docs: PolicyCitingDoc[]; reviewT
           ) : null}
         </div>
       ) : null}
-      <p className="text-muted-foreground text-xs leading-normal">
-        Sources: PubMed, NIH iCite and NCBI Bookshelf. Covers documents those sources index, so
-        some citing guidelines and reports are not listed.
-      </p>
-    </section>
+    </>
   );
 }
 
