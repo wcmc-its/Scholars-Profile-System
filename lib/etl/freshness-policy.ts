@@ -531,6 +531,7 @@ export const UNSCHEDULED: Readonly<Record<string, string>> = {
   MeSH: "hand-run descriptor load (etl:mesh)",
   "iLab-Import": "hand-run quarterly import (etl:ilab:import)",
   "RCR-Import": "hand-run bridge import (etl:reciter-rcr:import)",
+  "PatentCitations-Import": "hand-run per dataset release (etl:patent-citations:import)",
   ReciterRefresh: "operator-run scanner; see etl/reciter-refresh/index.ts",
   FamilyReview: "hand-run (etl:family-review)",
 };
