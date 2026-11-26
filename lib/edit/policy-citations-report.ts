@@ -21,10 +21,10 @@
  *     `DEFAULT_FROM`.
  *   - `body`, `cfrom` / `cto`, `excl` (hide excluded-study citations) pick
  *     which citing documents are counted, in every number on the page.
- *   - `level` picks which publications, citing documents and people are
- *     LISTED (one with a counted document at a ticked level); the counts and
- *     the tiles still cover all four levels. A bare URL lists the three above
- *     reviews.
+ *   - `level` (the rail's "Type") picks which publications, citing documents
+ *     and people are LISTED (one with a counted document at a ticked level);
+ *     the counts, the rail's included, still cover all four levels. A bare URL
+ *     lists the three above reviews.
  *   - `view`, `sort`, `dsort`, `q` (the tab's search) and `page` are view
  *     state, not filters.
  *
@@ -65,9 +65,8 @@ export const LEVEL_ONE: Record<Level, string> = {
 };
 
 /** What a bare URL lists: everything above systematic reviews. */
-/** The levels with few enough links to list and chart by citing document. */
+/** The levels with few enough links to list by citing document. */
 export const DOC_LEVELS = ["authority", "guideline", "consensus"] as const;
-export type DocLevel = (typeof DOC_LEVELS)[number];
 const DEFAULT_LEVELS: readonly Level[] = DOC_LEVELS;
 /** What a bare URL starts at: publications from this calendar year on. */
 export const DEFAULT_FROM = 2020;
@@ -94,7 +93,7 @@ export const POSITION_LABEL = {
 export type Position = keyof typeof POSITION_LABEL;
 
 export const SORT_LABEL = {
-  ranked: "Highest level, most distinct documents",
+  ranked: "Health authorities first, then most documents",
   guidelines: "Most guidelines",
   recent: "Most recently cited",
   year: "Publication year",
@@ -466,14 +465,15 @@ export function listedAt<T extends LevelCounts>(rows: readonly T[], levels: read
   return rows.filter((r) => want.some((l) => r[l] > 0));
 }
 
-/** Papers cited at each level, one tile per level. */
-export function policyTiles(rows: readonly LevelCounts[]): LevelCounts {
+/** Papers cited at each level: the counts on the rail's Type checklist. */
+export function papersByLevel(rows: readonly LevelCounts[]): LevelCounts {
   const n = (l: Level) => rows.filter((r) => r[l] > 0).length;
   return { authority: n("authority"), guideline: n("guideline"), consensus: n("consensus"), review: n("review") };
 }
 
 /** One row per cited publication in scope, every level, unsorted: fetched
- *  once, and both the tiles and the listed rows are derived from it in Node
+ *  once, and both the rail's Type counts and the listed rows are derived from
+ *  it in Node
  *  (at most about 81,000 small rows) rather than by two passes over `x`.
  *
  *  `STRAIGHT_JOIN` pins the order as written: the cited publications, then
@@ -851,7 +851,7 @@ export function howCited(editions: readonly { locations: readonly { label: strin
 }
 
 // ---------------------------------------------------------------------------
-// By citing document, and the two summary cards
+// By citing document, and the rail's issuing-body counts
 // ---------------------------------------------------------------------------
 
 /** One citation of a publication in scope by a document at one of
@@ -867,8 +867,8 @@ export type DocLink = {
   pmid: string;
 };
 
-/** Every such link, ungrouped: the By citing document tab, the chart and the
- *  issuing-body card are all folded from it in Node. Driven from the
+/** Every such link, ungrouped: the By citing document tab and the rail's
+ *  issuing-body counts are both folded from it in Node. Driven from the
  *  documents (`citing_document` is indexed on `level`, the links on
  *  `citing_document_id`), the who clause behind an `EXISTS`: the shape the
  *  guideline chart already had (2.0 s on staging, 2026-11-25, against 14.8 s
@@ -960,36 +960,22 @@ export function sortDocGroups(groups: readonly DocGroup[], sort: DocSort): DocGr
   return [...groups].sort((a, b) => lead[sort](a, b) || recent(a, b));
 }
 
-export type PolicySummary = {
-  /** Authority documents (editions grouped) and the papers they cite, per
-   *  issuing body, most documents first. */
-  bodies: { body: string; documents: number; papers: number }[];
-  /** Citing documents per citing-document year, ascending, per charted
-   *  level. Each edition counts in its own year. */
-  years: Record<DocLevel, { year: number; count: number }[]>;
-};
+/** One issuing body's count on the rail's checklist. */
+export type BodyPapers = { body: string; papers: number };
 
-export function policySummary(groups: readonly DocGroup[]): PolicySummary {
-  const bodies = new Map<string, { documents: number; pmids: Set<string> }>();
-  const years = new Map<Level, Map<number, number>>(DOC_LEVELS.map((l) => [l, new Map()]));
-  for (const g of groups) {
-    if (g.level === "authority" && g.body) {
-      const b = bodies.get(g.body) ?? { documents: 0, pmids: new Set<string>() };
-      bodies.set(g.body, b);
-      b.documents += 1;
-      for (const pmid of g.pmids) b.pmids.add(pmid);
-    }
-    const byYear = years.get(g.level);
-    for (const d of g.docs) if (byYear && d.year !== null) byYear.set(d.year, (byYear.get(d.year) ?? 0) + 1);
+/** The distinct papers in scope each issuing body's documents cite, most
+ *  first. Papers, not documents, so editions need no grouping. */
+export function bodyPaperCounts(links: readonly DocLink[]): BodyPapers[] {
+  const pmids = new Map<string, Set<string>>();
+  for (const l of links) {
+    if (l.level !== "authority" || !l.issuingBody) continue;
+    const set = pmids.get(l.issuingBody) ?? new Set<string>();
+    pmids.set(l.issuingBody, set);
+    set.add(l.pmid);
   }
-  const series = (l: Level) =>
-    [...(years.get(l) ?? [])].map(([year, count]) => ({ year, count })).sort((a, b) => a.year - b.year);
-  return {
-    bodies: [...bodies]
-      .map(([body, b]) => ({ body, documents: b.documents, papers: b.pmids.size }))
-      .sort((a, b) => b.documents - a.documents || a.body.localeCompare(b.body)),
-    years: { authority: series("authority"), guideline: series("guideline"), consensus: series("consensus") },
-  };
+  return [...pmids]
+    .map(([body, set]) => ({ body, papers: set.size }))
+    .sort((a, b) => b.papers - a.papers || a.body.localeCompare(b.body));
 }
 
 /** Papers listed under one citing document on the page; the row's count is
@@ -1042,23 +1028,33 @@ async function withDocDetails(p: PolicyCitationParams, groups: DocGroup[]): Prom
 }
 
 export type PolicyDocuments = {
-  summary: PolicySummary;
+  /** The rail's Issuing body counts: papers per body under every other
+   *  filter, whichever bodies are ticked. */
+  bodyPapers: BodyPapers[];
   /** Documents listed (at a ticked level; reviews never). */
   docTotal: number;
   /** One page of them, in the chosen order; empty off the documents tab. */
   docs: DocRow[];
 };
 
-/** Page only: the By citing document tab and the summary cards, from one
- *  pass over the links. The cards cover every charted level whatever `level`
- *  lists, like the tiles. */
+/** Page only: the By citing document tab and the rail's Issuing body counts,
+ *  from one pass over the links. The pass leaves the issuing-body filter out,
+ *  so the counts do not collapse to the bodies already ticked (a facet does
+ *  not count its own selection); the tab applies that filter here instead,
+ *  as `docSql` would have (a document with no issuing body is not listed
+ *  under one). No query of its own for the counts: this is the pass the tab
+ *  already made. */
 export async function loadPolicyDocuments(p: PolicyCitationParams): Promise<PolicyDocuments> {
-  const groups = groupDocLinks(await loadDocLinks(p));
+  const links = await loadDocLinks({ ...p, bodies: [] });
+  const picked =
+    p.bodies.length === 0
+      ? links
+      : links.filter((l) => l.issuingBody !== null && p.bodies.includes(l.issuingBody));
   const want = p.levels.length > 0 ? p.levels : LEVELS;
-  const listed = sortDocGroups(groups.filter((g) => want.includes(g.level)), p.docSort);
+  const listed = sortDocGroups(groupDocLinks(picked).filter((g) => want.includes(g.level)), p.docSort);
   const offset = (p.page - 1) * POLICY_PAGE_SIZE;
   return {
-    summary: policySummary(groups),
+    bodyPapers: bodyPaperCounts(links),
     docTotal: listed.length,
     docs: p.view === "documents" ? await withDocDetails(p, listed.slice(offset, offset + POLICY_PAGE_SIZE)) : [],
   };
@@ -1171,12 +1167,13 @@ export async function loadCitationPairs(
 export const POLICY_LIST_CAP = 5000;
 
 export type PolicyCitationData = {
-  /** Cited publications in scope, at any level. */
-  cited: number;
-  /** Over every cited publication in scope, whatever `level` lists. */
-  tiles: LevelCounts;
+  /** The rail's Type counts: papers cited at each level, over every cited
+   *  publication in scope, whatever `level` lists. */
+  levelPapers: LevelCounts;
   /** Publications listed (a counted document at a ticked level). */
   pubTotal: number;
+  /** `pubTotal` were systematic reviews listed too (the header's aside). */
+  withReviews: number;
   /** Those the search keeps (`pubTotal` without one): what the pages run over. */
   pubMatched: number;
   /** `limit` of them from `offset`, in the chosen order. */
@@ -1205,9 +1202,9 @@ export async function loadPolicyCitations(
   const picked = p.people.length > 0 ? everyone.filter((r) => p.people.includes(r.cwid)) : everyone;
   const needle = p.view === "people" ? p.q.toLowerCase() : "";
   return {
-    cited: counts.length,
-    tiles: policyTiles(counts),
+    levelPapers: papersByLevel(counts),
     pubTotal: listed.length,
+    withReviews: p.levels.length > 0 ? listedAt(counts, [...p.levels, "review"]).length : listed.length,
     pubMatched: matched.length,
     pubs: await withDetails(p, matched.slice(offset, offset + limit)),
     people: listedAt(picked, p.levels).filter(
@@ -1231,7 +1228,40 @@ export function yearSpan(lo: number | null, hi: number | null, label: (y: number
 export const fiscalLabel = (p: Pick<PolicyCitationParams, "basis">) => (y: number) =>
   p.basis === "fy" ? `FY${y}` : String(y);
 
-export type PolicyChip = { group: string; value: string; removeQuery: string | null };
+export type PolicyChip = {
+  group: string;
+  value: string;
+  /** A CWID shown after the value, in monospace (a person with no name to show). */
+  mono?: string;
+  removeQuery: string | null;
+};
+
+/** A ticked `person` no name resolves for (not a scholar, or outside the viewer's units). */
+export const UNKNOWN_PERSON = "Unknown person";
+
+/**
+ * A name for every ticked person, for the chips and the rail. `known` is the
+ * Person facet (everyone with something to count under the other filters);
+ * anyone ticked beyond it (no cited paper in these years, say) is read from
+ * `scholar`, inside the viewer's units like every other query here. No query
+ * when the facet already names everyone.
+ */
+export async function loadPersonNames(
+  p: Pick<WhoParams, "people" | "scope">,
+  known: readonly { cwid: string; name: string }[],
+): Promise<Map<string, string>> {
+  const names = new Map(known.map((r) => [r.cwid, r.name]));
+  const missing = p.people.filter((c) => !names.has(c));
+  if (missing.length === 0) return names;
+  const rows = await db.read.$queryRaw<{ cwid: string; preferred_name: string }[]>`
+    SELECT s.cwid, s.preferred_name
+      FROM scholar s
+     WHERE s.cwid IN (${Prisma.join(missing)})
+       AND s.deleted_at IS NULL
+       ${viewerScopeSql(p)}`;
+  for (const r of rows) names.set(r.cwid, r.preferred_name);
+  return names;
+}
 
 /** One facet's chips: one per value up to three, else one "N selected" chip
  *  that clears the facet. `without` is the query string with only the kept
@@ -1276,7 +1306,17 @@ export function whoChips(
     );
   }
   chips.push(
-    ...facetChips("Person", p.people, (c) => personName.get(c) ?? c, (keep) => qs({ people: p.people.filter(keep) })),
+    // One chip per person however many are ticked (papers by any of them), each
+    // by name: a CWID is never the name, so an unresolved one says so beside it.
+    ...p.people.map((c): PolicyChip => {
+      const name = personName.get(c);
+      return {
+        group: "Person",
+        value: name ?? UNKNOWN_PERSON,
+        ...(name === undefined ? { mono: c } : {}),
+        removeQuery: qs({ people: p.people.filter((x) => x !== c) }),
+      };
+    }),
     ...facetChips("Author", p.positions, (k) => POSITION_LABEL[k], (keep) => qs({ positions: p.positions.filter(keep) })),
   );
   return chips;
@@ -1291,7 +1331,7 @@ export function policyCitationChips(
   const qs = (next: Partial<PolicyCitationParams>) => policyCitationQueryString(p, next);
   const chips = whoChips(p, qs, unitLabel, personName);
   chips.push(
-    ...facetChips("Level", p.levels, (l) => LEVEL_LABEL[l], (keep) => qs({ levels: p.levels.filter(keep) })),
+    ...facetChips("Citing document type", p.levels, (l) => LEVEL_LABEL[l], (keep) => qs({ levels: p.levels.filter(keep) })),
     ...facetChips("Issuing body", p.bodies, bodyLabel, (keep) => qs({ bodies: p.bodies.filter(keep) })),
   );
   if (p.hideExcluded) {
@@ -1349,9 +1389,9 @@ export function describePolicyCitationCriteria(
     ["Generated", generatedAt.toISOString()],
     ...whoCriteria(p, labels),
     [
-      "Level",
+      "Citing document type",
       p.levels.length > 0
-        ? `${list(p.levels.map((l) => LEVEL_LABEL[l]))} (lists the publications and people cited at these levels; the counts cover every level)`
+        ? `${list(p.levels.map((l) => LEVEL_LABEL[l]))} (lists the publications and people cited by these types of document; the counts cover every type)`
         : "All",
     ],
     ["Issuing body", list(p.bodies.map(bodyLabel))],
@@ -1435,7 +1475,7 @@ export async function buildPolicyCitationWorkbook(
   pairs.addRow([
     "PMID",
     "Paper title",
-    "Level",
+    "Citing document type",
     "Issuing body",
     "Citing document",
     "Authors",
@@ -1476,7 +1516,7 @@ export async function buildPolicyCitationWorkbook(
     ],
     [
       "Citations sheet",
-      `One row per publication on the Publications sheet and citing document, at the levels above. ${
+      `One row per publication on the Publications sheet and citing document, of the types above. ${
         citations.more
           ? `Lists the first ${POLICY_CITATIONS_CAP.toLocaleString()} rows, health authorities first and systematic reviews last. Narrow the filters to list the rest.`
           : `Lists all ${citations.rows.length.toLocaleString()} rows (the limit is ${POLICY_CITATIONS_CAP.toLocaleString()}).`

@@ -33,7 +33,9 @@ import {
 } from "@/lib/edit/proxy-authz";
 import {
   resolveEditableUnitViaUnitAdmin,
+  scholarsEditableViaUnitAdmin,
   type EditableUnit,
+  type UnitScholarBatchLookup,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
 
@@ -118,4 +120,66 @@ export async function authorizeCvExport(args: {
     if (await isObserver(args.realCwid)) return { ok: true, viaUnitAdminUnit: null };
   }
   return authz;
+}
+
+/** What {@link cvExportAllowedAmong} reads: the proxy grants of one person
+ *  among a set of scholars, and the unit-admin batch surface. */
+export type CvExportBatchLookup = UnitScholarBatchLookup & {
+  scholarProxy: {
+    findMany: (args: {
+      where: { proxyCwid: string; scholarCwid: { in: string[] } };
+      select: { scholarCwid: true };
+    }) => Promise<Array<{ scholarCwid: string }>>;
+  };
+};
+
+/**
+ * {@link authorizeCvExport} for MANY scholars at once: which of `entityIds`
+ * it would allow. For a page that decides, per row, whether to offer a link
+ * to a CV-export surface (the Bibliometrics report). A fixed handful of
+ * reads, however many scholars. It only decides what to SHOW: the surface
+ * behind the link still runs `authorizeCvExport` on the one scholar.
+ *
+ * Same legs, same order: self, superuser, comms steward or content editor;
+ * a granted proxy (a superuser proxy is a conflict and does not fall through
+ * to the unit leg); an org-unit owner or curator; then, outside "View as",
+ * the observer role, which allows everyone the earlier legs refused.
+ * `tests/unit/cv-export-batch.test.ts` holds the two to the same answers.
+ */
+export async function cvExportAllowedAmong(args: {
+  session: EditSession;
+  realCwid: string;
+  impersonatedCwid: string | null;
+  entityIds: readonly string[];
+  db: CvExportBatchLookup;
+}): Promise<Set<string>> {
+  const { session, realCwid, impersonatedCwid, db } = args;
+  const ids = [...new Set(args.entityIds)].filter(Boolean);
+  const allowed = new Set(
+    ids.filter((entityId) => authorizeFieldEdit(session, { entityId, fieldName: "overview" }).ok),
+  );
+  let rest = ids.filter((id) => !allowed.has(id));
+  if (rest.length === 0) return allowed;
+
+  if (impersonatedCwid === null) {
+    const { isObserver } = await import("@/lib/auth/observer");
+    if (await isObserver(realCwid)) return new Set(ids);
+  } else if (!(await isSuperuser(realCwid).catch(() => false))) {
+    return allowed;
+  }
+  const actor = impersonatedCwid ?? realCwid;
+
+  const proxied = await db.scholarProxy.findMany({
+    where: { proxyCwid: actor, scholarCwid: { in: rest } },
+    select: { scholarCwid: true },
+  });
+  if (proxied.length > 0) {
+    const conflict = await checkProxyConflictingRole(actor, db as unknown as ProxyLookup);
+    const served = new Set(proxied.map((r) => r.scholarCwid));
+    if (conflict.ok) for (const cwid of served) allowed.add(cwid);
+    rest = rest.filter((id) => !served.has(id));
+  }
+
+  for (const cwid of await scholarsEditableViaUnitAdmin(actor, rest, db)) allowed.add(cwid);
+  return allowed;
 }

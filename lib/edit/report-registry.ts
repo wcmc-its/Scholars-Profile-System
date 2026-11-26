@@ -171,6 +171,8 @@ export type ReportRender = {
   /** The header's right-hand side (report 24's export button and its note).
    *  Rendered only for a report whose def sets `headerAside`. */
   aside?: React.ReactNode;
+  /** Beside the "All reports" link (reports 24 and 25 name each other). */
+  related?: React.ReactNode;
   main: React.ReactNode;
 };
 

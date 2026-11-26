@@ -2,21 +2,22 @@
  * Report 24 — "Guideline and policy citations" body (mockup: the report 24
  * redesign, 2026-11-25). The shared pieces (`report-ui.tsx`, and
  * `citation-report-parts.tsx` with report 25): a filter rail in a plain GET
- * `AutoSubmitForm`, the active filters as chips, the results card. Above the card, a tile per level (each a link that toggles the level)
- * and two summary cards; in it, the By publication / By citing document / By
- * person tabs, each with its own search or sort form and pages of
- * `POLICY_PAGE_SIZE`. The export button rides the report header (`aside`).
+ * `AutoSubmitForm`, the active filters as chips, the results card. The rail's
+ * Type and Issuing body checklists carry the paper counts. In the card, the
+ * By publication / By citing document / By person tabs, each with its own
+ * search or sort form and pages of `POLICY_PAGE_SIZE`. The export button
+ * rides the report header (`aside`), the link to report 25 the back-link row
+ * (`related`).
  *
  * Filters, search, sort, tab and page are the URL. The only client state is
- * which rows are open, the chart's level and "copied"
- * (`policy-citations-client.tsx`); what an open row shows is rendered here,
- * for the rows on the page only.
+ * which rows are open, to what, and "copied" (`policy-citations-client.tsx`);
+ * what an open row shows is rendered here, for the rows on the page only.
  *
  * Parser, access scope, loaders, chips and the workbook live in
  * `lib/edit/policy-citations-report.ts`; the download route
  * (`/api/edit/reports/policy-citations`) takes the same query string.
  */
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
@@ -24,33 +25,33 @@ import { Download } from "lucide-react";
 import { FiltersSheet } from "@/components/edit/filters-sheet";
 import {
   AuthorPills,
-  CARD,
-  CARD_TITLE,
   CitationRail,
   ExternalLink,
   LINK,
   LIST_HEAD,
   Pager,
   PersonCell,
+  personCardFooter,
   personFacetOptions,
   plural,
   PubMeta,
+  RelatedReport,
   ReportTab,
   SearchField,
   SortSelect,
-  summarize,
   TD,
   TH,
   Toolbar,
   toSearchParams,
   YearRange,
+  type PersonFooter,
 } from "@/components/edit/reports/citation-report-parts";
 import {
   Disclosure,
-  LevelChart,
   LevelIcon,
   PubRow,
   type CitedByChip,
+  type DocSection,
 } from "@/components/edit/reports/policy-citations-client";
 import { RailChecklist } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout } from "@/components/edit/reports/report-ui";
@@ -58,6 +59,12 @@ import { PubTitle } from "@/components/publication/pub-html";
 import { Button } from "@/components/ui/button";
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { db } from "@/lib/db";
+import { bibliometricsHref, loadBibliometricsAccess } from "@/lib/edit/bibliometrics-access";
+import {
+  isPatentCitationsReportEnabled,
+  parsePatentCitationParams,
+  patentCitationQueryString,
+} from "@/lib/edit/patent-citations-report";
 import { unitLabels } from "@/lib/edit/person-filter";
 import {
   BODIES,
@@ -72,6 +79,7 @@ import {
   LEVEL_ONE,
   LEVELS,
   loadCitingDocuments,
+  loadPersonNames,
   loadPolicyCitations,
   loadPolicyDocuments,
   parsePolicyCitationParams,
@@ -84,16 +92,18 @@ import {
   SORT_LABEL,
   yearRange,
   yearSpan,
+  type BodyPapers,
   type CitingDoc,
   type DocRow,
   type DocSort,
   type Level,
+  type LevelCounts,
   type PersonRow,
   type PolicyCitationParams,
   type PolicySort,
-  type PolicySummary,
   type PubRow as PubRowData,
 } from "@/lib/edit/policy-citations-report";
+import { reportMetaFor } from "@/lib/edit/report-meta";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 import { cn } from "@/lib/utils";
 
@@ -109,10 +119,24 @@ type RailProps = {
   facets: DataQualityFacets;
   labels: ReadonlyMap<string, string>;
   people: PersonRow[];
+  /** A name for every ticked person (`loadPersonNames`). */
+  names: ReadonlyMap<string, string>;
+  /** Papers cited at each level, whatever `level` lists. */
+  levelPapers: LevelCounts;
+  /** Papers per issuing body, whichever bodies are ticked. */
+  bodyPapers: BodyPapers[];
   resetHref: string | null;
 };
 
-function Rail({ basePath, params, facets, labels, people, resetHref }: RailProps) {
+const RAIL_LEGEND = "mb-1.5 p-0 text-[13px] font-medium";
+const RAIL_LEGEND_NOTE = <span className="text-muted-foreground font-normal"> · papers cited</span>;
+
+function Rail({ basePath, params, facets, labels, people, names, levelPapers, bodyPapers, resetHref }: RailProps) {
+  const papersOf = new Map(bodyPapers.map((b) => [b.body, b.papers]));
+  // Every body, most papers first; one with none still lists, so it can be unticked.
+  const bodies = BODIES.map((b) => ({ value: b, label: b, title: BODY_NAME[b], count: papersOf.get(b) ?? 0 })).sort(
+    (a, b) => b.count - a.count || a.label.localeCompare(b.label),
+  );
   // Top people by authority-cited papers; a ticked person always lists.
   const top = people.filter((r) => r.authority > 0).slice(0, FACET_PEOPLE);
   return (
@@ -137,15 +161,15 @@ function Rail({ basePath, params, facets, labels, people, resetHref }: RailProps
         children: (
           <>
             <fieldset className="m-0 border-0 px-[18px] pt-0 pb-3" data-testid="policy-citations-level">
-              <legend className="mb-1.5 p-0 text-[13px] font-medium">Level</legend>
+              <legend className={RAIL_LEGEND}>Type{RAIL_LEGEND_NOTE}</legend>
               <RailChecklist
                 name="level"
                 roomy
-                options={LEVELS.map((l) => ({ value: l, label: LEVEL_ONE[l] }))}
+                options={LEVELS.map((l) => ({ value: l, label: LEVEL_ONE[l], count: levelPapers[l] }))}
                 selected={params.levels}
               />
               <p className="text-muted-foreground mt-1 text-xs">
-                Lists the papers, documents and people cited at these levels. None checked = all.
+                Lists the papers, documents and people cited by these types of document. None checked = all.
               </p>
               <label className="border-apollo-rail-border mt-3 flex cursor-pointer items-center gap-2 border-t pt-2.5 text-sm">
                 <input
@@ -159,16 +183,12 @@ function Rail({ basePath, params, facets, labels, people, resetHref }: RailProps
                 Hide excluded-study citations
               </label>
             </fieldset>
-            <RailSection label="Issuing body" summary={summarize(params.bodies)} testId="policy-citations-body">
-              <RailChecklist
-                name="body"
-                roomy
-                options={BODIES.map((b) => ({ value: b, label: b }))}
-                selected={params.bodies}
-              />
-            </RailSection>
+            <fieldset className="m-0 border-0 px-[18px] pt-0 pb-3" data-testid="policy-citations-body">
+              <legend className={RAIL_LEGEND}>Issuing body{RAIL_LEGEND_NOTE}</legend>
+              <RailChecklist name="body" roomy options={bodies} selected={params.bodies} />
+            </fieldset>
             <RailSection
-              label="Citing document year"
+              label="Year published"
               summary={yearSpan(params.cfrom, params.cto) ?? "Any"}
               testId="policy-citations-citing-year"
             >
@@ -181,59 +201,9 @@ function Rail({ basePath, params, facets, labels, people, resetHref }: RailProps
           </>
         ),
       }}
-      personOptions={personFacetOptions(people, params.people, top, (r) => r.authority)}
+      personOptions={personFacetOptions(people, params.people, top, (r) => r.authority, names)}
       personNote={`The ${FACET_PEOPLE} people with the most papers cited by health authorities. Anyone else: open them from the By person tab.`}
     />
-  );
-}
-
-function SummaryCards({
-  summary,
-  bodyHref,
-  thisYear,
-}: {
-  summary: PolicySummary;
-  bodyHref: (body: string) => string;
-  thisYear: number;
-}) {
-  return (
-    <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3">
-      <div className={CARD} data-testid="policy-citations-bodies">
-        <h2 className={cn(CARD_TITLE, "mb-2.5")}>By issuing body</h2>
-        {summary.bodies.length === 0 ? (
-          <p className="text-muted-foreground text-[13px]">No health authority documents match.</p>
-        ) : (
-          <table className="w-full border-collapse tabular-nums">
-            <thead>
-              <tr className="text-muted-foreground text-left text-xs">
-                <th className="pb-1.5 font-normal">Body</th>
-                <th className="w-20 pb-1.5 text-right font-normal">Documents</th>
-                <th className="w-[60px] pb-1.5 text-right font-normal">Papers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.bodies.map((b) => (
-                <tr key={b.body} className="align-top">
-                  <td className="py-[5px] pr-3">
-                    <Link href={bodyHref(b.body)} className={LINK}>
-                      {b.body}
-                    </Link>
-                    {BODY_NAME[b.body] && (
-                      <div className="text-muted-foreground text-xs leading-[1.4]">{BODY_NAME[b.body]}</div>
-                    )}
-                  </td>
-                  <td className="py-[5px] text-right">{b.documents.toLocaleString()}</td>
-                  <td className="py-[5px] text-right">{b.papers.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      <div className={CARD} data-testid="policy-citations-years-chart">
-        <LevelChart series={summary.years} thisYear={thisYear} />
-      </div>
-    </section>
   );
 }
 
@@ -368,62 +338,17 @@ function CitingDocEntry({ editions }: { editions: CitingDoc[] }) {
   );
 }
 
-/** A publication's citing documents by level, editions grouped. `groups` is
- *  shared with the row's chips and count. A level outside the filter is a
- *  closed group that says so. */
-function PubDocs({
-  row,
-  groups,
-  listed,
-}: {
-  row: PubRowData;
-  groups: CitingDoc[][];
-  listed: readonly Level[];
-}) {
-  return LEVELS.map((level) => {
-    const items = groups.filter((g) => g[0].level === level);
-    // Reviews are loaded `REVIEWS_SHOWN` at most; the row's count is the full number.
-    const total = level === "review" ? row.review : items.length;
-    if (total === 0) return null;
-    const entries = (
-      <>
-        {items.map((g) => (
-          <CitingDocEntry key={g[0].id} editions={g} />
-        ))}
-        {level === "review" && row.review > items.length && (
-          <p className="text-muted-foreground border-apollo-border border-t py-3 text-[13px]">
-            The newest {items.length.toLocaleString()} of {row.review.toLocaleString()} systematic reviews.
-          </p>
-        )}
-      </>
-    );
-    if (listed.includes(level)) return <Fragment key={level}>{entries}</Fragment>;
-    return (
-      <div key={level} className="border-apollo-border-strong mt-2 border-t pt-4 pb-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-foreground text-xs font-semibold tracking-[0.05em] uppercase">
-            <LevelIcon level={level} />
-            {LEVEL_LABEL[level]} · {total.toLocaleString()}
-          </span>
-          <span className="text-muted-foreground text-[13px]">Not in the current level filter</span>
-          <Disclosure show="Show" className="py-1">
-            <div className="basis-full">{entries}</div>
-          </Disclosure>
-        </div>
-      </div>
-    );
-  });
-}
-
 function PublicationList({
   pubs,
   docs,
   listed,
+  footer,
 }: {
   pubs: PubRowData[];
   /** The citing documents of the rows on this page, per PMID. */
   docs: ReadonlyMap<string, CitingDoc[]>;
   listed: readonly Level[];
+  footer: PersonFooter;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -435,11 +360,10 @@ function PublicationList({
         {pubs.map((r) => {
           const groups = groupEditions(docs.get(r.pmid) ?? []);
           const authority = groups.filter((g) => g[0].level === "authority");
+          /** What an authority document's chip is keyed on. */
+          const bodyOf = (g: CitingDoc[]) => g[0].issuingBody ?? "Health authority";
           const byBody = new Map<string, number>();
-          for (const g of authority) {
-            const body = g[0].issuingBody ?? "Health authority";
-            byBody.set(body, (byBody.get(body) ?? 0) + 1);
-          }
+          for (const g of authority) byBody.set(bodyOf(g), (byBody.get(bodyOf(g)) ?? 0) + 1);
           const shown = (l: Level) => listed.includes(l) && r[l] > 0;
           const chips: CitedByChip[] = [
             ...(listed.includes("authority")
@@ -447,6 +371,7 @@ function PublicationList({
                   level: "authority" as const,
                   label: `${body} · ${n}`,
                   title: BODY_NAME[body],
+                  body,
                 }))
               : []),
             ...(shown("guideline")
@@ -467,11 +392,37 @@ function PublicationList({
           const count =
             (listed.includes("authority") ? authority.length : 0) +
             (["guideline", "consensus", "review"] as const).reduce((n, l) => n + (shown(l) ? r[l] : 0), 0);
+          // By type, editions grouped. A type outside the filter is a closed group
+          // that says so (the client row draws its heading).
+          const sections = LEVELS.flatMap((level): DocSection[] => {
+            const items = groups.filter((g) => g[0].level === level);
+            // Reviews are loaded `REVIEWS_SHOWN` at most; the row's count is the full number.
+            const total = level === "review" ? r.review : items.length;
+            if (total === 0) return [];
+            return [
+              {
+                level,
+                heading: `${LEVEL_LABEL[level]} · ${total.toLocaleString()}`,
+                listed: listed.includes(level),
+                entries: items.map((g) => ({
+                  key: g[0].id,
+                  body: level === "authority" ? bodyOf(g) : null,
+                  node: <CitingDocEntry editions={g} />,
+                })),
+                note: level === "review" && r.review > items.length && (
+                  <p className="text-muted-foreground border-apollo-border border-t py-3 text-[13px]">
+                    The newest {items.length.toLocaleString()} of {r.review.toLocaleString()} systematic reviews.
+                  </p>
+                ),
+              },
+            ];
+          });
           return (
             <PubRow
               key={r.pmid}
               chips={chips}
               count={count}
+              sections={sections}
               head={
                 <>
                   <div className="font-medium">
@@ -480,12 +431,10 @@ function PublicationList({
                   <div className="text-muted-foreground mt-0.5 leading-normal">
                     <PubMeta pub={r} copy />
                   </div>
-                  <AuthorPills authors={r.authors} />
+                  <AuthorPills authors={r.authors} footer={footer} />
                 </>
               }
-            >
-              <PubDocs row={r} groups={groups} listed={listed} />
-            </PubRow>
+            />
           );
         })}
       </div>
@@ -562,9 +511,14 @@ function DocumentList({ docs }: { docs: DocRow[] }) {
 function PeopleTable({
   people,
   countHref,
+  footer,
+  bibliometrics,
 }: {
   people: PersonRow[];
   countHref: (cwid: string, level: Level) => string;
+  footer: PersonFooter;
+  /** A person's Bibliometrics link, null when the viewer may not open it. */
+  bibliometrics: (cwid: string) => string | null;
 }) {
   const headers: Record<Level, string> = {
     authority: "Cited by health authorities",
@@ -591,7 +545,7 @@ function PeopleTable({
         <tbody>
           {people.map((r) => (
             <tr key={r.cwid} className="border-apollo-border border-b" data-testid="policy-citations-person-row">
-              <PersonCell cwid={r.cwid} name={r.name} />
+              <PersonCell cwid={r.cwid} name={r.name} footer={footer} bibliometrics={bibliometrics(r.cwid)} />
               <td className={TD}>{r.orgUnit}</td>
               <td className={TD}>{r.personType}</td>
               <td className={TD}>{r.institution}</td>
@@ -636,21 +590,47 @@ export async function renderPolicyCitationsReport({
   if (params.scope !== null && params.scope.length === 0) notFound();
   const { view } = params;
   const offset = (params.page - 1) * POLICY_PAGE_SIZE;
-  const [facets, data, documents] = await Promise.all([
+  const [facets, data, documents, patents] = await Promise.all([
     loadDataQualityFacets(db.read),
     loadPolicyCitations(params, view === "publications" ? POLICY_PAGE_SIZE : 0, offset),
     loadPolicyDocuments(params),
+    // Report 25, for the link beside "All reports": only while its flag is on.
+    isPatentCitationsReportEnabled() ? reportMetaFor("25") : null,
   ]);
-  // Citing documents for this page's rows only; `loadCitingDocuments` tests the scope again.
-  const docs = await loadCitingDocuments(
-    params,
-    data.pubs.map((r) => r.pmid),
-  );
+  const people = data.people.slice(offset, offset + POLICY_PAGE_SIZE);
+  const [docs, names, mayOpenBibliometrics] = await Promise.all([
+    // Citing documents for this page's rows only; `loadCitingDocuments` tests the scope again.
+    loadCitingDocuments(
+      params,
+      data.pubs.map((r) => r.pmid),
+    ),
+    loadPersonNames(params, data.facetPeople),
+    // One decision for everyone named on this page, not one per pill or row.
+    loadBibliometricsAccess(
+      view === "publications"
+        ? [...new Set(data.pubs.flatMap((r) => r.authors.map((a) => a.cwid)))]
+        : view === "people"
+          ? people.map((r) => r.cwid)
+          : [],
+    ),
+  ]);
   const listed: readonly Level[] = params.levels.length > 0 ? params.levels : LEVELS;
   const labels = unitLabels(facets);
-  const chips = policyCitationChips(params, labels, new Map(data.facetPeople.map((r) => [r.cwid, r.name])));
+  const chips = policyCitationChips(params, labels, names);
   const href = (q: string) => `${basePath}?${q}`;
   const qs = (over: Partial<PolicyCitationParams> = {}) => href(policyCitationQueryString(params, over));
+  const bibliometrics = (cwid: string) => (mayOpenBibliometrics.has(cwid) ? bibliometricsHref(cwid) : null);
+  // The card's button adds the person to whoever is already ticked (papers by
+  // any of them) and lands on By publication; a search typed on another tab is dropped.
+  const personFooter: PersonFooter = (cwid) =>
+    personCardFooter(
+      qs({
+        view: "publications",
+        q: view === "publications" ? params.q : "",
+        people: [...new Set([...params.people, cwid])],
+      }),
+      bibliometrics(cwid),
+    );
   const resetHref = isPolicyCitationDefault(params) ? null : view === "publications" ? basePath : href(`view=${view}`);
   const rail = (
     <Rail
@@ -659,6 +639,9 @@ export async function renderPolicyCitationsReport({
       facets={facets}
       labels={labels}
       people={data.facetPeople}
+      names={names}
+      levelPapers={data.levelPapers}
+      bodyPapers={documents.bodyPapers}
       resetHref={resetHref}
     />
   );
@@ -682,14 +665,21 @@ export async function renderPolicyCitationsReport({
       testId="policy-citations-pager"
     />
   );
-  const people = data.people.slice(offset, offset + POLICY_PAGE_SIZE);
   const overCap = data.pubTotal > POLICY_LIST_CAP;
   const published = yearSpan(params.from, params.to, fiscalLabel(params));
-  // Unticking the only level leaves none ticked, which lists every level.
-  const toggled = (l: Level) =>
-    listed.includes(l) ? listed.filter((x) => x !== l) : LEVELS.filter((x) => x === l || listed.includes(x));
 
   return {
+    // The who-filters both reports share ride along; report 25 keeps its own defaults for the rest.
+    related: patents && (
+      <RelatedReport
+        name={patents.name}
+        href={`/edit/reports/${patents.slug}?${patentCitationQueryString(
+          parsePatentCitationParams(new URLSearchParams()),
+          { types: params.types, units: params.units, people: params.people, positions: params.positions },
+        )}`}
+        testId="policy-citations-related"
+      />
+    ),
     subtitle: (
       <p className="text-muted-foreground text-sm" data-testid="policy-citations-subtitle">
         <strong className="text-foreground font-semibold">
@@ -697,11 +687,10 @@ export async function renderPolicyCitationsReport({
         </strong>{" "}
         cited by {levelPhrase(listed)} · {published ? `published ${published}` : "published in any year"} ·{" "}
         {params.scope === null ? "all units" : params.scope.map((u) => labels.get(u) ?? u).join("; ")}
-        {listed.length < LEVELS.length && (
+        {!listed.includes("review") && (
           <span className="text-muted-foreground/80">
             {" "}
-            · {data.cited.toLocaleString()} at any level
-            {!listed.includes("review") && ", including systematic reviews"}
+            · {data.withReviews.toLocaleString()} when systematic reviews are included
           </span>
         )}
       </p>
@@ -735,58 +724,14 @@ export async function renderPolicyCitationsReport({
               {rail}
             </FiltersSheet>
           </div>
-          <section
-            aria-label="Papers cited, by level"
-            className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3"
-            data-testid="policy-citations-tiles"
-          >
-            {LEVELS.map((l) => {
-              const on = listed.includes(l);
-              return (
-                <Link
-                  key={l}
-                  href={qs({ levels: toggled(l) })}
-                  title={`${on ? "Remove" : "Add"} ${LEVEL_LABEL[l].toLowerCase()} ${on ? "from" : "to"} the level filter`}
-                  data-testid={`policy-citations-tile-${l}`}
-                  className={cn(
-                    "text-foreground hover:border-apollo-slate rounded-[var(--apollo-radius-card)] border px-4 py-3.5",
-                    on
-                      ? "bg-apollo-surface border-apollo-border"
-                      : "bg-apollo-surface-2 border-apollo-border-strong border-dashed",
-                  )}
-                >
-                  <span className="text-muted-foreground block text-xs">
-                    <LevelIcon level={l} />
-                    {LEVEL_ONE[l]}
-                    {!on && " · not in filter"}
-                  </span>
-                  <span
-                    className={cn(
-                      "block text-[28px] leading-[1.2] font-semibold tabular-nums",
-                      !on && "text-muted-foreground",
-                    )}
-                  >
-                    {data.tiles[l].toLocaleString()}
-                  </span>
-                  <span className="text-muted-foreground block text-xs">
-                    papers{!on && " · click to include"}
-                  </span>
-                </Link>
-              );
-            })}
-          </section>
           <FilterChips
             chips={chips.map((c) => ({
               group: c.group,
               value: c.value,
+              mono: c.mono,
               removeHref: c.removeQuery === null ? null : href(c.removeQuery),
             }))}
             testId="policy-citations-chips"
-          />
-          <SummaryCards
-            summary={documents.summary}
-            bodyHref={(b) => qs({ bodies: [b] })}
-            thisYear={new Date().getFullYear()}
           />
           <ReportCard className="overflow-hidden p-0 sm:p-0">
             <nav
@@ -806,12 +751,12 @@ export async function renderPolicyCitationsReport({
                     <SortSelect<PolicySort> name="sort" value={params.sort} options={SORT_LABEL} />
                   </>,
                 )}
-                <PublicationList pubs={data.pubs} docs={docs} listed={listed} />
+                <PublicationList pubs={data.pubs} docs={docs} listed={listed} footer={personFooter} />
                 {data.pubMatched === 0 && (
                   <p className="text-muted-foreground px-4 pt-3 text-[13px]">
                     {params.q
                       ? "No publications match the search."
-                      : "No publications match. Try another level or widen the years."}
+                      : "No publications match. Try another type or widen the years."}
                   </p>
                 )}
                 {pager(data.pubMatched)}
@@ -848,12 +793,14 @@ export async function renderPolicyCitationsReport({
                   countHref={(cwid, level) =>
                     qs({ view: "publications", sort: "ranked", q: "", people: [cwid], levels: [level] })
                   }
+                  footer={personFooter}
+                  bibliometrics={bibliometrics}
                 />
                 {data.people.length === 0 && (
                   <p className="text-muted-foreground px-4 pt-3 text-[13px]">
                     {params.q
                       ? "No people match the search."
-                      : "No people match. Try another level or widen the years."}
+                      : "No people match. Try another type or widen the years."}
                   </p>
                 )}
                 {pager(data.people.length)}
@@ -862,8 +809,9 @@ export async function renderPolicyCitationsReport({
           </ReportCard>
           <p className="text-muted-foreground max-w-[760px] text-[13px]" role="note">
             Only ReCiter-confirmed authorships of active scholars count. A citing document counts once
-            per paper, however many journals printed it. Level chooses which publications, citing
-            documents and people are listed; the tiles cover every level. By person counts are papers,
+            per paper, however many journals printed it. Type chooses which publications, citing
+            documents and people are listed; the counts beside each type and issuing body cover every
+            type. By person counts are papers,
             and each links to the By publication view filtered to that person; the spreadsheet lists
             everyone. Showing at most {REVIEWS_SHOWN} systematic reviews per paper. Sources: PubMed, NIH
             iCite and NCBI Bookshelf.

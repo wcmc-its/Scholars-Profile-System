@@ -97,7 +97,13 @@ function openSheet(q: ReturnType<typeof setup>) {
 describe("ReportDetailsSheet", () => {
   it("closed: only the Edit details button", () => {
     const q = setup();
-    expect(q.getByTestId("report-details-edit").textContent).toContain("Edit details");
+    const trigger = q.getByTestId("report-details-edit");
+    expect(trigger.textContent).toBe("Edit details");
+    // A small text link, not a bordered header button with an icon.
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.className).toContain("text-xs");
+    expect(trigger.className).not.toMatch(/\bborder\b/);
+    expect(trigger.querySelector("svg")).toBeNull();
     expect(screen.queryByTestId("report-details-sheet")).toBeNull();
   });
 

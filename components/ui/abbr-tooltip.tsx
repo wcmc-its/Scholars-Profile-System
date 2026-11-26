@@ -23,9 +23,12 @@ interface Props {
   expand: string | null;
   /** Visual style of the short label. Defaults to inheriting from parent. */
   className?: string;
+  /** For a narrow container that clips (a report rail): the tooltip starts at
+   *  the label's left edge and wraps, where the default is one centred line. */
+  wrap?: boolean;
 }
 
-export function AbbrTooltip({ short, expand, className }: Props) {
+export function AbbrTooltip({ short, expand, className, wrap = false }: Props) {
   const tooltipId = useId();
   const [visible, setVisible] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,12 +80,16 @@ export function AbbrTooltip({ short, expand, className }: Props) {
         <span
           id={tooltipId}
           role="tooltip"
-          className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white shadow"
+          className={`pointer-events-none absolute bottom-[calc(100%+6px)] z-50 rounded bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white shadow ${
+            wrap ? "left-0 w-max max-w-[220px] whitespace-normal" : "left-1/2 -translate-x-1/2 whitespace-nowrap"
+          }`}
         >
           {expand}
           <span
             aria-hidden="true"
-            className="absolute left-1/2 top-full -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-zinc-900"
+            className={`absolute top-full border-x-4 border-t-4 border-x-transparent border-t-zinc-900 ${
+              wrap ? "left-3" : "left-1/2 -translate-x-1/2"
+            }`}
             style={{ width: 0, height: 0 }}
           />
         </span>

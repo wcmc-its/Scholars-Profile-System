@@ -314,6 +314,138 @@ export async function canEditScholarViaUnit(
   return (await resolveEditableUnitViaUnitAdmin(adminCwid, scholarCwid, db)) !== null;
 }
 
+/**
+ * The Prisma surface {@link scholarsEditableViaUnitAdmin} reads: the admin's
+ * grants once, then each membership table once for the whole set of scholars.
+ * `db.read` satisfies it structurally (cast at the call site).
+ */
+export type UnitScholarBatchLookup = {
+  unitAdmin: {
+    findMany: (args: {
+      where: { cwid: string };
+      select: { entityType: true; entityId: true };
+    }) => Promise<Array<{ entityType: string; entityId: string }>>;
+  };
+  scholar: {
+    findMany: (args: {
+      where: { cwid: { in: string[] }; deletedAt: null };
+      select: { cwid: true; deptCode: true; divCode: true; primaryOrgCode: true };
+    }) => Promise<
+      Array<{ cwid: string; deptCode: string | null; divCode: string | null; primaryOrgCode: string | null }>
+    >;
+  };
+  divisionMembership: {
+    findMany: (args: {
+      where: { cwid: { in: string[] } };
+      select: { cwid: true; divisionCode: true };
+    }) => Promise<Array<{ cwid: string; divisionCode: string }>>;
+  };
+  division: {
+    findMany: (args: {
+      where: { code: { in: string[] } };
+      select: { code: true; deptCode: true };
+    }) => Promise<Array<{ code: string; deptCode: string }>>;
+  };
+  centerMembership: {
+    findMany: (args: {
+      where: { cwid: { in: string[] } };
+      select: { cwid: true; centerCode: true; startDate: true; endDate: true; membershipRoleKey: true };
+    }) => Promise<
+      Array<{
+        cwid: string;
+        centerCode: string;
+        startDate: Date | null;
+        endDate: Date | null;
+        membershipRoleKey: string | null;
+      }>
+    >;
+  };
+};
+
+/**
+ * {@link canEditScholarViaUnit} for MANY scholars at once: which of
+ * `scholarCwids` `adminCwid` may edit by administering one of their units. A
+ * page that marks many people (a report's rows) calls this in place of one
+ * forward check per person: at most five reads, however many scholars.
+ *
+ * The rule is the forward resolver's, restated over sets: the scholar's
+ * department, each of their divisions (LDAP-primary and roster) directly or
+ * through its parent department, a center they are a current member of (only
+ * behind `UNIT_ADMIN_CENTER_PROXY`), or their institution. Any `unit_admin`
+ * row on the unit counts (owner or curator). A missing or soft-deleted
+ * scholar is never in the result. `tests/unit/cv-export-batch.test.ts` holds
+ * the two to the same answers; a write path still calls the forward resolver.
+ */
+export async function scholarsEditableViaUnitAdmin(
+  adminCwid: string,
+  scholarCwids: readonly string[],
+  db: UnitScholarBatchLookup,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const cwids = [...new Set(scholarCwids)].filter(Boolean);
+  if (!adminCwid || cwids.length === 0) return out;
+
+  const grants = await db.unitAdmin.findMany({
+    where: { cwid: adminCwid },
+    select: { entityType: true, entityId: true },
+  });
+  const granted = new Set(grants.map((g) => `${g.entityType}:${g.entityId}`));
+  const has = (kind: EditableUnit["kind"], code: string | null | undefined) =>
+    !!code && granted.has(`${kind}:${code}`);
+  if (granted.size === 0) return out;
+
+  const centersOn = isUnitAdminCenterProxyEnabled();
+  const [scholars, roster, centerRows] = await Promise.all([
+    db.scholar.findMany({
+      where: { cwid: { in: cwids }, deletedAt: null },
+      select: { cwid: true, deptCode: true, divCode: true, primaryOrgCode: true },
+    }),
+    db.divisionMembership.findMany({ where: { cwid: { in: cwids } }, select: { cwid: true, divisionCode: true } }),
+    centersOn
+      ? db.centerMembership.findMany({
+          where: { cwid: { in: cwids } },
+          select: { cwid: true, centerCode: true, startDate: true, endDate: true, membershipRoleKey: true },
+        })
+      : [],
+  ]);
+
+  const divisionsOf = new Map<string, Set<string>>();
+  const addDivision = (cwid: string, code: string) =>
+    divisionsOf.set(cwid, (divisionsOf.get(cwid) ?? new Set()).add(code));
+  for (const s of scholars) if (s.divCode) addDivision(s.cwid, s.divCode);
+  for (const r of roster) addDivision(r.cwid, r.divisionCode);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const centerMembers = new Set(
+    centerRows.filter((r) => isCenterMembershipActive(r, today) && has("center", r.centerCode)).map((r) => r.cwid),
+  );
+
+  const divisionCodes = [...new Set([...divisionsOf.values()].flatMap((codes) => [...codes]))];
+  const parentOf = new Map<string, string>();
+  if (divisionCodes.length > 0) {
+    const divisions = await db.division.findMany({
+      where: { code: { in: divisionCodes } },
+      select: { code: true, deptCode: true },
+    });
+    for (const d of divisions) parentOf.set(d.code, d.deptCode);
+  }
+
+  for (const s of scholars) {
+    const viaDivision = [...(divisionsOf.get(s.cwid) ?? [])].some(
+      (code) => has("division", code) || has("department", parentOf.get(code)),
+    );
+    if (
+      has("department", s.deptCode) ||
+      viaDivision ||
+      centerMembers.has(s.cwid) ||
+      has("institution", s.primaryOrgCode)
+    ) {
+      out.add(s.cwid);
+    }
+  }
+  return out;
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // The INVERSE direction — "who may edit this scholar?" (Amendment 4 P3)
 //

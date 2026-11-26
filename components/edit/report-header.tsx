@@ -4,11 +4,13 @@
  * `report_meta` (`lib/edit/report-meta.ts`) as the `<h1>`; beside it the
  * access badge — the default audience plus "+ N others" for hand-added
  * grantees, opening "Who can open this report" (`ReportAccessPopover`; the
- * page hands over its props, since only it knows the gate); the page's own dynamic subtitle (`children`); when the report has a
- * description, a closed-by-default "About this report" disclosure; and, at
- * the right, "Edit details" (`ReportDetailsSheet`, a client island) for a
- * superuser, or "Manage access" for a comms steward who can change a
- * row-granted report's grants.
+ * page hands over its props, since only it knows the gate) and, as a small
+ * text link beside the badge, "Edit details" (`ReportDetailsSheet`, a client
+ * island) for a superuser, or "Manage access" for a comms steward who can
+ * change a row-granted report's grants; the page's own dynamic subtitle
+ * (`children`); when the report has a description, a closed-by-default "About
+ * this report" disclosure; and, at the right, the body's own controls
+ * (`aside`).
  *
  * An async SERVER component: the meta read is `cache()`d, so it shares the
  * page's `generateMetadata` read. The request record is read only for a
@@ -44,7 +46,7 @@ export type ReportHeaderProps = {
    *  screen-reader-only `<h2>` and the badge rides the eyebrow row. */
   underCoreHeader?: boolean;
   /** The body's own controls for the right-hand side (report 24's export
-   *  button), stacked under "Edit details". */
+   *  button). */
   aside?: React.ReactNode;
 };
 
@@ -89,6 +91,7 @@ export async function ReportHeader({
               Report {n}
             </span>
             {badge}
+            {sheet}
           </div>
         ) : (
           <>
@@ -98,6 +101,7 @@ export async function ReportHeader({
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="m-0 text-[26px] font-bold tracking-[-0.01em]">{meta.name}</h1>
               {badge}
+              {sheet}
             </div>
           </>
         )}
@@ -115,14 +119,7 @@ export async function ReportHeader({
           )}
         </div>
       </div>
-      {aside ? (
-        <div className="flex max-w-[340px] flex-col items-end gap-1.5 text-right">
-          {aside}
-          {sheet}
-        </div>
-      ) : (
-        sheet
-      )}
+      {aside && <div className="flex max-w-[340px] flex-col items-end gap-1.5 text-right">{aside}</div>}
     </div>
   );
 }

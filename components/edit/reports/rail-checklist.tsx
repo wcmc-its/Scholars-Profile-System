@@ -18,7 +18,11 @@
  */
 import { useState } from "react";
 
-export type RailChecklistOption = { value: string; label: string; count?: number };
+import { AbbrTooltip } from "@/components/ui/abbr-tooltip";
+
+/** `title`: the label is a short name; it gets a dotted underline and the
+ *  full name on hover or focus. */
+export type RailChecklistOption = { value: string; label: string; count?: number; title?: string };
 
 export function RailChecklist({
   name,
@@ -115,7 +119,13 @@ export function RailChecklist({
                       : "mt-[3px] accent-[var(--apollo-maroon)]"
                   }
                 />
-                <span className={`min-w-0 flex-1 leading-[1.35] ${roomy ? "" : "break-words"}`}>{o.label}</span>
+                <span className={`min-w-0 flex-1 leading-[1.35] ${roomy ? "" : "break-words"}`}>
+                  {o.title ? (
+                    <AbbrTooltip short={o.label} expand={o.title} wrap className="border-b border-dotted border-current" />
+                  ) : (
+                    o.label
+                  )}
+                </span>
                 {o.count !== undefined && (
                   <span className="text-muted-foreground text-[13px] tabular-nums">
                     {o.count.toLocaleString()}

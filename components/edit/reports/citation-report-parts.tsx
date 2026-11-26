@@ -13,13 +13,20 @@ import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { RailChecklist, type RailChecklistOption } from "@/components/edit/reports/rail-checklist";
 import { RailSection, ReportRail } from "@/components/edit/reports/report-ui";
-import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
+import { ScholarHoverCard, type ScholarCardFooter } from "@/components/edit/scholar-hover-card";
 import { PubJournal } from "@/components/publication/pub-html";
 import { Button } from "@/components/ui/button";
 import type { DataQualityFacets } from "@/lib/api/data-quality";
 import { citationIdentifier } from "@/lib/citation";
 import { BASIS_LABEL, type YearBasis } from "@/lib/edit/article-count-report";
-import { fiscalLabel, POSITION_LABEL, yearSpan, type Position, type WhoParams } from "@/lib/edit/policy-citations-report";
+import {
+  fiscalLabel,
+  POSITION_LABEL,
+  UNKNOWN_PERSON,
+  yearSpan,
+  type Position,
+  type WhoParams,
+} from "@/lib/edit/policy-citations-report";
 import type { AdminReportProps } from "@/lib/edit/report-registry";
 import { cn } from "@/lib/utils";
 
@@ -27,9 +34,6 @@ export const SELECT =
   "border-apollo-border-strong bg-apollo-surface h-[34px] min-w-0 rounded-md border px-2 text-sm";
 export const RADIO = "flex cursor-pointer items-center gap-2 text-sm";
 export const RADIO_INPUT = "accent-apollo-maroon size-4";
-export const CARD =
-  "bg-apollo-surface border-apollo-border min-w-0 rounded-[var(--apollo-radius-card)] border p-4";
-export const CARD_TITLE = "m-0 text-sm font-semibold";
 export const LIST_HEAD =
   "bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground border-y px-4 py-2 text-xs tracking-[0.05em] uppercase";
 const TOOL_LABEL = "text-muted-foreground flex flex-col gap-0.5 text-xs";
@@ -356,12 +360,14 @@ export function CitationRail({
   );
 }
 
-/** The Person facet's options: the first `top` people, and anyone ticked. */
+/** The Person facet's options: the first `top` people, and anyone ticked.
+ *  `names` (`loadPersonNames`) names a ticked person with nothing to count. */
 export function personFacetOptions<R extends { cwid: string; name: string }>(
   people: readonly R[],
   ticked: readonly string[],
   top: readonly R[],
   count: (r: R) => number,
+  names: ReadonlyMap<string, string> = new Map(),
 ): RailChecklistOption[] {
   return [
     ...top.map((r) => ({ value: r.cwid, label: r.name, count: count(r) })),
@@ -369,7 +375,7 @@ export function personFacetOptions<R extends { cwid: string; name: string }>(
       .filter((c) => !top.some((r) => r.cwid === c))
       .map((c) => {
         const row = people.find((r) => r.cwid === c);
-        return { value: c, label: row?.name ?? c, count: row ? count(row) : 0 };
+        return { value: c, label: row?.name ?? names.get(c) ?? UNKNOWN_PERSON, count: row ? count(row) : 0 };
       }),
   ];
 }
@@ -413,12 +419,46 @@ export function PubMeta({
   );
 }
 
+/** A person's hover-card footer on reports 24 and 25, given per CWID. */
+export type PersonFooter = (cwid: string) => ScholarCardFooter;
+
+const CARD_LINK = "text-apollo-maroon hover:underline";
+const BIBLIOMETRICS_LINK = "Full bibliometrics report";
+
+/**
+ * The footer: a button that narrows the report to this person's papers
+ * (`onlyHref`: the By publication tab with the person added to the `person`
+ * filter), and the link to their Bibliometrics report when the viewer may
+ * open it (`bibliometrics`: `bibliometricsHref`, or null to leave it out).
+ * The name itself still only opens the card.
+ */
+export function personCardFooter(onlyHref: string, bibliometrics: string | null): ScholarCardFooter {
+  return {
+    action: (
+      <Button asChild variant="apollo" size="sm" className="w-full">
+        <Link href={onlyHref}>Show only this person&rsquo;s papers</Link>
+      </Button>
+    ),
+    link: bibliometrics && (
+      <Link href={bibliometrics} prefetch={false} className={CARD_LINK}>
+        {BIBLIOMETRICS_LINK}
+      </Link>
+    ),
+  };
+}
+
 /** A publication's WCM authors as pills, each with its hover card. */
-export function AuthorPills({ authors }: { authors: readonly { cwid: string; name: string }[] }) {
+export function AuthorPills({
+  authors,
+  footer,
+}: {
+  authors: readonly { cwid: string; name: string }[];
+  footer?: PersonFooter;
+}) {
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
       {authors.map((a) => (
-        <ScholarHoverCard key={a.cwid} cwid={a.cwid}>
+        <ScholarHoverCard key={a.cwid} cwid={a.cwid} footer={footer?.(a.cwid)}>
           <span className="border-border bg-background inline-flex items-center gap-2 rounded-full border py-[3px] pr-3 pl-1 text-[13px] leading-[1.3] font-semibold">
             <span
               aria-hidden
@@ -434,15 +474,45 @@ export function AuthorPills({ authors }: { authors: readonly { cwid: string; nam
   );
 }
 
-/** The By person tables' first cell: the name with its hover card, the CWID under it. */
-export function PersonCell({ cwid, name }: { cwid: string; name: string }) {
+/** The By person tables' first cell: the name with its hover card, the CWID
+ *  under it, then the link to the person's Bibliometrics report when the
+ *  viewer may open it (`bibliometrics`). */
+export function PersonCell({
+  cwid,
+  name,
+  footer,
+  bibliometrics = null,
+}: {
+  cwid: string;
+  name: string;
+  footer?: PersonFooter;
+  bibliometrics?: string | null;
+}) {
   return (
     <td className={cn(TD, "min-w-[200px]")}>
-      <ScholarHoverCard cwid={cwid}>
+      <ScholarHoverCard cwid={cwid} footer={footer?.(cwid)}>
         <span className="leading-[1.35] font-semibold">{name}</span>
       </ScholarHoverCard>
       <div className="text-muted-foreground mt-0.5 font-mono text-xs">{cwid}</div>
+      {bibliometrics && (
+        <Link href={bibliometrics} prefetch={false} className={cn(LINK, "mt-0.5 block text-xs")}>
+          {BIBLIOMETRICS_LINK}
+        </Link>
+      )}
     </td>
+  );
+}
+
+/** "· Related: Patent citations", beside the page's "All reports" link
+ *  (`ReportRender.related`): the sister report, under the same who-filters. */
+export function RelatedReport({ name, href, testId }: { name: string; href: string; testId: string }) {
+  return (
+    <span className="text-muted-foreground" data-testid={testId}>
+      <span aria-hidden>· </span>Related:{" "}
+      <Link href={href} className={LINK}>
+        {name}
+      </Link>
+    </span>
   );
 }
 

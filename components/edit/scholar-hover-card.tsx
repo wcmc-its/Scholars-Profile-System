@@ -15,6 +15,10 @@
  * must still work there: Radix's trigger preventDefaults `touchstart`, which on
  * iOS cancels the link's click, so the roster name re-issues it on
  * `onTouchEnd` (the #2588 pattern in matcha-tab).
+ *
+ * `footer` is an optional slot for the page that owns the trigger (reports 24
+ * and 25): an action above the bottom row, and a link at that row's left,
+ * beside "Public profile". Without it the card is as it always was.
  */
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
@@ -110,17 +114,27 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
+/** What a page adds to the bottom of the card, for the person it is about. */
+export type ScholarCardFooter = {
+  /** Full width, above the bottom row (a button). */
+  action?: ReactNode;
+  /** At the left of the bottom row; "Public profile" stays at its right. */
+  link?: ReactNode;
+};
+
 export function ScholarHoverCard({
   cwid,
   children,
   side = "right",
   sideOffset = 8,
+  footer,
 }: {
   cwid: string;
   /** The trigger — a name, or a whole name cell. Must accept a ref (an element, not a string). */
   children: ReactNode;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
+  footer?: ScholarCardFooter;
 }) {
   // Tagged with the cwid it was loaded for: a caller that keeps this instance
   // and swaps the cwid (the attribution queue's detail pane) would otherwise
@@ -149,7 +163,7 @@ export function ScholarHoverCard({
         data-testid={`scholar-card-${cwid}`}
       >
         {state.status === "ok" ? (
-          <CardBody c={state.card} />
+          <CardBody c={state.card} footer={footer} />
         ) : (
           <p className="text-muted-foreground p-4 text-sm">
             {state.status === "missing"
@@ -164,7 +178,7 @@ export function ScholarHoverCard({
   );
 }
 
-function CardBody({ c }: { c: ScholarCard }) {
+function CardBody({ c, footer }: { c: ScholarCard; footer?: ScholarCardFooter }) {
   return (
     <>
       <div className="flex items-center gap-4 p-4">
@@ -223,11 +237,25 @@ function CardBody({ c }: { c: ScholarCard }) {
         )}
       </div>
 
-      {c.isVisible && (
-        <div className="bg-apollo-surface-2 border-apollo-border flex justify-end gap-4 border-t px-4 py-2.5 text-sm">
-          <Link href={profilePath(c.slug)} prefetch={false} className="text-apollo-maroon hover:underline">
-            Public profile
-          </Link>
+      {footer?.action && (
+        <div className={SECTION} data-testid={`scholar-card-action-${c.cwid}`}>
+          {footer.action}
+        </div>
+      )}
+
+      {(c.isVisible || footer?.link) && (
+        <div
+          className={cn(
+            "bg-apollo-surface-2 border-apollo-border flex gap-4 border-t px-4 py-2.5 text-sm",
+            footer?.link ? "justify-between" : "justify-end",
+          )}
+        >
+          {footer?.link}
+          {c.isVisible && (
+            <Link href={profilePath(c.slug)} prefetch={false} className="text-apollo-maroon hover:underline">
+              Public profile
+            </Link>
+          )}
         </div>
       )}
     </>
