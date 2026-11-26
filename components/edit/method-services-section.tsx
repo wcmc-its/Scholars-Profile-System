@@ -7,9 +7,10 @@
  * supported PMIDs, and the affiliation text and author names that tell which
  * of those the unit's own people co-authored).
  *
- * SUPERUSER ONLY: the edit pages render it for a superuser and for nobody
- * else, and `/api/edit/method-service` refuses everyone else. A unit's own
- * editors do not see it.
+ * SUPERUSER ONLY: the edit pages render THIS editor for a superuser and for
+ * nobody else. A unit's own editors get `MethodServicePublicationsSection`
+ * (`method-service-publications-section.tsx`): the supported-publications box
+ * and the review list of the services the unit already has, nothing more.
  *
  * One list of the unit's services with Edit and Remove, and ONE form beneath
  * it that adds a service or, after Edit, changes the one picked. Every write is
@@ -357,7 +358,13 @@ export function MethodServicesSection({
       if (name.value !== editing.name) payload.name = name.value;
       if (url.value !== editing.url) payload.url = url.value;
       if (!sameFamilies(families.value, editing.families)) payload.families = families.value;
-      if (!sameList(parsed.pmids, editing.supportedPmids)) payload.supportedPmids = parsed.pmids;
+      if (!sameList(parsed.pmids, editing.supportedPmids)) {
+        payload.supportedPmids = parsed.pmids;
+        // The list this form started from: the server applies only what was
+        // added or removed here, so a stale form does not undo someone
+        // else's save.
+        payload.baseSupportedPmids = editing.supportedPmids;
+      }
       if (draft.countStaffPapers !== editing.countStaffPapers) {
         payload.countStaffPapers = draft.countStaffPapers;
       }
@@ -472,7 +479,7 @@ export function MethodServicesSection({
       <SectionHeader
         id={headingId}
         title="Method services"
-        description="Services this unit offers for a research method. Each one appears on that method’s public page, with a link to the service and a count of the publications the unit collaborated on or supported. Only a superuser can see or change this section; the unit’s own editors cannot."
+        description="Services this unit offers for a research method. Each one appears on that method’s public page, with a link to the service and a count of the publications the unit collaborated on or supported. Only a superuser can add, change or remove a service; the unit’s own editors can only keep its list of supported publications up to date."
       />
 
       {services.length === 0 ? (
@@ -946,6 +953,8 @@ function errorMessage(code: string): string {
       return "Only a superuser can change method services. Refresh the page and try again.";
     case "service_not_found":
       return "That service no longer exists. Refresh the page and try again.";
+    case "changed_elsewhere":
+      return "Someone else saved this service at the same moment, so your changes weren’t saved. Save again.";
     default:
       return "Something went wrong — your changes weren’t saved. Please try again.";
   }

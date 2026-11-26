@@ -310,7 +310,9 @@ describe("CoreEditSections — Method services", () => {
 
   it("renders after Basics for the core, with its count in the rail", () => {
     const view = renderSections({
-      methodServices: [
+      methodServices: {
+        mode: "manage",
+        services: [
         {
           id: 1,
           entityType: "core",
@@ -324,7 +326,8 @@ describe("CoreEditSections — Method services", () => {
           affiliationPhrases: [],
           coauthoredPmids: [], authorNames: [], nameMatchedPmids: [],
         },
-      ],
+        ],
+      },
     });
     expect(sectionIds(view)).toEqual(["basics", "method-services", "leadership", "staff", "access"]);
     const panel = view.getByTestId("panel-method-services");
@@ -337,7 +340,7 @@ describe("CoreEditSections — Method services", () => {
   });
 
   it("an empty list still renders the section", () => {
-    const view = renderSections({ methodServices: [], access: null });
+    const view = renderSections({ methodServices: { mode: "manage", services: [] }, access: null });
     expect(sectionIds(view)).toEqual(["basics", "method-services", "leadership", "staff"]);
   });
 });

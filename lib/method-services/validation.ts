@@ -47,6 +47,42 @@ export type MethodServiceView = {
   nameMatchedPmids: string[];
 };
 
+/**
+ * A service as a unit's own editor gets it: everything but the affiliation
+ * phrases and author names, which only a superuser sees or sets.
+ */
+export type MethodServicePublicationsView = Omit<
+  MethodServiceView,
+  "affiliationPhrases" | "authorNames"
+>;
+
+/** Drop what a unit's editor is not sent. */
+export function toPublicationsView(view: MethodServiceView): MethodServicePublicationsView {
+  // Named one by one: a field added to the full view later is not sent to a
+  // unit's editor until someone decides it should be.
+  return {
+    id: view.id,
+    entityType: view.entityType,
+    entityId: view.entityId,
+    name: view.name,
+    url: view.url,
+    families: view.families,
+    supportedPmids: view.supportedPmids,
+    excludedPmids: view.excludedPmids,
+    countStaffPapers: view.countStaffPapers,
+    coauthoredPmids: view.coauthoredPmids,
+    nameMatchedPmids: view.nameMatchedPmids,
+  };
+}
+
+/**
+ * What an edit page hands the Method services section: the whole editor for a
+ * superuser (`manage`), or the unit's own part of it (`publications`).
+ */
+export type MethodServicesForViewer =
+  | { mode: "manage"; services: ReadonlyArray<MethodServiceView> }
+  | { mode: "publications"; services: ReadonlyArray<MethodServicePublicationsView> };
+
 /** One row of the family picker (`GET /api/edit/method-families`). */
 export type MethodFamilyOption = MethodServiceFamily & {
   supercategoryLabel: string;
@@ -194,6 +230,29 @@ export function validatePmidList(
   if (invalid.length > 0) return { ok: false, error: "invalid_pmids" };
   if (pmids.length > SERVICE_PMIDS_MAX) return { ok: false, error: "too_many_pmids" };
   return { ok: true, value: pmids };
+}
+
+/**
+ * An editor's changes to a PMID list, applied to the list as it is stored NOW.
+ * `base` is the list the editor's page was showing and `edited` what they
+ * sent: what they added is `edited` minus `base`, what they removed is `base`
+ * minus `edited`. Only those are applied to `stored`, so a PMID someone else
+ * added after the page loaded stays, and one someone else removed is not put
+ * back. With `base` equal to `stored` the result is `edited` as sent. Pure.
+ */
+export function applyPmidEdits(
+  base: ReadonlyArray<string>,
+  edited: ReadonlyArray<string>,
+  stored: ReadonlyArray<string>,
+): string[] {
+  if (base.length === stored.length && base.every((p, i) => p === stored[i])) return [...edited];
+  const inBase = new Set(base);
+  const inEdited = new Set(edited);
+  const inStored = new Set(stored);
+  return [
+    ...stored.filter((p) => !inBase.has(p) || inEdited.has(p)),
+    ...edited.filter((p) => !inBase.has(p) && !inStored.has(p)),
+  ];
 }
 
 /** The editor's textareas: one affiliation phrase, or one author name, per

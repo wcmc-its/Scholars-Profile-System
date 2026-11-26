@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   SERVICE_PMIDS_MAX,
+  applyPmidEdits,
   defaultCountStaffPapers,
   isMethodServiceEntityType,
   parsePmidBlock,
@@ -203,5 +204,29 @@ describe("validatePmidList", () => {
     expect(over).toEqual({ ok: false, error: "too_many_pmids" });
     // 5001 entries that collapse to 5000 distinct PMIDs are fine.
     expect(validatePmidList([...at, "1"])).toMatchObject({ ok: true });
+  });
+});
+
+describe("applyPmidEdits", () => {
+  it("is the edited list when the base is what is stored", () => {
+    expect(applyPmidEdits(["1", "2"], ["3", "1"], ["1", "2"])).toEqual(["3", "1"]);
+  });
+  it("keeps what was added to the stored list since the base", () => {
+    expect(applyPmidEdits(["1", "2"], ["1", "2", "3"], ["1", "2", "8", "9"])).toEqual([
+      "1",
+      "2",
+      "8",
+      "9",
+      "3",
+    ]);
+  });
+  it("changes nothing for an unedited stale list", () => {
+    expect(applyPmidEdits(["1", "2"], ["1", "2"], ["2", "8"])).toEqual(["2", "8"]);
+  });
+  it("removes what was removed and does not restore what someone else removed", () => {
+    expect(applyPmidEdits(["1", "2", "3"], ["1", "3"], ["2", "3", "8"])).toEqual(["3", "8"]);
+  });
+  it("does not add twice what someone else also added", () => {
+    expect(applyPmidEdits(["1"], ["1", "5"], ["1", "5", "8"])).toEqual(["1", "5", "8"]);
   });
 });

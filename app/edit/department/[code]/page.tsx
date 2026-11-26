@@ -24,7 +24,7 @@ import { notFound, redirect } from "next/navigation";
 import { ConsoleTopBar } from "@/components/edit/console-top-bar";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
-import { loadMethodServicesForUnit } from "@/lib/api/method-services";
+import { loadMethodServicesForViewer } from "@/lib/api/method-service-access";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 import { loadUnitLeadershipRoles } from "@/lib/api/unit-leadership-roles";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -32,7 +32,6 @@ import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { isUnitLeadershipEnabled } from "@/lib/edit/unit-leadership-flags";
-import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import { stripObserverView } from "@/lib/auth/observer-view";
 
 export const dynamic = "force-dynamic";
@@ -90,12 +89,10 @@ export default async function EditDepartmentPage({
     session.isObserver === true &&
     (await loadUnitEditContext("department", code, stripObserverView(session), db.read)) === null;
   const viceChairs = isUnitLeadershipEnabled() ? await loadUnitLeadershipRoles(code, db.read) : null;
-  // Method services are managed by a superuser only (never the unit's own
-  // editors): no section for anyone else, as `/api/edit/method-service` 403s.
-  const methodServices =
-    isMethodServicesEnabled() && session.isSuperuser
-      ? await loadMethodServicesForUnit("department", code)
-      : null;
+  // Method services: the whole editor for a superuser; for the department's
+  // own editors, the publications half of the services it already has; no
+  // section (and no read) for anyone else. As `/api/edit/method-service`.
+  const methodServices = await loadMethodServicesForViewer(session, "department", code);
   return (
     <UnitEditPage
       ctx={ctx}

@@ -242,72 +242,280 @@ describe("POST /api/edit/method-service: gates", () => {
   });
 });
 
-describe("POST /api/edit/method-service: superuser only", () => {
-  const ALL_OPS: Array<[string, Record<string, unknown>]> = [
+describe("POST /api/edit/method-service: who may do what", () => {
+  const SUPERUSER_ONLY: Array<[string, Record<string, unknown>]> = [
     ["create", CREATE],
     ["create on a core", { ...CREATE, entityType: "core", entityId: CORE }],
-    ["update", { op: "update", id: 5, name: "Renamed" }],
+    ["update of a superuser-only field", { op: "update", id: 5, name: "Renamed" }],
     ["delete", { op: "delete", id: 5 }],
+  ];
+  const UNIT_OPS: Array<[string, Record<string, unknown>]> = [
+    ["update of supportedPmids alone", { op: "update", id: 5, supportedPmids: ["111", "333"] }],
     ["exclude", { op: "exclude", id: 5, pmid: "111" }],
     ["restore", { op: "restore", id: 5, pmid: "111" }],
   ];
-
-  it.each(ALL_OPS)("a superuser can %s", async (_label, body) => {
-    m.serviceFindUnique.mockResolvedValue(row({ excludedPmids: body.op === "restore" ? ["111"] : [] }));
-    const res = await call(body, SUPERUSER);
-    expect(res.status).toBe(200);
-    expect(m.transaction).toHaveBeenCalledTimes(1);
-    expect(m.logEditDenial).not.toHaveBeenCalled();
-  });
-
-  it.each(ALL_OPS)("a unit owner gets 403 on %s, logged, with no write", async (_label, body) => {
-    // Owner of the department AND of the core: neither grant opens anything.
-    grantDepartment(DEPT_A, "owner");
-    m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
-    const res = await call(body);
+  const ALL_OPS = [...SUPERUSER_ONLY, ...UNIT_OPS];
+  /** The stored row a body acts on, so that the op has something to change. */
+  const stored = (body: Record<string, unknown>, over: Record<string, unknown> = {}) => {
+    const r = row({ excludedPmids: body.op === "restore" ? ["111"] : [], ...over });
+    m.serviceFindUnique.mockResolvedValue(r);
+    m.txUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => ({
+      ...r,
+      ...args.data,
+    }));
+    // PubMed answers, and knows no author of anything.
+    m.fetchAffiliations.mockResolvedValue({ affiliations: new Map(), authors: new Map() });
+  };
+  const expectRefused = async (res: Response) => {
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ ok: false, error: "not_superuser" });
-    expect(m.logEditDenial).toHaveBeenCalledWith({
-      actorCwid: ACTOR,
-      targetCwid: ACTOR,
-      path: "/api/edit/method-service",
-      reason: "not_superuser",
-    });
+    // One body for every refusal: it never says whether the service exists.
+    expect(await res.json()).toEqual({ ok: false, error: "not_superuser" });
     expect(m.transaction).not.toHaveBeenCalled();
     expect(m.appendAuditRow).not.toHaveBeenCalled();
     expect(m.bustCache).not.toHaveBeenCalled();
-    // Refused before anything is looked up: no probing for a unit or a service.
+    expect(m.fetchAffiliations).not.toHaveBeenCalled();
+  };
+  const expectNothingLookedUp = () => {
     expect(m.deptFindUnique).not.toHaveBeenCalled();
     expect(m.coreFindUnique).not.toHaveBeenCalled();
     expect(m.serviceFindUnique).not.toHaveBeenCalled();
     expect(m.unitAdminFindMany).not.toHaveBeenCalled();
     expect(m.unitAdminFindUnique).not.toHaveBeenCalled();
+  };
+
+  describe("a superuser", () => {
+    it.each(ALL_OPS)("can %s", async (_label, body) => {
+      stored(body);
+      const res = await call(body, SUPERUSER);
+      expect(res.status).toBe(200);
+      expect(m.transaction).toHaveBeenCalledTimes(1);
+      expect(m.logEditDenial).not.toHaveBeenCalled();
+    });
+
+    it("is sent the affiliation phrases and author names back", async () => {
+      stored({}, { affiliationPhrases: ["Example Library"], authorNames: ["Stone B"] });
+      const res = await call({ op: "exclude", id: 5, pmid: "111" }, SUPERUSER);
+      expect((await res.json()).service).toMatchObject({
+        affiliationPhrases: ["Example Library"],
+        authorNames: ["Stone B"],
+      });
+    });
   });
 
-  it.each([
-    { isCommsSteward: true },
-    { isContentEditor: true },
-    { isCoreDirector: true },
-    { isCommsSteward: true, isObserver: true },
-  ])("%o gets 403 on every op", async (session) => {
-    for (const [, body] of ALL_OPS) {
-      const res = await call(body, session);
-      expect(res.status).toBe(403);
-      expect(await res.json()).toMatchObject({ error: "not_superuser" });
-    }
-    expect(m.transaction).not.toHaveBeenCalled();
+  describe("an editor of the service's unit", () => {
+    beforeEach(() => grantDepartment(DEPT_A, "curator"));
+
+    it.each(UNIT_OPS)("can %s", async (_label, body) => {
+      stored(body);
+      const res = await call(body);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ ok: true, changed: true });
+      expect(m.transaction).toHaveBeenCalledTimes(1);
+      expect(m.appendAuditRow).toHaveBeenCalledTimes(1);
+      expect(m.bustCache).toHaveBeenCalledTimes(1);
+      expect(m.logEditDenial).not.toHaveBeenCalled();
+    });
+
+    it.each(SUPERUSER_ONLY)("gets 403 on %s, logged, before anything is looked up", async (_label, body) => {
+      // Owner of the department AND of the core: neither grant opens these.
+      grantDepartment(DEPT_A, "owner");
+      m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
+      await expectRefused(await call(body));
+      expect(m.logEditDenial).toHaveBeenCalledWith({
+        actorCwid: ACTOR,
+        targetCwid: ACTOR,
+        path: "/api/edit/method-service",
+        reason: "not_superuser",
+      });
+      expectNothingLookedUp();
+    });
+
+    it.each([
+      ["name", "Renamed"],
+      ["url", "https://example.org/other"],
+      ["families", [FAM_2]],
+      ["countStaffPapers", true],
+      ["affiliationPhrases", ["Example Library"]],
+      ["authorNames", ["Stone B"]],
+      ["excludedPmids", ["111"]],
+      ["coauthoredPmids", ["111"]],
+      ["entityId", DEPT_B],
+    ])(
+      "sending %s alongside supportedPmids is refused whole: nothing is written, not even the PMIDs",
+      async (field, value) => {
+        await expectRefused(
+          await call({ op: "update", id: 5, supportedPmids: ["111", "333"], [field]: value }),
+        );
+        expect(m.txUpdate).not.toHaveBeenCalled();
+        expectNothingLookedUp();
+      },
+    );
+
+    it("saves the supported list and nothing else, audited as a roster_change on the unit", async () => {
+      const res = await call(
+        { op: "update", id: 5, supportedPmids: ["111", "333"] },
+        NOBODY,
+        { realCwid: "real001", impersonatedCwid: ACTOR },
+      );
+      expect(res.status).toBe(200);
+      expect(m.txUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 5 }, data: { supportedPmids: ["111", "333"] } }),
+      );
+      expect(m.appendAuditRow).toHaveBeenCalledWith(
+        fakeTx,
+        expect.objectContaining({
+          actorCwid: "real001",
+          impersonatedCwid: ACTOR,
+          targetEntityType: "department",
+          targetEntityId: DEPT_A,
+          action: "roster_change",
+          fieldsChanged: ["method_services"],
+          beforeValues: expect.objectContaining({ supportedPmids: ["111", "222"] }),
+          afterValues: expect.objectContaining({ supportedPmids: ["111", "333"] }),
+        }),
+      );
+    });
+
+    it("the PubMed co-author check still runs on their save, against the STORED phrases", async () => {
+      stored({}, { affiliationPhrases: ["Example Library"], affiliationCheckedPmids: ["111", "222"] });
+      m.fetchAffiliations.mockResolvedValue({
+        affiliations: new Map([["333", ["Example Library, Example University"]]]),
+        authors: new Map(),
+      });
+      const res = await call({ op: "update", id: 5, supportedPmids: ["111", "222", "333"] });
+      expect(res.status).toBe(200);
+      // Only the PMID not yet checked is asked for.
+      expect(m.fetchAffiliations).toHaveBeenCalledWith(["333"]);
+      expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+        supportedPmids: ["111", "222", "333"],
+        coauthoredPmids: ["333"],
+        affiliationCheckedPmids: ["111", "222", "333"],
+      });
+    });
+
+    it("is never sent the affiliation phrases or author names, on any op", async () => {
+      for (const [, body] of UNIT_OPS) {
+        vi.clearAllMocks();
+        stored(body, { affiliationPhrases: ["Example Library"], authorNames: ["Stone B"] });
+        const json = await (await call(body)).json();
+        expect(json.service).toMatchObject({ id: 5, name: "Example service" });
+        expect(json.service).not.toHaveProperty("affiliationPhrases");
+        expect(json.service).not.toHaveProperty("authorNames");
+        expect(JSON.stringify(json)).not.toMatch(/Example Library|Stone B/);
+      }
+    });
+
+    it("nor on a save that changes nothing", async () => {
+      stored({}, { authorNames: ["Stone B"] });
+      const json = await (await call({ op: "update", id: 5, supportedPmids: ["111", "222"] })).json();
+      expect(json).toMatchObject({ ok: true, changed: false });
+      expect(json.service).not.toHaveProperty("authorNames");
+    });
+
+    it("a core's owner can do the same on the core's service", async () => {
+      m.unitAdminFindMany.mockResolvedValue([]);
+      m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
+      for (const [, body] of UNIT_OPS) {
+        vi.clearAllMocks();
+        stored(body, { entityType: "core", entityId: CORE });
+        expect((await call(body)).status).toBe(200);
+      }
+    });
+
+    it.each([{ isCommsSteward: true }, { isContentEditor: true }])(
+      "%o edits every unit, so can do the same",
+      async (session) => {
+        m.unitAdminFindMany.mockResolvedValue([]);
+        for (const [, body] of UNIT_OPS) {
+          vi.clearAllMocks();
+          stored(body);
+          expect((await call(body, session)).status).toBe(200);
+        }
+      },
+    );
+
+    it("the Cores director can on a core's service, not on a department's", async () => {
+      m.unitAdminFindMany.mockResolvedValue([]);
+      const body = UNIT_OPS[0][1];
+      stored(body, { entityType: "core", entityId: CORE });
+      expect((await call(body, { isCoreDirector: true })).status).toBe(200);
+      vi.clearAllMocks();
+      stored(body);
+      await expectRefused(await call(body, { isCoreDirector: true }));
+    });
   });
 
-  it("an unknown op from someone who is not a superuser is a 403, not a 400", async () => {
-    const res = await call({ op: "merge" });
-    expect(res.status).toBe(403);
+  describe("an editor of a DIFFERENT unit", () => {
+    beforeEach(() => grantDepartment(DEPT_B, "owner"));
+
+    it.each(ALL_OPS)("gets 403 on %s, with no write", async (_label, body) => {
+      stored(body);
+      await expectRefused(await call(body));
+    });
+
+    it("the unit checked is the STORED row's: naming their own unit in the body opens nothing", async () => {
+      stored({});
+      await expectRefused(
+        await call({ op: "exclude", id: 5, pmid: "111", entityType: "department", entityId: DEPT_B }),
+      );
+      expect(m.logEditDenial).toHaveBeenCalledWith({
+        actorCwid: ACTOR,
+        targetCwid: DEPT_A,
+        path: "/api/edit/method-service",
+        reason: "not_curator",
+        targetEntityType: "department",
+        targetEntityId: DEPT_A,
+      });
+    });
   });
 
-  it("View as: the verdict is the viewed person's, so a superuser viewing a unit owner is refused", async () => {
+  describe("an outsider", () => {
+    it.each(ALL_OPS)("gets 403 on %s, with no write", async (_label, body) => {
+      stored(body);
+      await expectRefused(await call(body));
+      expect(m.logEditDenial).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(SUPERUSER_ONLY)("%s is refused before anything is looked up", async (_label, body) => {
+      await expectRefused(await call(body));
+      expectNothingLookedUp();
+    });
+
+    it("an unknown op is a 403, not a 400", async () => {
+      await expectRefused(await call({ op: "merge" }));
+      expectNothingLookedUp();
+    });
+
+    it.each(UNIT_OPS)(
+      "%s: a service that does not exist, one whose unit is gone, a malformed id and someone else's service all answer alike",
+      async (_label, body) => {
+        const answers: unknown[] = [];
+        const answer = async (b: Record<string, unknown>) => {
+          const res = await call(b);
+          answers.push([res.status, await res.json()]);
+        };
+        stored(body);
+        await answer(body); // exists, not theirs
+        m.serviceFindUnique.mockResolvedValue(null);
+        await answer(body); // no such service
+        stored(body, { entityId: "NOPE" });
+        await answer(body); // its unit is gone
+        stored(body, { entityType: "center" });
+        await answer(body); // a row of a kind that holds no service
+        await answer({ ...body, id: "5" }); // malformed id
+        expect(new Set(answers.map((a) => JSON.stringify(a))).size).toBe(1);
+        expect(answers[0]).toEqual([403, { ok: false, error: "not_superuser" }]);
+        expect(m.transaction).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it("View as: the verdict is the viewed person's, so a superuser viewing a unit owner is held to the unit's part", async () => {
     // `readEditRequest` hands the route the EFFECTIVE session.
-    const res = await call(CREATE, NOBODY, { realCwid: "real001", impersonatedCwid: ACTOR });
-    expect(res.status).toBe(403);
-    expect(m.transaction).not.toHaveBeenCalled();
+    grantDepartment(DEPT_A, "owner");
+    const viewing = { realCwid: "real001", impersonatedCwid: ACTOR };
+    await expectRefused(await call(CREATE, NOBODY, viewing));
+    expect((await call({ op: "exclude", id: 5, pmid: "111" }, NOBODY, viewing)).status).toBe(200);
   });
 });
 
@@ -629,6 +837,122 @@ describe("POST /api/edit/method-service: update", () => {
   });
 });
 
+describe("POST /api/edit/method-service: a supported list saved from a stale page", () => {
+  const SU = { isSuperuser: true };
+  const STORED = ["111", "222", "801", "802", "803"];
+  // The page was loaded when the list was 111, 222. Someone else has since
+  // added 801, 802 and 803.
+  const BASE = ["111", "222"];
+
+  it.each([
+    ["a superuser", SU],
+    ["an editor of the unit", NOBODY],
+  ])("%s adding one PMID keeps what was added since", async (_who, session) => {
+    grantDepartment(DEPT_A, "curator");
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: STORED }));
+    const res = await call(
+      { op: "update", id: 5, supportedPmids: ["111", "222", "333"], baseSupportedPmids: BASE },
+      session,
+    );
+    expect(res.status).toBe(200);
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({
+      supportedPmids: ["111", "222", "801", "802", "803", "333"],
+    });
+  });
+
+  it("an unchanged stale list writes nothing", async () => {
+    grantDepartment(DEPT_A, "curator");
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: STORED }));
+    const res = await call({ op: "update", id: 5, supportedPmids: BASE, baseSupportedPmids: BASE });
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      changed: false,
+      service: { supportedPmids: STORED },
+    });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("removes only what the editor removed, and does not put back what someone else removed", async () => {
+    grantDepartment(DEPT_A, "curator");
+    // Someone else removed 222 and added 801.
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: ["111", "801"] }));
+    await call({ op: "update", id: 5, supportedPmids: ["222", "333"], baseSupportedPmids: BASE });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ supportedPmids: ["801", "333"] });
+  });
+
+  it("with a base that is the stored list, saves the list as sent", async () => {
+    grantDepartment(DEPT_A, "curator");
+    await call({ op: "update", id: 5, supportedPmids: ["333", "111"], baseSupportedPmids: BASE });
+    expect(m.txUpdate.mock.calls[0][0].data).toEqual({ supportedPmids: ["333", "111"] });
+  });
+
+  it("400s on a base that is not a PMID list, or one with no supportedPmids", async () => {
+    const bad = await call(
+      { op: "update", id: 5, supportedPmids: ["111"], baseSupportedPmids: ["abc"] },
+      SU,
+    );
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: "invalid_pmids", field: "baseSupportedPmids" });
+    const alone = await call({ op: "update", id: 5, baseSupportedPmids: BASE }, SU);
+    expect(alone.status).toBe(400);
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("400s when the merged list is over the limit", async () => {
+    const stored = Array.from({ length: 5000 }, (_, i) => String(10000 + i));
+    m.serviceFindUnique.mockResolvedValue(row({ supportedPmids: stored }));
+    const res = await call({ op: "update", id: 5, supportedPmids: ["111"], baseSupportedPmids: [] }, SU);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "too_many_pmids" });
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it("locks the row and re-reads it before writing the list", async () => {
+    const order: string[] = [];
+    m.txQueryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      order.push(`lock:${strings.join("?")}:${values.join(",")}`);
+      return [{ id: 5 }];
+    });
+    m.txFindUnique.mockImplementation(async () => {
+      order.push("read");
+      return row();
+    });
+    m.txUpdate.mockImplementation(async (args: { data: Record<string, unknown> }) => {
+      order.push("write");
+      return { ...row(), ...args.data };
+    });
+    await call({ op: "update", id: 5, supportedPmids: ["111", "222", "333"] }, SU);
+    expect(order).toEqual([
+      "lock:SELECT id FROM method_service WHERE id = ? FOR UPDATE:5",
+      "read",
+      "write",
+    ]);
+  });
+
+  it("409s and writes nothing when another save landed while this one was working", async () => {
+    grantDepartment(DEPT_A, "curator");
+    // The first read saw 111, 222; by the time the row is locked it holds more.
+    m.txFindUnique.mockResolvedValue(row({ supportedPmids: STORED }));
+    const res = await call({
+      op: "update",
+      id: 5,
+      supportedPmids: ["111", "222", "333"],
+      baseSupportedPmids: BASE,
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "changed_elsewhere" });
+    expect(m.txUpdate).not.toHaveBeenCalled();
+    expect(m.appendAuditRow).not.toHaveBeenCalled();
+    expect(m.bustCache).not.toHaveBeenCalled();
+  });
+
+  it("does not lock for a change that leaves the list and its check alone", async () => {
+    const res = await call({ op: "update", id: 5, url: "https://example.org/new" }, SU);
+    expect(res.status).toBe(200);
+    expect(m.txQueryRaw).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/edit/method-service: delete", () => {
   it("hard-deletes and audits the row that was there", async () => {
     const res = await call({ op: "delete", id: 5 }, SUPERUSER);
@@ -883,24 +1207,63 @@ describe("GET /api/edit/method-service: the review numbers", () => {
     expect(m.loadServiceReview).toHaveBeenCalledWith(expect.objectContaining({ id: 5, entityId: DEPT_A }));
   });
 
-  it("a unit owner gets 403, and neither the service nor the review is read", async () => {
-    grantDepartment(DEPT_A, "owner");
+  it("an editor of the service's unit gets the review", async () => {
+    grantDepartment(DEPT_A, "curator");
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ ok: true, review: REVIEW });
+    expect(m.logEditDenial).not.toHaveBeenCalled();
+  });
+
+  it("a core's owner gets the review of the core's service", async () => {
+    m.serviceFindUnique.mockResolvedValue(row({ entityType: "core", entityId: CORE }));
+    m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    expect((await get()).status).toBe(200);
+  });
+
+  it("an editor of a DIFFERENT unit gets 403, and the review is not read", async () => {
+    grantDepartment(DEPT_B, "owner");
     const res = await get();
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "not_superuser" });
-    expect(m.serviceFindUnique).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({ ok: false, error: "not_superuser" });
     expect(m.loadServiceReview).not.toHaveBeenCalled();
     expect(m.logEditDenial).toHaveBeenCalledWith(
-      expect.objectContaining({ actorCwid: ACTOR, reason: "not_superuser" }),
+      expect.objectContaining({ actorCwid: ACTOR, reason: "not_curator", targetEntityId: DEPT_A }),
     );
   });
 
+  it("an outsider gets the same 403 whether or not the service exists", async () => {
+    const answers: string[] = [];
+    const answer = async (query?: string) => {
+      const res = await get(query);
+      answers.push(JSON.stringify([res.status, await res.json()]));
+    };
+    await answer(); // exists, not theirs
+    m.serviceFindUnique.mockResolvedValue(null);
+    await answer(); // no such service
+    m.serviceFindUnique.mockResolvedValue(row({ entityId: "NOPE" }));
+    await answer(); // its unit is gone
+    await answer("?id=abc"); // malformed id
+    expect(new Set(answers).size).toBe(1);
+    expect(JSON.parse(answers[0])).toEqual([403, { ok: false, error: "not_superuser" }]);
+    expect(m.loadServiceReview).not.toHaveBeenCalled();
+  });
+
+  it.each([{ isCommsSteward: true }, { isContentEditor: true }])(
+    "%o edits every unit, so gets the review",
+    async (session) => {
+      signIn(session);
+      expect((await get()).status).toBe(200);
+    },
+  );
+
   it.each([
-    { isCommsSteward: true },
-    { isContentEditor: true },
-    { isCoreDirector: true },
+    // The observer's steward view is read-only: stripped before the check.
     { isCommsSteward: true, isObserver: true },
-  ])("%o gets 403", async (session) => {
+    // Owner of every core, of no department.
+    { isCoreDirector: true },
+  ])("%o gets 403 on a department's service", async (session) => {
     signIn(session);
     const res = await get();
     expect(res.status).toBe(403);

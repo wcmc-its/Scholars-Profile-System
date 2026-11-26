@@ -38,7 +38,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { countHighConfidence, countReviewSuggestions } from "@/lib/api/core-console-index";
 import { loadCoreReviewQueue } from "@/lib/api/core-queue";
 import { loadCoreStaff } from "@/lib/api/core-staff";
-import { loadMethodServicesForUnit } from "@/lib/api/method-services";
+import { loadMethodServicesForViewer } from "@/lib/api/method-service-access";
 import { corePath } from "@/lib/core-url";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -51,7 +51,6 @@ import {
 } from "@/lib/edit/authz";
 import { loadConsoleTabs } from "@/lib/edit/console-tabs.server";
 import { resolveDirectoryNames } from "@/lib/edit/directory-names";
-import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import { isCorePagesEnabled, isCorePubModalEnabled } from "@/lib/profile/cores-flags";
 
 export const dynamic = "force-dynamic";
@@ -159,11 +158,10 @@ export default async function EditCorePage({
     loadConsoleTabs(session, db.read),
     // The Staff section's curated list (Scholar, then ED, names).
     loadCoreStaff(coreId),
-    // The Method services section; null (no section) while the flag is off,
-    // and for anyone but a superuser, who alone manages method services.
-    isMethodServicesEnabled() && session.isSuperuser
-      ? loadMethodServicesForUnit("core", coreId)
-      : Promise.resolve(null),
+    // The Method services section: the whole editor for a superuser, the
+    // publications half for the core's own editors when it has a service,
+    // null (no section) for anyone else and while the flag is off.
+    loadMethodServicesForViewer(session, "core", coreId),
   ]);
   if (!core) notFound();
   const candidates = queue?.candidates ?? [];

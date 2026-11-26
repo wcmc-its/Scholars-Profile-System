@@ -618,7 +618,7 @@ describe("UnitEditPage — Method services", () => {
   });
 
   it("a department gets the section after Basics, with its count in the nav", () => {
-    render(<UnitEditPage ctx={ctx({ actorRole: "owner", access: [] })} methodServices={[SERVICE]} />);
+    render(<UnitEditPage ctx={ctx({ actorRole: "owner", access: [] })} methodServices={{ mode: "manage", services: [SERVICE] }} />);
     expect(sectionIds()).toEqual(["basics", "method-services", "leadership", "access"]);
     expect(navItems()["method-services"]).toMatchObject({ label: "Method services", stat: "1" });
     const panel = screen.getByTestId("panel-method-services");
@@ -631,14 +631,14 @@ describe("UnitEditPage — Method services", () => {
   });
 
   it("an empty list still renders the section (the flag is on, nothing added yet)", () => {
-    render(<UnitEditPage ctx={ctx({})} methodServices={[]} />);
+    render(<UnitEditPage ctx={ctx({})} methodServices={{ mode: "manage", services: [] }} />);
     expect(sectionIds()).toEqual(["basics", "method-services", "leadership"]);
     expect(navItems()["method-services"].stat).toBe("0");
   });
 
   it("never on a division or a center, even if a list is passed", () => {
     for (const unitType of ["division", "center"] as const) {
-      const view = render(<UnitEditPage ctx={ctx({ unitType })} methodServices={[SERVICE]} />);
+      const view = render(<UnitEditPage ctx={ctx({ unitType })} methodServices={{ mode: "manage", services: [SERVICE] }} />);
       expect(sectionIds()).not.toContain("method-services");
       view.unmount();
     }
@@ -648,7 +648,7 @@ describe("UnitEditPage — Method services", () => {
     render(
       <UnitEditPage
         ctx={ctx({ actorRole: "superuser", suppression: { id: "s1", suppressedAt: new Date() } as never })}
-        methodServices={[SERVICE]}
+        methodServices={{ mode: "manage", services: [SERVICE] }}
       />,
     );
     expect(sectionIds()).toEqual(["retire"]);

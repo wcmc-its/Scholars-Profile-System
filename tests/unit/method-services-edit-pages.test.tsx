@@ -1,9 +1,13 @@
 /**
  * Who gets the "Method services" section on `/edit/department/[code]` and
- * `/edit/core/[coreId]`: a superuser, and nobody else. The site owner manages
- * every method service himself, so a unit's own Owner or Curator, a comms
- * steward and the Cores director are handed no list (`methodServices` null,
- * which renders no section) and the service list is never even read.
+ * `/edit/core/[coreId]`, and which half of it (`loadMethodServicesForViewer`,
+ * run for real here):
+ *   - a superuser: every service, the whole editor (`mode: "manage"`);
+ *   - someone else who may edit the unit: the publications half
+ *     (`mode: "publications"`), only when the unit already has a service, and
+ *     never with the affiliation phrases or author names in the payload;
+ *   - anyone else: `methodServices` null, which renders no section, and the
+ *     service list is never even read.
  *
  * The pages are called as functions and return a `{ type, props }` tree (the
  * `edit-core-page-role-labels.test.tsx` approach): child components are
@@ -17,6 +21,7 @@ const m = vi.hoisted(() => ({
   loadServices: vi.fn(),
   loadUnitEditContext: vi.fn(),
   unitAdminFindUnique: vi.fn(),
+  unitAdminFindMany: vi.fn(),
   unitPage: vi.fn(() => null),
   coreSections: vi.fn(() => null),
 }));
@@ -53,7 +58,7 @@ vi.mock("@/lib/db", () => ({
       },
       coreLeader: { findMany: vi.fn().mockResolvedValue([]) },
       orgUnitRole: { findMany: vi.fn().mockResolvedValue([]) },
-      unitAdmin: { findUnique: m.unitAdminFindUnique, findMany: vi.fn().mockResolvedValue([]) },
+      unitAdmin: { findUnique: m.unitAdminFindUnique, findMany: m.unitAdminFindMany },
       scholar: { findMany: vi.fn().mockResolvedValue([]) },
     },
     write: {},
@@ -82,8 +87,39 @@ function findByType(node: unknown, type: unknown): El | null {
   return findByType(el.props?.children, type);
 }
 
-const SERVICES = [{ id: 1, name: "Example service" }];
+const SERVICES = [
+  {
+    id: 1,
+    entityType: "department",
+    entityId: "DEPTA",
+    name: "Example service",
+    url: "https://example.org/service",
+    families: [{ supercategory: "s", familyLabel: "Example family" }],
+    supportedPmids: ["111"],
+    excludedPmids: [],
+    countStaffPapers: false,
+    affiliationPhrases: ["Example Library"],
+    authorNames: ["Stone B"],
+    coauthoredPmids: [],
+    nameMatchedPmids: [],
+  },
+];
 const NOBODY = { cwid: "act0001", isSuperuser: false, isCommsSteward: false };
+/** The actor holds this role on the department (`getEffectiveUnitRole`). */
+const grantDepartment = (role: "owner" | "curator") =>
+  m.unitAdminFindMany.mockResolvedValue([{ entityType: "department", entityId: "DEPTA", role }]);
+
+/** The publications half, as the browser of a unit's editor receives it. */
+function expectPublicationsPayload(methodServices: unknown) {
+  expect(methodServices).toMatchObject({
+    mode: "publications",
+    services: [{ id: 1, name: "Example service", supportedPmids: ["111"] }],
+  });
+  const [service] = (methodServices as { services: Array<Record<string, unknown>> }).services;
+  expect(service).not.toHaveProperty("affiliationPhrases");
+  expect(service).not.toHaveProperty("authorNames");
+  expect(JSON.stringify(methodServices)).not.toMatch(/Example Library|Stone B/);
+}
 
 const departmentProps = async () => {
   const tree = await EditDepartmentPage({
@@ -109,20 +145,46 @@ beforeEach(() => {
   // The department page renders for anyone the context loader admits.
   m.loadUnitEditContext.mockResolvedValue({ unit: { code: "DEPTA", name: "Example Library" } });
   m.unitAdminFindUnique.mockResolvedValue(null);
+  m.unitAdminFindMany.mockResolvedValue([]);
 });
 afterEach(() => vi.unstubAllEnvs());
 
 describe("/edit/department/[code]: the Method services section", () => {
-  it("a superuser is handed the department's services", async () => {
+  it("a superuser is handed the whole editor, phrases and names included", async () => {
     m.session.mockResolvedValue({ ...NOBODY, isSuperuser: true });
-    expect((await departmentProps()).methodServices).toBe(SERVICES);
+    expect((await departmentProps()).methodServices).toEqual({ mode: "manage", services: SERVICES });
     expect(m.loadServices).toHaveBeenCalledWith("department", "DEPTA");
   });
 
+  it("a superuser gets the section for a department with no service yet", async () => {
+    m.loadServices.mockResolvedValue([]);
+    m.session.mockResolvedValue({ ...NOBODY, isSuperuser: true });
+    expect((await departmentProps()).methodServices).toEqual({ mode: "manage", services: [] });
+  });
+
   it.each([
-    ["the department's own owner", {}],
-    ["a comms steward", { isCommsSteward: true }],
-    ["a content editor", { isCommsSteward: true, isContentEditor: true }],
+    ["the department's own owner", {}, "owner" as const],
+    ["the department's own curator", {}, "curator" as const],
+    ["a comms steward", { isCommsSteward: true }, null],
+    ["a content editor", { isCommsSteward: true, isContentEditor: true }, null],
+  ])("%s is handed the publications half, without phrases or names", async (_who, flags, role) => {
+    if (role) grantDepartment(role);
+    m.session.mockResolvedValue({ ...NOBODY, ...flags });
+    expectPublicationsPayload((await departmentProps()).methodServices);
+    expect(m.loadServices).toHaveBeenCalledWith("department", "DEPTA");
+  });
+
+  it("the department's own owner gets no section while it has no service", async () => {
+    grantDepartment("owner");
+    m.loadServices.mockResolvedValue([]);
+    m.session.mockResolvedValue(NOBODY);
+    expect((await departmentProps()).methodServices).toBeNull();
+  });
+
+  it.each([
+    // Admitted to the page by the (mocked) context loader, with no role on it.
+    ["someone with no role on the department", {}],
+    // The observer's steward view is read-only: nothing here they could save.
     ["an observer", { isCommsSteward: true, isObserver: true }],
     ["the Cores director", { isCoreDirector: true }],
   ])("%s gets the page with no section, and the services are not read", async (_who, flags) => {
@@ -141,25 +203,32 @@ describe("/edit/department/[code]: the Method services section", () => {
 });
 
 describe("/edit/core/[coreId]: the Method services section", () => {
-  it("a superuser is handed the core's services", async () => {
+  it("a superuser is handed the whole editor", async () => {
     m.session.mockResolvedValue({ ...NOBODY, isSuperuser: true });
-    expect((await coreProps()).methodServices).toBe(SERVICES);
+    expect((await coreProps()).methodServices).toEqual({ mode: "manage", services: SERVICES });
     expect(m.loadServices).toHaveBeenCalledWith("core", "77");
   });
 
-  it("the core's own owner gets the page with no section, and the services are not read", async () => {
-    m.session.mockResolvedValue(NOBODY);
-    m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
-    const props = await coreProps();
-    expect(props.methodServices).toBeNull();
-    expect(m.loadServices).not.toHaveBeenCalled();
+  it.each([
+    ["the core's own owner", {}, true],
+    ["the Cores director", { isCoreDirector: true }, false],
+    ["a comms steward", { isCommsSteward: true }, false],
+  ])("%s is handed the publications half, without phrases or names", async (_who, flags, owner) => {
+    m.session.mockResolvedValue({ ...NOBODY, ...flags });
+    if (owner) m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    expectPublicationsPayload((await coreProps()).methodServices);
+    expect(m.loadServices).toHaveBeenCalledWith("core", "77");
   });
 
-  it.each([
-    ["the Cores director", { isCoreDirector: true }],
-    ["a comms steward", { isCommsSteward: true }],
-  ])("%s gets the page with no section", async (_who, flags) => {
-    m.session.mockResolvedValue({ ...NOBODY, ...flags });
+  it("the core's own owner gets no section while it has no service", async () => {
+    m.session.mockResolvedValue(NOBODY);
+    m.unitAdminFindUnique.mockResolvedValue({ role: "owner" });
+    m.loadServices.mockResolvedValue([]);
+    expect((await coreProps()).methodServices).toBeNull();
+  });
+
+  it("an observer gets the page with no section, and the services are not read", async () => {
+    m.session.mockResolvedValue({ ...NOBODY, isCommsSteward: true, isObserver: true });
     expect((await coreProps()).methodServices).toBeNull();
     expect(m.loadServices).not.toHaveBeenCalled();
   });

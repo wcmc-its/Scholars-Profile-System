@@ -35,7 +35,7 @@ import { ArrowRight } from "lucide-react";
 import type { UnitLeadershipRoleView } from "@/lib/unit-leadership";
 import { CenterLeadershipCard } from "@/components/edit/center-leadership-card";
 import { UnitLeadershipCard } from "@/components/edit/unit-leadership-card";
-import { MethodServicesSection } from "@/components/edit/method-services-section";
+import { MethodServicesForViewerSection } from "@/components/edit/method-service-publications-section";
 import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -55,7 +55,7 @@ import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
 import { isCornellDirectoryMembersEnabled } from "@/lib/edit/cornell-directory-flag";
-import type { MethodServiceView } from "@/lib/method-services/validation";
+import type { MethodServicesForViewer } from "@/lib/method-services/validation";
 
 type AttrKey =
   | "description"
@@ -176,13 +176,15 @@ export type UnitEditPageProps = {
   /** Observer viewing a unit they have no real role on: "View only", `inert`. */
   readOnly?: boolean;
   /** A department's Vice Chairs (`UNIT_LEADERSHIP_ROLES`). `null` / omitted
-   *  renders no section: the flag is off, or the unit is not a department. */
+   *  renders no section: the flag is off, the unit is not a department, or
+   *  this viewer has nothing to do there (`loadMethodServicesForViewer`). */
   viceChairs?: ReadonlyArray<UnitLeadershipRoleView> | null;
   /** Header link to the internal program roster; the caller has checked the gate. */
   programRosterHref?: string;
   /** A department's method services (`METHOD_SERVICES`). `null` / omitted
-   *  renders no section: the flag is off, or the unit is not a department. */
-  methodServices?: ReadonlyArray<MethodServiceView> | null;
+   *  renders no section: the flag is off, the unit is not a department, or
+   *  this viewer has nothing to do there (`loadMethodServicesForViewer`). */
+  methodServices?: MethodServicesForViewer | null;
 };
 
 export function UnitEditPage({
@@ -347,7 +349,7 @@ function unitSections(
   visible: ReadonlyArray<AttrDef>,
   basePath: string,
   viceChairs: ReadonlyArray<UnitLeadershipRoleView> | null,
-  methodServices: ReadonlyArray<MethodServiceView> | null,
+  methodServices: MethodServicesForViewer | null,
 ): UnitEditSection[] {
   const has = (key: AttrKey) => visible.some((a) => a.key === key);
   const unitType = ctx.unit.unitType;
@@ -403,18 +405,19 @@ function unitSections(
 
   // A department's services for a research method. Departments only (a core
   // has its own page); the caller passes null unless the flag is on AND the
-  // viewer is a superuser, who alone manages method services.
+  // viewer is a superuser (the whole editor) or one of the department's own
+  // editors with a service to keep up to date (its publications only).
   if (unitType === "department" && methodServices) {
     sections.push({
       id: "method-services",
       label: "Method services",
-      stat: String(methodServices.length),
+      stat: String(methodServices.services.length),
       content: (
-        <MethodServicesSection
+        <MethodServicesForViewerSection
           entityType="department"
           entityId={ctx.unit.code}
           unitName={ctx.unit.name}
-          services={methodServices}
+          methodServices={methodServices}
           headingId="method-services-heading"
         />
       ),

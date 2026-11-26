@@ -108,7 +108,7 @@ describe("MethodServicesSection: list", () => {
     );
     const help = screen.getByText(/Services this unit offers for a research method\./).textContent ?? "";
     // Says who manages it, and never that it is the unit's own to maintain.
-    expect(help).toContain("Only a superuser can see or change this section");
+    expect(help).toContain("Only a superuser can add, change or remove a service");
     expect(help).not.toMatch(/your unit|your service/);
   });
 
@@ -689,7 +689,16 @@ describe("MethodServicesSection: edit", () => {
     fireEvent.click(form().getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(screen.getByText("Saved Renamed service.")).toBeTruthy());
-    expect(writes()).toEqual([{ op: "update", id: 5, name: "Renamed service", supportedPmids: ["111"] }]);
+    expect(writes()).toEqual([
+      {
+        op: "update",
+        id: 5,
+        name: "Renamed service",
+        supportedPmids: ["111"],
+        // The list the form started from, so the server applies only the edit.
+        baseSupportedPmids: ["111", "222", "333"],
+      },
+    ]);
     const row = within(screen.getByTestId("method-service-5"));
     expect(row.getByText("Renamed service")).toBeTruthy();
     expect(row.getByText("1 publication on the supported list")).toBeTruthy();
