@@ -78,6 +78,7 @@ export const REPORT_KEYS = [
   "22",
   "23",
   "24",
+  "25",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -281,6 +282,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Guideline and policy citations",
     summary:
       "Publications cited by health authorities (WHO, NICE, CDC, AHRQ, National Academies), clinical guidelines, consensus statements and systematic reviews, by publication, by citing document or by person. Open to every unit administrator, for the units they administer.",
+    descriptionHtml: null,
+  },
+  "25": {
+    slug: "patent-citations",
+    name: "Patent citations",
+    summary:
+      "Publications cited in a US patent, by publication, by invention or by person, with related patents counted once. Open to every unit administrator, for the units they administer.",
     descriptionHtml: null,
   },
 };

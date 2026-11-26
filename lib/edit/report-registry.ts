@@ -99,6 +99,7 @@ import { renderNihFundedPubsReport } from "@/components/edit/reports/nih-funded-
 import { renderOptimizeMembershipReport } from "@/components/edit/reports/optimize-membership-body";
 import { renderPublicationsReport } from "@/components/edit/reports/publications-body";
 import { renderPubCitationReport } from "@/components/edit/reports/pub-citation-body";
+import { renderPatentCitationsReport } from "@/components/edit/reports/patent-citations-body";
 import { renderPolicyCitationsReport } from "@/components/edit/reports/policy-citations-body";
 import { renderPubRelevanceReport } from "@/components/edit/reports/pub-relevance-body";
 import { renderSharedResourceUsageReport } from "@/components/edit/reports/shared-resource-usage-body";
@@ -114,6 +115,7 @@ import {
   HIGH_IMPACT_PUBS_REPORT,
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
+import { canViewPatentCitationsReport } from "@/lib/edit/patent-citations-report";
 import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
@@ -272,6 +274,16 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     accessRule: POLICY_CITATIONS_ACCESS_RULE,
     headerAside: true,
     render: renderPolicyCitationsReport,
+  },
+  // Patent citations (etl/patent-citations). Report 24's access rule; 404s
+  // while PATENT_CITATIONS_REPORT is off (`canView` checks).
+  "25": {
+    n: "25",
+    gate: "admin",
+    canView: canViewPatentCitationsReport,
+    accessRule: POLICY_CITATIONS_ACCESS_RULE,
+    headerAside: true,
+    render: renderPatentCitationsReport,
   },
 };
 

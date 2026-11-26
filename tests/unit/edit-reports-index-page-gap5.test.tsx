@@ -24,9 +24,11 @@ const {
   mockListReportAccess,
   mockReportMetaFindMany,
   mockCanViewArticleCount,
+  mockCanViewPatentCitations,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockCanViewArticleCount: vi.fn(),
+  mockCanViewPatentCitations: vi.fn(),
   mockNotFound: vi.fn(() => {
     throw new Error("__NOT_FOUND__");
   }),
@@ -109,6 +111,9 @@ vi.mock("@/lib/edit/policy-citations-report", () => ({
   canViewPolicyCitationsReport: vi.fn().mockResolvedValue(false),
   POLICY_CITATIONS_ACCESS_RULE: "",
 }));
+// Report 25 (Patent citations): its gate is the flag PATENT_CITATIONS_REPORT
+// and report 24's rule together (`patent-citations-report.test.ts`).
+vi.mock("@/lib/edit/patent-citations-report", () => ({ canViewPatentCitationsReport: mockCanViewPatentCitations }));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
 vi.mock("@/lib/db", () => ({
@@ -156,6 +161,7 @@ beforeEach(() => {
   mockListReportAccess.mockResolvedValue([]);
   mockReportMetaFindMany.mockResolvedValue([]);
   mockCanViewArticleCount.mockResolvedValue(false);
+  mockCanViewPatentCitations.mockResolvedValue(false);
 });
 
 describe("/edit/reports — Gap 5: zero reportable units", () => {
@@ -182,6 +188,19 @@ describe("/edit/reports — Gap 5: zero reportable units", () => {
     expect(units[0].reports[0].slug).toBe("article-count");
     // The report header's audience for report 8, not the person-mode default.
     expect(units[0].reports[0].accessText).toBe("All unit administrators");
+  });
+
+  it("report 25 (Patent citations) lists only while its gate is open: absent above, the institution row when it is", async () => {
+    mockGetEditSession.mockResolvedValue(CURATOR);
+    mockCanViewPatentCitations.mockResolvedValue(true);
+    const result = await EditReportsIndexPage({ searchParams: sp() });
+    const index = findByType(result, mockReportsIndex);
+    const units = index!.props.units as Array<{ kind: string; reports: Array<{ n: number; slug: string; name: string; accessText: string }> }>;
+    expect(units.map((u) => u.kind)).toEqual(["institution"]);
+    expect(units[0].reports).toEqual([
+      expect.objectContaining({ n: 25, slug: "patent-citations", name: "Patent citations", accessText: "All unit administrators" }),
+    ]);
+    expect(mockCanViewPatentCitations).toHaveBeenCalledWith(CURATOR);
   });
 
   it("a report 9 grant holder with zero unit grants → the institution row with report 9 alone", async () => {
