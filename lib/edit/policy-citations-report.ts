@@ -147,13 +147,15 @@ export type PolicyCitationParams = {
 
 const VIEW_KEYS = new Set(["view", "sort", "dsort", "q", "page"]);
 
-/** Every param is optional; a stray value is dropped. A bare URL (nothing but
- *  view state) gets `DEFAULT_LEVELS` and `DEFAULT_FROM`; any filter in the URL
- *  means the form was submitted and the URL is taken as-is (no level ticked =
- *  every level, no `from` = any year). The rail always submits `basis`, so
- *  clearing everything never brings the defaults back. */
-export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationParams {
-  const bare = ![...sp.keys()].some((k) => !VIEW_KEYS.has(k));
+/** The who-filter, the publication years and the viewer's scope: the params
+ *  report 25 (`patent-citations-report.ts`) shares, under the same names. */
+export type WhoParams = Pick<
+  PolicyCitationParams,
+  "types" | "units" | "people" | "positions" | "basis" | "from" | "to" | "scope"
+>;
+
+/** The reads both reports' parsers share. A stray value is dropped. */
+export function citationParamReader(sp: URLSearchParams) {
   const person = parsePersonFilter(sp);
   const among = <T extends string>(k: string, allowed: readonly T[]): T[] => {
     const given = sp.getAll(k);
@@ -170,18 +172,40 @@ export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationPa
     const hi = year(b);
     return [lo, lo !== null && hi !== null ? Math.max(lo, hi) : hi];
   };
-  const [from, to] = range("from", "to");
-  const [cfrom, cto] = range("cfrom", "cto");
   const page = Number.parseInt(sp.get("page") ?? "", 10);
   return {
+    among,
+    one,
+    range,
     types: person.types,
     units: person.unitValues,
     people: [...new Set(sp.getAll("person").map((v) => v.trim()))].filter((v) => /^[A-Za-z0-9]{2,16}$/.test(v)),
     positions: among("pos", Object.keys(POSITION_LABEL) as Position[]),
+    basis: one("basis", Object.keys(BASIS_LABEL) as YearBasis[], "cy"),
+    q: (sp.get("q") ?? "").trim().slice(0, 100),
+    page: Number.isFinite(page) ? Math.min(100_000, Math.max(1, page)) : 1,
+  };
+}
+
+/** Every param is optional; a stray value is dropped. A bare URL (nothing but
+ *  view state) gets `DEFAULT_LEVELS` and `DEFAULT_FROM`; any filter in the URL
+ *  means the form was submitted and the URL is taken as-is (no level ticked =
+ *  every level, no `from` = any year). The rail always submits `basis`, so
+ *  clearing everything never brings the defaults back. */
+export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationParams {
+  const bare = ![...sp.keys()].some((k) => !VIEW_KEYS.has(k));
+  const { among, one, range, types, units, people, positions, basis, q, page } = citationParamReader(sp);
+  const [from, to] = range("from", "to");
+  const [cfrom, cto] = range("cfrom", "cto");
+  return {
+    types,
+    units,
+    people,
+    positions,
     levels: bare ? [...DEFAULT_LEVELS] : among("level", LEVELS),
     bodies: among("body", BODIES),
     hideExcluded: sp.get("excl") === "1",
-    basis: one("basis", Object.keys(BASIS_LABEL) as YearBasis[], "cy"),
+    basis,
     from: bare ? DEFAULT_FROM : from,
     to,
     cfrom,
@@ -189,8 +213,8 @@ export function parsePolicyCitationParams(sp: URLSearchParams): PolicyCitationPa
     view: one("view", ["publications", "documents", "people"] as const, "publications"),
     sort: one("sort", Object.keys(SORT_LABEL) as PolicySort[], "ranked"),
     docSort: one("dsort", Object.keys(DOC_SORT_LABEL) as DocSort[], "recent"),
-    q: (sp.get("q") ?? "").trim().slice(0, 100),
-    page: Number.isFinite(page) ? Math.min(100_000, Math.max(1, page)) : 1,
+    q,
+    page,
     scope: [],
   };
 }
@@ -263,7 +287,7 @@ export async function resolvePolicyCitationParams(
 // SQL
 // ---------------------------------------------------------------------------
 
-const yearWindow = (expr: Prisma.Sql, lo: number | null, hi: number | null): Prisma.Sql =>
+export const yearWindow = (expr: Prisma.Sql, lo: number | null, hi: number | null): Prisma.Sql =>
   lo !== null && hi !== null
     ? Prisma.sql`AND ${expr} BETWEEN ${lo} AND ${hi}`
     : lo !== null
@@ -304,7 +328,7 @@ const POSITION_SQL: Record<Position, Prisma.Sql> = {
 };
 
 /** The viewer's units alone, as a condition on `s`. */
-const viewerScopeSql = (p: PolicyCitationParams): Prisma.Sql =>
+const viewerScopeSql = (p: Pick<WhoParams, "scope">): Prisma.Sql =>
   p.scope === null
     ? Prisma.empty
     : p.scope.length === 0
@@ -316,7 +340,7 @@ const viewerScopeSql = (p: PolicyCitationParams): Prisma.Sql =>
  *  AND-ed with the URL's selection: a `unit` outside the scope matches nobody.
  *  `people: false` leaves the `person` filter out (the Person facet's own
  *  counts, which must not collapse to the people already ticked). */
-export function policyScopeSql(p: PolicyCitationParams, opts: { people?: boolean } = {}): Prisma.Sql {
+export function policyScopeSql(p: WhoParams, opts: { people?: boolean } = {}): Prisma.Sql {
   const scope = viewerScopeSql(p);
   const listCwids = opts.people !== false && p.people.length > 0 ? p.people : null;
   return Prisma.sql`pa.is_confirmed = 1
@@ -328,13 +352,13 @@ export function policyScopeSql(p: PolicyCitationParams, opts: { people?: boolean
 
 /** "This publication has a matching authorship": a semi-join, so a paper with
  *  five matching authors is still one row. */
-const hasAuthorSql = (p: PolicyCitationParams, pmid: Prisma.Sql): Prisma.Sql =>
+export const hasAuthorSql = (p: WhoParams, pmid: Prisma.Sql): Prisma.Sql =>
   Prisma.sql`EXISTS (SELECT 1 FROM publication_author pa
                  JOIN scholar s ON s.cwid = pa.cwid
                 WHERE pa.pmid = ${pmid} AND ${policyScopeSql(p)})`;
 
 /** The publication-year window (`p` = `publication`). */
-const pubYearSql = (p: PolicyCitationParams): Prisma.Sql =>
+export const pubYearSql = (p: WhoParams): Prisma.Sql =>
   yearWindow(articleYearExpr({ basis: p.basis, added: null }), p.from, p.to);
 
 /** A filter on the citing documents themselves (issuing body, citing year,
@@ -381,7 +405,7 @@ export function citedSql(p: PolicyCitationParams): Prisma.Sql {
  *  from a listing that was already narrowed; testing the who clause again
  *  here, once per publication and never per link, keeps every query scoped on
  *  its own. */
-const scopedPubsSql = (p: PolicyCitationParams, pmids: readonly string[]): Prisma.Sql => Prisma.sql`(SELECT p.pmid
+export const scopedPubsSql = (p: WhoParams, pmids: readonly string[]): Prisma.Sql => Prisma.sql`(SELECT p.pmid
           FROM publication p
          WHERE p.pmid IN (${Prisma.join([...pmids])})
            AND ${hasAuthorSql(p, Prisma.sql`p.pmid`)}) ok`;
@@ -490,20 +514,25 @@ export async function loadPublicationCounts(p: PolicyCitationParams): Promise<Pu
   }));
 }
 
-const likeArg = (q: string) => `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+export const likeArg = (q: string) => `%${q.replace(/[\\%_]/g, "\\$&")}%`;
 
 /** The cited publications in scope matching the By publication search: the
  *  PMID exactly, or the text in the title or in a matching author's name.
  *  Reads the rollups whatever the document filters are (it can only
- *  over-include; the caller intersects it with the listing). */
-export async function searchPublications(p: PolicyCitationParams, q: string): Promise<Set<string>> {
+ *  over-include; the caller intersects it with the listing). `isCited` is the
+ *  rollup test on `p` (report 25 passes its own). */
+export async function searchPublications(
+  p: WhoParams,
+  q: string,
+  isCited: Prisma.Sql = Prisma.sql`(p.authority_count > 0 OR p.guideline_count > 0 OR p.consensus_count > 0 OR p.review_count > 0)`,
+): Promise<Set<string>> {
   const like = likeArg(q);
   const raw = await db.read.$queryRaw<{ pmid: string }[]>`
     SELECT STRAIGHT_JOIN p.pmid
       FROM publication p
       JOIN publication_author pa ON pa.pmid = p.pmid
       JOIN scholar s ON s.cwid = pa.cwid
-     WHERE (p.authority_count > 0 OR p.guideline_count > 0 OR p.consensus_count > 0 OR p.review_count > 0)
+     WHERE ${isCited}
        AND ${policyScopeSql(p)}
        ${pubYearSql(p)}
        AND (p.pmid = ${q} OR p.title LIKE ${like} OR s.preferred_name LIKE ${like})
@@ -560,66 +589,83 @@ export async function loadPersonCounts(p: PolicyCitationParams): Promise<PersonR
 // Publication rows and their citing documents
 // ---------------------------------------------------------------------------
 
-export type PubRow = PubCounts & {
+/** A publication's own columns and its authors the viewer may see. */
+export type PubDetails = {
   title: string;
   journal: string | null;
   doi: string | null;
   /** The confirmed, active WCM authors the viewer may see (everyone for a
    *  superuser, their units' people for a unit administrator), in byline order. */
   authors: { cwid: string; name: string; position: Position }[];
-  /** Counted authority documents per issuing body, most first. */
-  bodies: { body: string; count: number }[];
 };
 
-async function withDetails(p: PolicyCitationParams, rows: PubCounts[]): Promise<PubRow[]> {
-  if (rows.length === 0) return [];
-  const pmids = Prisma.join(rows.map((r) => r.pmid));
-  const [pubs, bodies] = await Promise.all([
-    db.read.$queryRaw<
-      {
-        pmid: string;
-        title: string;
-        journal: string | null;
-        doi: string | null;
-        cwid: string;
-        preferred_name: string;
-        is_first: number | boolean;
-        is_last: number | boolean;
-      }[]
-    >`
+export type PubRow = PubCounts &
+  PubDetails & {
+    /** Counted authority documents per issuing body, most first. */
+    bodies: { body: string; count: number }[];
+  };
+
+/** `PubDetails` per PMID, for one page (or one sheet) of rows. */
+export async function loadPublicationDetails(
+  p: Pick<WhoParams, "scope">,
+  pmids: readonly string[],
+): Promise<Map<string, PubDetails>> {
+  const out = new Map<string, PubDetails>();
+  if (pmids.length === 0) return out;
+  const pubs = await db.read.$queryRaw<
+    {
+      pmid: string;
+      title: string;
+      journal: string | null;
+      doi: string | null;
+      cwid: string;
+      preferred_name: string;
+      is_first: number | boolean;
+      is_last: number | boolean;
+    }[]
+  >`
       SELECT p.pmid, p.title, p.journal, p.doi, s.cwid, s.preferred_name, pa.is_first, pa.is_last
         FROM publication p
         JOIN publication_author pa ON pa.pmid = p.pmid
         JOIN scholar s ON s.cwid = pa.cwid
-       WHERE p.pmid IN (${pmids})
+       WHERE p.pmid IN (${Prisma.join([...pmids])})
          AND pa.is_confirmed = 1
          AND s.deleted_at IS NULL AND s.status = 'active'
          ${viewerScopeSql(p)}
-       ORDER BY p.pmid, pa.position`,
-    db.read.$queryRaw<{ pmid: string; body: string | null; n: Num }[]>`
-      SELECT l.pmid, d.issuing_body AS body, COUNT(DISTINCT d.dedup_key) AS n
-        FROM publication_citing_document l
-        JOIN citing_document d ON d.id = l.citing_document_id
-       WHERE l.pmid IN (${pmids})
-         AND d.level = 'authority'
-         ${docSql(p)}
-       GROUP BY l.pmid, d.issuing_body`,
-  ]);
-  const out = new Map<string, PubRow>(
-    rows.map((r) => [r.pmid, { ...r, title: "", journal: null, doi: null, authors: [], bodies: [] }]),
-  );
+       ORDER BY p.pmid, pa.position`;
   for (const r of pubs) {
-    const row = out.get(r.pmid);
-    if (!row || row.authors.some((a) => a.cwid === r.cwid)) continue;
-    row.title = r.title;
-    row.journal = r.journal;
-    row.doi = r.doi;
+    const row = out.get(r.pmid) ?? { title: r.title, journal: r.journal, doi: r.doi, authors: [] };
+    out.set(r.pmid, row);
+    if (row.authors.some((a) => a.cwid === r.cwid)) continue;
     row.authors.push({
       cwid: r.cwid,
       name: r.preferred_name,
       position: r.is_first ? "first" : r.is_last ? "last" : "middle",
     });
   }
+  return out;
+}
+
+async function withDetails(p: PolicyCitationParams, rows: PubCounts[]): Promise<PubRow[]> {
+  if (rows.length === 0) return [];
+  const pmids = rows.map((r) => r.pmid);
+  const [pubs, bodies] = await Promise.all([
+    loadPublicationDetails(p, pmids),
+    db.read.$queryRaw<{ pmid: string; body: string | null; n: Num }[]>`
+      SELECT l.pmid, d.issuing_body AS body, COUNT(DISTINCT d.dedup_key) AS n
+        FROM publication_citing_document l
+        JOIN citing_document d ON d.id = l.citing_document_id
+       WHERE l.pmid IN (${Prisma.join(pmids)})
+         AND d.level = 'authority'
+         ${docSql(p)}
+       GROUP BY l.pmid, d.issuing_body`,
+  ]);
+  const out = new Map<string, PubRow>(
+    rows.map((r) => [
+      r.pmid,
+      { ...r, ...(pubs.get(r.pmid) ?? { title: "", journal: null, doi: null, authors: [] }), bodies: [] },
+    ]),
+  );
   for (const r of bodies) {
     if (r.body) out.get(r.pmid)?.bodies.push({ body: r.body, count: Number(r.n) });
   }
@@ -1187,49 +1233,67 @@ export const fiscalLabel = (p: Pick<PolicyCitationParams, "basis">) => (y: numbe
 
 export type PolicyChip = { group: string; value: string; removeQuery: string | null };
 
-/** The active filters as chips: one per value up to three, else one
- *  "N selected" chip that clears the facet. The viewer's scope shows first
- *  and cannot be removed. */
-export function policyCitationChips(
-  p: PolicyCitationParams,
+/** One facet's chips: one per value up to three, else one "N selected" chip
+ *  that clears the facet. `without` is the query string with only the kept
+ *  values. */
+export function facetChips<V extends string>(
+  group: string,
+  values: readonly V[],
+  label: (v: V) => string,
+  without: (keep: (v: V) => boolean) => string,
+): PolicyChip[] {
+  if (values.length > 3) return [{ group, value: `${values.length} selected`, removeQuery: without(() => false) }];
+  return values.map((v) => ({ group, value: label(v), removeQuery: without((x) => x !== v) }));
+}
+
+/** The viewer's scope (first, and it cannot be removed), then the who-filter. */
+export function whoChips(
+  p: WhoParams,
+  qs: (next: Partial<WhoParams>) => string,
   unitLabel: ReadonlyMap<string, string> = new Map(),
   personName: ReadonlyMap<string, string> = new Map(),
 ): PolicyChip[] {
-  const qs = (next: Partial<PolicyCitationParams>) => policyCitationQueryString(p, next);
   const chips: PolicyChip[] = [];
   if (p.scope !== null) {
     chips.push({ group: "Unit", value: p.scope.map((u) => unitLabel.get(u) ?? u).join("; "), removeQuery: null });
   }
-  const facet = <V extends string>(
-    group: string,
-    values: readonly V[],
-    label: (v: V) => string,
-    without: (keep: (v: V) => boolean) => Partial<PolicyCitationParams>,
-  ) => {
-    if (values.length > 3) {
-      chips.push({ group, value: `${values.length} selected`, removeQuery: qs(without(() => false)) });
-      return;
-    }
-    for (const v of values) chips.push({ group, value: label(v), removeQuery: qs(without((x) => x !== v)) });
-  };
-  facet("Person type", p.types, (t) => formatRoleCategory(t) ?? t, (keep) => ({ types: p.types.filter(keep) }));
+  chips.push(
+    ...facetChips("Person type", p.types, (t) => formatRoleCategory(t) ?? t, (keep) => qs({ types: p.types.filter(keep) })),
+  );
   const unitGroups: [string, (u: string) => boolean][] = [
     ["Org unit", (u) => u.startsWith("dept:") || u.startsWith("div:")],
     ["Centers", (u) => u.startsWith("center:")],
     ["Primary institution", (u) => u.startsWith("inst:")],
   ];
   for (const [group, inGroup] of unitGroups) {
-    facet(
-      group,
-      p.units.filter(inGroup),
-      (u) => unitLabel.get(u) ?? u,
-      (keep) => ({ units: p.units.filter((u) => !inGroup(u) || keep(u)) }),
+    chips.push(
+      ...facetChips(
+        group,
+        p.units.filter(inGroup),
+        (u) => unitLabel.get(u) ?? u,
+        (keep) => qs({ units: p.units.filter((u) => !inGroup(u) || keep(u)) }),
+      ),
     );
   }
-  facet("Person", p.people, (c) => personName.get(c) ?? c, (keep) => ({ people: p.people.filter(keep) }));
-  facet("Author", p.positions, (k) => POSITION_LABEL[k], (keep) => ({ positions: p.positions.filter(keep) }));
-  facet("Level", p.levels, (l) => LEVEL_LABEL[l], (keep) => ({ levels: p.levels.filter(keep) }));
-  facet("Issuing body", p.bodies, bodyLabel, (keep) => ({ bodies: p.bodies.filter(keep) }));
+  chips.push(
+    ...facetChips("Person", p.people, (c) => personName.get(c) ?? c, (keep) => qs({ people: p.people.filter(keep) })),
+    ...facetChips("Author", p.positions, (k) => POSITION_LABEL[k], (keep) => qs({ positions: p.positions.filter(keep) })),
+  );
+  return chips;
+}
+
+/** The active filters as chips. */
+export function policyCitationChips(
+  p: PolicyCitationParams,
+  unitLabel: ReadonlyMap<string, string> = new Map(),
+  personName: ReadonlyMap<string, string> = new Map(),
+): PolicyChip[] {
+  const qs = (next: Partial<PolicyCitationParams>) => policyCitationQueryString(p, next);
+  const chips = whoChips(p, qs, unitLabel, personName);
+  chips.push(
+    ...facetChips("Level", p.levels, (l) => LEVEL_LABEL[l], (keep) => qs({ levels: p.levels.filter(keep) })),
+    ...facetChips("Issuing body", p.bodies, bodyLabel, (keep) => qs({ bodies: p.bodies.filter(keep) })),
+  );
   if (p.hideExcluded) {
     chips.push({ group: "Excluded-study citations", value: "Hidden", removeQuery: qs({ hideExcluded: false }) });
   }
@@ -1244,16 +1308,11 @@ export function policyCitationChips(
 
 const roleLabel = (r: string) => formatRoleCategory(r) ?? r;
 
-/** The Criteria sheet, verbatim: every filter, "All" when unset. */
-export function describePolicyCitationCriteria(
-  p: PolicyCitationParams,
-  generatedAt: Date,
-  labels: ReadonlyMap<string, string> = new Map(),
-): [string, string][] {
-  const list = (xs: string[]) => (xs.length > 0 ? xs.join("; ") : "All");
+const list = (xs: string[]) => (xs.length > 0 ? xs.join("; ") : "All");
+
+/** The Criteria rows for the viewer's access and the who-filter. */
+export function whoCriteria(p: WhoParams, labels: ReadonlyMap<string, string> = new Map()): [string, string][] {
   return [
-    ["Report", "24. Guideline and policy citations"],
-    ["Generated", generatedAt.toISOString()],
     [
       "Access",
       p.scope === null
@@ -1263,6 +1322,32 @@ export function describePolicyCitationCriteria(
     ...personFilterCriteria({ types: p.types, unitValues: p.units }, labels, roleLabel),
     ["Person (CWID)", list(p.people)],
     ["Author position", list(p.positions.map((k) => POSITION_LABEL[k]))],
+  ];
+}
+
+/** The Criteria rows for the publication years. */
+export function pubYearCriteria(p: WhoParams): [string, string][] {
+  return [
+    [
+      "Publication year basis",
+      p.basis === "fy"
+        ? "Fiscal year, July 1 – June 30, named by the ending calendar year, by the date the article was added to PubMed"
+        : "Calendar year of publication",
+    ],
+    ["Publication years", yearSpan(p.from, p.to) ?? "All"],
+  ];
+}
+
+/** The Criteria sheet, verbatim: every filter, "All" when unset. */
+export function describePolicyCitationCriteria(
+  p: PolicyCitationParams,
+  generatedAt: Date,
+  labels: ReadonlyMap<string, string> = new Map(),
+): [string, string][] {
+  return [
+    ["Report", "24. Guideline and policy citations"],
+    ["Generated", generatedAt.toISOString()],
+    ...whoCriteria(p, labels),
     [
       "Level",
       p.levels.length > 0
@@ -1276,13 +1361,7 @@ export function describePolicyCitationCriteria(
         ? "Hidden: a citation does not count when the document only lists the paper among its excluded studies"
         : "Counted",
     ],
-    [
-      "Publication year basis",
-      p.basis === "fy"
-        ? "Fiscal year, July 1 – June 30, named by the ending calendar year, by the date the article was added to PubMed"
-        : "Calendar year of publication",
-    ],
-    ["Publication years", yearSpan(p.from, p.to) ?? "All"],
+    ...pubYearCriteria(p),
     ["Citing document year", yearSpan(p.cfrom, p.cto) ?? "All"],
     ["Order", SORT_LABEL[p.sort]],
     ...(p.q ? ([[p.view === "people" ? "Search (people)" : "Search (publications)", p.q]] as [string, string][]) : []),

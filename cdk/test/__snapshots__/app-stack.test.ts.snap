@@ -971,6 +971,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "PATENT_CITATIONS_REPORT",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/program-roster-editor-role",
               },
@@ -6242,6 +6246,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_BIBLIOMETRICS",
+                "Value": "on",
+              },
+              {
+                "Name": "PATENT_CITATIONS_REPORT",
                 "Value": "on",
               },
               {

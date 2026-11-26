@@ -2106,6 +2106,13 @@ export class AppStack extends Stack {
         // Publication Manager's report.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         EDIT_BIBLIOMETRICS: envConfig.envName === "staging" ? "on" : "off",
+        // PATENT_CITATIONS_REPORT -- report 25 on /edit/reports and
+        // GET /api/edit/reports/patent-citations (its Excel download), read
+        // via isPatentCitationsReportEnabled() (=== "on"); off = absent from
+        // the index and both 404. Read-only, over what the patent-citations
+        // import loaded. Staging on; prod off until the staging review.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        PATENT_CITATIONS_REPORT: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
