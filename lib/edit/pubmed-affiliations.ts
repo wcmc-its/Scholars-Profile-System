@@ -91,3 +91,67 @@ export async function fetchExternalAuthorFlags(
   }
   return out;
 }
+
+/** pmid -> every author's affiliations, as PubMed prints them. A PMID with no
+ *  affiliation at all maps to an empty list. */
+export function authorAffiliationsByPmid(xml: string): Map<string, string[]> {
+  const doc = new DOMParser().parseFromString(xml, "text/xml");
+  const out = new Map<string, string[]>();
+  for (const article of Array.from(doc.getElementsByTagName("PubmedArticle"))) {
+    // The first PMID is MedlineCitation's own; later ones are cited references.
+    const pmid = article.getElementsByTagName("PMID")[0];
+    if (!pmid) continue;
+    const list = article.getElementsByTagName("AuthorList")[0];
+    const affiliations: string[] = [];
+    for (const author of list ? Array.from(list.getElementsByTagName("Author")) : []) {
+      for (const aff of Array.from(author.getElementsByTagName("Affiliation"))) {
+        const value = text(aff);
+        if (value) affiliations.push(value);
+      }
+    }
+    out.set(text(pmid), affiliations);
+  }
+  return out;
+}
+
+/** With an API key NCBI allows 10 requests a second, else 3. */
+const KEYED_DELAY_MS = 110;
+/** The whole lookup, all batches: it runs inside an editor's save request,
+ *  which the edge cuts off at 30 seconds. */
+export const AFFILIATION_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * EFetch every author's affiliations for the PMIDs, for a request handler (the
+ * method services save): POST, batches of 200, `NCBI_API_KEY` when set, and
+ * one deadline for the whole lookup. Throws on a non-2xx answer, a network
+ * error or the deadline; the caller decides what a failure means. A PMID
+ * PubMed does not return is absent.
+ */
+export async function fetchAuthorAffiliations(
+  pmids: ReadonlyArray<string>,
+  opts: { fetchFn?: typeof fetch; timeoutMs?: number } = {},
+): Promise<Map<string, string[]>> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? AFFILIATION_FETCH_TIMEOUT_MS);
+  const apiKey = process.env.NCBI_API_KEY;
+  const out = new Map<string, string[]>();
+  for (let i = 0; i < pmids.length; i += ID_BATCH) {
+    if (i > 0) await new Promise((r) => setTimeout(r, apiKey ? KEYED_DELAY_MS : DELAY_MS));
+    signal.throwIfAborted();
+    const body = new URLSearchParams({
+      db: "pubmed",
+      retmode: "xml",
+      id: pmids.slice(i, i + ID_BATCH).join(","),
+    });
+    if (apiKey) body.set("api_key", apiKey);
+    const res = await fetchFn(EFETCH, {
+      method: "POST",
+      body,
+      headers: { "User-Agent": "scholars-app/1.0" },
+      signal,
+    });
+    if (!res.ok) throw new Error(`EFetch ${res.status}`);
+    for (const [k, v] of authorAffiliationsByPmid(await res.text())) out.set(k, v);
+  }
+  return out;
+}

@@ -2,10 +2,11 @@
 
 /**
  * The review half of the Method services editor section: under each saved
- * service, the line "188 collaborations on the method page · 231 on your
- * supported list, 167 of them on the page · Review publications", and the
- * "Review publications" panel it opens. The panel lists the publications the
- * method page marks as the unit's, each with "Not ours" (which moves the PMID
+ * service, the line "120 collaborations and 68 supported on the method page ·
+ * 231 on the supported list, 167 of them on the page · Review publications",
+ * and the "Review publications" panel it opens. The panel lists the
+ * publications the method page counts for the service, each saying whether it
+ * is a collaboration or support and why, with "Not ours" (which moves the PMID
  * to the service's excluded list), and the excluded ones, each with "Undo".
  *
  * The numbers come from `GET /api/edit/method-service?id=` (`loadServiceReview`),
@@ -18,6 +19,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import type { ServiceReview, ServiceReviewPublication } from "@/lib/api/method-service-review";
+import type { CollaborationReason } from "@/lib/method-services/collaboration";
 import type { MethodServiceView } from "@/lib/method-services/validation";
 
 const plural = (n: number, one: string, many: string) =>
@@ -97,7 +99,7 @@ export function ServiceReviewSummary({
         className="text-muted-foreground mt-1 text-[13px]"
         data-testid={`method-service-supported-${service.id}`}
       >
-        {plural(service.supportedPmids.length, "publication", "publications")} on your supported
+        {plural(service.supportedPmids.length, "publication", "publications")} on the supported
         list
       </span>
     );
@@ -110,11 +112,12 @@ export function ServiceReviewSummary({
       className="text-muted-foreground mt-1 text-[13px]"
       data-testid={`method-service-review-line-${service.id}`}
     >
-      {plural(review.collaborations, "collaboration", "collaborations")} on the {pages}
+      {plural(review.collaborations, "collaboration", "collaborations")} and{" "}
+      {review.support.toLocaleString("en-US")} supported on the {pages}
       {review.supportedListed > 0 && (
         <>
           {" · "}
-          {review.supportedListed.toLocaleString("en-US")} on your supported list,{" "}
+          {review.supportedListed.toLocaleString("en-US")} on the supported list,{" "}
           {review.supportedOnPage.toLocaleString("en-US")} of them on the{" "}
           {service.families.length > 1 ? "pages" : "page"}
         </>
@@ -139,6 +142,14 @@ export function ServiceReviewSummary({
   );
 }
 
+/** What a counted row says: which it is, and why. */
+const REASON_TEXT: Record<CollaborationReason, string> = {
+  staff: "Collaboration: unit member in Scholars",
+  affiliation: "Collaboration: affiliation in PubMed",
+  supported: "Support: supported list",
+  confirmed: "Support: confirmed core publication",
+};
+
 function PublicationLine({ pub, multi }: { pub: ServiceReviewPublication; multi: boolean }) {
   const meta = [pub.journal, pub.year ? String(pub.year) : null, `PMID ${pub.pmid}`].filter(Boolean);
   return (
@@ -148,15 +159,11 @@ function PublicationLine({ pub, multi }: { pub: ServiceReviewPublication; multi:
       </span>
       <span className="text-muted-foreground text-[12.5px]">{meta.join(" · ")}</span>
       <span className="text-muted-foreground text-[12.5px]">
-        {pub.reason === "supported"
-          ? "On your supported list"
-          : pub.reason === "confirmed"
-            ? "Confirmed as a publication of your core"
-            : pub.reason === "staff"
-              ? "Co-authored by someone in your unit"
-              : pub.methods.length === 0
-                ? "Not on the method page"
-                : null}
+        {pub.reason
+          ? REASON_TEXT[pub.reason]
+          : pub.methods.length === 0
+            ? "Not on the method page"
+            : null}
         {multi && pub.methods.length > 0 && (
           <>
             {pub.reason ? " · " : ""}
@@ -199,9 +206,10 @@ export function ServiceReviewPanel({
         <ul className="text-muted-foreground text-[12.5px]">
           {review.perMethod.map((m) => (
             <li key={m.familyLabel}>
-              {m.familyLabel}: {plural(m.collaborations, "collaboration", "collaborations")}
+              {m.familyLabel}: {plural(m.collaborations, "collaboration", "collaborations")} and{" "}
+              {m.support.toLocaleString("en-US")} supported
               {review.supportedListed > 0 &&
-                `, ${m.supportedOnPage.toLocaleString("en-US")} of your supported list on the page`}
+                `, ${m.supportedOnPage.toLocaleString("en-US")} of the supported list on the page`}
             </li>
           ))}
         </ul>
@@ -209,10 +217,10 @@ export function ServiceReviewPanel({
 
       <div>
         <h4 className="text-[13px] font-semibold">
-          Marked as your collaborations ({review.marked.length.toLocaleString("en-US")})
+          Counted as collaboration or support ({review.marked.length.toLocaleString("en-US")})
         </h4>
         {review.marked.length === 0 ? (
-          <p className="text-muted-foreground mt-1 text-[13px]">No publications are marked.</p>
+          <p className="text-muted-foreground mt-1 text-[13px]">No publications are counted.</p>
         ) : (
           <ul
             className="divide-apollo-border mt-1 max-h-96 divide-y overflow-y-auto"
@@ -245,7 +253,7 @@ export function ServiceReviewPanel({
       {review.excluded.length > 0 && (
         <div>
           <h4 className="text-[13px] font-semibold">
-            Removed from your count ({review.excluded.length.toLocaleString("en-US")})
+            Removed from the count ({review.excluded.length.toLocaleString("en-US")})
           </h4>
           <ul
             className="divide-apollo-border mt-1 max-h-72 divide-y overflow-y-auto"

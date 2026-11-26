@@ -4,7 +4,12 @@
  * MethodServicesSection — the "Method services" section of a department's and
  * a core's edit page: the services the unit offers for a research method
  * (name, https link, the method families it supports, an optional list of
- * supported PMIDs).
+ * supported PMIDs, and the affiliation text that tells which of those the
+ * unit's own people co-authored).
+ *
+ * SUPERUSER ONLY: the edit pages render it for a superuser and for nobody
+ * else, and `/api/edit/method-service` refuses everyone else. A unit's own
+ * editors do not see it.
  *
  * One list of the unit's services with Edit and Remove, and ONE form beneath
  * it that adds a service or, after Edit, changes the one picked. Every write is
@@ -12,8 +17,8 @@
  * response (the reader replica can lag a refresh), and the page is refreshed
  * so the section nav's count follows.
  *
- * Under each saved service: its collaboration numbers and a "Review
- * publications" panel with "Not ours" / "Undo" (`method-service-review.tsx`).
+ * Under each saved service: its collaboration and support numbers and a
+ * "Review publications" panel with "Not ours" / "Undo" (`method-service-review.tsx`).
  *
  * Imports only types and pure validation from `lib/method-services/validation`
  * (no `@/lib/db`).
@@ -38,10 +43,15 @@ import { withArticle } from "@/lib/method-services/collaboration";
 import {
   SERVICE_FAMILIES_MAX,
   SERVICE_NAME_MAX_LENGTH,
+  SERVICE_PHRASES_MAX,
+  SERVICE_PHRASE_MAX_LENGTH,
+  SERVICE_PHRASE_MIN_LENGTH,
   SERVICE_PMIDS_MAX,
   defaultCountStaffPapers,
   methodFamilyKey,
+  parsePhraseBlock,
   parsePmidBlock,
+  validateAffiliationPhrases,
   validateServiceFamilies,
   validateServiceName,
   validateServiceUrl,
@@ -62,18 +72,23 @@ export type MethodServicesSectionProps = {
   headingId?: string;
 };
 
-type FieldKey = "name" | "url" | "families" | "pmids";
+type FieldKey = "name" | "url" | "families" | "pmids" | "phrases";
 type Draft = {
   name: string;
   url: string;
   families: MethodServiceFamily[];
   pmidText: string;
+  /** Affiliation phrases, one per line. */
+  phraseText: string;
   countStaffPapers: boolean;
 };
 
+/** Shown when a save went through but PubMed could not be read. */
+const PUBMED_WARNING = "Could not check PubMed for co-authors; try saving again";
+
 /** Rejected tokens listed in full up to this many; the rest are counted. */
 const INVALID_SHOWN = 12;
-const FIELD_ORDER: ReadonlyArray<FieldKey> = ["name", "url", "families", "pmids"];
+const FIELD_ORDER: ReadonlyArray<FieldKey> = ["name", "url", "families", "pmids", "phrases"];
 const LABEL_CLASS = "text-foreground mb-1.5 block text-sm font-medium";
 const HINT_CLASS = "text-muted-foreground font-normal";
 const NOTE_CLASS = "text-muted-foreground mt-1.5 text-[12.5px]";
@@ -107,6 +122,7 @@ export function MethodServicesSection({
       url: "",
       families: [],
       pmidText: "",
+      phraseText: "",
       countStaffPapers: defaultCountStaffPapers(entityType),
     }),
     [entityType],
@@ -121,6 +137,8 @@ export function MethodServicesSection({
   const [formError, setFormError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [status, setStatus] = React.useState("");
+  /** A saved service whose co-authors PubMed could not be asked about. */
+  const [warning, setWarning] = React.useState<string | null>(null);
   const [removing, setRemoving] = React.useState<MethodServiceView | null>(null);
   /** The row whose Edit was pressed over unsaved changes, awaiting a confirm. */
   const [pendingEdit, setPendingEdit] = React.useState<MethodServiceView | null>(null);
@@ -146,6 +164,7 @@ export function MethodServicesSection({
   const urlRef = React.useRef<HTMLInputElement | null>(null);
   const familiesRef = React.useRef<HTMLInputElement | null>(null);
   const pmidsRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const phrasesRef = React.useRef<HTMLTextAreaElement | null>(null);
   const editButtons = React.useRef(new Map<number, HTMLButtonElement>());
   /** Where focus goes once the list has re-rendered after a write. */
   const [focusAfter, setFocusAfter] = React.useState<
@@ -157,7 +176,13 @@ export function MethodServicesSection({
   React.useEffect(() => {
     if (focusAfter === null) return;
     if ("field" in focusAfter) {
-      const refs = { name: nameRef, url: urlRef, families: familiesRef, pmids: pmidsRef };
+      const refs = {
+        name: nameRef,
+        url: urlRef,
+        families: familiesRef,
+        pmids: pmidsRef,
+        phrases: phrasesRef,
+      };
       refs[focusAfter.field].current?.focus();
     } else {
       (editButtons.current.get(focusAfter.row) ?? nameRef.current)?.focus();
@@ -178,6 +203,7 @@ export function MethodServicesSection({
         url: editing.url,
         families: editing.families,
         pmidText: editing.supportedPmids.join("\n"),
+        phraseText: editing.affiliationPhrases.join("\n"),
         countStaffPapers: editing.countStaffPapers,
       }
     : emptyDraft();
@@ -185,6 +211,7 @@ export function MethodServicesSection({
     draft.name !== baseline.name ||
     draft.url !== baseline.url ||
     draft.pmidText !== baseline.pmidText ||
+    draft.phraseText !== baseline.phraseText ||
     draft.countStaffPapers !== baseline.countStaffPapers ||
     !sameFamilies(draft.families, baseline.families);
 
@@ -208,6 +235,7 @@ export function MethodServicesSection({
       url: service.url,
       families: [...service.families],
       pmidText: service.supportedPmids.join("\n"),
+      phraseText: service.affiliationPhrases.join("\n"),
       countStaffPapers: service.countStaffPapers,
     });
     setErrors({});
@@ -240,6 +268,7 @@ export function MethodServicesSection({
     error?: string;
     field?: string;
     service?: MethodServiceView;
+    warning?: string;
   }> {
     try {
       const res = await fetch("/api/edit/method-service", {
@@ -252,9 +281,10 @@ export function MethodServicesSection({
         error?: string;
         field?: string;
         service?: MethodServiceView;
+        warning?: string;
       };
       return res.ok && data.ok === true
-        ? { ok: true, service: data.service }
+        ? { ok: true, service: data.service, warning: data.warning }
         : { ok: false, error: data.error ?? "", field: data.field };
     } catch {
       return { ok: false, error: "" };
@@ -269,15 +299,17 @@ export function MethodServicesSection({
     const name = validateServiceName(draft.name);
     const url = validateServiceUrl(draft.url);
     const families = validateServiceFamilies(draft.families);
+    const phrases = validateAffiliationPhrases(parsePhraseBlock(draft.phraseText));
     const found: Partial<Record<FieldKey, string>> = {};
     if (!name.ok) found.name = errorMessage(name.error);
     if (!url.ok) found.url = errorMessage(url.error);
     if (!families.ok) found.families = errorMessage(families.error);
     if (tooManyPmids) found.pmids = errorMessage("too_many_pmids");
+    if (!phrases.ok) found.phrases = errorMessage(phrases.error);
     setErrors(found);
     setFormError(null);
     const firstInvalid = FIELD_ORDER.find((k) => found[k]);
-    if (firstInvalid || !name.ok || !url.ok || !families.ok) {
+    if (firstInvalid || !name.ok || !url.ok || !families.ok || !phrases.ok) {
       if (firstInvalid) setFocusAfter({ field: firstInvalid });
       return;
     }
@@ -293,6 +325,12 @@ export function MethodServicesSection({
       if (draft.countStaffPapers !== editing.countStaffPapers) {
         payload.countStaffPapers = draft.countStaffPapers;
       }
+      // Sent whenever there is a phrase, changed or not: its presence is what
+      // makes the server ask PubMed again, which is how "try saving again"
+      // works after a save that could not reach PubMed.
+      if (phrases.value.length > 0 || !sameList(phrases.value, editing.affiliationPhrases)) {
+        payload.affiliationPhrases = phrases.value;
+      }
     } else {
       payload = {
         op: "create",
@@ -303,15 +341,18 @@ export function MethodServicesSection({
         families: families.value,
         supportedPmids: parsed.pmids,
         countStaffPapers: draft.countStaffPapers,
+        affiliationPhrases: phrases.value,
       };
     }
 
     setBusy(true);
     setStatus("");
+    setWarning(null);
     const result = await post(payload);
     setBusy(false);
     if (result.ok && result.service) {
       const saved = result.service;
+      if (result.warning) setWarning(PUBMED_WARNING);
       setServices((prev) => [...prev.filter((s) => s.id !== saved.id), saved].sort(byName));
       setStatus(editing ? `Saved ${saved.name}.` : `Added ${saved.name}.`);
       resetForm();
@@ -371,7 +412,7 @@ export function MethodServicesSection({
     setServices((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
     setStatus(
       op === "exclude"
-        ? `PMID ${pmid} no longer counts as a collaboration of ${unit}.`
+        ? `PMID ${pmid} no longer counts for ${unit}.`
         : `PMID ${pmid} counts again.`,
     );
   }
@@ -387,7 +428,7 @@ export function MethodServicesSection({
       <SectionHeader
         id={headingId}
         title="Method services"
-        description="Services your unit offers for a research method. Each one appears on that method’s public page, with a link to your service and a count of the publications your unit collaborated on."
+        description="Services this unit offers for a research method. Each one appears on that method’s public page, with a link to the service and a count of the publications the unit collaborated on or supported. Only a superuser can see or change this section; the unit’s own editors cannot."
       />
 
       {services.length === 0 ? (
@@ -490,6 +531,11 @@ export function MethodServicesSection({
       <p role="status" className={cn("text-muted-foreground text-[12.5px]", !status && "sr-only")}>
         {status}
       </p>
+      {warning && (
+        <Alert data-testid="method-service-warning">
+          <AlertDescription>{warning}</AlertDescription>
+        </Alert>
+      )}
 
       <form
         noValidate
@@ -623,6 +669,38 @@ export function MethodServicesSection({
           )}
         </div>
 
+        <div>
+          <label htmlFor="method-service-phrases" className={LABEL_CLASS}>
+            Affiliation text that identifies your unit’s authors in PubMed{" "}
+            <span className={HINT_CLASS}>(optional; one phrase per line)</span>
+          </label>
+          <textarea
+            ref={phrasesRef}
+            id="method-service-phrases"
+            rows={3}
+            value={draft.phraseText}
+            disabled={busy}
+            spellCheck={false}
+            aria-invalid={errors.phrases ? true : undefined}
+            aria-describedby={describe(
+              "method-service-phrases-hint",
+              errors.phrases && "method-service-phrases-error",
+            )}
+            onChange={(e) => patch({ phraseText: e.target.value }, "phrases")}
+            className="border-apollo-border-strong text-foreground bg-background focus-visible:ring-apollo-maroon w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+          />
+          <p id="method-service-phrases-hint" className={NOTE_CLASS}>
+            This catches staff who are not faculty and people who have left. A publication on the
+            supported list counts as a collaboration when an author’s PubMed affiliation contains
+            one of these phrases; otherwise it counts as support.
+          </p>
+          {errors.phrases && (
+            <p id="method-service-phrases-error" role="alert" className={ERROR_CLASS}>
+              {errors.phrases}
+            </p>
+          )}
+        </div>
+
         <div className="flex items-start gap-2.5">
           <Checkbox
             id="method-service-count-staff"
@@ -662,12 +740,13 @@ export function MethodServicesSection({
             </p>
             <p className="border-apollo-slate-tint-border mt-2.5 border-t pt-2.5 text-sm">
               {unit.charAt(0).toUpperCase() + unit.slice(1)} collaborated on{" "}
-              <b className="font-semibold">N of the M</b> publications listed here.
+              <b className="font-semibold">N</b> and supported{" "}
+              <b className="font-semibold">S of the M</b> publications listed here.
             </p>
           </div>
           <p className={NOTE_CLASS}>
-            The count is worked out from your unit’s people and your supported list, and is filled
-            in on the public page.
+            The counts are worked out from the unit’s people, the supported list and the
+            affiliation text, and are filled in on the public page. A half that is zero is left out.
           </p>
         </div>
 
@@ -741,6 +820,8 @@ function serverField(field: string | undefined): FieldKey | null {
       return field;
     case "supportedPmids":
       return "pmids";
+    case "affiliationPhrases":
+      return "phrases";
     default:
       return null;
   }
@@ -767,10 +848,15 @@ function errorMessage(code: string): string {
       return "Some of these are not PMIDs. Remove them and try again.";
     case "too_many_pmids":
       return `Use ${SERVICE_PMIDS_MAX.toLocaleString("en-US")} PMIDs or fewer.`;
-    case "not_curator":
-    case "not_core_owner":
+    case "phrase_too_short":
+      return `Each phrase needs at least ${SERVICE_PHRASE_MIN_LENGTH} characters.`;
+    case "phrase_too_long":
+      return `Keep each phrase to ${SERVICE_PHRASE_MAX_LENGTH} characters or fewer.`;
+    case "too_many_phrases":
+      return `Use ${SERVICE_PHRASES_MAX} phrases or fewer.`;
+    case "not_superuser":
     case "impersonation_readonly":
-      return "You don’t have access to change this unit’s services. Refresh the page and try again.";
+      return "Only a superuser can change method services. Refresh the page and try again.";
     case "service_not_found":
       return "That service no longer exists. Refresh the page and try again.";
     default:

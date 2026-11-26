@@ -37,6 +37,11 @@ vi.mock("@/lib/db", () => {
 });
 
 import { loadFamilyServiceCollaborations } from "@/lib/api/method-service-collaborations";
+import type { CollaborationMark } from "@/lib/method-services/collaboration";
+
+/** pmid -> the reason it is counted. */
+const reasons = (marked: Map<string, CollaborationMark>) =>
+  Object.fromEntries([...marked].map(([pmid, mark]) => [pmid, mark.reason]));
 
 const FAM = { supercategory: "evidence_synthesis", familyLabel: "Example review methods" };
 const OTHER_FAM = { supercategory: "evidence_synthesis", familyLabel: "Example search methods" };
@@ -53,6 +58,8 @@ function service(over: Record<string, unknown> = {}) {
     supportedPmids: [],
     excludedPmids: [],
     countStaffPapers: false,
+    affiliationPhrases: [],
+    coauthoredPmids: [],
     ...over,
   };
 }
@@ -180,7 +187,8 @@ describe("loadFamilyServiceCollaborations: who the unit's people are", () => {
       deletedAt: null,
       status: "active",
     });
-    expect(Object.fromEntries(s.marked)).toEqual({ "102": "staff" });
+    expect(reasons(s.marked)).toEqual({ "102": "staff" });
+    expect(s.marked.get("102")?.kind).toBe("collaboration");
   });
 
   it("a core: its curated staff list, matched case-insensitively, confirmed authorships only", async () => {
@@ -237,8 +245,10 @@ describe("loadFamilyServiceCollaborations: a core's confirmed publications", () 
       revokedAt: null,
     });
     expect(m.coreStaffFindMany).not.toHaveBeenCalled();
-    expect(Object.fromEntries(s.marked)).toEqual({ "104": "confirmed" });
+    expect(reasons(s.marked)).toEqual({ "104": "confirmed" });
     expect(s.researchCount).toBe(1);
+    // No unit author: the core supported it.
+    expect([s.researchCollaborations, s.researchSupport]).toEqual([0, 1]);
   });
 
   it("an owner's claim counts without an engine row, and a rejection removes an engine match", async () => {
@@ -291,7 +301,7 @@ describe("loadFamilyServiceCollaborations: the page's pmids given as a function"
     const load = vi.fn(async () => PAGE);
     const [s] = await loadFamilyServiceCollaborations(FAM, load);
     expect(load).toHaveBeenCalledTimes(1);
-    expect(Object.fromEntries(s.marked)).toEqual({ "101": "supported" });
+    expect(reasons(s.marked)).toEqual({ "101": "supported" });
   });
 });
 
@@ -315,7 +325,9 @@ describe("loadFamilyServiceCollaborations: counts", () => {
     ]);
     const library = out.find((s) => s.id === 1)!;
     const core = out.find((s) => s.id === 2)!;
-    expect(Object.fromEntries(library.marked)).toEqual({ "101": "supported", "102": "staff" });
+    expect(reasons(library.marked)).toEqual({ "101": "supported", "102": "staff" });
+    expect([library.researchCollaborations, library.researchSupport]).toEqual([1, 1]);
+    expect([core.researchCollaborations, core.researchSupport]).toEqual([3, 0]);
     expect([...core.marked.keys()].sort()).toEqual(["102", "103", "104"]);
     expect(out.map((s) => s.label)).toEqual(["Example Imaging Core", "Example Library"]);
   });
@@ -332,5 +344,27 @@ describe("loadFamilyServiceCollaborations: counts", () => {
     expect([...s.marked.keys()].sort()).toEqual(["101", "102", "103"]);
     expect(s.allCount).toBe(3);
     expect(s.researchCount).toBe(1);
+  });
+
+  it("splits collaborations from support by the stored co-authored set, in each view", async () => {
+    m.serviceFindMany.mockResolvedValue([
+      service({
+        supportedPmids: ["101", "102", "103", "104"],
+        // 105 is stored but no longer on the supported list: it counts for nothing.
+        coauthoredPmids: ["101", "102", "105"],
+        excludedPmids: ["104"],
+      }),
+    ]);
+    m.publicationFindMany.mockResolvedValue([
+      { pmid: "101", publicationType: "Academic Article" },
+      { pmid: "102", publicationType: "Letter" },
+      { pmid: "103", publicationType: "Academic Article" },
+      { pmid: "104", publicationType: "Academic Article" },
+      { pmid: "105", publicationType: "Academic Article" },
+    ]);
+    const [s] = await loadFamilyServiceCollaborations(FAM, PAGE);
+    expect(reasons(s.marked)).toEqual({ "101": "affiliation", "102": "affiliation", "103": "supported" });
+    expect([s.researchCount, s.researchCollaborations, s.researchSupport]).toEqual([2, 1, 1]);
+    expect([s.allCount, s.allCollaborations, s.allSupport]).toEqual([3, 2, 1]);
   });
 });

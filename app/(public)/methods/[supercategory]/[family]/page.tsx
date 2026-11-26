@@ -96,14 +96,20 @@ export default async function FamilyPage({
     // Spotlight volume gate. 0 when the lens is off / family gated / no pmids.
     getDistinctPmidCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
     // METHOD_SERVICES — the units offering a service for this method, each with
-    // the publications it collaborated on ([] with no query when the flag is
+    // the publications it collaborated on or supported ([] with no query when the flag is
     // off; a failed read drops the block, the filter and the badges together).
     getFamilyServices(resolved.supercategory, resolved.familyLabel).catch(() => []),
   ]);
   // Every visible service goes to the feed, including one with no
   // collaborations in the default view: it may have some under "Show all
   // publication types". The feed leaves out a filter whose count is 0.
-  const feedServices = services.map((s) => ({ id: s.id, label: s.label, count: s.count }));
+  const feedServices = services.map((s) => ({
+    id: s.id,
+    label: s.label,
+    count: s.count,
+    collaborations: s.collaborations,
+    support: s.support,
+  }));
   const showListNote =
     isMethodServicesEnabled() &&
     isSystematicReviewFamily(resolved.supercategory, resolved.familyLabel);

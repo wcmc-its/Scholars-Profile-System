@@ -4010,6 +4010,13 @@ model MethodService {
   /// Also count publications co-authored by the unit's own people. The route
   /// sets it on create: true for a core, false for a department.
   countStaffPapers Boolean    @default(false) @map("count_staff_papers")
+  /// Short strings (0 to 10) that identify the unit's authors in a PubMed
+  /// affiliation, entered by a superuser. The column defaults to `[]` in SQL.
+  affiliationPhrases Json     @map("affiliation_phrases")
+  /// The supported PMIDs with an author whose PubMed affiliation contains one
+  /// of the phrases. Computed by the route on save, never sent by a client.
+  /// The column defaults to `[]` in SQL.
+  coauthoredPmids  Json       @map("coauthored_pmids")
   /// EFFECTIVE actor cwid, same convention as CoreStaff.addedBy.
   addedBy          String     @map("added_by") @db.VarChar(32)
   createdAt        DateTime   @default(now()) @map("created_at")

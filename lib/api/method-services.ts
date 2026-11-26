@@ -28,6 +28,8 @@ export const METHOD_SERVICE_SELECT = {
   supportedPmids: true,
   excludedPmids: true,
   countStaffPapers: true,
+  affiliationPhrases: true,
+  coauthoredPmids: true,
 } as const;
 
 export type MethodServiceRow = {
@@ -40,6 +42,8 @@ export type MethodServiceRow = {
   supportedPmids: unknown;
   excludedPmids: unknown;
   countStaffPapers: boolean;
+  affiliationPhrases: unknown;
+  coauthoredPmids: unknown;
 };
 
 function familiesOf(value: unknown): MethodServiceFamily[] {
@@ -55,6 +59,7 @@ function familiesOf(value: unknown): MethodServiceFamily[] {
   return out;
 }
 
+/** A stored JSON list of strings (PMIDs, affiliation phrases). */
 function pmidsOf(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
@@ -74,6 +79,8 @@ export function toMethodServiceView(row: MethodServiceRow): MethodServiceView | 
     supportedPmids: pmidsOf(row.supportedPmids),
     excludedPmids: pmidsOf(row.excludedPmids),
     countStaffPapers: row.countStaffPapers,
+    affiliationPhrases: pmidsOf(row.affiliationPhrases),
+    coauthoredPmids: pmidsOf(row.coauthoredPmids),
   };
 }
 

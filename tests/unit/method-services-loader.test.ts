@@ -41,6 +41,8 @@ const ROW = {
   supportedPmids: ["111"],
   excludedPmids: [],
   countStaffPapers: true,
+  affiliationPhrases: ["Example Imaging Core"],
+  coauthoredPmids: ["111"],
 };
 
 beforeEach(() => {
@@ -88,8 +90,16 @@ describe("toMethodServiceView", () => {
         families: [FAM, { supercategory: "x" }, "junk", null],
         supportedPmids: "111",
         excludedPmids: ["222", 333, null],
+        affiliationPhrases: null,
+        coauthoredPmids: ["222", 7],
       }),
-    ).toMatchObject({ families: [FAM], supportedPmids: [], excludedPmids: ["222"] });
+    ).toMatchObject({
+      families: [FAM],
+      supportedPmids: [],
+      excludedPmids: ["222"],
+      affiliationPhrases: [],
+      coauthoredPmids: ["222"],
+    });
   });
 
   it("is null for a row owned by a unit kind that holds no services", () => {

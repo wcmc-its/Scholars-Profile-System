@@ -1,21 +1,21 @@
 /**
- * Method services, editor side: the numbers under a saved service ("188
- * collaborations on the method page · 231 on your supported list, 167 of them
- * on the page") and its "Review publications" list, read by
+ * Method services, editor side: the numbers under a saved service ("120
+ * collaborations and 68 supported on the method page · 231 on the supported
+ * list, 167 of them on the page") and its "Review publications" list, read by
  * `GET /api/edit/method-service`.
  *
  * Uses the SAME rule and the same inputs as the public method page
  * (`computeCollaboration`, `loadStaffPmidsByUnit`,
- * `loadCoreConfirmedPmidsByUnit`, the gated page pmids), so the editor's count
- * is the public sentence's count. It reads them directly, never through the
- * public page's cache, so the owner sees a change at once. Two differences,
- * both on purpose: the owning unit's visibility is ignored (a hidden core can prepare
- * its service), and a service attached to several methods is summed over them.
+ * `loadCoreConfirmedPmidsByUnit`, the gated page pmids), so the editor's counts
+ * are the public sentence's counts. It reads them directly, never through the
+ * public page's cache, so a change shows at once. Two differences, both on
+ * purpose: the owning unit's visibility is ignored (a hidden core's service can
+ * be prepared), and a service attached to several methods is summed over them.
  *
  * "On the method page" means the page's default view (research publication
- * types), which is what the public sentence counts. A marked publication that
+ * types), which is what the public sentence counts. A counted publication that
  * only shows under "Show all publication types" is still listed for review,
- * flagged `inDefaultView: false`, so the owner can take it off.
+ * flagged `inDefaultView: false`, so it can be taken off.
  *
  * SERVER-ONLY (imports `@/lib/db`). Types may be imported by a client component.
  */
@@ -28,7 +28,11 @@ import { collectFamilyPmids } from "@/lib/api/methods";
 import { loadFamilyOverlayGate } from "@/lib/api/methods-overlay";
 import { db } from "@/lib/db";
 import {
+  COLLABORATION_REASON_RANK,
   computeCollaboration,
+  countKinds,
+  kindOfReason,
+  type CollaborationKind,
   type CollaborationReason,
 } from "@/lib/method-services/collaboration";
 import type { MethodServiceView } from "@/lib/method-services/validation";
@@ -40,7 +44,9 @@ export type ServiceReviewPublication = {
   title: string | null;
   journal: string | null;
   year: number | null;
-  /** Why it is marked; `null` on an excluded row. */
+  /** Collaboration or support; `null` on an excluded row. */
+  kind: CollaborationKind | null;
+  /** Why it is counted; `null` on an excluded row. */
   reason: CollaborationReason | null;
   /** The methods of this service whose page lists it. */
   methods: string[];
@@ -49,22 +55,28 @@ export type ServiceReviewPublication = {
 };
 
 export type ServiceReview = {
-  /** Marked publications in the default view, across the service's methods. */
+  /** Counted publications in the default view with an author from the unit,
+   *  across the service's methods. */
   collaborations: number;
+  /** Counted publications in the default view the unit supported without
+   *  authorship, across the service's methods. */
+  support: number;
   /** PMIDs on the supported list. */
   supportedListed: number;
   /** Of those, the ones a method page lists by default (excluded or not). */
   supportedOnPage: number;
   /** One entry per method, when the service has more than one. */
-  perMethod: Array<{ familyLabel: string; collaborations: number; supportedOnPage: number }>;
-  /** Every marked publication, newest first. */
+  perMethod: Array<{
+    familyLabel: string;
+    collaborations: number;
+    support: number;
+    supportedOnPage: number;
+  }>;
+  /** Every counted publication, newest first. */
   marked: ServiceReviewPublication[];
   /** The excluded list ("Not ours"), newest first, for the undo. */
   excluded: ServiceReviewPublication[];
 };
-
-/** Which reason a publication on several of the service's methods shows. */
-const REASON_RANK: Record<CollaborationReason, number> = { supported: 0, confirmed: 1, staff: 2 };
 
 const byNewest = (a: ServiceReviewPublication, b: ServiceReviewPublication) =>
   (b.year ?? 0) - (a.year ?? 0) || Number(b.pmid) - Number(a.pmid);
@@ -90,6 +102,7 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
         pagePmids: page.all,
         supportedPmids: service.supportedPmids,
         excludedPmids: service.excludedPmids,
+        coauthoredPmids: service.coauthoredPmids,
         countStaffPapers: service.countStaffPapers,
         staffPmids,
         confirmedPmids: [...confirmed.values()][0],
@@ -107,20 +120,22 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
     for (const pmid of page.all) {
       onAnyPage.set(pmid, [...(onAnyPage.get(pmid) ?? []), family.familyLabel]);
     }
-    let collaborations = 0;
-    for (const [pmid, reason] of m) {
-      if (page.research.has(pmid)) collaborations += 1;
+    const { collaborations, support } = countKinds(m, page.research);
+    for (const [pmid, { reason }] of m) {
       const entry = marked.get(pmid);
       if (entry) {
         entry.methods.push(family.familyLabel);
-        if (REASON_RANK[reason] < REASON_RANK[entry.reason]) entry.reason = reason;
+        // The reason a publication on several of the service's methods shows.
+        if (COLLABORATION_REASON_RANK[reason] < COLLABORATION_REASON_RANK[entry.reason]) {
+          entry.reason = reason;
+        }
       } else {
         marked.set(pmid, { reason, methods: [family.familyLabel] });
       }
     }
     let supportedOnPage = 0;
     for (const pmid of supported) if (page.research.has(pmid)) supportedOnPage += 1;
-    perMethod.push({ familyLabel: family.familyLabel, collaborations, supportedOnPage });
+    perMethod.push({ familyLabel: family.familyLabel, collaborations, support, supportedOnPage });
   }
 
   const wanted = [...new Set([...marked.keys(), ...excludedSet])];
@@ -143,6 +158,7 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
       title: p?.title ?? null,
       journal: p?.journal ?? null,
       year: p?.year ?? null,
+      kind: reason ? kindOfReason(reason) : null,
       reason,
       methods,
       inDefaultView: research.has(pmid),
@@ -154,7 +170,8 @@ export async function loadServiceReview(service: MethodServiceView): Promise<Ser
 
   const markedRows = [...marked].map(([pmid, v]) => row(pmid, v.reason, v.methods)).sort(byNewest);
   return {
-    collaborations: markedRows.filter((r) => r.inDefaultView).length,
+    collaborations: markedRows.filter((r) => r.inDefaultView && r.kind === "collaboration").length,
+    support: markedRows.filter((r) => r.inDefaultView && r.kind === "support").length,
     supportedListed: supported.size,
     supportedOnPage,
     perMethod: service.families.length > 1 ? perMethod : [],

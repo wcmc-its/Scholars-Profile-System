@@ -4,12 +4,12 @@
  * method families. Body: `{ op: "create" | "update" | "delete", ... }`.
  *
  *   - create: `{ entityType, entityId, name, url, families, supportedPmids?,
- *     countStaffPapers? }`. `countStaffPapers` defaults to true for a core and
- *     false for a department.
+ *     countStaffPapers?, affiliationPhrases? }`. `countStaffPapers` defaults to
+ *     true for a core and false for a department.
  *   - update: `{ id, name?, url?, families?, supportedPmids?, excludedPmids?,
- *     countStaffPapers? }`. Only the fields present are changed. The owning
- *     unit of a row never changes: `entityType` / `entityId` in an update body
- *     are ignored.
+ *     countStaffPapers?, affiliationPhrases? }`. Only the fields present are
+ *     changed. The owning unit of a row never changes: `entityType` /
+ *     `entityId` in an update body are ignored.
  *   - delete: `{ id }`. Hard delete; the history is the audit log.
  *   - exclude: `{ id, pmid }`. "Not ours": adds one PMID to `excludedPmids`,
  *     which takes it off the unit's count, filter and badge on the method page.
@@ -19,18 +19,30 @@
  *     request at the same moment can overwrite it, and both are a no-op
  *     (`changed: false`, no audit row) when the list already says so.
  *
+ * `coauthoredPmids` is the server's own: the supported PMIDs with an author
+ * whose PubMed affiliation contains one of the service's `affiliationPhrases`
+ * (`matchCoauthoredPmids`), which is what makes a supported publication a
+ * collaboration and not support. A body that carries it is a 400. A create,
+ * and an update whose body has `supportedPmids` or `affiliationPhrases`, asks
+ * PubMed for the supported PMIDs' author affiliations and stores the result.
+ * If PubMed cannot be read the save still goes through, the stored set is left
+ * as it was, and the response carries `warning: "pubmed_unavailable"`.
+ *
  * GET /api/edit/method-service?id=<id> — the numbers under a saved service and
  * its "Review publications" list (`loadServiceReview`): `{ ok: true, review }`.
- * Read-only, so no audit row, but gated exactly as a write is: the same
- * identity (observer and content-editor views stripped) and the same unit
- * predicates, against the stored row. Always `no-store`.
+ * Read-only, so no audit row, but gated exactly as a write is. Always
+ * `no-store`.
  *
- * Authorization is the owning unit's own, the same predicates its edit page
- * and sibling routes use:
- *   - department: `getEffectiveUnitRole` + `canEditUnit` (Owner / Curator,
- *     Superuser, comms_steward, content editor), as `/api/edit/unit-leadership`;
- *   - core: `getCoreOwnerRole` + `authorizeCoreClaim` (Owner / Curator, Cores
- *     director, Superuser, comms_steward, content editor), as `/api/edit/core`.
+ * Authorization: a SUPERUSER only, on every op and on the GET. The site owner
+ * manages every service himself; a unit's Owner or Curator, a comms steward,
+ * a content editor and the Cores director all get 403 `not_superuser`. The
+ * check is `session.isSuperuser` on the EFFECTIVE session, as on every other
+ * superuser-only `/api/edit/*` route (`/api/edit/effective-flags`, the
+ * structural ops of `/api/edit/unit`): under "View as" it is the verdict of
+ * the person being viewed, so viewing as someone who is not a superuser
+ * refuses, and `readEditRequest` has already refused a write under an overlay
+ * that must be read-only. It runs before anything is looked up, so nobody
+ * else can probe for a service or a unit.
  * For update and delete the unit is the STORED row's, never the body's. Any
  * other `entityType` is a 400; a unit that does not exist is a 404.
  *
@@ -65,16 +77,8 @@ import { stripContentEditorView, stripObserverView } from "@/lib/auth/observer-v
 import type { EditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import {
-  authorizeCoreClaim,
-  canEditUnit,
-  getCoreOwnerRole,
-  getEffectiveUnitRole,
-  logEditDenial,
-  type AuthzResult,
-  type CoreOwnerLookup,
-  type UnitAdminLookup,
-} from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { fetchAuthorAffiliations } from "@/lib/edit/pubmed-affiliations";
 import {
   editError,
   editOk,
@@ -82,12 +86,14 @@ import {
   readEditRequest,
   resolveEditIdentity,
 } from "@/lib/edit/request";
+import { matchCoauthoredPmids } from "@/lib/method-services/affiliation";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import {
   SERVICE_PMIDS_MAX,
   defaultCountStaffPapers,
   isMethodServiceEntityType,
   methodFamilyKey,
+  validateAffiliationPhrases,
   validatePmidList,
   validateServiceFamilies,
   validateServiceName,
@@ -115,6 +121,7 @@ function auditShape(row: MethodServiceRow): Record<string, unknown> {
   const view = toMethodServiceView(row);
   const supported = view?.supportedPmids ?? [];
   const excluded = view?.excludedPmids ?? [];
+  const coauthored = view?.coauthoredPmids ?? [];
   return {
     id: row.id,
     name: row.name,
@@ -125,47 +132,70 @@ function auditShape(row: MethodServiceRow): Record<string, unknown> {
     ...(supported.length <= AUDIT_PMID_LIST_MAX ? { supportedPmids: supported } : {}),
     excludedPmidCount: excluded.length,
     ...(excluded.length <= AUDIT_PMID_LIST_MAX ? { excludedPmids: excluded } : {}),
+    affiliationPhrases: view?.affiliationPhrases ?? [],
+    coauthoredPmidCount: coauthored.length,
   };
 }
 
-/** Shared gate: the unit exists (404) and the caller may edit it (403).
- *  Returns a response to send, or `null` to proceed. */
-async function gate(
-  session: EditSession,
+/**
+ * Superuser only: 403 `not_superuser` (and a logged denial) for anyone else,
+ * `null` to proceed. `session` is the EFFECTIVE session, so "View as" a person
+ * who is not a superuser is refused like that person would be.
+ */
+function denyNonSuperuser(session: EditSession): NextResponse | null {
+  if (session.isSuperuser) return null;
+  logEditDenial({
+    actorCwid: session.cwid,
+    targetCwid: session.cwid,
+    path: PATH,
+    reason: "not_superuser",
+  });
+  return editError(403, "not_superuser");
+}
+
+/** The owning unit exists, else a 404 to send. `null` to proceed. */
+async function unitMissing(
   entityType: MethodServiceEntityType,
   entityId: string,
 ): Promise<NextResponse | null> {
-  let authz: AuthzResult;
   if (entityType === "department") {
     const department = await db.read.department.findUnique({
       where: { code: entityId },
       select: { code: true },
     });
-    if (!department) return editError(404, "unit_not_found", "entityId");
-    const role = await getEffectiveUnitRole(
-      session,
-      { kind: "department", code: entityId },
-      db.read as unknown as UnitAdminLookup,
+    return department ? null : editError(404, "unit_not_found", "entityId");
+  }
+  const core = await db.read.core.findUnique({ where: { id: entityId }, select: { id: true } });
+  return core ? null : editError(404, "core_not_found", "entityId");
+}
+
+/** What the response says when PubMed could not be read. */
+const PUBMED_WARNING = "pubmed_unavailable";
+
+/**
+ * The supported PMIDs with an author whose PubMed affiliation contains one of
+ * the phrases, or `null` when PubMed could not be read (the caller keeps what
+ * is stored). No phrases or no supported PMIDs is an empty set with no request.
+ */
+async function coauthoredFromPubMed(
+  supportedPmids: ReadonlyArray<string>,
+  phrases: ReadonlyArray<string>,
+): Promise<string[] | null> {
+  if (supportedPmids.length === 0 || phrases.length === 0) return [];
+  try {
+    const affiliations = await fetchAuthorAffiliations(supportedPmids);
+    return matchCoauthoredPmids(supportedPmids, affiliations, phrases);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "method_service_pubmed_unavailable",
+        path: PATH,
+        pmids: supportedPmids.length,
+        message: err instanceof Error ? err.message : String(err),
+      }),
     );
-    authz = canEditUnit(session, role);
-  } else {
-    const core = await db.read.core.findUnique({ where: { id: entityId }, select: { id: true } });
-    if (!core) return editError(404, "core_not_found", "entityId");
-    const role = await getCoreOwnerRole(session, entityId, db.read as unknown as CoreOwnerLookup);
-    authz = authorizeCoreClaim(session, role);
+    return null;
   }
-  if (!authz.ok) {
-    logEditDenial({
-      actorCwid: session.cwid,
-      targetCwid: entityId,
-      path: PATH,
-      reason: authz.reason,
-      targetEntityType: entityType,
-      targetEntityId: entityId,
-    });
-    return editError(403, authz.reason);
-  }
-  return null;
 }
 
 type Fields = {
@@ -175,6 +205,7 @@ type Fields = {
   supportedPmids?: string[];
   excludedPmids?: string[];
   countStaffPapers?: boolean;
+  affiliationPhrases?: string[];
 };
 
 /** Validate the fields PRESENT in the body. Returns the clean values, or the
@@ -213,6 +244,11 @@ function readFields(
     if (typeof body.countStaffPapers !== "boolean") return fail("invalid_value", "countStaffPapers");
     fields.countStaffPapers = body.countStaffPapers;
   }
+  if ("affiliationPhrases" in body) {
+    const r = validateAffiliationPhrases(body.affiliationPhrases);
+    if (!r.ok) return fail(r.error, "affiliationPhrases");
+    fields.affiliationPhrases = r.value;
+  }
   return { ok: true, fields };
 }
 
@@ -234,6 +270,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // The identity a write is authorized against (`resolveEditIdentityForWrite`):
   // whoever may change the service is who may review it.
   const session = stripContentEditorView(stripObserverView(identity.session));
+  const notSuperuser = denyNonSuperuser(session);
+  if (notSuperuser) return notSuperuser;
 
   const idRaw = request.nextUrl.searchParams.get("id") ?? "";
   if (!/^[1-9]\d{0,8}$/.test(idRaw)) return editError(400, "invalid_value", "id");
@@ -246,8 +284,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!existing) return editError(404, "service_not_found", "id");
   const view = toMethodServiceView(existing);
   if (!view) return editError(400, "invalid_entity_type", "id");
-  const denied = await gate(session, view.entityType, view.entityId);
-  if (denied) return denied;
+  const missing = await unitMissing(view.entityType, view.entityId);
+  if (missing) return missing;
 
   try {
     const review = await loadServiceReview(view);
@@ -264,6 +302,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request, { maxBytes: MAX_BODY_BYTES });
   if (!req.ok) return req.response;
   const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
+  const notSuperuser = denyNonSuperuser(session);
+  if (notSuperuser) return notSuperuser;
 
   if (typeof body.op !== "string" || !(OPS as readonly string[]).includes(body.op)) {
     return editError(400, "invalid_op", "op");
@@ -301,10 +341,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (typeof entityId !== "string" || entityId.length === 0 || entityId.length > 64) {
       return editError(400, "invalid_unit_code", "entityId");
     }
-    const denied = await gate(session, entityType, entityId);
-    if (denied) return denied;
+    const missing = await unitMissing(entityType, entityId);
+    if (missing) return missing;
 
     if ("excludedPmids" in body) return editError(400, "invalid_value", "excludedPmids");
+    if ("coauthoredPmids" in body) return editError(400, "invalid_value", "coauthoredPmids");
     const read = readFields(body);
     if (!read.ok) return read.response;
     const { name, url, families } = read.fields;
@@ -314,6 +355,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if ((await findNonPublicFamilies(families)).length > 0) {
       return editError(400, "unknown_family", "families");
     }
+    const supportedPmids = read.fields.supportedPmids ?? [];
+    const affiliationPhrases = read.fields.affiliationPhrases ?? [];
+    // Before the transaction: a slow PubMed must not hold a connection.
+    const coauthored = await coauthoredFromPubMed(supportedPmids, affiliationPhrases);
 
     let saved: MethodServiceRow;
     try {
@@ -325,8 +370,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             name,
             url,
             families,
-            supportedPmids: read.fields.supportedPmids ?? [],
+            supportedPmids,
             excludedPmids: [],
+            affiliationPhrases,
+            coauthoredPmids: coauthored ?? [],
             countStaffPapers: read.fields.countStaffPapers ?? defaultCountStaffPapers(entityType),
             addedBy: session.cwid,
           },
@@ -340,7 +387,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return editError(500, "write_failed");
     }
     bustMethodServiceCache();
-    return editOk({ op, changed: true, service: toMethodServiceView(saved) });
+    return editOk({
+      op,
+      changed: true,
+      service: toMethodServiceView(saved),
+      ...(coauthored === null ? { warning: PUBMED_WARNING } : {}),
+    });
   }
 
   // ---------------------------------------------------------- update / delete
@@ -358,8 +410,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "invalid_entity_type", "id");
   }
   const unit = { entityType: existing.entityType, entityId: existing.entityId };
-  const denied = await gate(session, unit.entityType, unit.entityId);
-  if (denied) return denied;
+  const missing = await unitMissing(unit.entityType, unit.entityId);
+  if (missing) return missing;
 
   if (op === "delete") {
     try {
@@ -431,18 +483,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // update — only the fields present, and only those that differ.
+  if ("coauthoredPmids" in body) return editError(400, "invalid_value", "coauthoredPmids");
   const read = readFields(body);
   if (!read.ok) return read.response;
   const current = toMethodServiceView(existing);
-  const data: Fields = {};
+  const data: Fields & { coauthoredPmids?: string[] } = {};
   for (const key of Object.keys(read.fields) as Array<keyof Fields>) {
     if (!sameValue(read.fields[key], current?.[key])) {
       Object.assign(data, { [key]: read.fields[key] });
     }
   }
-  if (Object.keys(data).length === 0) return editOk({ op, changed: false, service: current });
   if (data.families && (await findNonPublicFamilies(data.families)).length > 0) {
     return editError(400, "unknown_family", "families");
+  }
+  // Either list in the body asks PubMed again, changed or not: that is how an
+  // editor retries after a save that could not reach PubMed. Before the
+  // transaction, so a slow PubMed does not hold a connection.
+  let warning: string | undefined;
+  if (read.fields.supportedPmids !== undefined || read.fields.affiliationPhrases !== undefined) {
+    const coauthored = await coauthoredFromPubMed(
+      read.fields.supportedPmids ?? current?.supportedPmids ?? [],
+      read.fields.affiliationPhrases ?? current?.affiliationPhrases ?? [],
+    );
+    if (coauthored === null) warning = PUBMED_WARNING;
+    else if (!sameValue(coauthored, current?.coauthoredPmids)) data.coauthoredPmids = coauthored;
+  }
+  const warned = warning ? { warning } : {};
+  if (Object.keys(data).length === 0) {
+    return editOk({ op, changed: false, service: current, ...warned });
   }
 
   let saved: MethodServiceRow;
@@ -461,5 +529,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(500, "write_failed");
   }
   bustMethodServiceCache();
-  return editOk({ op, changed: true, service: toMethodServiceView(saved) });
+  return editOk({ op, changed: true, service: toMethodServiceView(saved), ...warned });
 }

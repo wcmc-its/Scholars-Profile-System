@@ -8,19 +8,17 @@
  * The source is `loadMethodFamilyCandidates`, the same loader site search
  * suggests families from, so a suppressed or sensitive family never appears
  * here either. The data is public; the gate only keeps the route to the people
- * who have an editor to use it in: a superuser, comms steward, content editor
- * or Cores director, or anyone holding at least one unit grant (one indexed
- * `unit_admin` lookup). Resolved against the EFFECTIVE session, with an
- * observer's read-only steward view stripped, as `/api/edit/can-edit-unit`
- * does. Read-only, so no audit row. 404 while `isMethodServicesEnabled()` is
- * false. Always `no-store`.
+ * who have an editor to use it in, and only a SUPERUSER manages method
+ * services (`/api/edit/method-service`). Anyone else gets 403 `not_superuser`.
+ * Resolved against the EFFECTIVE session (`session.isSuperuser`), as
+ * `/api/edit/effective-flags` does: under "View as" it is the verdict of the
+ * person being viewed. Read-only, so no audit row. 404 while
+ * `isMethodServicesEnabled()` is false. Always `no-store`.
  */
 import { NextResponse, type NextRequest } from "next/server";
 
 import { loadMethodFamilyCandidates } from "@/lib/api/search";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { stripObserverView } from "@/lib/auth/observer-view";
-import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
 import type { MethodFamilyOption } from "@/lib/method-services/validation";
@@ -41,29 +39,16 @@ function jsonError(status: number, error: string): NextResponse {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!isMethodServicesEnabled()) return jsonError(404, "not_found");
 
-  const effective = await getEffectiveEditSession();
-  if (!effective) return jsonError(401, "unauthenticated");
-  const session = stripObserverView(effective);
-
-  const editsEverything =
-    session.isSuperuser ||
-    session.isCommsSteward ||
-    session.isContentEditor === true ||
-    session.isCoreDirector === true;
-  if (!editsEverything) {
-    const grant = await db.read.unitAdmin.findFirst({
-      where: { cwid: session.cwid },
-      select: { cwid: true },
+  const session = await getEffectiveEditSession();
+  if (!session) return jsonError(401, "unauthenticated");
+  if (!session.isSuperuser) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: session.cwid,
+      path: PATH,
+      reason: "not_superuser",
     });
-    if (!grant) {
-      logEditDenial({
-        actorCwid: session.cwid,
-        targetCwid: session.cwid,
-        path: PATH,
-        reason: "not_curator",
-      });
-      return jsonError(403, "not_curator");
-    }
+    return jsonError(403, "not_superuser");
   }
 
   const q = (request.nextUrl.searchParams.get("q") ?? "").trim();

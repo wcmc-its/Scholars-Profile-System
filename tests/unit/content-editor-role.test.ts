@@ -253,9 +253,8 @@ const VERDICT: Record<string, "allow" | "deny"> = {
   "matcha/pitch": "deny",
   "mentee-suggestions/[id]/dismiss": "deny",
   "mentee-suggestions/[id]/restore": "deny",
-  // The owning unit's own gate: `canEditUnit` (department) or
-  // `authorizeCoreClaim` (core), as unit-leadership and core-staff.
-  "method-service": "allow",
+  // Superuser only: the site owner manages every method service himself.
+  "method-service": "deny",
   "methods/families/review": "allow",
   "methods/families/tier": "allow",
   "news-mention/add-person": "allow",

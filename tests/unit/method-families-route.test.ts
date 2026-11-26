@@ -60,39 +60,42 @@ describe("GET /api/edit/method-families", () => {
     expect(m.candidates).not.toHaveBeenCalled();
   });
 
-  it("403s a signed-in user with no unit to edit, and logs the denial", async () => {
+  it("admits a superuser", async () => {
+    expect((await get("review")).status).toBe(200);
+    expect(m.logEditDenial).not.toHaveBeenCalled();
+  });
+
+  it("403s a signed-in user who is not a superuser, and logs the denial", async () => {
     m.session.mockResolvedValue(NOBODY);
     const res = await get("review");
     expect(res.status).toBe(403);
-    expect(m.unitAdminFindFirst).toHaveBeenCalledWith({
-      where: { cwid: "act0001" },
-      select: { cwid: true },
+    expect(await res.json()).toEqual({ ok: false, error: "not_superuser" });
+    expect(m.logEditDenial).toHaveBeenCalledWith({
+      actorCwid: "act0001",
+      targetCwid: "act0001",
+      path: "/api/edit/method-families",
+      reason: "not_superuser",
     });
-    expect(m.logEditDenial).toHaveBeenCalledWith(
-      expect.objectContaining({ actorCwid: "act0001", path: "/api/edit/method-families" }),
-    );
     expect(m.candidates).not.toHaveBeenCalled();
   });
 
-  it("admits anyone holding a unit grant", async () => {
+  it("403s a unit owner: a unit grant is never consulted", async () => {
     m.session.mockResolvedValue(NOBODY);
     m.unitAdminFindFirst.mockResolvedValue({ cwid: "act0001" });
-    expect((await get("review")).status).toBe(200);
+    expect((await get("review")).status).toBe(403);
+    expect(m.unitAdminFindFirst).not.toHaveBeenCalled();
+    expect(m.candidates).not.toHaveBeenCalled();
   });
 
-  it.each([{ isSuperuser: true }, { isCommsSteward: true }, { isContentEditor: true }, { isCoreDirector: true }])(
-    "admits %o without a grant lookup",
-    async (flags) => {
-      m.session.mockResolvedValue({ ...NOBODY, ...flags });
-      expect((await get("review")).status).toBe(200);
-      expect(m.unitAdminFindFirst).not.toHaveBeenCalled();
-    },
-  );
-
-  it("does not admit an observer on the strength of the read-only steward view", async () => {
-    // getEffectiveEditSession hands an observer a synthetic isCommsSteward.
-    m.session.mockResolvedValue({ ...NOBODY, isObserver: true, isCommsSteward: true });
+  it.each([
+    { isCommsSteward: true },
+    { isContentEditor: true },
+    { isCoreDirector: true },
+    { isObserver: true, isCommsSteward: true },
+  ])("403s %o", async (flags) => {
+    m.session.mockResolvedValue({ ...NOBODY, ...flags });
     expect((await get("review")).status).toBe(403);
+    expect(m.candidates).not.toHaveBeenCalled();
   });
 
   it("returns the picker rows with the supercategory's label, uncached", async () => {

@@ -1,7 +1,7 @@
 /**
  * Method services on the PUBLIC method page: for one method family, the
  * services attached to it whose unit is publicly visible, each with the
- * publications of that page the unit collaborated on.
+ * publications of that page counted for it, as a collaboration or as support.
  *
  * The rule itself is `computeCollaboration` (`lib/method-services/
  * collaboration.ts`); this module only supplies its inputs:
@@ -20,7 +20,7 @@
  * (prefix `method-services:`): a method page and every fetch of its feed share
  * one computation, and a family with no service costs no query once the list
  * is warm. Every write to a service clears the prefix
- * (`bustMethodServiceCache`), so an owner's "Not ours" shows straight away.
+ * (`bustMethodServiceCache`), so a "Not ours" shows straight away.
  * Changes made elsewhere (a core's staff list or visibility, a new claim, the
  * nightly import) show when the entry is next refreshed.
  *
@@ -38,10 +38,11 @@ import { db } from "@/lib/db";
 import {
   compareServicesForBlock,
   computeCollaboration,
+  countKinds,
   isServiceUnitVisible,
   serviceCoversFamily,
   serviceDisplayLabels,
-  type CollaborationReason,
+  type CollaborationMark,
   type ServiceUnitFacts,
 } from "@/lib/method-services/collaboration";
 import { isMethodServicesEnabled } from "@/lib/method-services/flags";
@@ -76,13 +77,20 @@ export type FamilyServiceCollaboration = {
   /** What the filter and the badge call it: the unit's name (see
    *  `serviceDisplayLabels`). */
   label: string;
-  /** Marked publications of the page, any publication type. */
-  marked: Map<string, CollaborationReason>;
-  /** Of those, the ones in the page's default view (research types). This is
-   *  the N of "collaborated on N of the M publications listed here". */
+  /** Counted publications of the page, any publication type, each a
+   *  collaboration or support. */
+  marked: Map<string, CollaborationMark>;
+  /** Of those, the ones in the page's default view (research types): the
+   *  collaborations plus the support of the public sentence. */
   researchCount: number;
-  /** Of those, the ones under "Show all publication types". */
+  /** The N of "collaborated on N ... of the M publications listed here". */
+  researchCollaborations: number;
+  /** The S of "supported S of the M publications listed here". */
+  researchSupport: number;
+  /** Everything counted, under "Show all publication types". */
   allCount: number;
+  allCollaborations: number;
+  allSupport: number;
 };
 
 const unitKey = (entityType: string, entityId: string) => `${entityType}:${entityId}`;
@@ -373,12 +381,14 @@ async function computeFamilyServiceCollaborations(
         pagePmids: page.all,
         supportedPmids: service.supportedPmids,
         excludedPmids: service.excludedPmids,
+        coauthoredPmids: service.coauthoredPmids,
         countStaffPapers: service.countStaffPapers,
         staffPmids: staffByUnit.get(unitKey(service.entityType, service.entityId)) ?? new Set(),
         confirmedPmids: confirmedByUnit.get(unitKey(service.entityType, service.entityId)),
       });
-      let researchCount = 0;
-      for (const pmid of marked.keys()) if (page.research.has(pmid)) researchCount += 1;
+      const research = countKinds(marked, page.research);
+      const everything = countKinds(marked);
+      const researchCount = research.collaborations + research.support;
       return {
         id: service.id,
         name: service.name,
@@ -388,7 +398,11 @@ async function computeFamilyServiceCollaborations(
         label: labels.get(service.id) ?? unit.name,
         marked,
         researchCount,
+        researchCollaborations: research.collaborations,
+        researchSupport: research.support,
         allCount: marked.size,
+        allCollaborations: everything.collaborations,
+        allSupport: everything.support,
       };
     })
     .sort((a, b) =>

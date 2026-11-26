@@ -321,6 +321,8 @@ describe("CoreEditSections — Method services", () => {
           supportedPmids: [],
           excludedPmids: [],
           countStaffPapers: true,
+          affiliationPhrases: [],
+          coauthoredPmids: [],
         },
       ],
     });
