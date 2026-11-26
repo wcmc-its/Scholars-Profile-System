@@ -1517,12 +1517,12 @@ export class AppStack extends Stack {
         //     rows, zero deletes) and it is not in a scheduled Step Function
         //     yet, so the tab shows only manual grants until that lands.
         //   SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY -> narrows informal-center
-        //     creation to superusers. OFF: it REMOVES a parent-dept Owner's
-        //     create path, a behaviour change gated on the OQ-8a stakeholder
-        //     sign-off; ships dark until then.
+        //     creation to superusers. ON in both envs (owner decision,
+        //     2026-11-26): a parent-dept Owner can no longer create a center
+        //     and is offered "Request a new org unit" instead.
         SELF_EDIT_ADMINISTRATORS_TAB: "on",
         SELF_EDIT_ED_ADMINS_IMPORT: "off",
-        SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY: "off",
+        SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY: "on",
         // Data Quality dashboard (`/edit/data-quality`, docs/data-quality-dashboard-spec.md):
         // a read-only, prominence-sorted list of scholars + their profile gaps
         // (missing headshot/overview, pending COI suggestions) for stewards

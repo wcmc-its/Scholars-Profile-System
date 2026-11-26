@@ -708,7 +708,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_DATA_QUALITY_DASHBOARD",
@@ -5982,7 +5982,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_DATA_QUALITY_DASHBOARD",
