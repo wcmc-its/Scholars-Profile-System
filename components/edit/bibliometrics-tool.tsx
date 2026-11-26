@@ -12,7 +12,7 @@ import { Download, Landmark, Lock } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
-import { pubTitleProps } from "@/components/publication/pub-html";
+import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { PolicyCitationGroups } from "@/components/publication/publication-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -391,7 +391,7 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
               </React.Fragment>
             ))}
             {p.etAl ? ", et al. " : p.authors.length > 0 ? ". " : ""}
-            {p.journal ? <em>{p.journal}</em> : null}
+            {p.journal ? <PubJournal value={p.journal} /> : null}
             {p.journal ? ". " : ""}
             {p.dated ? `${p.dated}. ` : ""}
             {id.label} {id.value}
