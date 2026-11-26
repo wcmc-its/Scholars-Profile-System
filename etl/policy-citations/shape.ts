@@ -6,13 +6,29 @@ import { issuingBody } from "@/lib/citations/issuing-bodies";
 
 export type Level = "authority" | "guideline" | "consensus" | "review";
 
+/** What ClinicalTrials.gov says about a citing trial, values as the registry gives them. */
+export type TrialDetails = {
+  /** "PHASE2/PHASE3"; null for a study with no phase. */
+  phase: string | null;
+  sponsor: string | null;
+  /** INDUSTRY, NIH, OTHER, ... */
+  sponsorClass: string | null;
+  /** RECRUITING, COMPLETED, ... */
+  status: string | null;
+  /** INTERVENTIONAL, OBSERVATIONAL, ... */
+  studyType: string | null;
+  /** "YYYY-MM" or "YYYY-MM-DD". */
+  startDate: string | null;
+};
+
 export interface CitingDoc {
-  source: "pubmed" | "bookshelf";
+  source: "pubmed" | "bookshelf" | "ctgov";
   externalId: string;
   title: string;
   year: number | null;
   url: string;
-  level: Level;
+  /** "trial" is not a ranked level (see `POLICY_LEVELS`, lib/citations/policy-rollup.ts). */
+  level: Level | "trial";
   issuingBody: string | null;
   dedupKey: string;
   /** Citation fields. PubMed fills all but `publisher`; Bookshelf fills only that. */
@@ -24,6 +40,8 @@ export interface CitingDoc {
   pages: string | null;
   doi: string | null;
   publisher: string | null;
+  /** Trials only. */
+  details?: TrialDetails;
 }
 
 /** The fields an existing row is back-filled with. */
@@ -229,4 +247,81 @@ export function authorityBodies(bodies: ReadonlyArray<string>): Array<{ body: st
   return [...counts]
     .map(([body, count]) => ({ body, count }))
     .sort((a, b) => b.count - a.count || a.body.localeCompare(b.body));
+}
+
+/** A ClinicalTrials.gov study, as far as the trials pass asks for it (ctgov.ts `FIELDS`). */
+export type CtgovStudy = {
+  protocolSection?: {
+    identificationModule?: { nctId?: string; briefTitle?: string };
+    statusModule?: { overallStatus?: string; startDateStruct?: { date?: string } };
+    sponsorCollaboratorsModule?: { leadSponsor?: { name?: string; class?: string } };
+    designModule?: { studyType?: string; phases?: string[] };
+    referencesModule?: { references?: Array<{ pmid?: string; type?: string }> };
+  };
+};
+
+/**
+ * The papers a study lists as background, and how many of its background
+ * references carry no PMID (free text only, so they can never be matched).
+ * `RESULT` and `DERIVED` references are dropped: they mean the paper reports
+ * the trial, not that the trial cites the paper.
+ */
+export function backgroundRefs(study: CtgovStudy): { pmids: string[]; noPmid: number } {
+  const pmids = new Set<string>();
+  let noPmid = 0;
+  for (const r of study.protocolSection?.referencesModule?.references ?? []) {
+    if (r.type !== "BACKGROUND") continue;
+    const pmid = r.pmid?.trim();
+    if (pmid && /^\d{1,9}$/.test(pmid)) pmids.add(pmid);
+    else noPmid++;
+  }
+  return { pmids: [...pmids], noPmid };
+}
+
+/** One citing document per trial, keyed and de-duplicated by its NCT number. */
+export function trialDoc(study: CtgovStudy): CitingDoc | null {
+  const s = study.protocolSection;
+  const nct = s?.identificationModule?.nctId;
+  if (!nct || !/^NCT\d{8}$/.test(nct)) return null;
+  const startDate = text(s?.statusModule?.startDateStruct?.date, 10);
+  const y = /^\d{4}/.exec(startDate ?? "");
+  return {
+    source: "ctgov",
+    externalId: nct,
+    title: cleanTitle(s?.identificationModule?.briefTitle ?? "") || nct,
+    year: y ? Number(y[0]) : null,
+    url: `https://clinicaltrials.gov/study/${nct}`,
+    level: "trial",
+    issuingBody: null,
+    dedupKey: nct,
+    authors: null,
+    journal: null,
+    journalAbbrev: null,
+    volume: null,
+    issue: null,
+    pages: null,
+    doi: null,
+    publisher: null,
+    details: {
+      phase: text(s?.designModule?.phases?.join("/"), 64),
+      sponsor: text(s?.sponsorCollaboratorsModule?.leadSponsor?.name, 255),
+      sponsorClass: text(s?.sponsorCollaboratorsModule?.leadSponsor?.class, 32),
+      status: text(s?.statusModule?.overallStatus, 32),
+      studyType: text(s?.designModule?.studyType, 32),
+      startDate,
+    },
+  };
+}
+
+/**
+ * The authors' own trial: one of the paper's confirmed WCM authors is an
+ * investigator on the citing trial. Other WCM trials count like anyone else's.
+ */
+export function isOwnTrial(
+  authors: ReadonlySet<string> | undefined,
+  investigators: ReadonlySet<string> | undefined,
+): boolean {
+  if (!authors || !investigators) return false;
+  for (const cwid of authors) if (investigators.has(cwid)) return true;
+  return false;
 }

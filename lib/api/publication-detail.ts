@@ -6,7 +6,7 @@
  * Same pure-function shape as `lib/api/profile.ts` etc. — the route file
  * (`app/api/publications/[pmid]/route.ts`) is a thin delegator.
  */
-import { parseLocations, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { parseLocations, POLICY_LEVELS, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
@@ -163,7 +163,8 @@ export async function readPolicyCitations(
 ): Promise<PublicationDetailPayload["policyCitations"] | null> {
   try {
     const links = await prisma.publicationCitingDocument.findMany({
-      where: { pmid },
+      // The ranked levels only: a citing trial (`level` "trial") is not listed here.
+      where: { pmid, citingDocument: { level: { in: [...POLICY_LEVELS] } } },
       select: { citingDocument: true, locations: true },
       orderBy: [{ citingDocument: { year: "desc" } }, { citingDocumentId: "asc" }],
     });

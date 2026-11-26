@@ -31,7 +31,7 @@
  * A citing document counts once per publication however many journals printed
  * it (`dedup_key`). Server-only (`@/lib/db`).
  */
-import { parseLocations } from "@/lib/citations/policy-rollup";
+import { parseLocations, POLICY_LEVELS } from "@/lib/citations/policy-rollup";
 import ExcelJS from "exceljs";
 
 import type { EditSession } from "@/lib/auth/superuser";
@@ -47,7 +47,7 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { htmlToPlainText } from "@/lib/utils";
 
 /** Highest first: the ranked sort's order. */
-export const LEVELS = ["authority", "guideline", "consensus", "review"] as const;
+export const LEVELS = POLICY_LEVELS;
 export type Level = (typeof LEVELS)[number];
 export type LevelCounts = Record<Level, number>;
 
@@ -367,10 +367,12 @@ export function citedSql(p: PolicyCitationParams): Prisma.Sql {
     ),
     ", ",
   );
+  // The ranked levels only, as the rollups are: a citing trial must not make a
+  // row here, nor move `latest`.
   return Prisma.sql`(SELECT l.pmid, MAX(d.year) AS latest, ${counts}
           FROM publication_citing_document l
           JOIN citing_document d ON d.id = l.citing_document_id
-         WHERE 1 = 1
+         WHERE d.level IN (${Prisma.join([...LEVELS])})
            ${docSql(p)}
          GROUP BY l.pmid) x`;
 }
@@ -699,7 +701,7 @@ export async function loadCitingDocuments(
               FROM ${scopedPubsSql(p, pmids)}
               JOIN publication_citing_document l ON l.pmid = ok.pmid
               JOIN citing_document d ON d.id = l.citing_document_id
-             WHERE 1 = 1
+             WHERE d.level IN (${Prisma.join([...LEVELS])})
                ${docSql(p)}) t
      WHERE t.level <> 'review' OR t.rn <= ${REVIEWS_SHOWN}
      ORDER BY t.year DESC, t.id`;

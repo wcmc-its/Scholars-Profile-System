@@ -858,16 +858,21 @@ model PublicationCiting {
 /// consensus statement or systematic review indexed in PubMed, or a health
 /// authority / national academy document in NCBI Bookshelf. Loaded weekly by
 /// `etl:policy-citations`. `source` + `externalId` is the natural key (a PMID,
-/// or a Bookshelf book accession such as NBK442272).
+/// a Bookshelf book accession such as NBK442272, or an NCT number).
+///
+/// Also holds ClinicalTrials.gov studies that list a publication as a
+/// background reference (`source` "ctgov", `level` "trial"). A trial is not a
+/// rung of the ranked levels: every reader of the four ranked levels names
+/// them (`POLICY_LEVELS`, lib/citations/policy-rollup.ts) and so skips it.
 model CitingDocument {
   id          Int     @id @default(autoincrement())
-  /// "pubmed" | "bookshelf"
+  /// "pubmed" | "bookshelf" | "ctgov"
   source      String  @db.VarChar(16)
   externalId  String  @map("external_id") @db.VarChar(32)
   title       String  @db.Text
   year        Int?
   url         String  @db.VarChar(255)
-  /// "authority" | "guideline" | "consensus" | "review"
+  /// "authority" | "guideline" | "consensus" | "review" | "trial"
   level       String  @db.VarChar(16)
   /// Health authority that issued it (lib/citations/issuing-bodies.ts); NULL for
   /// PubMed-indexed documents.
@@ -886,6 +891,9 @@ model CitingDocument {
   /// Normalized title + year. The same guideline printed in several journals
   /// shares a key, and counts once.
   dedupKey    String  @map("dedup_key") @db.VarChar(191)
+  /// Trials only: `{ phase, sponsor, sponsorClass, status, studyType, startDate }`
+  /// as ClinicalTrials.gov gives them, refreshed each run. NULL otherwise.
+  details     Json?
 
   publications PublicationCitingDocument[]
 
@@ -904,6 +912,10 @@ model PublicationCitingDocument {
   firstSeenAt      DateTime       @default(now()) @map("first_seen_at")
   /// Bookshelf only: the chapters and sections citing the paper, `[{ url, label }]`.
   locations        Json?
+  /// Trials only: `{ ownTrial: true }` when a confirmed WCM author of the paper
+  /// is an investigator on the citing trial. Such a link is stored and left out
+  /// of `publication.trial_count`. NULL otherwise.
+  evidence         Json?
   citingDocument   CitingDocument @relation(fields: [citingDocumentId], references: [id], onDelete: Cascade)
 
   @@id([pmid, citingDocumentId])
@@ -2179,6 +2191,10 @@ model Publication {
   authorityCount        Int       @default(0) @map("authority_count")
   consensusCount        Int       @default(0) @map("consensus_count")
   latestCitingYear      Int?      @map("latest_citing_year")
+  /// Distinct ClinicalTrials.gov studies listing this paper as a background
+  /// reference, less the authors' own trials. Kept apart from the four ranked
+  /// levels above: `latestCitingYear` and report 24 do not see trials.
+  trialCount            Int       @default(0) @map("trial_count")
   /// When `etl:policy-citations` last asked NCBI Bookshelf which books cite this
   /// paper. Drives the rolling pass (never-checked first, then oldest).
   bookshelfCheckedAt    DateTime? @map("bookshelf_checked_at")
