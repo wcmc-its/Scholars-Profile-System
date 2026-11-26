@@ -44,6 +44,17 @@ function firstInitial(initials: string): string {
 
 const SINGLE_LETTER = /^\p{L}\.?$/u;
 const RUN_OF_CAPITALS = /^(?:\p{Lu}\.?){2,3}$/u;
+/** A generational suffix, which PubMed prints after the initials ("Stone B
+ *  Jr", "Stone B III", "Stone B 3rd") and holds apart from both. */
+const SUFFIX = /^(?:jr|sr|ii|iii|iv|vi|\d(?:st|nd|rd|th))\.?$/iu;
+
+/** Where the initials start in `words[0..end)`: `end` when there are none. */
+function initialsStart(words: ReadonlyArray<string>, end: number): number {
+  let cut = end;
+  while (cut > 0 && SINGLE_LETTER.test(words[cut - 1])) cut -= 1;
+  if (cut === end && cut > 0 && RUN_OF_CAPITALS.test(words[cut - 1])) cut -= 1;
+  return cut;
+}
 
 /**
  * What an entered name is compared by: its family-name letters, a space and
@@ -53,15 +64,23 @@ const RUN_OF_CAPITALS = /^(?:\p{Lu}\.?){2,3}$/u;
  * Stone B K", "Rivera Stone B."), or else a last word of two or three capitals
  * ("Rivera Stone BK"). So "Rivera Stone", with no initial, is refused and is
  * never read as family name "Rivera", initial "S".
+ *
+ * A generational suffix after the initials is left out, since a PubMed author
+ * is keyed without one: "Stone B III" and "Stone BK Jr" are both "stone b".
+ * It is only a suffix when a family name and initials come before it, so
+ * "Stone II" is still family name "Stone", initials "II".
  */
 export function authorNameKey(entry: string): string | null {
   const words = entry.trim().split(/\s+/).filter((w) => w.length > 0);
-  let cut = words.length;
-  while (cut > 0 && SINGLE_LETTER.test(words[cut - 1])) cut -= 1;
-  if (cut === words.length && cut > 0 && RUN_OF_CAPITALS.test(words[cut - 1])) cut -= 1;
-  if (cut === words.length) return null;
+  let end = words.length;
+  if (end > 2 && SUFFIX.test(words[end - 1])) {
+    const before = initialsStart(words, end - 1);
+    if (before > 0 && before < end - 1) end -= 1;
+  }
+  const cut = initialsStart(words, end);
+  if (cut === end) return null;
   const family = familyNameKey(words.slice(0, cut).join(" "));
-  const initial = firstInitial(words.slice(cut).join(""));
+  const initial = firstInitial(words.slice(cut, end).join(""));
   return family.length > 0 && initial.length > 0 ? `${family} ${initial}` : null;
 }
 

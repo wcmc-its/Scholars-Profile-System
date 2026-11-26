@@ -96,23 +96,31 @@ export type AffiliationProgress = { checked: string[]; coauthored: string[]; nam
 
 const NO_PROGRESS: AffiliationProgress = { checked: [], coauthored: [], nameMatched: [] };
 
-/** The phrases and names a check was made against, as one comparable set. */
-function criteria(phrases: ReadonlyArray<string>, authorNames: ReadonlyArray<string>): Set<string> {
-  return new Set([
-    ...phrases.map(fold).filter((p) => p.length > 0).map((p) => `phrase:${p}`),
-    ...authorNames.flatMap((n) => authorNameKey(n) ?? []).map((k) => `name:${k}`),
-  ]);
-}
+/** The phrases a check was made against, as a comparable set. */
+const phraseSet = (phrases: ReadonlyArray<string>) =>
+  new Set(phrases.map(fold).filter((p) => p.length > 0));
+
+/** The author names a check was made against, as a comparable set. */
+const nameSet = (authorNames: ReadonlyArray<string>) =>
+  new Set(authorNames.flatMap((n) => authorNameKey(n) ?? []));
+
+const within = (a: ReadonlySet<string>, b: ReadonlySet<string>) => [...a].every((v) => b.has(v));
 
 /**
  * How much of a stored lookup still holds once the supported list, the phrases
- * and the author names are what `next` says. Phrases and names are treated
- * alike:
- *   - the same phrases and names: everything checked that is still supported;
- *   - only added to: the stored matches still match, so they are kept, and
- *     every other PMID must be compared again with what is new;
- *   - a phrase or a name removed or reworded: nothing, since a stored match
- *     may have been for it.
+ * and the author names are what `next` says. The matches found by an
+ * affiliation and the ones found by a name are judged apart, each by its own
+ * list:
+ *   - a stored affiliation match stands while every stored phrase is still
+ *     listed; a phrase removed or reworded drops them all, since a match may
+ *     have been for it. A stored name match stands, likewise, while every
+ *     stored name is still listed. So removing a name never costs the
+ *     affiliation matches, nor rewording a phrase the name matches;
+ *   - a PMID checked and not matched stays checked while nothing was added:
+ *     fewer phrases or names cannot make it match. Anything added (a reworded
+ *     entry is one removed and one added) means it must be compared again;
+ *   - a dropped match is never carried as checked: it is read again, in case
+ *     something still listed matches it.
  * `stored: null` (a new service) and neither phrases nor names carry nothing.
  *
  * A carried match keeps the reason it was found by. Each reason stays true (a
@@ -135,20 +143,29 @@ export function carriedAffiliationProgress(
   },
 ): AffiliationProgress {
   if (!stored) return NO_PROGRESS;
-  const before = criteria(stored.phrases, stored.authorNames ?? []);
-  const after = criteria(next.phrases, next.authorNames ?? []);
-  if (after.size === 0 || ![...before].every((p) => after.has(p))) return NO_PROGRESS;
+  const phrasesBefore = phraseSet(stored.phrases);
+  const phrasesAfter = phraseSet(next.phrases);
+  const namesBefore = nameSet(stored.authorNames ?? []);
+  const namesAfter = nameSet(next.authorNames ?? []);
+  if (phrasesAfter.size === 0 && namesAfter.size === 0) return NO_PROGRESS;
+  // A match can only have come from a list that had something in it.
+  const phrasesStand = phrasesBefore.size > 0 && within(phrasesBefore, phrasesAfter);
+  const namesStand = namesBefore.size > 0 && within(namesBefore, namesAfter);
+  const added = !within(phrasesAfter, phrasesBefore) || !within(namesAfter, namesBefore);
   const supported = new Set(next.supportedPmids);
   const checkedBefore = new Set(stored.checked);
+  const byName = new Set(stored.nameMatched ?? []);
   // A match only stands while PubMed's answer for it is on record.
-  const coauthored = [...new Set(stored.coauthored)].filter(
+  const matchedBefore = [...new Set(stored.coauthored)].filter(
     (p) => supported.has(p) && checkedBefore.has(p),
   );
-  const byName = new Set(stored.nameMatched ?? []);
+  const coauthored = matchedBefore.filter((p) => (byName.has(p) ? namesStand : phrasesStand));
   const nameMatched = coauthored.filter((p) => byName.has(p));
-  if (before.size !== after.size) return { checked: coauthored, coauthored, nameMatched };
+  if (added) return { checked: coauthored, coauthored, nameMatched };
+  const kept = new Set(coauthored);
+  const dropped = new Set(matchedBefore.filter((p) => !kept.has(p)));
   return {
-    checked: [...checkedBefore].filter((p) => supported.has(p)),
+    checked: [...checkedBefore].filter((p) => supported.has(p) && !dropped.has(p)),
     coauthored,
     nameMatched,
   };

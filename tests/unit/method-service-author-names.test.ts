@@ -81,6 +81,23 @@ describe("the name matcher", () => {
     expect(pubmedAuthorKey(author("Rivera Stone", ""))).toBeNull();
   });
 
+  it("leaves out a generational suffix after the initials, as PubMed keys the author without it", () => {
+    for (const entry of ["Stone B II", "Stone B III", "Stone B IV", "Stone B Jr", "Stone BK Jr.", "Stone B 3rd", "Stone B K Sr", "stone b iii"]) {
+      expect(authorNameKey(entry)).toBe("stone b");
+    }
+    expect(matches("Stone B III", "Stone", "B")).toBe(true);
+    expect(matches("Rivera Stone BK Jr", "Rivera-Stone", "BK")).toBe(true);
+    expect(validateAuthorNames(["Stone B Jr", "Stone B 3rd"])).toEqual({ ok: true, value: ["Stone B Jr"] });
+  });
+
+  it("reads a suffix-like last word as initials when no initial comes before it", () => {
+    expect(authorNameKey("Stone II")).toBe("stone i");
+    expect(authorNameKey("Stone JR")).toBe("stone j");
+    expect(authorNameKey("Rivera Stone IV")).toBe("riverastone i");
+    expect(authorNameKey("Stone Jr")).toBeNull();
+    expect(authorNameKey("B Jr")).toBeNull();
+  });
+
   it("an entry with no initial has no key, and so can never match", () => {
     expect(authorNameKey("Rivera Stone")).toBeNull();
     expect(authorNameKey("Rivera")).toBeNull();
@@ -217,8 +234,10 @@ describe("the PubMed reader's author names", () => {
 });
 
 describe("the resumable PubMed check, with names", () => {
+  const PHRASE = "Example Library";
+  // "101" was found by the phrase, "102" by the name.
   const stored = (over: Partial<Parameters<typeof carriedAffiliationProgress>[0] & object> = {}) => ({
-    phrases: [] as string[],
+    phrases: [PHRASE],
     authorNames: [NAME],
     checked: ["101", "102", "103"],
     coauthored: ["101", "102"],
@@ -243,56 +262,107 @@ describe("the resumable PubMed check, with names", () => {
 
   it("the same names (however they are written) carry everything checked", () => {
     expect(
-      carriedAffiliationProgress(stored(), { supportedPmids, phrases: [], authorNames: ["rivera-stone BK"] }),
+      carriedAffiliationProgress(stored(), { supportedPmids, phrases: [PHRASE], authorNames: ["rivera-stone BK"] }),
     ).toEqual({ checked: ["101", "102", "103"], coauthored: ["101", "102"], nameMatched: ["102"] });
   });
 
   it("an added name carries the matches only, each with the reason it was found by", () => {
     expect(
-      carriedAffiliationProgress(stored(), { supportedPmids, phrases: [], authorNames: [NAME, "Okafor C"] }),
+      carriedAffiliationProgress(stored(), { supportedPmids, phrases: [PHRASE], authorNames: [NAME, "Okafor C"] }),
     ).toEqual({ checked: ["101", "102"], coauthored: ["101", "102"], nameMatched: ["102"] });
   });
 
   it("an added phrase beside unchanged names carries the matches only, too", () => {
     expect(
-      carriedAffiliationProgress(stored(), { supportedPmids, phrases: ["Example Library"], authorNames: [NAME] }),
+      carriedAffiliationProgress(stored(), { supportedPmids, phrases: [PHRASE, "Example Archive"], authorNames: [NAME] }),
     ).toEqual({ checked: ["101", "102"], coauthored: ["101", "102"], nameMatched: ["102"] });
   });
 
-  it("a changed name restarts the check", () => {
+  it("a changed name restarts the check of a names-only service", () => {
     expect(
-      carriedAffiliationProgress(stored(), { supportedPmids, phrases: [], authorNames: ["Rivera Stone K"] }),
+      carriedAffiliationProgress(stored({ phrases: [], coauthored: ["102"] }), { supportedPmids, phrases: [], authorNames: ["Rivera Stone K"] }),
     ).toEqual({ checked: [], coauthored: [], nameMatched: [] });
   });
 
-  it("a removed name restarts the check, with or without a phrase left", () => {
-    const two = stored({ phrases: ["Example Library"], authorNames: [NAME, "Okafor C"] });
+  it("a removed name keeps the affiliation matches, and re-reads only what a name found", () => {
+    const two = stored({ authorNames: [NAME, "Okafor C"] });
     expect(
       carriedAffiliationProgress(two, { supportedPmids, phrases: ["Example Library"], authorNames: [NAME] }),
-    ).toEqual({ checked: [], coauthored: [], nameMatched: [] });
+    ).toEqual({ checked: ["101", "103"], coauthored: ["101"], nameMatched: [] });
     expect(
       carriedAffiliationProgress(two, { supportedPmids, phrases: ["Example Library"], authorNames: [] }),
-    ).toEqual({ checked: [], coauthored: [], nameMatched: [] });
-    expect(carriedAffiliationProgress(stored(), { supportedPmids, phrases: [], authorNames: [] })).toEqual({
+    ).toEqual({ checked: ["101", "103"], coauthored: ["101"], nameMatched: [] });
+    expect(carriedAffiliationProgress(two, { supportedPmids, phrases: [], authorNames: [] })).toEqual({
       checked: [],
       coauthored: [],
       nameMatched: [],
     });
   });
 
-  it("a removed phrase restarts the check even when the names are unchanged", () => {
+  it("a reworded name keeps the affiliation matches only: the rest must be compared again", () => {
     expect(
-      carriedAffiliationProgress(stored({ phrases: ["Example Library"] }), {
+      carriedAffiliationProgress(stored(), {
+        supportedPmids,
+        phrases: ["Example Library"],
+        authorNames: ["Rivera Stine B"],
+      }),
+    ).toEqual({ checked: ["101"], coauthored: ["101"], nameMatched: [] });
+  });
+
+  it("a removed phrase keeps the name matches, and re-reads only what an affiliation found", () => {
+    expect(
+      carriedAffiliationProgress(stored(), {
         supportedPmids,
         phrases: [],
         authorNames: [NAME],
       }),
+    ).toEqual({ checked: ["102", "103"], coauthored: ["102"], nameMatched: ["102"] });
+  });
+
+  it("a reworded phrase keeps the name matches only", () => {
+    expect(
+      carriedAffiliationProgress(stored(), {
+        supportedPmids,
+        phrases: ["Example Libraries"],
+        authorNames: [NAME],
+      }),
+    ).toEqual({ checked: ["102"], coauthored: ["102"], nameMatched: ["102"] });
+  });
+
+  it("a phrase reworded and a name removed together carry nothing", () => {
+    expect(
+      carriedAffiliationProgress(stored({ authorNames: [NAME, "Okafor C"] }), {
+        supportedPmids,
+        phrases: ["Example Libraries"],
+        authorNames: ["Okafor C"],
+      }),
     ).toEqual({ checked: [], coauthored: [], nameMatched: [] });
+  });
+
+  it("a kept affiliation match survives a part-way lookup after a name is removed", () => {
+    const carried = carriedAffiliationProgress(
+      stored({ authorNames: [NAME, "Okafor C"] }),
+      { supportedPmids, phrases: ["Example Library"], authorNames: [NAME] },
+    );
+    expect(pmidsToCheck(supportedPmids, carried)).toEqual(["102"]);
+    // PubMed answers nothing: the affiliation match is still on record.
+    expect(mergeAffiliationLookup(supportedPmids, ["Example Library"], carried, new Map(), [NAME])).toEqual({
+      checked: ["101", "103"],
+      coauthored: ["101"],
+      nameMatched: [],
+      complete: false,
+    });
+  });
+
+  it("a match with no list that could have found it is read again, not carried", () => {
+    expect(
+      carriedAffiliationProgress(stored({ phrases: [] }), { supportedPmids, phrases: [], authorNames: [NAME] }),
+    ).toEqual({ checked: ["102", "103"], coauthored: ["102"], nameMatched: ["102"] });
   });
 
   it("a name match that is no longer supported is dropped from both lists", () => {
     expect(
-      carriedAffiliationProgress(stored(), { supportedPmids: ["101", "103"], phrases: [], authorNames: [NAME] }),
+      carriedAffiliationProgress(stored(), { supportedPmids: ["101", "103"], phrases: [PHRASE], authorNames: [NAME] }),
     ).toEqual({ checked: ["101", "103"], coauthored: ["101"], nameMatched: [] });
   });
 });

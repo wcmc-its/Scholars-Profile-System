@@ -35,8 +35,10 @@
  *     save, whatever else that save changes;
  *   - a list too long for one request's deadline is finished over several
  *     saves: each keeps what it read and the next asks only for the rest;
- *   - changing or removing a phrase or a name starts the check again; adding
- *     one keeps the matches already found and re-checks the rest.
+ *   - removing a phrase drops only the matches an affiliation found, and
+ *     removing a name only the ones a name found; those are read again and
+ *     everything else stands. Adding a phrase or a name (rewording one is
+ *     both) keeps the matches that still stand and re-checks the rest.
  * The save always goes through. When some supported PMIDs are still unchecked
  * afterwards the response carries a warning and `pubmed: { checked, total }`:
  * `"pubmed_incomplete"` when this save checked some more (save again to carry

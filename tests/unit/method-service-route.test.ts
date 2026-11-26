@@ -1301,12 +1301,33 @@ describe("POST /api/edit/method-service: co-authors from PubMed author names", (
     });
   });
 
-  it("removing one of two names starts the check again", async () => {
+  it("removing a name while PubMed is down keeps the affiliation matches on the row", async () => {
+    m.serviceFindUnique.mockResolvedValue(
+      namedRow({
+        affiliationPhrases: ["Example Library"],
+        authorNames: [NAME, "Okafor C"],
+        supportedPmids: ["111", "222", "333"],
+        coauthoredPmids: ["111", "333"],
+        nameMatchedPmids: ["111"],
+        affiliationCheckedPmids: ["111", "222", "333"],
+      }),
+    );
+    m.fetchAffiliations.mockRejectedValue(new Error("PubMed is down"));
+    await call({ op: "update", id: 5, authorNames: ["Okafor C"] });
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111"]);
+    expect(m.txUpdate.mock.calls[0][0].data).toMatchObject({
+      coauthoredPmids: ["333"],
+      nameMatchedPmids: [],
+      affiliationCheckedPmids: ["222", "333"],
+    });
+  });
+
+  it("removing one of two names re-reads only what a name had found", async () => {
     m.serviceFindUnique.mockResolvedValue(
       namedRow({ authorNames: [NAME, "Okafor C"], coauthoredPmids: ["111"], nameMatchedPmids: ["111"] }),
     );
     await call({ op: "update", id: 5, authorNames: ["Okafor C"] });
-    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111", "222"]);
+    expect(m.fetchAffiliations).toHaveBeenCalledWith(["111"]);
     expect(m.txUpdate.mock.calls[0][0].data).toMatchObject({ authorNames: ["Okafor C"] });
   });
 
