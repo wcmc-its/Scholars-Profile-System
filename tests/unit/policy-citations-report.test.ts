@@ -496,16 +496,24 @@ describe("scope narrowing", () => {
       level,
       issuing_body: null,
       title: `Document ${dedup_key}`,
+      authors: null,
+      journal: null,
+      volume: null,
+      issue: null,
+      pages: null,
+      publisher: null,
       year: 2024,
+      doi: null,
       url: `https://example.org/${dedup_key}`,
       locations: null,
+      first_seen_at: new Date("2026-11-25T03:00:00Z"),
       ...over,
     });
     h.queryRaw.mockResolvedValue([
-      pair("111", "authority", "a", { issuing_body: "WHO", locations: JSON.stringify([{ url: "https://www.ncbi.nlm.nih.gov/books/NBK000003/", label: "Chapter 4" }, { url: "https://www.ncbi.nlm.nih.gov/books/NBK000004/", label: "Annex 1" }]) }),
+      pair("111", "authority", "a", { issuing_body: "WHO", publisher: "Geneva: World Health Organization; 2024 Jan.", locations: JSON.stringify([{ url: "https://www.ncbi.nlm.nih.gov/books/NBK000003/", label: "Chapter 4" }, { url: "https://www.ncbi.nlm.nih.gov/books/NBK000004/", label: "Annex 1" }]) }),
       pair("222", "guideline", "g"),
       pair("222", "guideline", "g"), // the same guideline in a second journal
-      pair("111", "guideline", "g"),
+      pair("111", "guideline", "g", { authors: "Doe J, Roe R", journal: "Example J", volume: "12", issue: "3", pages: "45-67", doi: "10.1000/example" }),
       pair("222", "review", "r"),
     ]);
     const p = { ...parse("basis=cy&level=authority&level=guideline&excl=1"), scope: ["dept:N1"] };
@@ -518,7 +526,18 @@ describe("scope narrowing", () => {
       ["111", "authority", "Document a"],
       ["111", "guideline", "Document g"],
     ]);
-    expect(rows[2]).toMatchObject({ pubTitle: "First paper", body: "WHO", where: "Chapter 4; Annex 1", url: "https://example.org/a" });
+    expect(rows[2]).toMatchObject({
+      pubTitle: "First paper",
+      body: "WHO",
+      authors: null,
+      source: "Geneva: World Health Organization; 2024 Jan.",
+      where: "Chapter 4; Annex 1",
+      url: "https://example.org/a",
+      firstSeen: "2026-11-25",
+    });
+    expect(rows[3]).toMatchObject({ authors: "Doe J, Roe R", source: "Example J, 12(3):45-67", doi: "10.1000/example" });
+    // A journal with no volume, issue or pages: the journal alone.
+    expect(rows[0]).toMatchObject({ source: null, doi: null });
     const { text, values } = call(0);
     expect(text).toMatch(
       /FROM \(SELECT p\.pmid FROM publication p WHERE p\.pmid IN \(\?,\?\) AND EXISTS \(SELECT 1 FROM publication_author pa JOIN scholar s ON s\.cwid = pa\.cwid WHERE pa\.pmid = p\.pmid AND .*s\.dept_code IN \(\?\).*\)\) ok JOIN publication_citing_document l ON l\.pmid = ok\.pmid JOIN citing_document d ON d\.id = l\.citing_document_id WHERE d\.level IN \(\?,\?\) .*JSON_SEARCH.* ORDER BY FIELD\(d\.level, 'authority', 'guideline', 'consensus', 'review'\), ok\.pmid, d\.year DESC, d\.id LIMIT \?$/,
@@ -982,9 +1001,13 @@ describe("the workbook", () => {
           level: "authority" as const,
           body: "WHO",
           title: "Example <i>Guidance</i>: 2024 Update",
+          authors: null,
+          source: "Geneva: World Health Organization; 2024 Jan.",
           year: 2024,
           where: "Chapter 4; Annex 1",
+          doi: null,
           url: "https://www.ncbi.nlm.nih.gov/books/NBK000001/",
+          firstSeen: "2026-11-25",
         },
       ],
       more: false,
@@ -998,9 +1021,13 @@ describe("the workbook", () => {
       "Level",
       "Issuing body",
       "Citing document",
+      "Authors",
+      "Journal or publisher",
       "Year",
       "Where cited",
+      "DOI",
       "Link",
+      "First seen",
     ]);
     expect(sheet.getRow(2).values).toEqual([
       undefined,
@@ -1009,9 +1036,13 @@ describe("the workbook", () => {
       "Health authority",
       "WHO",
       "Example Guidance: 2024 Update",
+      undefined,
+      "Geneva: World Health Organization; 2024 Jan.",
       2024,
       "Chapter 4; Annex 1",
+      undefined,
       "https://www.ncbi.nlm.nih.gov/books/NBK000001/",
+      "2026-11-25",
     ]);
     const criteria = async (c: typeof citations) =>
       Object.fromEntries(

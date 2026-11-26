@@ -1030,10 +1030,17 @@ export type CitationPair = {
   level: Level;
   body: string | null;
   title: string;
+  /** PubMed documents: every author. Bookshelf: null. */
+  authors: string | null;
+  /** PubMed: journal plus volume(issue):pages. Bookshelf: the publication statement. */
+  source: string | null;
   year: number | null;
   /** Bookshelf: the chapters and sections citing the paper, "; "-joined. */
   where: string;
+  doi: string | null;
   url: string;
+  /** When the weekly import first saw this link, YYYY-MM-DD. */
+  firstSeen: string;
 };
 
 /** One row per publication and counted citing document, at the listed
@@ -1047,9 +1054,27 @@ export async function loadCitationPairs(
   if (pubs.length === 0) return { rows: [], more: false };
   const levels = p.levels.length > 0 ? p.levels : LEVELS;
   const raw = await db.read.$queryRaw<
-    { pmid: string; dedup_key: string; level: string; issuing_body: string | null; title: string; year: number | null; url: string; locations: unknown }[]
+    {
+      pmid: string;
+      dedup_key: string;
+      level: string;
+      issuing_body: string | null;
+      title: string;
+      authors: string | null;
+      journal: string | null;
+      volume: string | null;
+      issue: string | null;
+      pages: string | null;
+      publisher: string | null;
+      year: number | null;
+      doi: string | null;
+      url: string;
+      locations: unknown;
+      first_seen_at: Date;
+    }[]
   >`
-    SELECT ok.pmid, d.dedup_key, d.level, d.issuing_body, d.title, d.year, d.url, l.locations
+    SELECT ok.pmid, d.dedup_key, d.level, d.issuing_body, d.title, d.authors, d.journal, d.volume, d.issue,
+           d.pages, d.publisher, d.year, d.doi, d.url, l.locations, l.first_seen_at
       FROM ${scopedPubsSql(p, pubs.map((r) => r.pmid))}
       JOIN publication_citing_document l ON l.pmid = ok.pmid
       JOIN citing_document d ON d.id = l.citing_document_id
@@ -1072,9 +1097,15 @@ export async function loadCitationPairs(
         level,
         body: r.issuing_body,
         title: r.title,
+        authors: r.authors,
+        source: r.journal
+          ? [r.journal, formatVolIssuePages(r.volume, r.issue, r.pages)].filter(Boolean).join(", ")
+          : r.publisher,
         year: r.year === null ? null : Number(r.year),
         where: parseLocations(r.locations).map((x) => x.label).join("; "),
+        doi: r.doi,
         url: r.url,
+        firstSeen: new Date(r.first_seen_at).toISOString().slice(0, 10),
       },
     ];
   });
@@ -1320,7 +1351,20 @@ export async function buildPolicyCitationWorkbook(
   for (const [i, w] of [28, 10, 30, 22, 28, 16, 14, 16, 14].entries()) people.getColumn(i + 1).width = w;
 
   const pairs = wb.addWorksheet("Citations");
-  pairs.addRow(["PMID", "Paper title", "Level", "Issuing body", "Citing document", "Year", "Where cited", "Link"]);
+  pairs.addRow([
+    "PMID",
+    "Paper title",
+    "Level",
+    "Issuing body",
+    "Citing document",
+    "Authors",
+    "Journal or publisher",
+    "Year",
+    "Where cited",
+    "DOI",
+    "Link",
+    "First seen",
+  ]);
   boldRow(pairs, 1);
   pairs.views = [{ state: "frozen", ySplit: 1 }];
   for (const r of citations.rows) {
@@ -1330,12 +1374,16 @@ export async function buildPolicyCitationWorkbook(
       LEVEL_ONE[r.level],
       r.body,
       htmlToPlainText(r.title, Number.POSITIVE_INFINITY),
+      r.authors,
+      r.source ? htmlToPlainText(r.source, Number.POSITIVE_INFINITY) : r.source,
       r.year,
       r.where,
+      r.doi,
       r.url,
+      r.firstSeen,
     ]);
   }
-  for (const [i, w] of [12, 60, 20, 18, 70, 8, 40, 46].entries()) pairs.getColumn(i + 1).width = w;
+  for (const [i, w] of [12, 60, 20, 18, 70, 40, 40, 8, 40, 28, 46, 12].entries()) pairs.getColumn(i + 1).width = w;
 
   addCriteriaSheet(wb, [
     ...describePolicyCitationCriteria(p, generatedAt, labels),
