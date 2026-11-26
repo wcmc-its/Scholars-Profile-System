@@ -985,6 +985,16 @@ export class EtlStack extends Stack {
           parameterName: `/sps/${env}/etl/openalex-api-key`,
         }),
       ),
+      // NCBI E-utilities key, read by every PubMed step (systematic reviews,
+      // retractions, policy citations, ORCID evidence, reciter titles). A key lifts
+      // NCBI's limit from 3 to 10 requests a second; etl:pubmed-systematic-reviews
+      // then runs three calls at a time. The SecureString must exist in SSM before
+      // deploy or every ETL task fails to start.
+      NCBI_API_KEY: ecs.Secret.fromSsmParameter(
+        ssm.StringParameter.fromSecureStringParameterAttributes(this, "NcbiApiKey", {
+          parameterName: `/sps/${env}/etl/ncbi-api-key`,
+        }),
+      ),
     };
     // Internal-ALB origin (http://<dns>), read once from the App stack's SSM
     // param; feeds SCHOLARS_BASE_URL and SCHOLARS_INTERNAL_ALB_ORIGIN (#1478).

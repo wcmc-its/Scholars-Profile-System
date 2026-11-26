@@ -25,6 +25,7 @@ const RETRY_BASE_MS = 2000;
 /** Spacing between calls: under 3 a second without a key, under 10 with one. */
 const DELAY_MS_KEYLESS = 350;
 const DELAY_MS_WITH_KEY = 110;
+const CONCURRENCY_WITH_KEY = 3;
 const TIMEOUT_MS = 90_000;
 
 function sleep(ms: number): Promise<void> {
@@ -131,6 +132,9 @@ interface FetchOptions {
   apiKey?: string;
   delayMs?: number;
   retryBaseMs?: number;
+  /** Calls in flight at once. Defaults to 3 with a key (about 5 requests a second
+   *  against NCBI's 10) and 1 without (NCBI allows 3 a second keyless). */
+  concurrency?: number;
   /** Called after each batch, for progress logging. */
   onBatch?: (done: number, total: number) => void;
 }
@@ -156,20 +160,41 @@ export async function fetchSystematicReviewPmids(
     apiKey,
     delayMs = apiKey ? DELAY_MS_WITH_KEY : DELAY_MS_KEYLESS,
     retryBaseMs = RETRY_BASE_MS,
+    concurrency = apiKey ? CONCURRENCY_WITH_KEY : 1,
     onBatch,
   } = options;
   const batches = batchPmids(pmids);
   const flagged = new Set<string>();
   let asked = 0;
+  let next = 0;
+  let done = 0;
 
-  for (const [i, batch] of batches.entries()) {
-    const sent = new Set(batch);
-    asked += batch.length;
-    for (const id of await esearchBatch(batch, fetchFn, apiKey, retryBaseMs)) {
-      if (sent.has(id)) flagged.add(id);
+  // Each worker takes the next unclaimed batch, then pauses before its next call.
+  // A failed batch rejects Promise.all, so the caller never sees a partial set;
+  // `failed` stops the other workers from starting further calls.
+  let failed = false;
+  const worker = async () => {
+    while (!failed) {
+      const i = next++;
+      if (i >= batches.length) return;
+      const batch = batches[i];
+      const sent = new Set(batch);
+      asked += batch.length;
+      let ids: string[];
+      try {
+        ids = await esearchBatch(batch, fetchFn, apiKey, retryBaseMs);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
+      for (const id of ids) {
+        if (sent.has(id)) flagged.add(id);
+      }
+      onBatch?.(++done, batches.length);
+      if (next < batches.length) await sleep(delayMs);
     }
-    onBatch?.(i + 1, batches.length);
-    if (i < batches.length - 1) await sleep(delayMs);
-  }
+  };
+  const workers = Math.max(1, Math.min(Math.trunc(concurrency) || 1, batches.length));
+  await Promise.all(Array.from({ length: workers }, worker));
   return { flagged, asked, batches: batches.length };
 }

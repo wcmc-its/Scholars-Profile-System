@@ -197,6 +197,53 @@ describe("fetchSystematicReviewPmids", () => {
     expect(fetchFn).toHaveBeenCalledTimes(6);
   });
 
+  /** A fetch that records how many calls are in flight at once. */
+  function trackingFetch(flag: (body: URLSearchParams) => string[] = () => []) {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchFn = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      inFlight--;
+      return jsonResponse(flag(init?.body as URLSearchParams));
+    });
+    return { fetchFn, peak: () => peak };
+  }
+
+  it("makes one call at a time without a key", async () => {
+    const pmids = Array.from({ length: 800 }, (_, i) => String(i + 1));
+    const { fetchFn, peak } = trackingFetch();
+    await fetchSystematicReviewPmids(pmids, { fetchFn, ...fast });
+    expect(fetchFn).toHaveBeenCalledTimes(8);
+    expect(peak()).toBe(1);
+  });
+
+  it("makes three calls at a time with a key, and still asks about every batch once", async () => {
+    const pmids = Array.from({ length: 800 }, (_, i) => String(i + 1));
+    // Flag the first PMID of each batch, so a skipped or repeated batch shows.
+    const { fetchFn, peak } = trackingFetch((body) => [
+      /^\((\d+)\[uid\]/.exec(body.get("term") ?? "")![1],
+    ]);
+    const out = await fetchSystematicReviewPmids(pmids, { fetchFn, apiKey: "k", ...fast });
+    expect(fetchFn).toHaveBeenCalledTimes(8);
+    expect(peak()).toBe(3);
+    expect(out.asked).toBe(800);
+    expect([...out.flagged].sort((x, y) => Number(x) - Number(y))).toEqual(
+      ["1", "101", "201", "301", "401", "501", "601", "701"],
+    );
+  });
+
+  it("stops starting new batches once one has failed", async () => {
+    const pmids = Array.from({ length: 2000 }, (_, i) => String(i + 1));
+    const fetchFn = vi.fn(async () => errorResponse());
+    await expect(
+      fetchSystematicReviewPmids(pmids, { fetchFn, apiKey: "k", concurrency: 3, ...fast }),
+    ).rejects.toThrow(/ESearch error/);
+    // Only the three batches already in flight are tried (1 try + 5 retries each).
+    expect(fetchFn.mock.calls.length).toBeLessThanOrEqual(18);
+  });
+
   it("throws after retries on a persistent 5xx", async () => {
     const fetchFn = vi.fn(
       async () => ({ ok: false, status: 502, text: async () => "bad gateway" }) as unknown as Response,

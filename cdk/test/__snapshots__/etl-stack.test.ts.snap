@@ -2493,6 +2493,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SCHOLARS_LDAP_URL",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -2813,6 +2828,27 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -3264,6 +3300,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SCHOLARS_LDAP_URL",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -3523,6 +3574,27 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -3976,6 +4048,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_API_BASE_URL",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -4239,6 +4326,27 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -4610,6 +4718,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/openalex-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
                     ],
                   ],
                 },
@@ -5247,6 +5370,27 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             },
             {
               "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
                 "secretsmanager:GetSecretValue",
                 "secretsmanager:DescribeSecret",
               ],
@@ -5689,6 +5833,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "DATABASE_URL_RO",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -5937,6 +6096,27 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/prod/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -15341,6 +15521,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SCHOLARS_LDAP_URL",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -15661,6 +15856,27 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -16112,6 +16328,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SCHOLARS_LDAP_URL",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -16371,6 +16602,27 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -16824,6 +17076,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "RECITER_API_BASE_URL",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -17087,6 +17354,27 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
                   ],
                 ],
               },
@@ -17458,6 +17746,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/openalex-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
                     ],
                   ],
                 },
@@ -18095,6 +18398,27 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             },
             {
               "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
                 "secretsmanager:GetSecretValue",
                 "secretsmanager:DescribeSecret",
               ],
@@ -18537,6 +18861,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "NCBI_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "DATABASE_URL_RO",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -18785,6 +19124,27 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/openalex-api-key",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ssm:DescribeParameters",
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+                "ssm:GetParameterHistory",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:us-east-1:123456789012:parameter/sps/staging/etl/ncbi-api-key",
                   ],
                 ],
               },
