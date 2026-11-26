@@ -33,6 +33,7 @@ import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 import { isCvEnabled } from "@/lib/edit/cv-export";
+import { isBibliometricsEnabled } from "@/lib/edit/bibliometrics";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isMenteeSuggestionsEnabled } from "@/lib/edit/mentee-suggestions-flag";
@@ -230,6 +231,8 @@ export default async function EditScholarPage({
     // Media highlights is valid only when the scholar has ≥1 approved clip (the
     // loader gates the array on MEDIA_HIGHLIGHTS_SECTION). Last positional arg.
     ctx.mediaHighlights.length > 0,
+    // EDIT_BIBLIOMETRICS — the "Bibliometrics" Tools item. Last positional arg.
+    isBibliometricsEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -314,6 +317,7 @@ export default async function EditScholarPage({
       grantRecsFeedbackEnabled={isGrantRecsEnabled() && (isSelf || session.isSuperuser)}
       biosketchEnabled={isBiosketchGenerateEnabled()}
       cvEnabled={isCvEnabled()}
+      bibliometricsEnabled={isBibliometricsEnabled()}
       railRestructureEnabled={isRailRestructureEnabled()}
     />
   );

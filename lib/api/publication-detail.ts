@@ -158,7 +158,7 @@ function firstAuthors(authors: string | null): string | null {
  * printed in several journals shares a `dedupKey` and is listed once, as the
  * rollup counts it. Null on a read failure, so the modal just omits the section.
  */
-async function readPolicyCitations(
+export async function readPolicyCitations(
   pmid: string,
 ): Promise<PublicationDetailPayload["policyCitations"] | null> {
   try {

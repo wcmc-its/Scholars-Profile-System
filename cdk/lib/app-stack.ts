@@ -2089,6 +2089,14 @@ export class AppStack extends Stack {
         // Staging on; prod off until the public method-page half ships.
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         METHOD_SERVICES: envConfig.envName === "staging" ? "on" : "off",
+        // EDIT_BIBLIOMETRICS -- the per-scholar "Bibliometrics" tab on /edit
+        // and GET /api/edit/bibliometrics (the report and its Word download),
+        // read via isBibliometricsEnabled() (=== "on"); off = no rail item and
+        // the route 404s. Read-only, computed at request time from publication
+        // rows. Staging on; prod off until the figures are reconciled against
+        // Publication Manager's report.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        EDIT_BIBLIOMETRICS: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
