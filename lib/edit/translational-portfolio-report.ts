@@ -106,10 +106,15 @@ export type PortfolioParams = {
   page: number;
 };
 
-/** The default window: the last 10 complete calendar years. */
+/** The first publication year with stages: ReciterAI staged almost nothing
+ *  earlier (49 publications across 2016–2019, staging 2026-11-27), so a
+ *  window starting before it reads as a shift that is only missing data. */
+export const FIRST_STAGED_YEAR = 2020;
+
+/** The default window: `FIRST_STAGED_YEAR` through the last complete year. */
 export function defaultYears(now = new Date()): { from: number; to: number } {
   const y = now.getUTCFullYear();
-  return { from: y - 10, to: y - 1 };
+  return { from: FIRST_STAGED_YEAR, to: Math.max(FIRST_STAGED_YEAR, y - 1) };
 }
 
 export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
