@@ -388,6 +388,10 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
     },
   },
   PubMedSystematicReviews: { cadence: "weekly" }, // PubMedSystematicReviewsWeekly
+  // Hand-run per Reliance on Science release (etl:patent-citations:import), so
+  // no step runs it. Annual so Data sync lists it and the heartbeat says when
+  // a year has passed without a fresh load.
+  "PatentCitations-Import": { cadence: "annual" },
   FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
   // ED email-visibility bridge (export -> S3 -> import). Only the import writes a
   // row; built only where edEmailVisibilityBridgeEnabled (staging today).
@@ -555,7 +559,6 @@ export const UNSCHEDULED: Readonly<Record<string, string>> = {
   MeSH: "hand-run descriptor load (etl:mesh)",
   "iLab-Import": "hand-run quarterly import (etl:ilab:import)",
   "RCR-Import": "hand-run bridge import (etl:reciter-rcr:import)",
-  "PatentCitations-Import": "hand-run per dataset release (etl:patent-citations:import)",
   ReciterRefresh: "operator-run scanner; see etl/reciter-refresh/index.ts",
   FamilyReview: "hand-run (etl:family-review)",
 };

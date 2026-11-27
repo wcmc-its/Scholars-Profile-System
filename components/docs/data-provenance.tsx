@@ -63,7 +63,10 @@ const EXT: Source[] = [
   { name: "NIH RePORTER", data: "Earlier NIH grants, abstracts, grant-linked papers", cad: "weekly" },
   { name: "NSF Awards", data: "NSF grant abstracts", cad: "weekly" },
   { name: "Gates Foundation", data: "Gates grant summaries", cad: "weekly" },
-  { name: "ClinicalTrials.gov", data: "Trial details, status, whether results are posted; condition MeSH terms for search", cad: "weekly" },
+  { name: "ClinicalTrials.gov", data: "Trial details, status, whether results are posted; condition MeSH terms for search; registered trials that cite your papers", cad: "weekly" },
+  { name: "NCBI Bookshelf", data: "Health-authority reports that cite your papers (WHO, NICE, CDC, AHRQ, National Academies)", cad: "weekly" },
+  { name: "Reliance on Science", data: "Which US patents cite your papers", cad: "occasional" },
+  { name: "USPTO PatentsView", data: "Details of those patents: title, assignees, inventors, dates", cad: "occasional" },
   { name: "NLM MeSH", data: "Subject vocabulary for search", cad: "annual" },
 ];
 
@@ -74,7 +77,7 @@ const PUB: Source[] = [
   { name: "Scopus", data: "Citation counts, papers not in PubMed", cad: "nightly" },
   { name: "OpenAlex", data: "Papers not in PubMed and their abstracts", cad: "nightly" },
   { name: "Crossref", data: "Papers not in PubMed, and abstracts where OpenAlex has none", cad: "nightly" },
-  { name: "NIH iCite", data: "Citing papers", cad: "occasional" },
+  { name: "NIH iCite", data: "Citing papers, including the guidelines, consensus statements and systematic reviews among them", cad: "occasional" },
 ];
 
 // Feed the Datasets section and the data-sharing dashboard via reciterdb.dataset_deposit
@@ -212,6 +215,24 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
       { field: "MeSH topics", detail: "The Topics list on your profile", source: "PubMed indexing, via ReCiter", cadence: "Nightly", tag: "At the source", how: "Set by NLM indexers. Hide a paper to drop its tags." },
       { field: "Citation count", source: "Scopus", cadence: "Nightly", tag: "At the source", how: "Follows Scopus." },
       { field: "Citing papers", source: "NIH iCite", cadence: "Occasional", tag: "At the source", how: "Follows iCite." },
+      {
+        field: "Guideline and policy citations",
+        detail: "A paper's badges and its Guidelines and policy section",
+        source: "NIH iCite and PubMed publication types; NCBI Bookshelf for health-authority reports",
+        cadence: "Weekly",
+        tag: "Not editable",
+        how: (
+          <>
+            Matched automatically. Report a wrong match through the{" "}
+            <Link href="/about/feedback" className={LINK}>
+              feedback form
+            </Link>
+            .
+          </>
+        ),
+      },
+      { field: "Trials that cite a paper", detail: "In a paper's details", source: "ClinicalTrials.gov", cadence: "Weekly", tag: "At the source", how: "The study team lists the paper as a reference in the registration. A trial one of the paper's WCM authors is an investigator on is not counted." },
+      { field: "Patents that cite a paper", detail: "In a paper's details", source: "Reliance on Science; patent details from USPTO PatentsView", cadence: "Occasional", tag: "Not editable", how: "Loaded from each dataset release. The current release covers patents through 31 December 2025." },
       { field: "Retractions", source: "PubMed", cadence: "Nightly", tag: "Not editable", how: "Retracted papers are hidden everywhere automatically." },
       { field: "Selected highlights", detail: "Up to three featured papers", source: "Scholars, from Impact scores", cadence: "Nightly", tag: "Yours to edit", how: "Pick your own on your edit page, or keep the automatic set." },
       { field: "Datasets", detail: "Off unless you turn it on", source: "Europe PMC and PubMed Central full text, PubMed and DataCite, via the ReCiter database", cadence: "Occasional", tag: "Yours to edit", how: "Turn the section on, then hide or mark “Not mine.”" },

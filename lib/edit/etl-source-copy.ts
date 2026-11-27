@@ -361,13 +361,19 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
   },
   PolicyCitations: {
     label: "Guideline and Policy Citations",
-    description: "Guidelines, systematic reviews and health-authority documents that cite our publications.",
-    origin: "external", // PubMed + NCBI Bookshelf + ReCiterDB citation links
+    description:
+      "Guidelines, systematic reviews, health-authority documents and registered clinical trials that cite our publications.",
+    origin: "external", // PubMed + NCBI Bookshelf + ClinicalTrials.gov + ReCiterDB citation links
   },
   ClinicalCitations: {
     label: "Clinical Citations",
     description: "Clinical trials, clinical studies and guidelines that cite our publications.",
     origin: "external", // ReCiterDB clinical citation links (iCite) + PubMed
+  },
+  "PatentCitations-Import": {
+    label: "Patent Citations",
+    description: "US patents that cite our publications, loaded by hand from each Reliance on Science release.",
+    origin: "external", // Reliance on Science (Zenodo) + USPTO PatentsView, extracted on a laptop
   },
   CitationLinks: {
     label: "Citation Links",
