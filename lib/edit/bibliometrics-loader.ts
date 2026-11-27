@@ -2,13 +2,14 @@
  * Loads one scholar's Bibliometrics report (`EDIT_BIBLIOMETRICS`). Everything
  * is computed at read time from rows the profile already uses: one authorship
  * query, the publication suppressions, one grouped count of citing documents,
- * and the citing lists of the ten papers shown. Server-only.
+ * one count of citing inventions, and the citing lists of the ten papers shown. Server-only.
  */
 import { db } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-layer";
 import { readPolicyCitations } from "@/lib/api/publication-detail";
 import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
+import { PATENT_DATA_END } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   buildBibliometricsReport,
@@ -19,11 +20,16 @@ import {
 
 const num = (d: { toString(): string } | null): number | null => (d === null ? null : Number(d));
 
-export async function loadBibliometricsReport(
-  cwid: string,
-  filters: BibliometricsFilters,
-  now: Date = new Date(),
-): Promise<BibliometricsReport | null> {
+/**
+ * The scholar and their confirmed authorships: `all` of them, and the
+ * `visible` ones the profile shows. The report and the patents download both
+ * start here, so they cover the same papers. Null for a cwid with no scholar.
+ */
+export async function loadScholarPublications(cwid: string): Promise<{
+  scholar: { cwid: string; preferredName: string; hIndex: number | null };
+  all: BibliometricsPubRow[];
+  visible: BibliometricsPubRow[];
+} | null> {
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
     select: { cwid: true, preferredName: true, hIndex: true },
@@ -58,6 +64,7 @@ export async function loadBibliometricsReport(
           guidelineCount: true,
           consensusCount: true,
           reviewCount: true,
+          patentFamilyCount: true,
         },
       },
     },
@@ -82,6 +89,17 @@ export async function loadBibliometricsReport(
       !isAuthorHidden(suppressions, p.pmid, cwid) &&
       !suppressions.darkPmids.has(p.pmid),
   );
+  return { scholar, all, visible };
+}
+
+export async function loadBibliometricsReport(
+  cwid: string,
+  filters: BibliometricsFilters,
+  now: Date = new Date(),
+): Promise<BibliometricsReport | null> {
+  const pubs = await loadScholarPublications(cwid);
+  if (!pubs) return null;
+  const { scholar, all, visible } = pubs;
 
   const report = buildBibliometricsReport({
     scholar: { cwid, name: scholar.preferredName, hIndex: scholar.hIndex },
@@ -117,6 +135,20 @@ export async function loadBibliometricsReport(
           .sort((a, b) => b.count - a.count || a.body.localeCompare(b.body));
       }
     }
+  }
+
+  // Distinct inventions across the scholar's cited papers: one patent family
+  // citing two of them counts once. The papers come off the rollup column.
+  const patentPmids = visible.filter((p) => p.patentFamilyCount > 0).map((p) => p.pmid);
+  if (patentPmids.length > 0) {
+    const [row] = await db.read.$queryRaw<{ n: bigint | number }[]>`
+      SELECT COUNT(DISTINCT d.dedup_key) AS n
+        FROM publication_citing_document l
+        JOIN citing_document d ON d.id = l.citing_document_id
+       WHERE l.pmid IN (${Prisma.join(patentPmids)})
+         AND d.level = 'patent'`;
+    report.patents.inventions = Number(row?.n ?? 0);
+    report.patents.dataEnd = PATENT_DATA_END.label;
   }
 
   // The listed papers' WCM authors, for the author chips. Unranked rows

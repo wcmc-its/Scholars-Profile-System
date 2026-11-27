@@ -11,6 +11,21 @@ export function boldRow(ws: ExcelJS.Worksheet, r: number): void {
   ws.getRow(r).font = { bold: true };
 }
 
+/** A list sheet: a bold, frozen header row and the column widths. */
+export function addListSheet(
+  wb: ExcelJS.Workbook,
+  name: string,
+  header: string[],
+  widths: number[],
+): ExcelJS.Worksheet {
+  const ws = wb.addWorksheet(name);
+  ws.addRow(header);
+  boldRow(ws, 1);
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  for (const [i, w] of widths.entries()) ws.getColumn(i + 1).width = w;
+  return ws;
+}
+
 /** A "Criteria" sheet: a bold `Criterion | Value` header, one row per pair,
  *  and a wide, wrapped value column. */
 export function addCriteriaSheet(

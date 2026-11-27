@@ -22,10 +22,14 @@ import { citationIdentifier } from "@/lib/citation";
 import { authorityBadgeLabel, plural } from "@/lib/citations/policy-rollup";
 import {
   NO_SUMMARY_NOTE,
+  OWN_PATENTS_NOTE,
+  PATENTS_DOWNLOAD_LABEL,
+  PATENTS_DOWNLOAD_PATH,
   POSITION_LABEL,
   TOP_DECILE_LABEL,
   bibliometricsQuery,
   papersNote,
+  patentsLine,
   percentileText,
   unratedNote,
   type BibliometricsFilters,
@@ -128,6 +132,7 @@ function Report({
   setFilters: React.Dispatch<React.SetStateAction<BibliometricsFilters>>;
 }) {
   const unrated = unratedNote(r);
+  const patents = patentsLine(r.patents);
   const peak = Math.max(1, ...r.output.byYear.map((y) => y.count));
   const years = r.yearRange
     ? Array.from({ length: r.yearRange.max - r.yearRange.min + 1 }, (_, i) => r.yearRange!.min + i)
@@ -345,6 +350,34 @@ function Report({
         </div>
       </section>
 
+      {patents ? (
+        <section className={CARD} data-testid="bibliometrics-patents">
+          <h3 className={EYEBROW}>Patents citing this work</h3>
+          <p className="text-[15px] leading-[1.6]" data-testid="bibliometrics-patents-line">
+            {patents}
+            {r.patents.dataEnd ? `, in patent data through ${r.patents.dataEnd}.` : "."}
+          </p>
+          <p className="text-apollo-ink-2 text-[13px]">{OWN_PATENTS_NOTE}</p>
+          <div className="flex flex-wrap items-center gap-4">
+            <Button asChild variant="outline" className="min-h-11">
+              <a
+                href={`${PATENTS_DOWNLOAD_PATH}?cwid=${encodeURIComponent(r.scholar.cwid)}`}
+                download
+                data-testid="bibliometrics-patents-download"
+              >
+                <Download className="size-4" />
+                {PATENTS_DOWNLOAD_LABEL}
+              </a>
+            </Button>
+            {r.patents.reportHref ? (
+              <a href={r.patents.reportHref} className={`${LINK} text-sm`} data-testid="bibliometrics-patents-report">
+                Open the Patent citations report for this person
+              </a>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       <section className="bg-apollo-lock-bg border-apollo-border-strong flex flex-col gap-1.5 rounded-xl border px-5 py-4 text-[13px] leading-[1.55]">
         <h3 className={EYEBROW}>Definitions and sources</h3>
         {r.definitions.map((d) => (
@@ -371,10 +404,11 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
   const [open, setOpen] = React.useState(false);
   const id = citationIdentifier(p.pmid);
   const title = pubTitleProps(sanitizePubTitle(p.title), id.href ? LINK : undefined);
-  const hasCitations = p.authority.length + p.guidelines + p.consensus + p.reviews > 0;
+  const hasCitations = p.authority.length + p.guidelines + p.consensus + p.reviews + p.patents > 0;
   const plain = [
     p.consensus > 0 ? plural(p.consensus, "consensus statement", "consensus statements") : null,
     p.reviews > 0 ? plural(p.reviews, "systematic review", "systematic reviews") : null,
+    p.patents > 0 ? plural(p.patents, "patent", "patents") : null,
   ].filter(Boolean);
   const citingId = `bibliometrics-citing-${p.pmid}`;
   return (

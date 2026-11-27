@@ -69,6 +69,8 @@ export type BibliometricsPubRow = {
   guidelineCount: number;
   consensusCount: number;
   reviewCount: number;
+  /** Distinct inventions (patent families) citing the paper: the stored rollup. */
+  patentFamilyCount: number;
   /** The scholar's 1-based place in the author list. */
   position: number;
   isFirst: boolean;
@@ -98,6 +100,8 @@ export type BibliometricsPaper = {
   guidelines: number;
   consensus: number;
   reviews: number;
+  /** Inventions (patent families) citing the paper. */
+  patents: number;
   /** Citing documents, filled by the loader for listed papers that have any. */
   citing: PolicyCitingDoc[];
   reviewTotal: number;
@@ -112,6 +116,20 @@ export type BibliometricsPolicyLevel = {
   documents: number;
   /** Authority level only: distinct documents per issuing body. */
   bodies: Array<{ body: string; count: number }>;
+};
+
+/** Patents citing the scholar's work. Every visible publication counts, of
+ *  any type: the same papers the Excel download lists. */
+export type BibliometricsPatents = {
+  /** The scholar's papers cited in a patent. */
+  papers: number;
+  /** Distinct inventions citing them, filled by the loader. */
+  inventions: number;
+  /** Where the patent data ends ("31 December 2025"), filled by the loader. */
+  dataEnd: string | null;
+  /** Report 25 filtered to this scholar, filled by the route; null when the
+   *  viewer may not open that report. */
+  reportHref: string | null;
 };
 
 export type BibliometricsReport = {
@@ -140,6 +158,7 @@ export type BibliometricsReport = {
   };
   papers: { rows: BibliometricsPaper[]; matching: number };
   policy: BibliometricsPolicyLevel[];
+  patents: BibliometricsPatents;
   definitions: Array<{ term: string | null; text: string }>;
 };
 
@@ -241,6 +260,7 @@ function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
     guidelines: p.guidelineCount,
     consensus: p.consensusCount,
     reviews: p.reviewCount,
+    patents: p.patentFamilyCount,
     citing: [],
     reviewTotal: p.reviewCount,
   };
@@ -403,6 +423,12 @@ export function buildBibliometricsReport(input: {
       matching: matching.length,
     },
     policy,
+    patents: {
+      papers: input.visible.filter((p) => p.patentFamilyCount > 0).length,
+      inventions: 0,
+      dataEnd: null,
+      reportHref: null,
+    },
     definitions: DEFINITIONS,
   };
 }
@@ -461,6 +487,21 @@ export function filtersNote(f: BibliometricsFilters): string | null {
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
+
+/** "12 papers cited by 30 patented inventions"; null when no patent cites the work. */
+export function patentsLine(p: BibliometricsPatents): string | null {
+  // A stale rollup with no live links would read "cited by 0": say nothing.
+  if (p.papers === 0 || p.inventions === 0) return null;
+  return `${count(p.papers, "paper")} cited by ${count(p.inventions, "patented invention")}`;
+}
+
+/** The limit of the patent data, on the tab and in the download. */
+export const OWN_PATENTS_NOTE =
+  "Patents on which the scholar is an inventor are not separated out.";
+
+/** The Excel download of every patent citing the scholar's work. */
+export const PATENTS_DOWNLOAD_PATH = "/api/edit/bibliometrics/patents";
+export const PATENTS_DOWNLOAD_LABEL = "Download patents citing this work (Excel)";
 
 /** "98.4", or the label for a paper iCite has not rated. */
 export function percentileText(p: Pick<BibliometricsPaper, "nihPercentile">): string {
