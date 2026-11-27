@@ -976,7 +976,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORT_TRANSLATIONAL_PORTFOLIO",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
