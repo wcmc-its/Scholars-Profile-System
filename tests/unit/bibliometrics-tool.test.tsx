@@ -39,15 +39,20 @@ const pub = (i: number, over: Partial<BibliometricsPubRow> = {}): BibliometricsP
   guidelineCount: 0,
   consensusCount: 0,
   reviewCount: 0,
+  patentFamilyCount: 0,
   position: 1,
   isFirst: true,
   isLast: false,
   ...over,
 });
 
-function report(n: number) {
+/** `patents[i]` is paper i's count of citing inventions. */
+function report(n: number, patents: number[] = []) {
   const pubs = Array.from({ length: n }, (_, i) =>
-    pub(i, i === 0 ? { guidelineCount: 1, authorityCount: 1, authorityBodies: [{ body: "WHO", count: 1 }] } : {}),
+    pub(i, {
+      ...(i === 0 ? { guidelineCount: 1, authorityCount: 1, authorityBodies: [{ body: "WHO", count: 1 }] } : {}),
+      patentFamilyCount: patents[i] ?? 0,
+    }),
   );
   const r = buildBibliometricsReport({
     scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
@@ -82,6 +87,12 @@ function report(n: number) {
 const fetchMock = vi.fn();
 const respond = (n: number) =>
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: report(n) }) });
+/** Papers 0, 1 and 2 are cited by 14, 1 and 0 inventions; the loader's fields filled in. */
+const respondWithPatents = (reportHref: string | null) => {
+  const r = report(12, [14, 1]);
+  r.patents = { ...r.patents, inventions: 15, dataEnd: "31 December 2025", reportHref };
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+};
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -137,6 +148,42 @@ describe("BibliometricsTool", () => {
     expect(screen.getByTestId("bibliometrics-download").getAttribute("href")).toBe(
       "/api/edit/bibliometrics?cwid=zzz9001&authorship=lead&format=docx",
     );
+  });
+
+  it("shows the patents line, each paper's count and the Excel download when a patent cites the work", async () => {
+    respondWithPatents("/edit/reports/patent-citations?person=zzz9001");
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const line = await screen.findByTestId("bibliometrics-patents-line");
+    expect(line.textContent).toBe("2 papers cited by 15 patented inventions, in patent data through 31 December 2025.");
+    expect(screen.getByText(/Patents on which the scholar is an inventor are not separated out\./)).toBeTruthy();
+    const download = screen.getByTestId("bibliometrics-patents-download");
+    expect(download.textContent).toBe("Download patents citing this work (Excel)");
+    expect(download.getAttribute("href")).toBe("/api/edit/bibliometrics/patents?cwid=zzz9001");
+    expect(screen.getByTestId("bibliometrics-patents-report").getAttribute("href")).toBe(
+      "/edit/reports/patent-citations?person=zzz9001",
+    );
+    // Plain text beside the other counts, singular for one, absent for none.
+    const paper = (i: number) => screen.getByTestId(`bibliometrics-paper-${90000100 + i}`).textContent ?? "";
+    expect(paper(0)).toContain("14 patents");
+    expect(paper(1)).toContain("1 patent");
+    expect(paper(1)).not.toContain("1 patents");
+    expect(paper(2)).not.toMatch(/\d patents?\b/);
+  });
+
+  it("leaves out the link to report 25 for a viewer who may not open it", async () => {
+    respondWithPatents(null);
+    render(<BibliometricsTool entityId="zzz9001" />);
+    expect(await screen.findByTestId("bibliometrics-patents-download")).toBeTruthy();
+    expect(screen.queryByTestId("bibliometrics-patents-report")).toBeNull();
+  });
+
+  it("shows no patents line, count or download when no patent cites the work", async () => {
+    respond(12);
+    render(<BibliometricsTool entityId="zzz9001" />);
+    await screen.findByTestId("bibliometrics-report");
+    expect(screen.queryByTestId("bibliometrics-patents")).toBeNull();
+    expect(screen.queryByTestId("bibliometrics-patents-download")).toBeNull();
+    expect(screen.queryByText(/\d patents?\b/)).toBeNull();
   });
 
   it("says so when the report cannot be loaded", async () => {

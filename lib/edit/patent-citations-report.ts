@@ -12,6 +12,8 @@
  * the download route alike. Every query that reads a person or a publication
  * carries it; the two that do not (`loadPatentDocs`, `searchInventions`) read
  * public patent facts only, for keys a scoped listing produced.
+ * The `...OfPmids` loaders carry no scope either: the Bibliometrics tab calls
+ * them for one scholar's own PMIDs, after `authorizeCvExport`.
  *
  * Counts are inventions: the documents of one patent family share a
  * `dedup_key` and count once. An invention is shown by its earliest granted
@@ -51,7 +53,7 @@ import {
   type PubDetails,
   type WhoParams,
 } from "@/lib/edit/policy-citations-report";
-import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
+import { addCriteriaSheet, addListSheet, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { institutionDisplayName } from "@/lib/institutions";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -456,13 +458,29 @@ export type InventionCounts = {
  * behind an `EXISTS`, report 24's shape, took 2.5 s.
  */
 export async function loadInventionCounts(p: PatentCitationParams): Promise<InventionCounts[]> {
+  return inventionCountsOf(citedInScopeSql(p), patentSql(p));
+}
+
+/** `ok`: exactly these publications, with no viewer scope. For one scholar's
+ *  own list (the Bibliometrics download), where the caller has authorized the
+ *  scholar and the PMIDs are that scholar's visible papers. */
+const ownPubsSql = (pmids: readonly string[]): Prisma.Sql => Prisma.sql`(SELECT p.pmid
+          FROM publication p
+         WHERE p.pmid IN (${Prisma.join([...pmids])})) ok`;
+
+/** `loadInventionCounts` over exactly these publications. No PMIDs, no query. */
+export async function loadInventionCountsOfPmids(pmids: readonly string[]): Promise<InventionCounts[]> {
+  return pmids.length === 0 ? [] : inventionCountsOf(ownPubsSql(pmids), Prisma.empty);
+}
+
+async function inventionCountsOf(ok: Prisma.Sql, patents: Prisma.Sql): Promise<InventionCounts[]> {
   const raw = await db.read.$queryRaw<{ dedup_key: string; papers: Num; docs: Num; rep: string }[]>`
     SELECT STRAIGHT_JOIN d.dedup_key, COUNT(DISTINCT l.pmid) AS papers, COUNT(DISTINCT d.id) AS docs,
            MIN(${REP_SQL}) AS rep
-      FROM ${citedInScopeSql(p)}
+      FROM ${ok}
       JOIN publication_citing_document l ON l.pmid = ok.pmid
       JOIN citing_document d ON d.id = l.citing_document_id
-     WHERE d.level = 'patent' ${patentSql(p)}
+     WHERE d.level = 'patent' ${patents}
      GROUP BY d.dedup_key`;
   return raw.map((r) => {
     const rep = parseRep(String(r.rep));
@@ -625,17 +643,33 @@ export async function loadCitingInventions(
   p: PatentCitationParams,
   pmids: readonly string[],
 ): Promise<Map<string, PubInventions>> {
+  if (pmids.length === 0) return new Map();
+  return citingInventionsOf(scopedPubsSql(p, pmids), patentSql(p), INVENTIONS_SHOWN);
+}
+
+/** Every citing invention of exactly these publications, with no viewer scope
+ *  and no `INVENTIONS_SHOWN` cut: one scholar's own list (`ownPubsSql`). No
+ *  PMIDs, no query. */
+export async function loadCitingInventionsOfPmids(pmids: readonly string[]): Promise<Map<string, PubInventions>> {
+  if (pmids.length === 0) return new Map();
+  return citingInventionsOf(ownPubsSql(pmids), Prisma.empty, Number.POSITIVE_INFINITY);
+}
+
+async function citingInventionsOf(
+  ok: Prisma.Sql,
+  patents: Prisma.Sql,
+  shown: number,
+): Promise<Map<string, PubInventions>> {
   const out = new Map<string, PubInventions>();
-  if (pmids.length === 0) return out;
   const raw = await db.read.$queryRaw<
     { pmid: string; dedup_key: string; docs: Num; rep: string; latest: Num | null; front: Num | null; body: Num | null }[]
   >`
     SELECT ok.pmid, d.dedup_key, COUNT(DISTINCT d.id) AS docs, MIN(${REP_SQL}) AS rep, MAX(d.year) AS latest,
            MAX(${WHERE_SQL} IN ('front', 'both')) AS front, MAX(${WHERE_SQL} IN ('body', 'both')) AS body
-      FROM ${scopedPubsSql(p, pmids)}
+      FROM ${ok}
       JOIN publication_citing_document l ON l.pmid = ok.pmid
       JOIN citing_document d ON d.id = l.citing_document_id
-     WHERE d.level = 'patent' ${patentSql(p)}
+     WHERE d.level = 'patent' ${patents}
      GROUP BY ok.pmid, d.dedup_key`;
   const groups = new Map<string, (Omit<CitingInvention, keyof PatentDoc> & { id: number })[]>();
   for (const r of raw) {
@@ -658,7 +692,7 @@ export async function loadCitingInventions(
     const latest = num(r.latest);
     if (latest !== null && latest > (pub.latest ?? 0)) pub.latest = latest;
   }
-  for (const list of groups.values()) list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.id - b.id).splice(INVENTIONS_SHOWN);
+  for (const list of groups.values()) list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.id - b.id).splice(shown);
   // One document can stand for an invention under several publications.
   const docs = await loadPatentDocs([...new Set([...groups.values()].flatMap((list) => list.map((g) => g.id)))]);
   for (const [pmid, list] of groups) {
@@ -890,14 +924,7 @@ export async function buildPatentCitationWorkbook(
   labels?: ReadonlyMap<string, string>,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  const sheet = (name: string, header: string[], widths: number[]) => {
-    const ws = wb.addWorksheet(name);
-    ws.addRow(header);
-    boldRow(ws, 1);
-    ws.views = [{ state: "frozen", ySplit: 1 }];
-    for (const [i, w] of widths.entries()) ws.getColumn(i + 1).width = w;
-    return ws;
-  };
+  const sheet = (name: string, header: string[], widths: number[]) => addListSheet(wb, name, header, widths);
 
   const pubs = sheet(
     "Publications",
