@@ -25,6 +25,7 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { isBibliometricsEnabled, parseBibliometricsFilters } from "@/lib/edit/bibliometrics";
 import { buildBibliometricsDocx } from "@/lib/edit/bibliometrics-docx";
 import { loadBibliometricsReport } from "@/lib/edit/bibliometrics-loader";
+import { patentReportHref } from "@/lib/edit/bibliometrics-patents";
 import { loadScholarReach } from "@/lib/edit/downstream-reach-entry";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -70,7 +71,11 @@ export async function GET(request: NextRequest): Promise<Response> {
   try {
     const report = await loadBibliometricsReport(targetCwid, parseBibliometricsFilters(params));
     if (!report) return editError(404, "scholar_not_found", "cwid");
-    if (params.get("format") !== "docx") return editOk({ report });
+    if (params.get("format") !== "docx") {
+      // The link to report 25, only for a viewer who may open it.
+      if (report.patents.papers > 0) report.patents.reportHref = await patentReportHref(session, targetCwid);
+      return editOk({ report });
+    }
 
     const buffer = await buildBibliometricsDocx(report);
     return new NextResponse(new Uint8Array(buffer), {

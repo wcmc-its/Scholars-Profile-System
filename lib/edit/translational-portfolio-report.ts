@@ -36,6 +36,7 @@ import ExcelJS from "exceljs";
 
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
+import { cachedRead } from "@/lib/api/swr-cache";
 import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { TOPIC_ACTIVITY_SCORE_FLOOR } from "@/lib/api/topic-activity";
 import type { EditSession } from "@/lib/auth/superuser";
@@ -279,14 +280,24 @@ function extraSql(p: PortfolioParams): Prisma.Sql {
   } ${p.cwid ? Prisma.sql`AND pa.cwid = ${p.cwid}` : Prisma.empty}`;
 }
 
-/** The scoped (publication, author, year, department, stage) rows as a derived
- *  table `x` — the one set every count below groups. */
-function scopedRows(ac: ArticleCountParams, extra: Prisma.Sql): Prisma.Sql {
+/** The scoped (publication, author, year, department, stage) rows — the one
+ *  set every count below groups. `byYear` drives the join from the year window
+ *  (`publication(year)`) instead of a full `publication_author` scan: about 2x
+ *  faster on staging (3.4 s → 1.6 s), the same rows. Off when the scope is a
+ *  handful of CWIDs, where the `publication_author(cwid)` index wins. */
+function scopedSelect(ac: ArticleCountParams, extra: Prisma.Sql, byYear = true): Prisma.Sql {
   const { fromWhere } = scopeSql(ac, extra);
-  return Prisma.sql`(SELECT DISTINCT pa.pmid, pa.cwid, p.year AS y, s.dept_code AS dc, ${stageCase()} AS st ${fromWhere}) x`;
+  const hint = byYear ? Prisma.raw("/*+ JOIN_PREFIX(p) */") : Prisma.empty;
+  return Prisma.sql`SELECT ${hint} DISTINCT pa.pmid, pa.cwid, p.year AS y, s.dept_code AS dc, ${stageCase()} AS st ${fromWhere}`;
 }
 
-type Grouping = "all" | "year" | "cwid" | UnitTab;
+function scopedRows(ac: ArticleCountParams, extra: Prisma.Sql, byYear = true): Prisma.Sql {
+  return Prisma.sql`(${scopedSelect(ac, extra, byYear)}) x`;
+}
+
+/** `areaPeople`: distinct scholars (not publications) per research area, the
+ *  area table's second line; its count lands in the `none` bucket. */
+type Grouping = "all" | "year" | "cwid" | "areaPeople" | UnitTab;
 
 /** How each grouping maps a scoped row to its group: the unit rule
  *  `personFilterSql` applies, as a join instead of a filter. */
@@ -317,40 +328,53 @@ function groupSql(g: Grouping): { key: Prisma.Sql; join: Prisma.Sql } {
         key: Prisma.sql`cm.center_code`,
         join: Prisma.sql`JOIN center_membership cm ON cm.cwid = x.cwid AND ${currentCenterMembershipSql("cm", today)}`,
       };
+    case "areaPeople":
     case "area":
-      return {
-        key: Prisma.sql`pt.parent_topic_id`,
-        join: Prisma.sql`JOIN publication_topic pt ON pt.pmid = x.pmid AND pt.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR}`,
-      };
+      // `v`: the scope's distinct (publication, area) pairs, built in `stageCounts`.
+      return { key: Prisma.sql`v.g`, join: Prisma.sql`JOIN v ON v.pmid = x.pmid` };
   }
 }
 
-/** Distinct publications per group, split by displayed stage. An article has
- *  one stage, so a group's buckets are disjoint and sum to its count. */
-async function stageCountsBy(ac: ArticleCountParams, extra: Prisma.Sql, g: Grouping): Promise<Map<string, StageCounts>> {
-  const { key, join } = groupSql(g);
-  const raw = await db.read.$queryRaw<{ g: string | number | null; st: string | null; n: bigint | number }[]>`
-    SELECT ${key} AS g, x.st, COUNT(DISTINCT x.pmid) AS n
-      FROM ${scopedRows(ac, extra)}
-      ${join}
-     GROUP BY g, x.st`;
-  const out = new Map<string, StageCounts>();
+/** Distinct publications per group, split by displayed stage, for several
+ *  groupings in ONE query: the scoped set is built once (CTE `x`) and each
+ *  grouping is a `UNION ALL` branch over it. The read replica runs parallel
+ *  scans no faster than serial ones, so one scan instead of one per grouping is
+ *  the win (default view: 4 queries ~18 s → 1 query ~3 s on staging). An article
+ *  has one stage, so a group's buckets are disjoint and sum to its count.
+ *  Cached (`cachedRead`, keyed by the SQL itself): aggregates only, the data
+ *  changes nightly, and paging re-asks the same counts. */
+async function stageCounts<G extends Grouping>(
+  ac: ArticleCountParams,
+  extra: Prisma.Sql,
+  gs: readonly G[],
+  byYear = true,
+): Promise<Map<G, Map<string, StageCounts>>> {
+  const branches = gs.map((g) => {
+    const { key, join } = groupSql(g);
+    if (g === "areaPeople")
+      return Prisma.sql`SELECT ${g} AS k, ${key} AS g, NULL AS st, COUNT(DISTINCT x.cwid) AS n FROM x ${join} GROUP BY g`;
+    // Area counts publications: the distinct (pmid, stage) set `u`, not every authorship.
+    const from = g === "area" ? Prisma.sql`u x` : Prisma.sql`x`;
+    return Prisma.sql`SELECT ${g} AS k, ${key} AS g, x.st, COUNT(DISTINCT x.pmid) AS n FROM ${from} ${join} GROUP BY g, x.st`;
+  });
+  // publication_topic has a row per (pmid, author, area): dedupe it to `v` once.
+  const sql = Prisma.sql`WITH x AS (${scopedSelect(ac, extra, byYear)}),
+    u AS (SELECT DISTINCT pmid, st FROM x),
+    v AS (SELECT DISTINCT pt.pmid, pt.parent_topic_id AS g FROM u JOIN publication_topic pt ON pt.pmid = u.pmid AND pt.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR})
+    ${Prisma.join(branches, " UNION ALL ")}`;
+  const raw = await cachedRead(`tp26:${sql.sql}:${JSON.stringify(sql.values)}`, () =>
+    db.read.$queryRaw<{ k: string; g: string | number | null; st: string | null; n: bigint | number }[]>(sql),
+  );
+  const out = new Map<G, Map<string, StageCounts>>(gs.map((g) => [g, new Map()]));
   for (const r of raw) {
     if (r.g === null) continue;
+    const m = out.get(r.k as G)!;
     const k = String(r.g);
-    const c = out.get(k) ?? emptyCounts();
+    const c = m.get(k) ?? emptyCounts();
     c[isTranslationalStage(r.st) ? r.st : "none"] += Number(r.n);
-    out.set(k, c);
+    m.set(k, c);
   }
   return out;
-}
-
-/** Distinct scholars per research area (the table's second line). */
-async function scholarsByArea(ac: ArticleCountParams, extra: Prisma.Sql): Promise<Map<string, number>> {
-  const { key, join } = groupSql("area");
-  const raw = await db.read.$queryRaw<{ g: string; n: bigint | number }[]>`
-    SELECT ${key} AS g, COUNT(DISTINCT x.cwid) AS n FROM ${scopedRows(ac, extra)} ${join} GROUP BY g`;
-  return new Map(raw.map((r) => [r.g, Number(r.n)]));
 }
 
 /** Current members and their departments, per center. */
@@ -399,7 +423,7 @@ async function recentWorks(
   const ac = { ...articleScope(p, { stages: p.stages.length > 0 ? p.stages : [...TRANSLATIONAL_STAGES] }), pos: "either" as const };
   const raw = await db.read.$queryRaw<{ cwid: string; pmid: string; title: string; y: number; st: string }[]>`
     SELECT x.cwid, x.pmid, pub.title, x.y, x.st
-      FROM ${scopedRows(ac, Prisma.sql`${extraSql(p)} AND pa.cwid IN (${Prisma.join(cwids)})`)}
+      FROM ${scopedRows(ac, Prisma.sql`${extraSql(p)} AND pa.cwid IN (${Prisma.join(cwids)})`, false)}
       JOIN publication pub ON pub.pmid = x.pmid
      ORDER BY x.y DESC, x.pmid DESC`;
   const out = new Map<string, RecentWork[]>();
@@ -489,23 +513,29 @@ export async function loadPortfolio(
   const acScholars = { ...articleScope(p), pos: "either" as const };
   const showScholars = !p.cwid && (opts.forExport || p.view === "scholars");
 
-  const [all, byYearMap, baselineMap, tableMap, areaMap, areaPeople, centers, byCwid, lookup, person] =
-    await Promise.all([
-      stageCountsBy(ac, extra, "all"),
-      stageCountsBy(ac, extra, "year"),
-      p.units.length > 0 ? stageCountsBy(articleScope(p, { units: [] }), extra, "all") : Promise.resolve(null),
-      p.by === "area" ? Promise.resolve(null) : stageCountsBy(ac, extra, p.by),
-      stageCountsBy(ac, extra, "area"),
-      p.by === "area" ? scholarsByArea(ac, extra) : Promise.resolve(new Map<string, number>()),
-      p.by === "center" ? centerSizes() : Promise.resolve(new Map<string, { members: number; departments: number }>()),
-      showScholars ? stageCountsBy(acScholars, extra, "cwid") : Promise.resolve(new Map<string, StageCounts>()),
-      opts.forExport ? Promise.resolve([]) : lookupScholars(p.q),
-      p.cwid && !opts.forExport ? loadScholars([p.cwid]) : Promise.resolve(new Map<string, PortfolioScholar>()),
-    ]);
+  // One scholar's or one area's papers: their own index beats driving from the year window.
+  const byYear = !p.cwid && !p.area;
+  const [counts, baselineMap, centers, byCwid, lookup, person] = await Promise.all([
+    stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? (["areaPeople"] as const) : [p.by])], byYear),
+    p.units.length > 0
+      ? stageCounts(articleScope(p, { units: [] }), extra, ["all"], byYear).then((m) => m.get("all")!)
+      : Promise.resolve(null),
+    p.by === "center" ? centerSizes() : Promise.resolve(new Map<string, { members: number; departments: number }>()),
+    showScholars
+      ? stageCounts(acScholars, extra, ["cwid"], byYear).then((m) => m.get("cwid")!)
+      : Promise.resolve(new Map<string, StageCounts>()),
+    opts.forExport ? Promise.resolve([]) : lookupScholars(p.q),
+    p.cwid && !opts.forExport ? loadScholars([p.cwid]) : Promise.resolve(new Map<string, PortfolioScholar>()),
+  ]);
+  const all = counts.get("all")!;
+  const byYearMap = counts.get("year")!;
+  const areaMap = counts.get("area")!;
+  const tableMap = p.by === "area" ? null : counts.get(p.by)!;
+  const areaPeople = counts.get("areaPeople") ?? new Map<string, StageCounts>();
 
   const allCounts = all.get("all") ?? emptyCounts();
-  const byYear = [];
-  for (let y = p.from; y <= p.to; y++) byYear.push({ year: y, counts: byYearMap.get(String(y)) ?? emptyCounts() });
+  const years = [];
+  for (let y = p.from; y <= p.to; y++) years.push({ year: y, counts: byYearMap.get(String(y)) ?? emptyCounts() });
 
   // The unit table.
   const { facets, labels } = choices;
@@ -521,7 +551,7 @@ export async function loadPortfolio(
     if (p.by === "area") {
       href.set("area", code);
       label = areaLabel.get(code) ?? code;
-      const n = areaPeople.get(code) ?? 0;
+      const n = countsTotal(areaPeople.get(code) ?? emptyCounts());
       note = `${n.toLocaleString()} scholar${n === 1 ? "" : "s"}`;
     } else {
       const value = `${p.by}:${code}`;
@@ -559,14 +589,14 @@ export async function loadPortfolio(
     loadScholars(pageCwids),
     opts.forExport ? Promise.resolve(new Map<string, RecentWork[]>()) : recentWorks(p, pageCwids, 2),
     p.cwid && !opts.forExport ? recentWorks(p, [p.cwid], 3) : Promise.resolve(new Map<string, RecentWork[]>()),
-    opts.forExport || p.view !== "activities" ? Promise.resolve([]) : activityPage(p, acPicked, extra),
+    opts.forExport || p.view !== "activities" || p.cwid ? Promise.resolve([]) : activityPage(p, acPicked, extra),
   ]);
   const rankedPage = ranked.filter((r) => pageCwids.includes(r.cwid));
   const personRow = p.cwid ? person.get(p.cwid) : undefined;
 
   return {
     all: allCounts,
-    byYear,
+    byYear: years,
     baseline: baselineMap ? (baselineMap.get("all") ?? emptyCounts()) : allCounts,
     table: sortTableRows(table, p.by, p.stages),
     areaCoverage: { sized: sized.length, spanning: sized.filter((c) => gapStages(c).length === 0).length },
@@ -586,12 +616,17 @@ export async function loadPortfolio(
   };
 }
 
-/** One page of the Activities list's pmids, newest first. */
+/** One page of the Activities list's pmids, newest first. Walks publications
+ *  down the `(year)` index and probes the scope per row (a correlated EXISTS,
+ *  NO_SEMIJOIN so it isn't materialized), stopping once the page is full:
+ *  ~3 ms instead of ~3 s for grouping the whole scope (staging). */
 async function activityPage(p: PortfolioParams, ac: ArticleCountParams, extra: Prisma.Sql): Promise<string[]> {
+  const { fromWhere } = scopeSql(ac, extra);
   const raw = await db.read.$queryRaw<{ pmid: string }[]>`
-    SELECT x.pmid, MAX(x.y) AS y FROM ${scopedRows(ac, extra)}
-     GROUP BY x.pmid
-     ORDER BY y DESC, x.pmid DESC
+    SELECT q.pmid FROM publication q
+     WHERE q.year BETWEEN ${p.from} AND ${p.to}
+       AND EXISTS (SELECT /*+ NO_SEMIJOIN() */ 1 ${fromWhere} AND pa.pmid = q.pmid)
+     ORDER BY q.year DESC, q.pmid DESC
      LIMIT ${PORTFOLIO_PAGE_SIZE} OFFSET ${(p.page - 1) * PORTFOLIO_PAGE_SIZE}`;
   return raw.map((r) => r.pmid);
 }

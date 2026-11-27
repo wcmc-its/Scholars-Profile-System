@@ -6,7 +6,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), reach: vi.fn() }));
+const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn(), reach: vi.fn() }));
 vi.mock("@/lib/edit/request", async () => {
   const { NextResponse } = await import("next/server");
   return {
@@ -20,6 +20,7 @@ vi.mock("@/lib/edit/overview-authz", () => ({ authorizeCvExport: h.authz }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/edit/bibliometrics-loader", () => ({ loadBibliometricsReport: h.load }));
 vi.mock("@/lib/edit/bibliometrics-docx", () => ({ buildBibliometricsDocx: h.docx }));
+vi.mock("@/lib/edit/bibliometrics-patents", () => ({ patentReportHref: h.patentHref }));
 vi.mock("@/lib/edit/downstream-reach-entry", () => ({ loadScholarReach: h.reach }));
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
@@ -32,6 +33,7 @@ import {
   h5IndexOf,
   hIndexOf,
   parseBibliometricsFilters,
+  patentsLine,
   rankPapers,
   unratedNote,
   type BibliometricsFilters,
@@ -65,6 +67,7 @@ function pub(over: Partial<BibliometricsPubRow> = {}): BibliometricsPubRow {
     guidelineCount: 0,
     consensusCount: 0,
     reviewCount: 0,
+    patentFamilyCount: 0,
     position: 2,
     isFirst: false,
     isLast: false,
@@ -215,6 +218,27 @@ describe("buildBibliometricsReport — figures", () => {
   });
 });
 
+describe("patents citing the work", () => {
+  it("counts every visible paper a patent cites, of any type, and carries each paper's count", () => {
+    const article = pub({ patentFamilyCount: 14, nihPercentile: 99 });
+    const review = pub({ patentFamilyCount: 1, publicationType: "Review" });
+    const hidden = pub({ patentFamilyCount: 7 });
+    const r = build([article, review, pub()], NO_FILTERS, [article, review, hidden]);
+    // The loader fills the inventions, the cut-off and the link.
+    expect(r.patents).toEqual({ papers: 2, inventions: 0, dataEnd: null, reportHref: null });
+    expect(r.papers.rows.map((p) => p.patents)).toEqual([14, 0]);
+  });
+
+  it("words the line with its singulars, and has none when no patent cites the work", () => {
+    const line = (papers: number, inventions: number) =>
+      patentsLine({ papers, inventions, dataEnd: null, reportHref: null });
+    expect(line(12, 1030)).toBe("12 papers cited by 1,030 patented inventions");
+    expect(line(1, 1)).toBe("1 paper cited by 1 patented invention");
+    expect(line(0, 0)).toBeNull();
+    expect(build([pub()]).patents.papers).toBe(0);
+  });
+});
+
 describe("most impactful papers", () => {
   it("ranks by percentile, then senior before first before co-author, then ratio, then citations", () => {
     const a = pub({ nihPercentile: 99, relativeCitationRatio: 1 });
@@ -315,7 +339,11 @@ describe("GET /api/edit/bibliometrics", () => {
     vi.stubEnv("EDIT_BIBLIOMETRICS", "on");
     h.identity.mockResolvedValue({ session: SESSION, realCwid: "zzz9001", impersonatedCwid: null });
     h.authz.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
-    h.load.mockResolvedValue({ scholar: { cwid: "zzz9001", name: "Jordan Vale" } });
+    h.load.mockImplementation(async () => ({
+      scholar: { cwid: "zzz9001", name: "Jordan Vale" },
+      patents: { papers: 0, inventions: 0, dataEnd: null, reportHref: null },
+    }));
+    h.patentHref.mockResolvedValue("/edit/reports/patent-citations?person=zzz9002");
     h.docx.mockResolvedValue(Buffer.from("docx"));
     h.reach.mockResolvedValue(null);
   });
@@ -358,13 +386,30 @@ describe("GET /api/edit/bibliometrics", () => {
     expect(h.load).toHaveBeenCalledWith("zzz9001", { authorship: "all", yearFrom: null, yearTo: 2020 });
   });
 
+  it("adds the link to report 25, decided for this viewer, only when a patent cites the work", async () => {
+    await get();
+    expect(h.patentHref).not.toHaveBeenCalled();
+
+    h.load.mockImplementation(async () => ({
+      scholar: { cwid: "zzz9002", name: "Rowan Marsh" },
+      patents: { papers: 3, inventions: 5, dataEnd: "31 December 2025", reportHref: null },
+    }));
+    const { report } = await (await get("cwid=zzz9002")).json();
+    expect(report.patents.reportHref).toBe("/edit/reports/patent-citations?person=zzz9002");
+    expect(h.patentHref).toHaveBeenCalledWith(SESSION, "zzz9002");
+
+    // A viewer who may not open report 25 gets no link.
+    h.patentHref.mockResolvedValue(null);
+    expect((await (await get("cwid=zzz9002")).json()).report.patents.reportHref).toBeNull();
+  });
+
   it("404s for a cwid with no scholar", async () => {
     h.load.mockResolvedValue(null);
     expect((await get()).status).toBe(404);
   });
 
   it("the report request answers exactly as before and never loads the Downstream reach block", async () => {
-    expect(await (await get()).json()).toEqual({ ok: true, report: { scholar: { cwid: "zzz9001", name: "Jordan Vale" } } });
+    expect(await (await get()).json()).toEqual({ ok: true, report: await h.load.mock.results[0]!.value });
     await get("authorship=lead&from=2020");
     await get("format=docx");
     expect(h.reach).not.toHaveBeenCalled();

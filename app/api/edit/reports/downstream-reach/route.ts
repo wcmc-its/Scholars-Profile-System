@@ -1,7 +1,9 @@
 /**
  * GET /api/edit/reports/downstream-reach — report 27 (Downstream reach) as an
  * `.xlsx`: Publications (the first `REACH_LIST_CAP` in the chosen order),
- * Citing documents (the first `REACH_DOCS_CAP`), People, Criteria. Same query
+ * Citing documents (the first `REACH_DOCS_CAP`; a note and no rows when the
+ * selection is wider than `REACH_DOCS_PAPER_CEILING` cited papers, in which
+ * case the grouped query is not run), People, Criteria. Same query
  * string as the page (`parseReachParams`), same narrowing: `resolveReachParams`
  * pins the viewer's units from the session, so a `unit` in the URL can only
  * narrow within them. `DOWNSTREAM_REACH_REPORT` off → 404, before the session
@@ -60,7 +62,14 @@ export async function GET(request: Request) {
   ]);
   const buffer = await buildReachWorkbook(
     params,
-    { pubs, pubTotal: data.pubMatched, docs, docTotal: data.docTotal ?? 0, people: data.people ?? [] },
+    {
+      pubs,
+      pubTotal: data.pubMatched,
+      docs,
+      docTotal: data.docTotal ?? 0,
+      docsWithheld: data.docsWithheld,
+      people: data.people ?? [],
+    },
     generatedAt,
     labels,
     new Map(areas.map((a) => [a.id, a.label])),
