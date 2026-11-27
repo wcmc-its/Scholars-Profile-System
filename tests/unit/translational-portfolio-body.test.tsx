@@ -231,3 +231,31 @@ describe("report 26's redesigned page", () => {
     expect(list.textContent).toContain("left out of printouts over 50 scholars");
   });
 });
+
+describe("report 26 with nothing to compare", () => {
+  const WCM = { T0: 1, T1: 1, T2: 1, "T3-4": 97, none: 0 };
+  const bottomRow = (root: HTMLElement) => {
+    const rows = within(root).getByTestId("portfolio-stage-rows").children;
+    return rows[rows.length - 1].textContent;
+  };
+
+  it("compares a unit with all of WCM, but a scholar in a unit with their own years, since the baseline keeps the scholar", async () => {
+    h.portfolio.mockResolvedValue({ ...DATA, baseline: WCM });
+    const unit = (await page()).container;
+    expect(bottomRow(unit)).toContain("All of WCM");
+    expect(bottomRow(unit)).toContain("97%");
+    cleanup();
+    const scholar = (await page({ ...SP, cwid: "abc1234" })).container;
+    expect(bottomRow(scholar)).toContain("All years");
+    expect(bottomRow(scholar)).not.toContain("97%");
+    expect(scholar.textContent).not.toContain("All of WCM");
+  });
+
+  it("drops the areas tile when no area is big enough to check, and the reach tile when it counts nothing", async () => {
+    h.portfolio.mockResolvedValue({ ...DATA, areaCoverage: { sized: 0, spanning: 0 } });
+    h.tile.mockResolvedValue({ ...TILE, cited: 0, total: 0 });
+    const { container } = await page();
+    expect(tiles(container)).toEqual([["Publications, 2020 to 2021", "125", "80% have a stage"]]);
+    expect(container.textContent).not.toContain("0 of 0");
+  });
+});

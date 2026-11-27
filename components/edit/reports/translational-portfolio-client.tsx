@@ -6,7 +6,7 @@
  * stylesheet (`print:` classes in the body and the console shell) is the PDF.
  * Nothing here reaches `@/lib/db`.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -56,4 +56,18 @@ export function PortfolioDownloadMenu({ xlsxHref }: { xlsxHref: string }) {
       </PopoverContent>
     </Popover>
   );
+}
+
+/**
+ * Scrolls to the URL's `#units` / `#items` once the body has streamed in. The
+ * body sits in a Suspense keyed on the filters, so after a filter link Next
+ * looks for the anchor while only the skeleton exists and lands at the top.
+ * Mounts with each new body, so it runs once per filter change.
+ */
+export function ScrollToHash() {
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, []);
+  return null;
 }
