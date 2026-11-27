@@ -532,7 +532,7 @@ function StagesSection({ stages }: { stages: BibliometricsStages }) {
                         </span>
                       </span>
                     </td>
-                    <td className="p-2.5 text-right tabular-nums">{stages.shares[k]}%</td>
+                    <td className="p-2.5 text-right tabular-nums">{k === "none" ? "–" : `${stages.shares[k]}%`}</td>
                   </tr>
                   {open === k ? (
                     <tr className="border-apollo-border border-b">
@@ -568,7 +568,7 @@ function StagesSection({ stages }: { stages: BibliometricsStages }) {
                 All research articles
               </th>
               <td className="p-2.5 font-semibold tabular-nums">{total.toLocaleString()}</td>
-              <td className="p-2.5 text-right font-semibold tabular-nums">{total > 0 ? "100%" : "0%"}</td>
+              <td className="p-2.5 text-right font-semibold tabular-nums">–</td>
             </tr>
           </tbody>
         </table>

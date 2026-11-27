@@ -140,6 +140,8 @@ export type PortfolioReachTile = {
  * cannot carry a value (`expressible`).
  */
 export function portfolioReachParams(p: PortfolioParams): ReachParams | null {
+  // Report 27 takes one research area; several have no form there.
+  if (p.areas.length > 1) return null;
   return expressible({
     ...base(),
     units: p.units,
@@ -148,7 +150,7 @@ export function portfolioReachParams(p: PortfolioParams): ReachParams | null {
     basis: "cy",
     from: p.from,
     to: p.to,
-    area: p.area,
+    area: p.areas[0] ?? null,
     stages: ["T0", "T1"],
     ctypes: ["clinical"],
   });

@@ -16,7 +16,10 @@
  * senior-author papers).
  *
  * Stage rule: `displayStage` — a T stage, confidence not "low". Everything
- * else is "No stage", computed as the remainder, so every breakdown adds up.
+ * else is "No stage", computed as the remainder. Shares (and gaps) are among
+ * STAGED publications only (`stagedShares`), so falling coverage (#3610) does
+ * not read as a shift between stages; how many have a stage is its own figure,
+ * "Stage assigned".
  *
  * People are described, never ranked by share: the Scholars list counts each
  * scholar's first- or senior-author publications (`is_first` / `is_last`, the
@@ -25,8 +28,10 @@
  *
  * URL (all optional; a bad value falls back, never a 400): `unit` (the shared
  * who-filter vocabulary, `parsePersonFilter`), `from` / `to`, `area` (topic
- * id), `stage` (repeated), `cwid` (scope to one scholar), `q` (name / CWID
- * lookup), `by` (table tab), `view` (`activities` | `scholars`), `page`.
+ * id, repeated), `gaps=1` (Research areas tab: gapped areas only), `rows=all`
+ * (the whole unit table), `stage` (repeated), `cwid` (scope to one scholar),
+ * `q` (name / CWID lookup), `by` (table tab), `view` (`scholars`, the default,
+ * | `activities`), `page`.
  *
  * Gate: report 8's audience (`canViewArticleCountReport`), and only while
  * REPORT_TRANSLATIONAL_PORTFOLIO and SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET are
@@ -63,20 +68,26 @@ import {
   countsIn,
   countsTotal,
   emptyCounts,
-  exactShares,
+  exactStagedShares,
   isTranslationalStage,
   STAGE_BUCKETS,
   STAGE_RULE,
+  stageAssignedShare,
+  stagedShares,
+  stagedTotal,
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
   type StageCounts,
   type TranslationalStage,
 } from "@/lib/translational-stage";
 
-/** A research area's stage under this share is called out as a gap… */
+/** A research area's stage under this share of its STAGED publications is
+ *  called out as a gap… */
 export const GAP_SHARE = 3;
-/** …but only for an area with at least this many publications (noise). */
+/** …but only for an area with at least this many staged publications (noise). */
 export const MIN_AREA_SIZE = 50;
+/** The unit table shows this many rows until "View all". */
+export const TABLE_PREVIEW_ROWS = 9;
 /** The Scholars list leaves out anyone with fewer qualifying publications. */
 export const MIN_SCHOLAR_ACTIVITIES = 3;
 /** Rows per page, both lists. */
@@ -101,11 +112,17 @@ export type UnitTab = keyof typeof UNIT_TABS;
 export type PortfolioView = "activities" | "scholars";
 
 export type PortfolioParams = {
-  /** Encoded unit values (`dept:` / `div:` / `center:` + CODE). */
+  /** Encoded unit values (`dept:` / `div:` / `center:` + CODE). The rail sends
+   *  one; the parser keeps accepting several, as report 8's links do. */
   units: string[];
   from: number;
   to: number;
-  area: string | null;
+  /** Research area topic ids (repeated `area`); a publication in ANY counts. */
+  areas: string[];
+  /** Research areas tab: only the areas with a gap (`gaps=1`). */
+  gaps: boolean;
+  /** The unit table in full instead of its first `TABLE_PREVIEW_ROWS` (`rows=all`). */
+  allRows: boolean;
   stages: TranslationalStage[];
   cwid: string | null;
   q: string;
@@ -133,19 +150,21 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
   };
   const from = int("from", d.from, 1900, 2100);
   const to = Math.max(from, int("to", d.to, 1900, 2100));
-  const area = sp.get("area")?.trim() ?? "";
   const cwid = sp.get("cwid")?.trim() ?? "";
   const by = sp.get("by");
   return {
     units: parsePersonFilter(sp).unitValues.filter((u) => !u.startsWith("inst:")),
     from,
     to,
-    area: /^[A-Za-z0-9_-]{1,128}$/.test(area) ? area : null,
+    areas: [...new Set(sp.getAll("area").map((a) => a.trim()))].filter((a) => /^[A-Za-z0-9_-]{1,128}$/.test(a)).slice(0, 50),
+    gaps: sp.get("gaps") === "1",
+    allRows: sp.get("rows") === "all",
     stages: TRANSLATIONAL_STAGES.filter((s) => sp.getAll("stage").includes(s)),
     cwid: /^[A-Za-z0-9]{2,32}$/.test(cwid) ? cwid : null,
     q: (sp.get("q") ?? "").trim().slice(0, 100),
     by: by && by in UNIT_TABS ? (by as UnitTab) : "dept",
-    view: sp.get("view") === "scholars" ? "scholars" : "activities",
+    // The Scholars list is the default; `view=activities` is the publication list.
+    view: sp.get("view") === "activities" ? "activities" : "scholars",
     page: int("page", 1, 1, 10_000),
   };
 }
@@ -156,12 +175,14 @@ export function portfolioQueryString(p: PortfolioParams): string {
   for (const u of p.units) q.append("unit", u);
   q.set("from", String(p.from));
   q.set("to", String(p.to));
-  if (p.area) q.set("area", p.area);
+  for (const a of p.areas) q.append("area", a);
+  if (p.gaps) q.set("gaps", "1");
+  if (p.allRows) q.set("rows", "all");
   for (const s of p.stages) q.append("stage", s);
   if (p.cwid) q.set("cwid", p.cwid);
   if (p.q) q.set("q", p.q);
   if (p.by !== "dept") q.set("by", p.by);
-  if (p.view !== "activities") q.set("view", p.view);
+  if (p.view !== "scholars") q.set("view", p.view);
   if (p.page > 1) q.set("page", String(p.page));
   return q.toString();
 }
@@ -180,19 +201,23 @@ export {
   countsIn,
   countsTotal,
   emptyCounts,
-  exactShares,
-  roundedShares,
+  exactStagedShares,
   STAGE_BUCKETS,
+  stageAssignedShare,
+  stagedShares,
   stagedTotal,
   STAGE_RULE,
   type StageBucket,
   type StageCounts,
+  type StageShares,
 } from "@/lib/translational-stage";
-/** The T stages an area is thin at: exact share under `GAP_SHARE`, for an
- *  area of at least `MIN_AREA_SIZE` publications (else none). */
+/** The T stages an area is thin at: under `GAP_SHARE` of its STAGED
+ *  publications (No stage is not in the denominator, matching the shares the
+ *  page shows), for an area with at least `MIN_AREA_SIZE` staged publications
+ *  (else none). */
 export function gapStages(c: StageCounts): TranslationalStage[] {
-  if (countsTotal(c) < MIN_AREA_SIZE) return [];
-  const ex = exactShares(c);
+  if (stagedTotal(c) < MIN_AREA_SIZE) return [];
+  const ex = exactStagedShares(c);
   return TRANSLATIONAL_STAGES.filter((s) => ex[s] < GAP_SHARE);
 }
 
@@ -204,12 +229,12 @@ export type TableRow = { key: string; counts: StageCounts };
 export function sortTableRows<T extends TableRow>(rows: T[], tab: UnitTab, stages: readonly TranslationalStage[]): T[] {
   const vol = (a: T, b: T) => countsTotal(b.counts) - countsTotal(a.counts) || a.key.localeCompare(b.key);
   if (stages.length > 0) {
-    const share = (r: T) => countsIn(exactShares(r.counts), stages);
+    const share = (r: T) => stages.reduce((n, s) => n + exactStagedShares(r.counts)[s], 0);
     return [...rows].sort((a, b) => share(b) - share(a) || vol(a, b));
   }
   if (tab === "area") {
-    const sized = (r: T) => countsTotal(r.counts) >= MIN_AREA_SIZE;
-    const thin = (r: T) => Math.min(...TRANSLATIONAL_STAGES.map((s) => exactShares(r.counts)[s]));
+    const sized = (r: T) => stagedTotal(r.counts) >= MIN_AREA_SIZE;
+    const thin = (r: T) => Math.min(...TRANSLATIONAL_STAGES.map((s) => exactStagedShares(r.counts)[s]));
     return [...rows].sort(
       (a, b) => Number(sized(b)) - Number(sized(a)) || (sized(a) ? thin(a) - thin(b) : 0) || vol(a, b),
     );
@@ -259,8 +284,8 @@ function articleScope(p: PortfolioParams, opts: { stages?: TranslationalStage[];
 /** The area and scholar clauses on top of report 8's scope. */
 function extraSql(p: PortfolioParams): Prisma.Sql {
   return Prisma.sql`${
-    p.area
-      ? Prisma.sql`AND p.pmid IN (SELECT pt_a.pmid FROM publication_topic pt_a WHERE pt_a.parent_topic_id = ${p.area} AND pt_a.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR})`
+    p.areas.length > 0
+      ? Prisma.sql`AND p.pmid IN (SELECT pt_a.pmid FROM publication_topic pt_a WHERE pt_a.parent_topic_id IN (${Prisma.join(p.areas)}) AND pt_a.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR})`
       : Prisma.empty
   } ${p.cwid ? Prisma.sql`AND pa.cwid = ${p.cwid}` : Prisma.empty}`;
 }
@@ -280,8 +305,10 @@ function scopedRows(ac: ArticleCountParams, extra: Prisma.Sql, byYear = true): P
   return Prisma.sql`(${scopedSelect(ac, extra, byYear)}) x`;
 }
 
-/** `areaPeople`: distinct scholars (not publications) per research area, the
- *  area table's second line; its count lands in the `none` bucket. */
+/** `areaPeople`: per research area, the scholars the Scholars list would show
+ *  for that area (run over the list's first / senior scope, at least
+ *  `MIN_SCHOLAR_ACTIVITIES` papers in the picked stages), so the area table's
+ *  "N scholars" link opens a list of N; its count lands in the `none` bucket. */
 type Grouping = "all" | "year" | "cwid" | "areaPeople" | UnitTab;
 
 /** How each grouping maps a scoped row to its group: the unit rule
@@ -333,11 +360,18 @@ async function stageCounts<G extends Grouping>(
   extra: Prisma.Sql,
   gs: readonly G[],
   byYear = true,
+  /** `areaPeople` only: the stages a scholar's papers must be in (`rankScholars`). */
+  pick: readonly TranslationalStage[] = TRANSLATIONAL_STAGES,
 ): Promise<Map<G, Map<string, StageCounts>>> {
   const branches = gs.map((g) => {
     const { key, join } = groupSql(g);
     if (g === "areaPeople")
-      return Prisma.sql`SELECT ${g} AS k, ${key} AS g, NULL AS st, COUNT(DISTINCT x.cwid) AS n FROM x ${join} GROUP BY g`;
+      return Prisma.sql`SELECT ${g} AS k, t.g, NULL AS st, COUNT(*) AS n FROM (
+          SELECT ${key} AS g, x.cwid FROM x ${join}
+           WHERE x.st IN (${Prisma.join([...pick])})
+           GROUP BY ${key}, x.cwid
+          HAVING COUNT(DISTINCT x.pmid) >= ${MIN_SCHOLAR_ACTIVITIES}
+        ) t GROUP BY t.g`;
     // Area counts publications: the distinct (pmid, stage) set `u`, not every authorship.
     const from = g === "area" ? Prisma.sql`u x` : Prisma.sql`x`;
     return Prisma.sql`SELECT ${g} AS k, ${key} AS g, x.st, COUNT(DISTINCT x.pmid) AS n FROM ${from} ${join} GROUP BY g, x.st`;
@@ -427,6 +461,9 @@ export type UnitTableRow = TableRow & {
   href: string;
   /** The second line (division count, parent, members, scholars). */
   note: string;
+  /** Research areas tab: the note ("169 scholars") links to the Scholars list
+   *  filtered to the area; this is that list's query string. */
+  noteHref: string | null;
   gaps: TranslationalStage[];
 };
 
@@ -436,9 +473,13 @@ export type PortfolioData = {
   byYear: { year: number; counts: StageCounts }[];
   /** All of WCM for the same years / area / scholar (the table's baseline). */
   baseline: StageCounts;
+  /** Every row, sorted (the page shows the first `TABLE_PREVIEW_ROWS` until
+   *  "View all"; the Download has them all). With `gaps`, only gapped areas. */
   table: UnitTableRow[];
-  /** Areas of at least `MIN_AREA_SIZE` publications, and those with no gap. */
+  /** Areas of at least `MIN_AREA_SIZE` staged publications, and those with no gap. */
   areaCoverage: { sized: number; spanning: number };
+  /** Research area ids in scope, most publications first (the rail's order). */
+  areaOrder: string[];
   scholars: { total: number; rows: (PortfolioScholar & { n: number; counts: StageCounts; works: RecentWork[] })[] };
   /** The scoped scholar (`cwid`), with their recent staged papers. */
   person: (PortfolioScholar & { works: RecentWork[] }) | null;
@@ -499,16 +540,18 @@ export async function loadPortfolio(
   const showScholars = !p.cwid && (opts.forExport || p.view === "scholars");
 
   // One scholar's or one area's papers: their own index beats driving from the year window.
-  const byYear = !p.cwid && !p.area;
-  const [counts, baselineMap, centers, byCwid, lookup, person] = await Promise.all([
-    stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? (["areaPeople"] as const) : [p.by])], byYear),
+  const byYear = !p.cwid && p.areas.length === 0;
+  // The Scholars list's groupings share one query over its first / senior scope.
+  const scholarGroups = [...(showScholars ? (["cwid"] as const) : []), ...(p.by === "area" ? (["areaPeople"] as const) : [])];
+  const [counts, baselineMap, centers, scholarCounts, lookup, person] = await Promise.all([
+    stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? [] : [p.by])], byYear),
     p.units.length > 0
       ? stageCounts(articleScope(p, { units: [] }), extra, ["all"], byYear).then((m) => m.get("all")!)
       : Promise.resolve(null),
     p.by === "center" ? centerSizes() : Promise.resolve(new Map<string, { members: number; departments: number }>()),
-    showScholars
-      ? stageCounts(acScholars, extra, ["cwid"], byYear).then((m) => m.get("cwid")!)
-      : Promise.resolve(new Map<string, StageCounts>()),
+    scholarGroups.length > 0
+      ? stageCounts(acScholars, extra, scholarGroups, byYear, p.stages.length > 0 ? p.stages : TRANSLATIONAL_STAGES)
+      : Promise.resolve(new Map<"cwid" | "areaPeople", Map<string, StageCounts>>()),
     opts.forExport ? Promise.resolve([]) : lookupScholars(p.q),
     p.cwid && !opts.forExport ? loadScholars([p.cwid]) : Promise.resolve(new Map<string, PortfolioScholar>()),
   ]);
@@ -516,7 +559,9 @@ export async function loadPortfolio(
   const byYearMap = counts.get("year")!;
   const areaMap = counts.get("area")!;
   const tableMap = p.by === "area" ? null : counts.get(p.by)!;
-  const areaPeople = counts.get("areaPeople") ?? new Map<string, StageCounts>();
+  const byCwid = scholarCounts.get("cwid") ?? new Map<string, StageCounts>();
+  // ponytail: with an area filter set, a row's count is within that filter while its link replaces it; rare, left as is.
+  const areaPeople = scholarCounts.get("areaPeople") ?? new Map<string, StageCounts>();
 
   const allCounts = all.get("all") ?? emptyCounts();
   const years = [];
@@ -533,11 +578,16 @@ export async function loadPortfolio(
     const href = new URLSearchParams(base);
     let label: string;
     let note = "";
+    let noteHref: string | null = null;
     if (p.by === "area") {
-      href.set("area", code);
+      href.delete("area");
+      href.append("area", code);
       label = areaLabel.get(code) ?? code;
       const n = countsTotal(areaPeople.get(code) ?? emptyCounts());
       note = `${n.toLocaleString()} scholar${n === 1 ? "" : "s"}`;
+      const people = new URLSearchParams(href);
+      people.delete("view");
+      noteHref = people.toString();
     } else {
       const value = `${p.by}:${code}`;
       href.delete("unit");
@@ -556,12 +606,16 @@ export async function loadPortfolio(
         if (c) note = `${c.members.toLocaleString()} members across ${c.departments} departments`;
       }
     }
+    // Gaps are marked in the stage cells, not in the note.
     const gaps = p.by === "area" ? gapStages(counts) : [];
-    if (gaps.length > 0) note = `Gap at ${stagesLabel(gaps).replace(/ \+ /g, " and ")}${note ? ` · ${note}` : ""}`;
-    return { key: code, counts, label, href: href.toString(), note, gaps };
+    return { key: code, counts, label, href: href.toString(), note, noteHref, gaps };
   });
+  const shownTable = p.by === "area" && p.gaps ? table.filter((r) => r.gaps.length > 0) : table;
 
-  const sized = [...areaMap.values()].filter((c) => countsTotal(c) >= MIN_AREA_SIZE);
+  const sized = [...areaMap.values()].filter((c) => stagedTotal(c) >= MIN_AREA_SIZE);
+  const areaOrder = [...areaMap]
+    .sort((a, b) => countsTotal(b[1]) - countsTotal(a[1]) || a[0].localeCompare(b[0]))
+    .map(([id]) => id);
 
   // The Scholars list (unless one scholar is in scope).
   const ranked = rankScholars(byCwid, p.stages);
@@ -572,7 +626,7 @@ export async function loadPortfolio(
     : ranked.slice((p.page - 1) * PORTFOLIO_PAGE_SIZE, p.page * PORTFOLIO_PAGE_SIZE).map((r) => r.cwid);
   const [people, works, personWorks, activities] = await Promise.all([
     loadScholars(pageCwids),
-    opts.forExport ? Promise.resolve(new Map<string, RecentWork[]>()) : recentWorks(p, pageCwids, 2),
+    opts.forExport ? Promise.resolve(new Map<string, RecentWork[]>()) : recentWorks(p, pageCwids, 3),
     p.cwid && !opts.forExport ? recentWorks(p, [p.cwid], 3) : Promise.resolve(new Map<string, RecentWork[]>()),
     opts.forExport || p.view !== "activities" || p.cwid ? Promise.resolve([]) : activityPage(p, acPicked, extra),
   ]);
@@ -583,8 +637,9 @@ export async function loadPortfolio(
     all: allCounts,
     byYear: years,
     baseline: baselineMap ? (baselineMap.get("all") ?? emptyCounts()) : allCounts,
-    table: sortTableRows(table, p.by, p.stages),
+    table: sortTableRows(shownTable, p.by, p.stages),
     areaCoverage: { sized: sized.length, spanning: sized.filter((c) => gapStages(c).length === 0).length },
+    areaOrder,
     scholars: {
       total: ranked.length,
       rows: rankedPage.flatMap((r) => {
@@ -636,6 +691,8 @@ export const COUNTING_RULE =
   "Each publication counts once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; department, division (including hand-added division members) and center membership are the scholar's current values, the rule report 8 uses. A research area is a publication's ReciterAI area score of 0.3 or more, as on the research area pages.";
 
 
+export const GAP_RULE = `A research area has a gap at a stage that holds under ${GAP_SHARE}% of its publications with a stage. Only areas with at least ${MIN_AREA_SIZE} publications with a stage are checked.`;
+
 export const SCHOLAR_RULE = `The Scholars list counts publications where the scholar is first or senior author and lists only scholars with at least ${MIN_SCHOLAR_ACTIVITIES}, ordered by count.`;
 
 export function describePortfolioCriteria(
@@ -643,23 +700,32 @@ export function describePortfolioCriteria(
   choices: PortfolioChoices,
   generatedAt: Date,
 ): [string, string][] {
-  const area = p.area ? (choices.areas.find((a) => a.id === p.area)?.label ?? p.area) : "All";
+  const areas = p.areas.length > 0 ? p.areas.map((id) => choices.areas.find((a) => a.id === id)?.label ?? id).join("; ") : "All";
   return [
     ["Report", "26. Translational portfolio"],
     ["Generated", generatedAt.toISOString()],
     ...personFilterCriteria({ types: [], unitValues: p.units }, choices.labels, (r) => formatRoleCategory(r) ?? ""),
     ["Years", `${p.from}–${p.to} (calendar year of publication)`],
-    ["Research area", area],
+    ["Research area", areas],
+    ...(p.gaps && p.by === "area" ? ([["Research areas listed", "Only areas with a gap"]] as [string, string][]) : []),
+    ["Gap rule", GAP_RULE],
     ["Translational stage", p.stages.length > 0 ? p.stages.map(translationalStageDisplay).join("; ") : "All"],
     ["Scholar", p.cwid ?? "All (first or senior author when one scholar is chosen)"],
     ["Record type", "Publications"],
     ["Counting rule", COUNTING_RULE],
-    ["Stage rule", STAGE_RULE],
+    ["Stage rule", `${STAGE_RULE} How many have a stage is shown separately, as Stage assigned.`],
     ["Scholars rule", SCHOLAR_RULE],
   ];
 }
 
 const bucketHeads = () => STAGE_BUCKETS.map((k) => (k === "none" ? NO_STAGE_LABEL : translationalStageDisplay(k)));
+/** The page's figures beside the counts: Stage assigned, then each stage's
+ *  share of the staged publications (whole percents, as the page rounds them). */
+const shareHeads = () => ["Stage assigned (%)", ...TRANSLATIONAL_STAGES.map((k) => `${k.replace("-", "–")} share of staged (%)`)];
+const shareCells = (c: StageCounts) => {
+  const s = stagedShares(c);
+  return [Math.round(stageAssignedShare(c)), ...TRANSLATIONAL_STAGES.map((k) => s[k])];
+};
 
 export async function buildPortfolioWorkbook(
   p: PortfolioParams,
@@ -671,17 +737,25 @@ export async function buildPortfolioWorkbook(
   const counts = (c: StageCounts) => STAGE_BUCKETS.map((k) => c[k]);
 
   const years = wb.addWorksheet("By year");
-  years.addRow(["Year", "Publications", ...bucketHeads()]);
+  years.addRow(["Year", "Publications", ...bucketHeads(), ...shareHeads()]);
   boldRow(years, 1);
-  for (const r of data.byYear) years.addRow([r.year, countsTotal(r.counts), ...counts(r.counts)]);
-  years.addRow(["Total", countsTotal(data.all), ...counts(data.all)]);
+  for (const r of data.byYear) years.addRow([r.year, countsTotal(r.counts), ...counts(r.counts), ...shareCells(r.counts)]);
+  years.addRow(["Total", countsTotal(data.all), ...counts(data.all), ...shareCells(data.all)]);
   boldRow(years, years.rowCount);
 
   const table = wb.addWorksheet(UNIT_TABS[p.by].label);
-  table.addRow([UNIT_TABS[p.by].head, "Note", "Publications", ...bucketHeads()]);
+  table.addRow([UNIT_TABS[p.by].head, "Note", "Gaps", "Publications", ...bucketHeads(), ...shareHeads()]);
   boldRow(table, 1);
-  table.addRow(["All of Weill Cornell Medicine", "Baseline", countsTotal(data.baseline), ...counts(data.baseline)]);
-  for (const r of data.table) table.addRow([r.label, r.note, countsTotal(r.counts), ...counts(r.counts)]);
+  table.addRow(["All of Weill Cornell Medicine", "Baseline", "", countsTotal(data.baseline), ...counts(data.baseline), ...shareCells(data.baseline)]);
+  for (const r of data.table)
+    table.addRow([
+      r.label,
+      r.note,
+      r.gaps.map((s) => s.replace("-", "–")).join(", "),
+      countsTotal(r.counts),
+      ...counts(r.counts),
+      ...shareCells(r.counts),
+    ]);
   table.getColumn(1).width = 44;
   table.getColumn(2).width = 40;
 

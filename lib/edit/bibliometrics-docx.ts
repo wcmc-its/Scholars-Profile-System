@@ -108,16 +108,16 @@ function stageBlocks(s: NonNullable<BibliometricsReport["stages"]>, filters: str
   const total = STAGE_BUCKETS.reduce((n, k) => n + s.counts[k], 0);
   return [
     heading("Translational stage"),
-    para(`Research articles${filters ? `, filters: ${filters}` : ""}.`),
+    para(`Research articles${filters ? `, filters: ${filters}` : ""}. Shares are among papers with a stage.`),
     table(
       ["Stage", "Papers", "Share"],
       [
         ...STAGE_BUCKETS.map((k) => [
           k === "none" ? NO_STAGE_LABEL : translationalStageDisplay(k),
           String(s.counts[k]),
-          `${s.shares[k]}%`,
+          k === "none" ? "–" : `${s.shares[k]}%`,
         ]),
-        ["All research articles", String(total), total > 0 ? "100%" : "0%"],
+        ["All research articles", String(total), "–"],
       ],
     ),
   ];

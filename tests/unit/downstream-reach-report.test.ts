@@ -1534,4 +1534,12 @@ describe("the portfolio report's Downstream reach tile", () => {
     expect(await loadPortfolioReachTile(portfolio(long), SUPER)).toBeNull();
     expect(h.queryRaw).not.toHaveBeenCalled();
   });
+
+  it("is absent with more than one research area ticked (report 27 takes one)", async () => {
+    const two = "area=area_a&area=area_b&from=2020&to=2024";
+    expect(portfolio(two).areas).toEqual(["area_a", "area_b"]);
+    expect(portfolioReachParams(portfolio(two))).toBeNull();
+    expect(await loadPortfolioReachTile(portfolio(two), SUPER)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
 });

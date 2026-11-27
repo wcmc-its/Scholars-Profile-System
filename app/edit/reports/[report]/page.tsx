@@ -332,7 +332,7 @@ export default async function EditReportPage({
   const body = (
     <>
       {coreHeader ?? (
-        <div className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+        <div className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm print:hidden">
           <Link href={back} className="text-apollo-slate hover:underline">
             &larr; {partner ? "Back" : "All reports"}
           </Link>

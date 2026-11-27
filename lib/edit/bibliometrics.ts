@@ -12,11 +12,12 @@ import { toPolicyRollup } from "@/lib/citations/policy-rollup";
 import {
   displayStage,
   emptyCounts,
-  roundedShares,
   STAGE_BUCKETS,
   STAGE_RULE,
+  stagedShares,
   type StageBucket,
   type StageCounts,
+  type StageShares,
 } from "@/lib/translational-stage";
 import { htmlToPlainText } from "@/lib/utils";
 
@@ -151,8 +152,9 @@ export type BibliometricsStagePaper = { pmid: string; title: string; journal: st
  *  (report 26's rule). Each bucket lists the papers it counts, newest first. */
 export type BibliometricsStages = {
   counts: StageCounts;
-  /** Whole percents that add up to 100 (`roundedShares`). */
-  shares: StageCounts;
+  /** Whole percents of the four T stages among papers WITH a stage, adding up
+   *  to 100 (`stagedShares`, report 26's rule). No stage has no share. */
+  shares: StageShares;
   papers: Record<StageBucket, BibliometricsStagePaper[]>;
   /** Report 26 for this scholar, filled by the route; null when the viewer may
    *  not open that report. */
@@ -481,12 +483,12 @@ function stagesOf(pubs: readonly BibliometricsPubRow[]): BibliometricsStages {
       year: p.year,
     });
   }
-  return { counts, shares: roundedShares(counts), papers, portfolioHref: null };
+  return { counts, shares: stagedShares(counts), papers, portfolioHref: null };
 }
 
 /** What the stage section counts, under its heading. */
 export const STAGES_NOTE =
-  "Research articles matching the Authorship and year filters above. Select a count to list its papers.";
+  "Research articles matching the Authorship and year filters above. Shares are among papers with a stage. Select a count to list its papers.";
 
 /** "Senior", "First", "Co-author" */
 export const POSITION_LABEL: Record<BibliometricsPosition, string> = {
