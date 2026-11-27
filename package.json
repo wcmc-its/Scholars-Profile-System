@@ -85,6 +85,7 @@
     "etl:policy-citations": "tsx etl/policy-citations/index.ts",
     "etl:clinical-citations": "tsx etl/clinical-citations/index.ts",
     "etl:citation-links": "tsx etl/citation-links/index.ts",
+    "etl:patent-citations:extract": "tsx etl/patent-citations/extract.ts",
     "etl:patent-citations:import": "tsx etl/patent-citations/import.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
     "etl:nsf": "tsx etl/nsf/index.ts",

@@ -85,7 +85,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # slim base omits openssl, which can misdetect to a 1.1.x engine for the TLS
 # connections the source loaders make to Aurora / external DBs. Match the
 # runtime stage and install OpenSSL 3.0 + CA certs before dropping privileges.
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+# unzip: the patent-citations extract streams the PatentsView zips (unzip -p).
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates unzip \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 # Whole source subset (.dockerignore strips node_modules/.next/cdk/.env/etc.),
