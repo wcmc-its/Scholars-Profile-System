@@ -13,8 +13,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { read: {} }, prisma: {} }));
 
+import { db } from "@/lib/db";
 import {
   buildPortfolioWorkbook,
+  loadPortfolio,
   countsTotal,
   emptyCounts,
   gapStages,
@@ -184,6 +186,41 @@ describe("buildPortfolioWorkbook", () => {
     const row = ws.getRow(2).values as unknown[];
     expect(row[2]).toBe(10);
     expect((row.slice(3) as number[]).reduce((s, n) => s + n, 0)).toBe(10);
+  });
+});
+
+describe("loadPortfolio", () => {
+  it("counts every grouping in ONE query and routes its rows by grouping", async () => {
+    const texts: string[] = [];
+    (db.read as unknown as Record<string, unknown>).$queryRaw = vi.fn(async (q: { sql?: string } | string[]) => {
+      const text = Array.isArray(q) ? q.join("?") : String(q.sql);
+      texts.push(text);
+      if (!text.includes("UNION ALL")) return [{ pmid: "9" }];
+      return [
+        { k: "all", g: "all", st: "T0", n: 3n },
+        { k: "all", g: "all", st: null, n: 2n },
+        { k: "year", g: 2024, st: "T0", n: 3n },
+        { k: "year", g: 2025, st: "low-or-other", n: 2 },
+        { k: "area", g: "a1", st: "T0", n: 3n },
+        { k: "dept", g: "dept:x", st: "T1", n: 1n },
+        { k: "dept", g: null, st: "T1", n: 7n },
+      ];
+    });
+    const choices: PortfolioChoices = {
+      facets: { roleCategories: [], departments: [], centers: [], institutions: [] },
+      labels: new Map(),
+      areas: [],
+    };
+    const p = parsePortfolioParams(new URLSearchParams("from=2024&to=2025"));
+    const d = await loadPortfolio(p, choices);
+    expect(texts.filter((t) => t.includes("UNION ALL"))).toHaveLength(1);
+    expect(d.all).toEqual(c(3, 0, 0, 0, 2));
+    expect(d.byYear).toEqual([
+      { year: 2024, counts: c(3, 0, 0, 0, 0) },
+      { year: 2025, counts: c(0, 0, 0, 0, 2) },
+    ]);
+    expect(d.table.map((r) => [r.key, r.counts])).toEqual([["dept:x", c(0, 1, 0, 0, 0)]]);
+    expect(d.activities.pmids).toEqual(["9"]);
   });
 });
 
