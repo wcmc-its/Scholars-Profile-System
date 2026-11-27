@@ -864,6 +864,12 @@ model PublicationCiting {
 /// background reference (`source` "ctgov", `level` "trial"). A trial is not a
 /// rung of the ranked levels: every reader of the four ranked levels names
 /// them (`POLICY_LEVELS`, lib/citations/policy-rollup.ts) and so skips it.
+///
+/// And the clinical articles citing a publication (`source` "pubmed", `level`
+/// "clinical"; iCite's flag, loaded by `etl:clinical-citations`). Not a ranked
+/// level either. A PubMed article has one row: one stored at a ranked level is
+/// never also stored as clinical, and a clinical row that PubMed later types
+/// as a guideline, consensus statement or review moves up to that level.
 model CitingDocument {
   id          Int     @id @default(autoincrement())
   /// "pubmed" | "bookshelf" | "ctgov" | "ros" (Reliance on Science: patents)
@@ -872,7 +878,7 @@ model CitingDocument {
   title       String  @db.Text
   year        Int?
   url         String  @db.VarChar(255)
-  /// "authority" | "guideline" | "consensus" | "review" | "trial" | "patent"
+  /// "authority" | "guideline" | "consensus" | "review" | "trial" | "patent" | "clinical"
   level       String  @db.VarChar(16)
   /// Health authority that issued it (lib/citations/issuing-bodies.ts); NULL for
   /// PubMed-indexed documents.
@@ -918,7 +924,10 @@ model PublicationCitingDocument {
   /// Trials only: `{ ownTrial: true }` when a confirmed WCM author of the paper
   /// is an investigator on the citing trial. Such a link is stored and left out
   /// of `publication.trial_count`. Patents: `{ score, where, release }`, plus
-  /// `sharedId` when a tie-break decided the paper. NULL otherwise.
+  /// `sharedId` when a tie-break decided the paper. Clinical articles:
+  /// `{ ownWork: true }` when the citing article is one of ours and shares a
+  /// confirmed WCM author with the paper; stored and left out of
+  /// `publication.clinical_cite_count`. NULL otherwise.
   evidence         Json?
   citingDocument   CitingDocument @relation(fields: [citingDocumentId], references: [id], onDelete: Cascade)
 
@@ -2220,6 +2229,10 @@ model Publication {
   /// this paper. Not a ranked level either. Kept by etl:patent-citations:import
   /// and the weekly rollup.
   patentFamilyCount     Int       @default(0) @map("patent_family_count")
+  /// Clinical articles (iCite's flag) citing this paper, less the authors' own
+  /// and less any stored at a ranked level. Not a ranked level either. Kept by
+  /// etl:clinical-citations and the weekly rollup.
+  clinicalCiteCount     Int       @default(0) @map("clinical_cite_count")
   /// When `etl:policy-citations` last asked NCBI Bookshelf which books cite this
   /// paper. Drives the rolling pass (never-checked first, then oldest).
   bookshelfCheckedAt    DateTime? @map("bookshelf_checked_at")

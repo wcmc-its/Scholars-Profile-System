@@ -12,9 +12,10 @@ export type PolicyRollup = {
 
 /**
  * The ranked citing-document levels, highest first. `citing_document` also
- * holds rows at other levels (a ClinicalTrials.gov study is `trial`); those are
- * a different kind of uptake, so every reader of the ranked levels names these
- * four and never sees them.
+ * holds rows at other levels (a ClinicalTrials.gov study is `trial`, a patent
+ * `patent`, a citing clinical article `clinical`); those are a different kind
+ * of uptake, so every reader of the ranked levels names these four and never
+ * sees them.
  */
 export const POLICY_LEVELS = ["authority", "guideline", "consensus", "review"] as const;
 

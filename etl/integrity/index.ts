@@ -154,6 +154,9 @@ export function staleSources(
 // PolicyCitations (etl/policy-citations) only adds, and returns citation links ADDED.
 // Staging 2026-11-25: the 390,313-link backfill, then 7, which failed this guard. Its
 // own assertSourceVolume and an empty-read check grade the PubMed links it reads.
+// ClinicalCitations (etl/clinical-citations) is the same: it only adds, and returns
+// citation links ADDED, about 976,000 on the first load and a week's new ones after.
+// Its own assertSourceVolume and an empty-read check grade the links it reads.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
@@ -165,6 +168,7 @@ export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "CdnReconcile",
   "SearchReconcile",
   "PolicyCitations",
+  "ClinicalCitations",
 ]);
 
 /**

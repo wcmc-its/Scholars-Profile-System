@@ -363,6 +363,18 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   JournalImpactFactor: { cadence: "weekly" }, // JournalImpactFactorWeekly
   FundableWork: { cadence: "weekly" }, // FundableWorkWeekly
   PolicyCitations: { cadence: "weekly" }, // PolicyCitationsWeekly
+  // ClinicalCitationsWeekly. Acked because the registration ships in the image
+  // before the source has a run: until the first load in an env (a hand run,
+  // see etl/clinical-citations/index.ts) or the first Sunday step, there is no
+  // row and this would read never-ran. Remove the ack once both envs have one.
+  ClinicalCitations: {
+    cadence: "weekly",
+    ack: {
+      until: "2026-12-14",
+      reason:
+        "etl:clinical-citations is new: no run on record until the first load in each env; remove once both envs have a successful run",
+    },
+  },
   PubMedSystematicReviews: { cadence: "weekly" }, // PubMedSystematicReviewsWeekly
   FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
   // ED email-visibility bridge (export -> S3 -> import). Only the import writes a

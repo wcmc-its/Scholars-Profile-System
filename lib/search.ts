@@ -484,6 +484,9 @@ export const publicationsIndexMapping = {
       // displayable stage.
       translationalStage: { type: "keyword" },
       citationCount: { type: "integer" },
+      // Clinical articles (iCite's flag) citing the paper, less the authors'
+      // own. OMITTED on docs with none. Nothing queries it yet.
+      clinicalCiteCount: { type: "integer" },
       dateAddedToEntrez: { type: "date" },
       doi: { type: "keyword" },
       pmcid: { type: "keyword" },

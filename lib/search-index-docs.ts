@@ -901,6 +901,10 @@ export function buildPublicationDoc(
     // write this field (`SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`).
     ...(translationalStage ? { translationalStage } : {}),
     citationCount: p.citationCount,
+    // OMIT-on-empty integer: clinical articles citing the paper, less the
+    // authors' own (`publication.clinical_cite_count`, etl:clinical-citations).
+    // Only cited pubs write it, so a `range` or `exists` filter finds them.
+    ...(p.clinicalCiteCount > 0 ? { clinicalCiteCount: p.clinicalCiteCount } : {}),
     dateAddedToEntrez: p.dateAddedToEntrez,
     doi: p.doi,
     pmcid: p.pmcid,
