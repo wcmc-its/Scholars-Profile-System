@@ -2079,6 +2079,14 @@ export class AppStack extends Stack {
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         TRIAL_CITATIONS_MODAL: "on",
         PATENT_CITATIONS_MODAL: "on",
+        // CLINICAL_CITATIONS_MODAL -- the "Clinical studies" group of the same
+        // section (clinical citing articles from `etl:clinical-citations`), and
+        // its paged public read, GET
+        // /api/publications/<pmid>/clinical-citations/<offset>. Render-only,
+        // === "on"; off, the detail payload and the modal are unchanged and the
+        // paged read is a 404. Staging first; prod stays off until reviewed there.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        CLINICAL_CITATIONS_MODAL: envConfig.envName === "staging" ? "on" : "off",
         // Internal program roster (trainees and mentors, some of them minors).
         //   EDIT_PROGRAM_ROSTER -- the page, its API and the
         //     `program_roster_editor` role; off = 404 and no directory check.

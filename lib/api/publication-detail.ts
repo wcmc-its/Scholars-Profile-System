@@ -7,10 +7,14 @@
  * (`app/api/publications/[pmid]/route.ts`) is a thin delegator.
  */
 import { parseLocations, POLICY_LEVELS, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { CLINICAL_PAGE_SIZE, parseClinicalOffset } from "@/lib/citations/clinical-page";
 import {
+  clinicalCitationsModalOn,
   patentCitationsModalOn,
+  shapeClinicalCitations,
   shapeTrialPatentCitations,
   trialCitationsModalOn,
+  type ClinicalCitations,
   type TrialPatentCitations,
 } from "@/lib/citations/trials-patents";
 import { prisma } from "@/lib/db";
@@ -248,6 +252,83 @@ export async function readTrialPatentCitations(
   }
 }
 
+/**
+ * One page of the clinical studies citing the paper, newest first, with the
+ * counts over the whole list. Undefined when the paper has none; null on a
+ * read failure. `offset` is a page start (`parseClinicalOffset`).
+ */
+export async function readClinicalCitations(
+  pmid: string,
+  offset = 0,
+): Promise<ClinicalCitations | null | undefined> {
+  const where = { pmid, citingDocument: { level: "clinical" } };
+  try {
+    const [page, every] = await Promise.all([
+      prisma.publicationCitingDocument.findMany({
+        where,
+        select: {
+          evidence: true,
+          citingDocument: {
+            select: { id: true, title: true, year: true, url: true, journal: true, journalAbbrev: true },
+          },
+        },
+        orderBy: [{ citingDocument: { year: "desc" } }, { citingDocumentId: "asc" }],
+        skip: offset,
+        take: CLINICAL_PAGE_SIZE,
+      }),
+      // ponytail: the counts come from every link's `evidence` (about 5,200
+      // slim rows for the most-cited paper), read the way the trials are, so
+      // the count is the list's own. Count in SQL if this shows in latency.
+      prisma.publicationCitingDocument.findMany({ where, select: { evidence: true } }),
+    ]);
+    return shapeClinicalCitations(
+      page,
+      every.map((l) => l.evidence),
+    );
+  } catch (err) {
+    console.error("[publication-detail] clinical citations read failed", err);
+    return null;
+  }
+}
+
+/**
+ * Whether the public modal would show this publication: it exists and is not
+ * taken down or derived-dark (#356). The same test `getPublicationDetail` applies.
+ */
+async function isPublicationShown(pmid: string): Promise<boolean> {
+  const pub = await prisma.publication.findUnique({ where: { pmid }, select: { pmid: true } });
+  if (!pub) return false;
+  const suppressions = await loadPublicationSuppressions([pmid], prisma);
+  const darkPmids = await resolveDarkPmids([pmid], suppressions, prisma);
+  return !darkPmids.has(pmid);
+}
+
+export type ClinicalCitationsPageResult =
+  | { status: "ok"; page: ClinicalCitations }
+  /** Flag off, a bad pmid or offset, a publication the modal would not show, or no clinical studies. */
+  | { status: "not_found" }
+  | { status: "unavailable" };
+
+/**
+ * A later page of the modal's "Clinical studies" group, for the public route
+ * `/api/publications/:pmid/clinical-citations/:offset`. Everything that is not
+ * a page reads as not found, so the route says nothing about a publication the
+ * modal would not show.
+ */
+export async function getClinicalCitationsPage(
+  rawPmid: string,
+  rawOffset: string,
+): Promise<ClinicalCitationsPageResult> {
+  if (!clinicalCitationsModalOn()) return { status: "not_found" };
+  const offset = parseClinicalOffset(rawOffset);
+  // Clinical citations are PubMed-keyed: an external publication has none.
+  if (offset === null || parsePmid(rawPmid) === null) return { status: "not_found" };
+  if (!(await isPublicationShown(rawPmid))) return { status: "not_found" };
+  const page = await readClinicalCitations(rawPmid, offset);
+  if (page === null) return { status: "unavailable" };
+  return page ? { status: "ok", page } : { status: "not_found" };
+}
+
 export type PublicationDetailPayload = {
   pub: {
     pmid: string;
@@ -308,9 +389,10 @@ export type PublicationDetailPayload = {
    *  `POLICY_CITATION_BADGES` is off or there are none; the modal omits the
    *  section then. `reviewTotal` can exceed the reviews listed. */
   policyCitations?: { docs: PolicyCitingDoc[]; reviewTotal: number };
-  /** Registered trials and US patents citing this paper. Absent when both
-   *  `TRIAL_CITATIONS_MODAL` and `PATENT_CITATIONS_MODAL` are off or there are
-   *  none; a group whose flag is off is absent from it. */
+  /** Registered trials, US patents and clinical studies citing this paper.
+   *  Absent when `TRIAL_CITATIONS_MODAL`, `PATENT_CITATIONS_MODAL` and
+   *  `CLINICAL_CITATIONS_MODAL` are all off or there are none; a group whose
+   *  flag is off is absent from it. */
   trialPatentCitations?: TrialPatentCitations;
   /** Count of distinct citing pmids in `analysis_nih_cites` for this
    *  `cited_pmid`. Typically
@@ -894,12 +976,18 @@ export async function getPublicationDetail(
   const policyCitations =
     policyCitationBadgesOn() && pmidInt !== null ? await readPolicyCitations(pmid) : null;
 
-  const trialPatentCitations =
+  const trialsAndPatents =
     pmidInt !== null
       ? await readTrialPatentCitations(pmid, {
           trials: trialCitationsModalOn(),
           patents: patentCitationsModalOn(),
         })
+      : null;
+  const clinical =
+    clinicalCitationsModalOn() && pmidInt !== null ? await readClinicalCitations(pmid) : null;
+  const trialPatentCitations: TrialPatentCitations | null =
+    trialsAndPatents || clinical
+      ? { ...trialsAndPatents, ...(clinical ? { clinical } : {}) }
       : null;
 
   const translationalStage = resolveSearchPubsTranslationalStageFacet()
