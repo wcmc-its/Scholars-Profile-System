@@ -6,7 +6,7 @@
  * on-screen filters to the Word download. All people and papers invented.
  */
 import * as React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/edit/scholar-hover-card", () => ({
@@ -105,6 +105,46 @@ afterEach(() => {
 });
 
 describe("BibliometricsTool", () => {
+  it("lists a stage's papers when its count is selected, and links report 26 only when allowed", async () => {
+    const pubs = [
+      pub(1, { translationalStage: "T2", translationalStageConfidence: "high", title: "A staged paper" }),
+      pub(2, { translationalStage: null }),
+    ];
+    const r = buildBibliometricsReport({
+      scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
+      visible: pubs,
+      all: pubs,
+      filters: { authorship: "all", yearFrom: null, yearTo: null },
+      now: new Date("2026-11-25T12:00:00Z"),
+      stagesEnabled: true,
+    });
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const section = await screen.findByTestId("bibliometrics-stages");
+    expect(section.textContent).toContain("50%");
+    expect(screen.queryByText("Full translational profile", { exact: false })).toBeNull();
+    const counts = section.querySelectorAll("button[aria-expanded]");
+    expect(counts).toHaveLength(2); // T2 and No stage; zero rows are not buttons
+    const listed = () => within(section).queryByRole("link", { name: "A staged paper" });
+    expect(listed()).toBeNull();
+    fireEvent.click(counts[0]!);
+    expect(counts[0]!.getAttribute("aria-expanded")).toBe("true");
+    expect(listed()).toBeTruthy();
+    cleanup();
+    r.stages!.portfolioHref = "/edit/reports/translational-portfolio?cwid=zzz9001";
+    render(<BibliometricsTool entityId="zzz9001" />);
+    expect((await screen.findByText("Full translational profile", { exact: false })).getAttribute("href")).toBe(
+      "/edit/reports/translational-portfolio?cwid=zzz9001",
+    );
+  });
+
+  it("has no stage section while stage data is off", async () => {
+    respond(3);
+    render(<BibliometricsTool entityId="zzz9001" />);
+    await screen.findByTestId("bibliometrics-report");
+    expect(screen.queryByTestId("bibliometrics-stages")).toBeNull();
+  });
+
   it("renders the report for the scholar it was given", async () => {
     respond(12);
     render(<BibliometricsTool entityId="zzz9001" />);

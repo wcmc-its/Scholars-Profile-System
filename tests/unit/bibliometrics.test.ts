@@ -442,3 +442,67 @@ describe("GET /api/edit/bibliometrics", () => {
     expect(await res.json()).toEqual({ ok: true, reach: null });
   });
 });
+
+describe("translational stage section", () => {
+  const staged = (stage: string | null, confidence: string | null, over: Partial<BibliometricsPubRow> = {}) =>
+    pub({ translationalStage: stage, translationalStageConfidence: confidence, ...over });
+  const withStages = (visible: BibliometricsPubRow[], filters = NO_FILTERS) =>
+    buildBibliometricsReport({
+      scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: null },
+      visible,
+      all: visible,
+      filters,
+      now: NOW,
+      stagesEnabled: true,
+    });
+
+  it("is absent, with no stage definition, while stage data is off", () => {
+    const r = build([staged("T0", "high")]);
+    expect(r.stages).toBeNull();
+    expect(r.definitions.some((d) => d.term === "Translational stage")).toBe(false);
+  });
+
+  it("counts by report 26's rule, adds up, and lists each bucket's papers newest first", () => {
+    const pubs = [
+      staged("T0", "high", { year: 2019 }),
+      staged("T0", null, { year: 2022 }),
+      staged("T2", "medium"),
+      staged("T1", "low"), // unsure: No stage
+      staged("NA", "high"), // outside the spectrum: No stage
+      staged(null, null),
+      staged("T2", "high", { publicationType: "Review" }), // not a research article
+    ];
+    const s = withStages(pubs).stages!;
+    expect(s.counts).toEqual({ T0: 2, T1: 0, T2: 1, "T3-4": 0, none: 3 });
+    expect(Object.values(s.shares).reduce((a, b) => a + b, 0)).toBe(100);
+    expect(s.papers.T0.map((p) => p.year)).toEqual([2022, 2019]);
+    expect(Object.values(s.papers).flat()).toHaveLength(6);
+    expect(s.portfolioHref).toBeNull();
+    expect(withStages(pubs).definitions.at(-2)?.term).toBe("Translational stage");
+  });
+
+  it("follows the Authorship and year filters", () => {
+    const pubs = [
+      staged("T0", "high", { isFirst: true, year: 2021 }),
+      staged("T0", "high", { year: 2021 }), // co-author
+      staged("T1", "high", { isLast: true, year: 2015 }),
+    ];
+    expect(withStages(pubs, { authorship: "lead", yearFrom: null, yearTo: null }).stages!.counts).toEqual({
+      T0: 1, T1: 1, T2: 0, "T3-4": 0, none: 0,
+    });
+    expect(withStages(pubs, { authorship: "all", yearFrom: 2020, yearTo: null }).stages!.counts.T0).toBe(2);
+    expect(withStages(pubs, { authorship: "all", yearFrom: 2020, yearTo: null }).stages!.counts.T1).toBe(0);
+  });
+
+  it("the Word document carries the table only when the section is on", async () => {
+    const { buildBibliometricsDocx } = await vi.importActual<typeof import("@/lib/edit/bibliometrics-docx")>(
+      "@/lib/edit/bibliometrics-docx",
+    );
+    const JSZip = (await import("jszip")).default;
+    const xml = async (r: ReturnType<typeof build>) =>
+      (await JSZip.loadAsync(await buildBibliometricsDocx(r))).file("word/document.xml")!.async("string");
+    const pubs = [staged("T2", "high")];
+    expect(await xml(withStages(pubs))).toContain("Translational stage");
+    expect(await xml(build(pubs))).not.toContain("Translational stage");
+  });
+});

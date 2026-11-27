@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-layer";
 import { readPolicyCitations } from "@/lib/api/publication-detail";
+import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
 import { PATENT_DATA_END } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
@@ -65,6 +66,8 @@ export async function loadScholarPublications(cwid: string): Promise<{
           consensusCount: true,
           reviewCount: true,
           patentFamilyCount: true,
+          translationalStage: true,
+          translationalStageConfidence: true,
         },
       },
     },
@@ -107,6 +110,7 @@ export async function loadBibliometricsReport(
     all,
     filters,
     now,
+    stagesEnabled: resolveSearchPubsTranslationalStageFacet(),
   });
 
   // Distinct citing documents per level: a guideline citing two of the

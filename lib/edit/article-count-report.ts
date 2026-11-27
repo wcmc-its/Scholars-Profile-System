@@ -78,6 +78,7 @@ import { formatRoleCategory } from "@/lib/role-display";
 import {
   displayStage,
   isTranslationalStage,
+  NO_STAGE_LABEL,
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
   type TranslationalStage,
@@ -388,7 +389,7 @@ export { unitLabels };
 
 /** A year's count split by displayed stage; the parts sum to the count. */
 export type StageSplit = Record<TranslationalStage | "none", number>;
-export const NO_STAGE_LABEL = "No stage";
+export { NO_STAGE_LABEL };
 
 export type ArticleCountRow = {
   year: number;
