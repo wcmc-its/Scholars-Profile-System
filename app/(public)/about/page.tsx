@@ -9,7 +9,11 @@ import {
   RESEARCH_TYPE_YEARS,
 } from "@/lib/research-type";
 import { RESEARCH_ACTIVE_YEARS, RESEARCHER_TYPE_LABEL } from "@/lib/api/matcha-contract";
-import { TRANSLATIONAL_STAGE_LABELS } from "@/lib/translational-stage";
+import {
+  TRANSLATIONAL_STAGE_DEFINITIONS,
+  TRANSLATIONAL_STAGE_LABELS,
+  TRANSLATIONAL_STAGES,
+} from "@/lib/translational-stage";
 
 /**
  * /docs (v0): single comprehensive documentation page, stakeholder-first +
@@ -1292,22 +1296,11 @@ export default async function DocsPage() {
           between the laboratory and the community. There are four stages:
         </p>
         <ul>
-          <li>
-            <strong>{TRANSLATIONAL_STAGE_LABELS.T0}</strong> (T0): how biology and disease work,
-            studied in cells, animals or models.
-          </li>
-          <li>
-            <strong>{TRANSLATIONAL_STAGE_LABELS.T1}</strong> (T1): moving a discovery toward people,
-            including first studies in humans.
-          </li>
-          <li>
-            <strong>{TRANSLATIONAL_STAGE_LABELS.T2}</strong> (T2): testing whether an intervention
-            works in patients.
-          </li>
-          <li>
-            <strong>{TRANSLATIONAL_STAGE_LABELS["T3-4"]}</strong> (T3-4): how care is delivered in
-            practice and what it does for the health of populations.
-          </li>
+          {TRANSLATIONAL_STAGES.map((s) => (
+            <li key={s}>
+              <strong>{TRANSLATIONAL_STAGE_LABELS[s]}</strong> ({s}): {TRANSLATIONAL_STAGE_DEFINITIONS[s]}
+            </li>
+          ))}
         </ul>
         <p>
           ReciterAI assigns the stage automatically, using an AI model that reads the

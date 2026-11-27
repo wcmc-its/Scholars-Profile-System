@@ -100,6 +100,7 @@ import { renderOptimizeMembershipReport } from "@/components/edit/reports/optimi
 import { renderPublicationsReport } from "@/components/edit/reports/publications-body";
 import { renderPubCitationReport } from "@/components/edit/reports/pub-citation-body";
 import { renderPatentCitationsReport } from "@/components/edit/reports/patent-citations-body";
+import { renderTranslationalPortfolioReport } from "@/components/edit/reports/translational-portfolio-body";
 import { renderPolicyCitationsReport } from "@/components/edit/reports/policy-citations-body";
 import { renderPubRelevanceReport } from "@/components/edit/reports/pub-relevance-body";
 import { renderSharedResourceUsageReport } from "@/components/edit/reports/shared-resource-usage-body";
@@ -116,6 +117,7 @@ import {
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
 import { canViewPatentCitationsReport } from "@/lib/edit/patent-citations-report";
+import { canViewTranslationalPortfolioReport } from "@/lib/edit/translational-portfolio-report";
 import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
@@ -286,6 +288,15 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     accessRule: POLICY_CITATIONS_ACCESS_RULE,
     headerAside: true,
     render: renderPatentCitationsReport,
+  },
+  // Translational stage across publications (step 1). Report 8's audience;
+  // 404s while REPORT_TRANSLATIONAL_PORTFOLIO (or the stage facet) is off.
+  "26": {
+    n: "26",
+    gate: "admin",
+    canView: canViewTranslationalPortfolioReport,
+    headerAside: true,
+    render: renderTranslationalPortfolioReport,
   },
 };
 

@@ -16,7 +16,10 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useShowMore } from "@/components/edit/reports/report-show-more";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
+import { StageBadge } from "@/components/publication/stage-badge";
 import { Button } from "@/components/ui/button";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { stageDefinition, type TranslationalStage } from "@/lib/translational-stage";
 
 export type CitationRow = {
   key: string;
@@ -40,6 +43,9 @@ export type CitationRow = {
   /** The report-basis year (sorting). */
   year: number;
   dateAdded: string | null;
+  /** Report 26: the stage badge (`StageBadge`) and its stored confidence. */
+  stage?: TranslationalStage | null;
+  stageConfidence?: string | null;
 };
 
 export type CitationSort = "new" | "jif" | "journal";
@@ -66,12 +72,15 @@ export function ArticleCitationList({
   rows,
   yearChip,
   showDateAdded = false,
+  rangeLabel,
 }: {
   rows: CitationRow[];
   /** The Year pick's chip (`Year: 2024` + its remove link), beside the range label. */
   yearChip?: ReactNode;
   /** Each row states its PubMed add date (the date-added window). */
   showDateAdded?: boolean;
+  /** Replaces "Showing 1–N of M" when the caller pages on the server (report 26). */
+  rangeLabel?: string;
 }) {
   const [sort, setSort] = useState<CitationSort>("new");
   const sorted = useMemo(() => [...rows].sort(COMPARE[sort]), [rows, sort]);
@@ -82,9 +91,10 @@ export function ArticleCitationList({
       <div className="flex flex-wrap items-center justify-between gap-3 py-3.5">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="text-muted-foreground text-sm tabular-nums" data-testid="article-range">
-            {rows.length === 0
-              ? "No articles match"
-              : `Showing 1–${visible.length.toLocaleString()} of ${rows.length.toLocaleString()}`}
+            {rangeLabel ??
+              (rows.length === 0
+                ? "No articles match"
+                : `Showing 1–${visible.length.toLocaleString()} of ${rows.length.toLocaleString()}`)}
           </span>
           {yearChip}
         </div>
@@ -185,6 +195,20 @@ export function ArticleCitationList({
                   </a>
                 )}
                 {showDateAdded && c.dateAdded && <span className="tabular-nums">Added to PubMed {c.dateAdded}</span>}
+                {c.stage && (
+                  <span className="flex items-center gap-2">
+                    <HoverTooltip text={stageDefinition(c.stage)} wide>
+                      <span tabIndex={0}>
+                        <StageBadge stage={c.stage} />
+                      </span>
+                    </HoverTooltip>
+                    {c.stageConfidence && (
+                      <span data-testid="article-stage-confidence">
+                        {c.stageConfidence.charAt(0).toUpperCase() + c.stageConfidence.slice(1)} confidence
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
             </li>
           ))}

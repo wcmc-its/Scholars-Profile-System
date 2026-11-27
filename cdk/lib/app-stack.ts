@@ -2112,6 +2112,14 @@ export class AppStack extends Stack {
         // import loaded. On in both envs (owner decision, 2026-11-26).
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         PATENT_CITATIONS_REPORT: "on",
+        // REPORT_TRANSLATIONAL_PORTFOLIO -- report 26 on /edit/reports and
+        // GET /api/edit/reports/translational-portfolio (its Excel download),
+        // read via isTranslationalPortfolioReportEnabled() (=== "on", AND
+        // SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET on); off = absent from the
+        // index and both 404. Read-only, publications only (Phase 1). Staging
+        // on; prod off until the staging review.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        REPORT_TRANSLATIONAL_PORTFOLIO: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
