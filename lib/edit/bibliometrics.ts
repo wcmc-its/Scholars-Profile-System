@@ -213,7 +213,8 @@ const BODY_PHRASE: Readonly<Record<string, string>> = {
 };
 
 function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
-  const names = (p.authorsString ?? "").split(", ").filter(Boolean);
+  // `authorsString` wraps WCM authors as "((Name))"; the markers never show.
+  const names = (p.authorsString ?? "").replace(/\(\(|\)\)/g, "").split(", ").filter(Boolean);
   const rollup = toPolicyRollup(p);
   const locator = formatVolIssuePages(p.volume, p.issue, p.pages);
   return {

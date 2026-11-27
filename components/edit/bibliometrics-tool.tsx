@@ -11,6 +11,7 @@ import * as React from "react";
 import { Download, Landmark, Lock } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
+import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { PolicyCitationGroups } from "@/components/publication/publication-modal";
@@ -393,8 +394,10 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
             {p.etAl ? ", et al. " : p.authors.length > 0 ? ". " : ""}
             {p.journal ? <PubJournal value={p.journal} /> : null}
             {p.journal ? ". " : ""}
-            {p.dated ? `${p.dated}. ` : ""}
+            {p.dated ? `${p.dated}.` : ""}
+            <br />
             {id.label} {id.value}
+            {id.label === "PMID" ? <CopyPmid pmid={p.pmid} /> : null}
             {p.doi ? (
               <>
                 {" · "}
@@ -423,7 +426,7 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
                 </span>
               ) : null}
               {plain.length > 0 ? (
-                <span className="text-apollo-ink-2 text-[13px]">· {plain.join(" · ")}</span>
+                <span className="text-apollo-ink-2 text-[13px]">{plain.join(" · ")}</span>
               ) : null}
               {p.citing.length > 0 ? (
                 <button
