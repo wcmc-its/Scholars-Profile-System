@@ -116,10 +116,10 @@ describe("params", () => {
     expect(p).toMatchObject({ units: ["dept:N1280"], from: 2016, to: 2025, area: "cancer_genomics", stages: ["T1", "T2"], cwid: "abc1234", by: "area", view: "scholars", page: 3 });
     expect(parsePortfolioParams(new URLSearchParams(portfolioQueryString(p)))).toEqual(p);
   });
-  it("falls back on bad values and defaults to the last 10 complete years", () => {
+  it("falls back on bad values and defaults to 2020 through the last complete year", () => {
     const p = parsePortfolioParams(new URLSearchParams("stage=NA&stage=T9&by=nope&view=x&area=<x>&cwid=a;b&unit=inst:X"));
     const y = new Date().getUTCFullYear();
-    expect(p).toMatchObject({ stages: [], by: "dept", view: "activities", area: null, cwid: null, units: [], from: y - 10, to: y - 1 });
+    expect(p).toMatchObject({ stages: [], by: "dept", view: "activities", area: null, cwid: null, units: [], from: 2020, to: y - 1 });
   });
 });
 
