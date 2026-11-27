@@ -10,7 +10,7 @@ import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-la
 import { readPolicyCitations } from "@/lib/api/publication-detail";
 import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
-import { PATENT_DATA_END } from "@/lib/edit/patent-citations-report";
+import { loadPatentDataEnd } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   buildBibliometricsReport,
@@ -152,7 +152,7 @@ export async function loadBibliometricsReport(
        WHERE l.pmid IN (${Prisma.join(patentPmids)})
          AND d.level = 'patent'`;
     report.patents.inventions = Number(row?.n ?? 0);
-    report.patents.dataEnd = PATENT_DATA_END.label;
+    report.patents.dataEnd = await loadPatentDataEnd();
   }
 
   // The listed papers' WCM authors, for the author chips. Unranked rows

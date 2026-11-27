@@ -232,7 +232,7 @@ const GROUPS: { id: string; label: string; rows: Row[] }[] = [
         ),
       },
       { field: "Trials that cite a paper", detail: "In a paper's details", source: "ClinicalTrials.gov", cadence: "Weekly", tag: "At the source", how: "The study team lists the paper as a reference in the registration. A trial one of the paper's WCM authors is an investigator on is not counted." },
-      { field: "Patents that cite a paper", detail: "In a paper's details", source: "Reliance on Science; patent details from USPTO PatentsView", cadence: "Occasional", tag: "Not editable", how: "Loaded from each dataset release. The current release covers patents through 31 December 2025." },
+      { field: "Patents that cite a paper", detail: "In a paper's details", source: "Reliance on Science; patent details from USPTO PatentsView", cadence: "Weekly", tag: "Not editable", how: "Rebuilt every week from the latest dataset release. Report 25 and the Bibliometrics tab say how far the patent data runs." },
       { field: "Retractions", source: "PubMed", cadence: "Nightly", tag: "Not editable", how: "Retracted papers are hidden everywhere automatically." },
       { field: "Selected highlights", detail: "Up to three featured papers", source: "Scholars, from Impact scores", cadence: "Nightly", tag: "Yours to edit", how: "Pick your own on your edit page, or keep the automatic set." },
       { field: "Datasets", detail: "Off unless you turn it on", source: "Europe PMC and PubMed Central full text, PubMed and DataCite, via the ReCiter database", cadence: "Occasional", tag: "Yours to edit", how: "Turn the section on, then hide or mark “Not mine.”" },

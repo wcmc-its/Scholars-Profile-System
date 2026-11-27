@@ -4277,6 +4277,9 @@ model EtlRun {
 model EtlState {
   id                 Int       @id @default(1)
   lastTopicRebuildAt DateTime? @map("last_topic_rebuild_at")
+  /// The date the loaded PatentsView tables run to, set by etl:patent-citations:refresh.
+  /// Report 25, the Bibliometrics patents card and both downloads say "patent data through" it.
+  patentDataTo       DateTime? @map("patent_data_to") @db.Date
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
   @@map("etl_state")

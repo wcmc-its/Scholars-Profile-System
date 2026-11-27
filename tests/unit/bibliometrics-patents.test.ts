@@ -55,7 +55,6 @@ import {
   loadScholarPatentCitations,
   patentReportHref,
 } from "@/lib/edit/bibliometrics-patents";
-import { PATENT_DATA_END } from "@/lib/edit/patent-citations-report";
 import { Prisma } from "@/lib/generated/prisma/client";
 
 const CWID = "zzz9001";
@@ -165,7 +164,7 @@ describe("the tab load", () => {
     expect(report!.patents).toEqual({
       papers: 2,
       inventions: 2,
-      dataEnd: PATENT_DATA_END.label,
+      dataEnd: "31 December 2025", // nothing stored: the fallback
       reportHref: null,
     });
     const patentQueries = calls().filter((c) => c.text.includes("'patent'"));
@@ -310,7 +309,7 @@ describe("buildScholarPatentWorkbook", () => {
     const criteria = new Map(rows(wb.getWorksheet("Criteria")!).map((r) => [r[0], r[1]] as [string, string]));
     expect(criteria.get("Scholar")).toBe("Jordan Vale");
     expect(criteria.get("Generated")).toBe("2026-11-26T15:00:00.000Z");
-    expect(criteria.get("Reading the numbers")).toContain(`The patent data ends at ${PATENT_DATA_END.label}.`);
+    expect(criteria.get("Reading the numbers")).toContain("The patent data ends at 31 December 2025.");
     expect(criteria.get("Sources")).toContain("Reliance on Science");
     expect(criteria.get("The scholar's own patents")).toBe(OWN_PATENTS_NOTE);
     // The paper's other authors are in the fixture; none of them is in the file.

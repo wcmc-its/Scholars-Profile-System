@@ -44,3 +44,19 @@ export async function isTopicRebuildWindowOpen(now: Date = new Date()): Promise<
   if (!row?.lastTopicRebuildAt) return false;
   return now.getTime() - row.lastTopicRebuildAt.getTime() < TOPIC_REBUILD_WINDOW_MS;
 }
+
+/** etl/patent-citations/refresh — the date the loaded patent tables run to ("YYYY-MM-DD"). */
+export async function setPatentDataTo(isoDate: string): Promise<void> {
+  const patentDataTo = new Date(`${isoDate}T00:00:00Z`);
+  await db.write.etlState.upsert({
+    where: { id: ETL_STATE_ID },
+    create: { id: ETL_STATE_ID, patentDataTo },
+    update: { patentDataTo },
+  });
+}
+
+/** The stored patent data end ("YYYY-MM-DD"), or null before the first refresh. */
+export async function getPatentDataTo(): Promise<string | null> {
+  const row = await db.read.etlState.findUnique({ where: { id: ETL_STATE_ID }, select: { patentDataTo: true } });
+  return row?.patentDataTo ? row.patentDataTo.toISOString().slice(0, 10) : null;
+}
