@@ -55,6 +55,7 @@ import {
 } from "@/lib/edit/policy-citations-report";
 import { addCriteriaSheet, addListSheet, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { getPatentDataTo } from "@/lib/etl-state";
 import { institutionDisplayName } from "@/lib/institutions";
 import { formatRoleCategory } from "@/lib/role-display";
 import { htmlToPlainText } from "@/lib/utils";
@@ -77,10 +78,20 @@ export const PATENT_LIST_CAP = 5000;
 export const PATENT_INVENTIONS_CAP = 20_000;
 /** Assignees offered in the rail. */
 const ASSIGNEE_OPTIONS = 50;
-/** Where the patent tables end.
- *  ponytail: a constant, true of the one release loaded so far (PatentsView,
- *  grants through 2025). The import storing its coverage end is the upgrade. */
-export const PATENT_DATA_END = { year: 2025, label: "31 December 2025" } as const;
+/** Where the patent tables end, as the Criteria sheets and the Bibliometrics
+ *  card print it ("31 December 2025"). */
+export const patentDataEndLabel = (isoDate: string) =>
+  new Date(`${isoDate}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+/** The 2026-11-26 load's end, until the weekly refresh stores one. */
+export const PATENT_DATA_END_FALLBACK = "2025-12-31";
+/** The loaded patent data's end, as a label; the fallback when none is stored or it cannot be read. */
+export async function loadPatentDataEnd(): Promise<string> {
+  try {
+    return patentDataEndLabel((await getPatentDataTo()) ?? PATENT_DATA_END_FALLBACK);
+  } catch {
+    return patentDataEndLabel(PATENT_DATA_END_FALLBACK);
+  }
+}
 
 export const WHERE_LABEL = {
   any: "Front page or text",
@@ -875,6 +886,7 @@ export function describePatentCitationCriteria(
   p: PatentCitationParams,
   generatedAt: Date,
   labels: ReadonlyMap<string, string> = new Map(),
+  dataEnd: string = patentDataEndLabel(PATENT_DATA_END_FALLBACK),
 ): [string, string][] {
   const search = { publications: "Search (publications)", inventions: "Search (inventions)", people: "Search (people)" };
   return [
@@ -891,7 +903,7 @@ export function describePatentCitationCriteria(
       "Counting rule",
       "Counts are inventions: related patents (one patent family) count once, and an invention is listed by its earliest granted patent. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.",
     ],
-    ["Reading the numbers", `${PATENT_LAG_NOTICE} The patent data ends at ${PATENT_DATA_END.label}.`],
+    ["Reading the numbers", `${PATENT_LAG_NOTICE} The patent data ends at ${dataEnd}.`],
     ["Sources", PATENT_SOURCES.replace(/^Sources: /, "")],
   ];
 }
@@ -976,7 +988,7 @@ export async function buildPatentCitationWorkbook(
   }
 
   addCriteriaSheet(wb, [
-    ...describePatentCitationCriteria(p, generatedAt, labels),
+    ...describePatentCitationCriteria(p, generatedAt, labels, await loadPatentDataEnd()),
     ["Publications sheet", sheetNote(data.pubs.length, data.pubTotal, "publications", PATENT_LIST_CAP)],
     [
       "Inventions sheet",

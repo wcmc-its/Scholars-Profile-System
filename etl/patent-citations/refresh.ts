@@ -12,7 +12,8 @@
  *      downloaded once, checked against the listed MD5 or size, and stored.
  *   3. Extract (extract.ts). OpenAlex answers are kept in S3 (`…/state/`), so
  *      only new papers are asked.
- *   4. Load (load.ts) with pruning: links the new extract no longer carries
+ *   4. Load (load.ts) with pruning, then store the patent tables' "data to"
+ *      date (etl_state.patent_data_to) for the report and card to print: links the new extract no longer carries
  *      are deleted, behind the drop guards. The extract is kept in S3
  *      (`…/extracts/`), so `etl:patent-citations:import -- --key …` can reload it.
  *
@@ -35,6 +36,7 @@ import { gunzipSync } from "node:zlib";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { db } from "../../lib/db";
 import { withEtlRun } from "@/lib/etl-run";
+import { setPatentDataTo } from "@/lib/etl-state";
 import { PATENTSVIEW_TABLES, buildExtract } from "./extract";
 import { loadExtract, readExtract } from "./load";
 
@@ -207,6 +209,7 @@ async function main(): Promise<number> {
     const extract = readExtract(gunzipSync(readFileSync(out)).toString("utf8").split("\n"));
     const summary = await loadExtract(extract, { dryRun, prune: true });
     if (!dryRun) {
+      await setPatentDataTo(m.metadataDataTo);
       const tmp = join(work, "manifest.json");
       writeFileSync(tmp, JSON.stringify({ ...m, loadedAt: new Date().toISOString() }, null, 2));
       await s3Put(`${PREFIX}/manifest.json`, tmp);
