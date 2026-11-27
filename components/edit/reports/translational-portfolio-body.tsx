@@ -37,7 +37,7 @@ import { SELECT } from "@/components/edit/reports/citation-report-parts";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { RailChecklist, type RailChecklistOption } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout, ReportRail, type FilterChip } from "@/components/edit/reports/report-ui";
-import { PortfolioDownloadMenu } from "@/components/edit/reports/translational-portfolio-client";
+import { PortfolioDownloadMenu, ScrollToHash } from "@/components/edit/reports/translational-portfolio-client";
 import { PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Button } from "@/components/ui/button";
@@ -466,10 +466,13 @@ export async function renderTranslationalPortfolioReport({
     </ReportRail>
   );
 
-  // Stage mix over time: a row per year, then all of WCM for comparison.
+  // Stage mix over time: a row per year, then all of WCM for comparison on a
+  // unit view. The baseline keeps the scholar filter, so with a scholar picked
+  // it is that scholar outside the unit, not all of WCM: show all years instead.
+  const wcmBaseline = p.units.length > 0 && !p.cwid;
   const mixRows: { label: string; counts: StageCounts; base?: boolean }[] = [
     ...data.byYear.map((r) => ({ label: String(r.year), counts: r.counts })),
-    { label: p.units.length > 0 ? "All of WCM" : "All years", counts: data.baseline, base: true },
+    wcmBaseline ? { label: "All of WCM", counts: data.baseline, base: true } : { label: "All years", counts: data.all, base: true },
   ];
   const mixAria = (c: StageCounts) => {
     if (stagedTotal(c) === 0) return "No publications with a stage";
@@ -522,6 +525,7 @@ export async function renderTranslationalPortfolioReport({
     ),
     main: (
       <div className="[print-color-adjust:exact]" data-testid="portfolio-report">
+        <ScrollToHash />
         <ReportLayout rail={rail}>
           <div className="flex min-w-0 flex-col gap-6">
             <div className="lg:hidden print:hidden">
@@ -570,6 +574,7 @@ export async function renderTranslationalPortfolioReport({
                 }
                 sub={`${pct(stageAssignedShare(data.all))} have a stage`}
               />
+              {data.areaCoverage.sized > 0 && (
               <Tile
                 label="Areas spanning T0 to T3–4"
                 value={
@@ -587,7 +592,8 @@ export async function renderTranslationalPortfolioReport({
                   )
                 }
               />
-              {reach && (
+              )}
+              {reach && reach.total > 0 && (
                 <Tile
                   label="T0 and T1 later cited by clinical studies"
                   value={
@@ -667,8 +673,8 @@ export async function renderTranslationalPortfolioReport({
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <div role="table" aria-label="Stage mix by year" className="flex min-w-[560px] flex-col gap-1.5" data-testid="portfolio-stage-rows">
-                  <div role="row" className={cn(EYEBROW, "grid grid-cols-[96px_minmax(0,1fr)_180px] gap-4")}>
+                <div role="table" aria-label="Stage mix by year" className="flex min-w-[400px] flex-col gap-1.5 sm:min-w-[560px]" data-testid="portfolio-stage-rows">
+                  <div role="row" className={cn(EYEBROW, "grid grid-cols-[48px_minmax(0,1fr)_112px] sm:grid-cols-[96px_minmax(0,1fr)_180px] gap-4")}>
                     <span role="columnheader">Year</span>
                     <span role="columnheader">Share of staged publications</span>
                     <span role="columnheader">Stage assigned</span>
@@ -676,7 +682,7 @@ export async function renderTranslationalPortfolioReport({
                   {mixRows.map((r) => {
                     const cov = stageAssignedShare(r.counts);
                     return (
-                      <div key={r.label} role="row" className={cn("grid grid-cols-[96px_minmax(0,1fr)_180px] items-center gap-4", r.base && "mt-2.5")}>
+                      <div key={r.label} role="row" className={cn("grid grid-cols-[48px_minmax(0,1fr)_112px] sm:grid-cols-[96px_minmax(0,1fr)_180px] items-center gap-4", r.base && "mt-2.5")}>
                         <span role="rowheader" className={cn("text-[13px] tabular-nums", r.base && "font-medium")}>
                           {r.label}
                         </span>
@@ -701,7 +707,7 @@ export async function renderTranslationalPortfolioReport({
               <p className="text-muted-foreground text-xs">
                 Select a stage in the key to focus on it: the chart and table fade the other stages, and the lists below
                 filter to it.{" "}
-                {p.units.length > 0
+                {wcmBaseline
                   ? "The bottom row is all of Weill Cornell Medicine for the same years, for comparison."
                   : "The bottom row is every year together."}
               </p>
