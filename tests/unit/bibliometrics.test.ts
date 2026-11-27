@@ -225,13 +225,13 @@ describe("patents citing the work", () => {
     const hidden = pub({ patentFamilyCount: 7 });
     const r = build([article, review, pub()], NO_FILTERS, [article, review, hidden]);
     // The loader fills the inventions, the cut-off and the link.
-    expect(r.patents).toEqual({ papers: 2, inventions: 0, dataEnd: null, reportHref: null });
+    expect(r.patents).toEqual({ papers: 2, inventions: 0, list: [], dataEnd: null, reportHref: null });
     expect(r.papers.rows.map((p) => p.patents)).toEqual([14, 0]);
   });
 
   it("words the line with its singulars, and has none when no patent cites the work", () => {
     const line = (papers: number, inventions: number) =>
-      patentsLine({ papers, inventions, dataEnd: null, reportHref: null });
+      patentsLine({ papers, inventions, list: [], dataEnd: null, reportHref: null });
     expect(line(12, 1030)).toBe("12 papers cited by 1,030 patented inventions");
     expect(line(1, 1)).toBe("1 paper cited by 1 patented invention");
     expect(line(0, 0)).toBeNull();

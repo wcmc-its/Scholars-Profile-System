@@ -8,14 +8,14 @@
 "use client";
 
 import * as React from "react";
-import { Download, Landmark, Lock } from "lucide-react";
+import { Download, FileText, Landmark, Lock } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { AuthorPills } from "@/components/edit/reports/author-pills";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
-import { PolicyCitationGroups } from "@/components/publication/publication-modal";
+import { InventionRow, PolicyCitationGroups, TrialPatentGroup } from "@/components/publication/publication-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { citationIdentifier } from "@/lib/citation";
@@ -388,6 +388,18 @@ function Report({
             {r.patents.dataEnd ? `, in patent data through ${r.patents.dataEnd}.` : "."}
           </p>
           <p className="text-apollo-ink-2 text-[13px]">{OWN_PATENTS_NOTE}</p>
+          {r.patents.list.length > 0 ? (
+            <TrialPatentGroup
+              icon={<FileText className="size-[15px]" strokeWidth={2} aria-hidden="true" />}
+              heading="Citing inventions"
+              count={plural(r.patents.inventions, "invention", "inventions")}
+              blurb="Inventions citing the most papers come first. Related patents for one invention are grouped. The download lists every invention and the papers each one cites."
+              items={r.patents.list}
+              total={r.patents.inventions}
+              nouns={["invention", "inventions"]}
+              row={(inv) => <InventionRow invention={inv} note={`cites ${plural(inv.papers, "paper", "papers")}`} />}
+            />
+          ) : null}
           <div className="flex flex-wrap items-center gap-4">
             <Button asChild variant="outline" className="min-h-11">
               <a
@@ -647,7 +659,7 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
               {plain.length > 0 ? (
                 <span className="text-apollo-ink-2 text-[13px]">{plain.join(" · ")}</span>
               ) : null}
-              {p.citing.length > 0 ? (
+              {p.citing.length > 0 || p.citingPatents ? (
                 <button
                   type="button"
                   aria-expanded={open}
@@ -671,6 +683,18 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
           <td colSpan={5} className="px-2.5 pb-4">
             <div className="flex flex-col gap-3">
               <PolicyCitationGroups docs={p.citing} reviewTotal={p.reviewTotal} />
+              {p.citingPatents ? (
+                <TrialPatentGroup
+                  icon={<FileText className="size-[15px]" strokeWidth={2} aria-hidden="true" />}
+                  heading="Patents that cite this paper"
+                  count={plural(p.citingPatents.total, "invention", "inventions")}
+                  blurb="US patents whose text or references cite this paper. Citing a paper does not mean its authors hold the patent. Related patents for one invention are grouped."
+                  items={p.citingPatents.items}
+                  total={p.citingPatents.total}
+                  nouns={["invention", "inventions"]}
+                  row={(inv) => <InventionRow invention={inv} />}
+                />
+              ) : null}
             </div>
           </td>
         </tr>

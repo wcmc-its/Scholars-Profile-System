@@ -10,6 +10,7 @@ import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-la
 import { readPolicyCitations } from "@/lib/api/publication-detail";
 import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
+import { shapeScholarInventions, shapeTrialPatentCitations } from "@/lib/citations/trials-patents";
 import { loadPatentDataEnd } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
@@ -141,18 +142,33 @@ export async function loadBibliometricsReport(
     }
   }
 
-  // Distinct inventions across the scholar's cited papers: one patent family
-  // citing two of them counts once. The papers come off the rollup column.
+  // The inventions citing the scholar's papers, listed on the card and under
+  // each listed paper: one patent family citing two papers counts once. The
+  // papers come off the rollup column.
+  // ponytail: every patent link of the scholar's cited papers is read (the
+  // modal reads one paper's, about 2,700 rows at most). Group in SQL if a
+  // heavily cited scholar's tab ever shows it in latency.
   const patentPmids = visible.filter((p) => p.patentFamilyCount > 0).map((p) => p.pmid);
   if (patentPmids.length > 0) {
-    const [row] = await db.read.$queryRaw<{ n: bigint | number }[]>`
-      SELECT COUNT(DISTINCT d.dedup_key) AS n
-        FROM publication_citing_document l
-        JOIN citing_document d ON d.id = l.citing_document_id
-       WHERE l.pmid IN (${Prisma.join(patentPmids)})
-         AND d.level = 'patent'`;
-    report.patents.inventions = Number(row?.n ?? 0);
+    const links = await db.read.publicationCitingDocument.findMany({
+      where: { pmid: { in: patentPmids }, citingDocument: { level: "patent" } },
+      select: {
+        pmid: true,
+        evidence: true,
+        citingDocument: {
+          select: { id: true, level: true, externalId: true, title: true, year: true, url: true, dedupKey: true, details: true },
+        },
+      },
+    });
+    const all = shapeScholarInventions(links);
+    report.patents.inventions = all.total;
+    report.patents.list = all.items;
     report.patents.dataEnd = await loadPatentDataEnd();
+    for (const p of report.papers.rows) {
+      if (p.patents === 0) continue;
+      const mine = shapeTrialPatentCitations(links.filter((l) => l.pmid === p.pmid), { trials: false, patents: true });
+      p.citingPatents = mine?.inventions ?? null;
+    }
   }
 
   // The listed papers' WCM authors, for the author chips. Unranked rows

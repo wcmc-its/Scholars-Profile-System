@@ -1391,7 +1391,7 @@ export function PolicyCitationGroups({
 const TRIAL_PATENT_INITIAL_VISIBLE = 5;
 
 /** One group card: heading with its count, a one-line explanation, the first five rows, then "Show all". */
-function TrialPatentGroup<T extends { id: number }>({
+export function TrialPatentGroup<T extends { id: number }>({
   icon,
   heading,
   count,
@@ -1485,7 +1485,8 @@ function TrialRow({ trial: t }: { trial: CitingTrial }) {
   );
 }
 
-function InventionRow({ invention: p }: { invention: CitingInvention }) {
+/** One invention: title, then holder, year, number and its other patents; `note` adds a part. */
+export function InventionRow({ invention: p, note }: { invention: CitingInvention; note?: string }) {
   return (
     <>
       <div>
@@ -1496,6 +1497,7 @@ function InventionRow({ invention: p }: { invention: CitingInvention }) {
         p.year !== null && `${p.granted ? "granted" : "application published"} ${p.year}`,
         p.number,
         p.related > 0 && `and ${plural(p.related, "related patent", "related patents")}`,
+        note ?? null,
       ])}
     </>
   );
