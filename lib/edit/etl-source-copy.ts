@@ -369,6 +369,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Clinical trials, clinical studies and guidelines that cite our publications.",
     origin: "external", // ReCiterDB clinical citation links (iCite) + PubMed
   },
+  CitationLinks: {
+    label: "Citation Links",
+    description: "Which of our publications cite which of our other publications.",
+    origin: "external", // ReCiterDB citation links (iCite)
+  },
   PubMedSystematicReviews: {
     label: "Systematic Review Flags",
     description: "Records which of our publications PubMed classifies as systematic reviews.",

@@ -1542,6 +1542,8 @@ export class EtlStack extends Stack {
       "etl:policy-citations",
       // Reads reciterdb analysis_nih_cites_clin (the clinical citation links).
       "etl:clinical-citations",
+      // Reads reciterdb analysis_nih_cites (links between two Scholars papers).
+      "etl:citation-links",
     ]);
     // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
     // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
@@ -2517,6 +2519,11 @@ export class EtlStack extends Stack {
       // not stored again as clinical. `continue` — writes only add rows, so a miss just
       // delays new citations a week.
       { id: "ClinicalCitationsWeekly", npmScript: "etl:clinical-citations", external: true, tier: "continue" },
+      // Citation links (etl/citation-links) — which Scholars publications cite which,
+      // into publication_citation. Reads analysis_nih_cites from reciterdb, so
+      // external:true (the Reciter secret); no other egress. `continue` — writes only
+      // add rows, so a miss just delays new links a week.
+      { id: "CitationLinksWeekly", npmScript: "etl:citation-links", external: true, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
@@ -2848,7 +2855,8 @@ export class EtlStack extends Stack {
         // before 2026-10-25). PolicyCitationsWeekly adds about 2h on top: its
         // Bookshelf pass covers every paper each run (BOOKSHELF_BUDGET_MIN).
         // ClinicalCitationsWeekly adds at most its 30-minute PubMed budget
-        // (FETCH_BUDGET_MIN) plus the link read.
+        // (FETCH_BUDGET_MIN) plus the link read. CitationLinksWeekly is one more
+        // read of the same links plus inserts that skip what is stored.
         maxDuration: Duration.hours(8),
         stateMachine: this.weeklyStateMachine,
       },

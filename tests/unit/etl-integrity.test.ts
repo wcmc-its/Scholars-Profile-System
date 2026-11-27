@@ -188,6 +188,14 @@ describe("findVolumeRegressions — change-count sources (#2200)", () => {
     expect(out).toHaveLength(0);
   });
 
+  it("exempts CitationLinks, which counts only links it added", () => {
+    const out = findVolumeRegressions(
+      [{ source: "CitationLinks", latest: 120, previous: 1_500_000, latestAt: hoursAgo(1) }],
+      { now: NOW },
+    );
+    expect(out).toHaveLength(0);
+  });
+
   it("still grades Identity-orcid, which records the scan size", () => {
     const out = findVolumeRegressions(
       [{ source: "Identity-orcid", latest: 476, previous: 5251, latestAt: hoursAgo(1) }],

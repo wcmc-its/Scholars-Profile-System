@@ -157,6 +157,9 @@ export function staleSources(
 // ClinicalCitations (etl/clinical-citations) is the same: it only adds, and returns
 // citation links ADDED, about 976,000 on the first load and a week's new ones after.
 // Its own assertSourceVolume and an empty-read check grade the links it reads.
+// CitationLinks (etl/citation-links) is the same: it only adds, and returns links
+// ADDED, roughly 1 to 2 million on the first load and a week's new ones after.
+// Its own assertSourceVolume and an empty-read check grade the links it reads.
 export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "News",
   "NewsClips",
@@ -169,6 +172,7 @@ export const CHANGE_COUNT_SOURCES: ReadonlySet<string> = new Set([
   "SearchReconcile",
   "PolicyCitations",
   "ClinicalCitations",
+  "CitationLinks",
 ]);
 
 /**
