@@ -18,6 +18,7 @@ import {
 import { citationIdentifier } from "@/lib/citation";
 import { policyDocCitation } from "@/lib/citations/policy-rollup";
 import { buildPubmedRuns } from "@/lib/pubmed-runs";
+import { NO_STAGE_LABEL, STAGE_BUCKETS, translationalStageDisplay } from "@/lib/translational-stage";
 import {
   NO_SUMMARY_NOTE,
   POLICY_LEVEL_LABELS,
@@ -102,6 +103,26 @@ function paperParagraphs(p: BibliometricsPaper, index: number): Paragraph[] {
   return out;
 }
 
+/** The tab's stage table, without its paper lists. */
+function stageBlocks(s: NonNullable<BibliometricsReport["stages"]>, filters: string | null): Array<Paragraph | Table> {
+  const total = STAGE_BUCKETS.reduce((n, k) => n + s.counts[k], 0);
+  return [
+    heading("Translational stage"),
+    para(`Research articles${filters ? `, filters: ${filters}` : ""}.`),
+    table(
+      ["Stage", "Papers", "Share"],
+      [
+        ...STAGE_BUCKETS.map((k) => [
+          k === "none" ? NO_STAGE_LABEL : translationalStageDisplay(k),
+          String(s.counts[k]),
+          `${s.shares[k]}%`,
+        ]),
+        ["All research articles", String(total), total > 0 ? "100%" : "0%"],
+      ],
+    ),
+  ];
+}
+
 export async function buildBibliometricsDocx(r: BibliometricsReport): Promise<Buffer> {
   const asOf = new Date(`${r.asOf}T00:00:00Z`).toLocaleDateString("en-US", {
     year: "numeric",
@@ -144,6 +165,8 @@ export async function buildBibliometricsDocx(r: BibliometricsReport): Promise<Bu
     ...(filters ? [para(`Filters: ${filters}.`)] : []),
     ...r.papers.rows.flatMap(paperParagraphs),
     para(r.papers.rows.length > 0 ? papersNote(r) : "No research articles match."),
+
+    ...(r.stages ? stageBlocks(r.stages, filters) : []),
 
     heading("Guideline and policy citations"),
     table(

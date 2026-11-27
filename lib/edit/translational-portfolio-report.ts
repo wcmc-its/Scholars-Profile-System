@@ -60,9 +60,16 @@ import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xls
 import { Prisma } from "@/lib/generated/prisma/client";
 import { formatRoleCategory } from "@/lib/role-display";
 import {
+  countsIn,
+  countsTotal,
+  emptyCounts,
+  exactShares,
   isTranslationalStage,
+  STAGE_BUCKETS,
+  STAGE_RULE,
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
+  type StageCounts,
   type TranslationalStage,
 } from "@/lib/translational-stage";
 
@@ -168,41 +175,19 @@ export function stagesLabel(stages: readonly TranslationalStage[]): string {
 // Counts and shares (pure).
 // ---------------------------------------------------------------------------
 
-export type StageBucket = TranslationalStage | "none";
-export const STAGE_BUCKETS: readonly StageBucket[] = [...TRANSLATIONAL_STAGES, "none"];
-export type StageCounts = Record<StageBucket, number>;
-
-export const emptyCounts = (): StageCounts => ({ T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 0 });
-export const countsTotal = (c: StageCounts) => STAGE_BUCKETS.reduce((s, k) => s + c[k], 0);
-export const countsIn = (c: StageCounts, stages: readonly TranslationalStage[]) =>
-  stages.reduce((s, k) => s + c[k], 0);
-export const stagedTotal = (c: StageCounts) => countsIn(c, TRANSLATIONAL_STAGES);
-
-/** Exact shares (0–100) per bucket; all zero for an empty set. */
-export function exactShares(c: StageCounts): StageCounts {
-  const t = countsTotal(c);
-  const out = emptyCounts();
-  if (t > 0) for (const k of STAGE_BUCKETS) out[k] = (c[k] / t) * 100;
-  return out;
-}
-
-/** Whole-percent shares that add up to exactly 100 (largest remainder), so
- *  every row, column and chart the page draws sums to 100% with No stage. All
- *  zero for an empty set. */
-export function roundedShares(c: StageCounts): StageCounts {
-  const ex = exactShares(c);
-  const out = emptyCounts();
-  if (countsTotal(c) === 0) return out;
-  let left = 100;
-  for (const k of STAGE_BUCKETS) {
-    out[k] = Math.floor(ex[k]);
-    left -= out[k];
-  }
-  const order = [...STAGE_BUCKETS].sort((a, b) => ex[b] - Math.floor(ex[b]) - (ex[a] - Math.floor(ex[a])));
-  for (let i = 0; i < left; i++) out[order[i]] += 1;
-  return out;
-}
-
+// Moved to `@/lib/translational-stage` (client-safe); re-exported for this report's callers.
+export {
+  countsIn,
+  countsTotal,
+  emptyCounts,
+  exactShares,
+  roundedShares,
+  STAGE_BUCKETS,
+  stagedTotal,
+  STAGE_RULE,
+  type StageBucket,
+  type StageCounts,
+} from "@/lib/translational-stage";
 /** The T stages an area is thin at: exact share under `GAP_SHARE`, for an
  *  area of at least `MIN_AREA_SIZE` publications (else none). */
 export function gapStages(c: StageCounts): TranslationalStage[] {
@@ -650,8 +635,6 @@ export function activityListScope(
 export const COUNTING_RULE =
   "Each publication counts once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; department, division (including hand-added division members) and center membership are the scholar's current values, the rule report 8 uses. A research area is a publication's ReciterAI area score of 0.3 or more, as on the research area pages.";
 
-export const STAGE_RULE =
-  "ReCiterAI assigns a translational stage from the abstract or summary. A stage counts only when the model was not unsure; low-confidence records and those outside the spectrum are under No stage, so every row adds up to 100%.";
 
 export const SCHOLAR_RULE = `The Scholars list counts publications where the scholar is first or senior author and lists only scholars with at least ${MIN_SCHOLAR_ACTIVITIES}, ordered by count.`;
 

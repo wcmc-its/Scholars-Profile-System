@@ -26,6 +26,8 @@ import { isBibliometricsEnabled, parseBibliometricsFilters } from "@/lib/edit/bi
 import { buildBibliometricsDocx } from "@/lib/edit/bibliometrics-docx";
 import { loadBibliometricsReport } from "@/lib/edit/bibliometrics-loader";
 import { patentReportHref } from "@/lib/edit/bibliometrics-patents";
+import { reportMetaFor } from "@/lib/edit/report-meta";
+import { canViewTranslationalPortfolioReport } from "@/lib/edit/translational-portfolio-report";
 import { loadScholarReach } from "@/lib/edit/downstream-reach-entry";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -74,6 +76,10 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (params.get("format") !== "docx") {
       // The link to report 25, only for a viewer who may open it.
       if (report.patents.papers > 0) report.patents.reportHref = await patentReportHref(session, targetCwid);
+      // The link to report 26's one-scholar view, likewise.
+      if (report.stages && (await canViewTranslationalPortfolioReport(session))) {
+        report.stages.portfolioHref = `/edit/reports/${(await reportMetaFor("26")).slug}?cwid=${encodeURIComponent(targetCwid)}`;
+      }
       return editOk({ report });
     }
 

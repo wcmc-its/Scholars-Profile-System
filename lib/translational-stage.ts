@@ -97,3 +97,49 @@ export function translationalStageDisplay(v: string): string {
 export function translationalStageLabel(v: string): string {
   return isTranslationalStage(v) ? TRANSLATIONAL_STAGE_LABELS[v] : v;
 }
+
+// Counts and shares by stage, with "none" for No stage (pure; reports 26 and
+// the per-scholar Bibliometrics report share them).
+
+export type StageBucket = TranslationalStage | "none";
+export const STAGE_BUCKETS: readonly StageBucket[] = [...TRANSLATIONAL_STAGES, "none"];
+export type StageCounts = Record<StageBucket, number>;
+
+export const emptyCounts = (): StageCounts => ({ T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 0 });
+export const countsTotal = (c: StageCounts) => STAGE_BUCKETS.reduce((s, k) => s + c[k], 0);
+export const countsIn = (c: StageCounts, stages: readonly TranslationalStage[]) =>
+  stages.reduce((s, k) => s + c[k], 0);
+export const stagedTotal = (c: StageCounts) => countsIn(c, TRANSLATIONAL_STAGES);
+
+/** Exact shares (0–100) per bucket; all zero for an empty set. */
+export function exactShares(c: StageCounts): StageCounts {
+  const t = countsTotal(c);
+  const out = emptyCounts();
+  if (t > 0) for (const k of STAGE_BUCKETS) out[k] = (c[k] / t) * 100;
+  return out;
+}
+
+/** Whole-percent shares that add up to exactly 100 (largest remainder), so
+ *  every row, column and chart the page draws sums to 100% with No stage. All
+ *  zero for an empty set. */
+export function roundedShares(c: StageCounts): StageCounts {
+  const ex = exactShares(c);
+  const out = emptyCounts();
+  if (countsTotal(c) === 0) return out;
+  let left = 100;
+  for (const k of STAGE_BUCKETS) {
+    out[k] = Math.floor(ex[k]);
+    left -= out[k];
+  }
+  const order = [...STAGE_BUCKETS].sort((a, b) => ex[b] - Math.floor(ex[b]) - (ex[a] - Math.floor(ex[a])));
+  for (let i = 0; i < left; i++) out[order[i]] += 1;
+  return out;
+}
+
+/** How a stage is counted, in report 26's Download and the Bibliometrics
+ *  report's definitions. */
+export const STAGE_RULE =
+  "ReCiterAI assigns a translational stage from the abstract or summary. A stage counts only when the model was not unsure; low-confidence records and those outside the spectrum are under No stage, so every row adds up to 100%.";
+
+/** The label for a paper with no displayable stage. */
+export const NO_STAGE_LABEL = "No stage";

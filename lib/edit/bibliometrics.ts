@@ -9,6 +9,15 @@
 import type { PolicyCitingDoc } from "@/lib/api/publication-detail";
 import { formatVolIssuePages } from "@/lib/citation";
 import { toPolicyRollup } from "@/lib/citations/policy-rollup";
+import {
+  displayStage,
+  emptyCounts,
+  roundedShares,
+  STAGE_BUCKETS,
+  STAGE_RULE,
+  type StageBucket,
+  type StageCounts,
+} from "@/lib/translational-stage";
 import { htmlToPlainText } from "@/lib/utils";
 
 /** EDIT_BIBLIOMETRICS — gates the "Bibliometrics" Tools rail item and its route. */
@@ -71,6 +80,9 @@ export type BibliometricsPubRow = {
   reviewCount: number;
   /** Distinct inventions (patent families) citing the paper: the stored rollup. */
   patentFamilyCount: number;
+  /** Raw ReCiterAI stage and confidence; `displayStage` decides what counts. */
+  translationalStage?: string | null;
+  translationalStageConfidence?: string | null;
   /** The scholar's 1-based place in the author list. */
   position: number;
   isFirst: boolean;
@@ -132,6 +144,21 @@ export type BibliometricsPatents = {
   reportHref: string | null;
 };
 
+/** One paper in a stage's list. */
+export type BibliometricsStagePaper = { pmid: string; title: string; journal: string | null; year: number | null };
+
+/** The research articles matching the filters, by translational stage
+ *  (report 26's rule). Each bucket lists the papers it counts, newest first. */
+export type BibliometricsStages = {
+  counts: StageCounts;
+  /** Whole percents that add up to 100 (`roundedShares`). */
+  shares: StageCounts;
+  papers: Record<StageBucket, BibliometricsStagePaper[]>;
+  /** Report 26 for this scholar, filled by the route; null when the viewer may
+   *  not open that report. */
+  portfolioHref: string | null;
+};
+
 export type BibliometricsReport = {
   scholar: { cwid: string; name: string };
   /** ISO date the figures were calculated. */
@@ -157,6 +184,8 @@ export type BibliometricsReport = {
     byYear: Array<{ year: number; count: number }>;
   };
   papers: { rows: BibliometricsPaper[]; matching: number };
+  /** Null while stage data is off (`SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`). */
+  stages: BibliometricsStages | null;
   policy: BibliometricsPolicyLevel[];
   patents: BibliometricsPatents;
   definitions: Array<{ term: string | null; text: string }>;
@@ -339,6 +368,8 @@ export function buildBibliometricsReport(input: {
   all: readonly BibliometricsPubRow[];
   filters: BibliometricsFilters;
   now: Date;
+  /** `resolveSearchPubsTranslationalStageFacet()`, read by the loader. */
+  stagesEnabled?: boolean;
 }): BibliometricsReport {
   const { scholar, filters, now } = input;
   const articles = input.visible.filter((p) => p.publicationType === RESEARCH_ARTICLE);
@@ -422,6 +453,7 @@ export function buildBibliometricsReport(input: {
       rows: matching.slice(0, BIBLIOMETRICS_TOP_PAPERS).map((p) => toPaper(p, surname)),
       matching: matching.length,
     },
+    stages: input.stagesEnabled ? stagesOf(matching) : null,
     policy,
     patents: {
       papers: input.visible.filter((p) => p.patentFamilyCount > 0).length,
@@ -429,9 +461,32 @@ export function buildBibliometricsReport(input: {
       dataEnd: null,
       reportHref: null,
     },
-    definitions: DEFINITIONS,
+    definitions: input.stagesEnabled ? [...DEFINITIONS.slice(0, -1), STAGE_DEFINITION, DEFINITIONS.at(-1)!] : DEFINITIONS,
   };
 }
+
+const STAGE_DEFINITION = { term: "Translational stage", text: STAGE_RULE };
+
+function stagesOf(pubs: readonly BibliometricsPubRow[]): BibliometricsStages {
+  const counts = emptyCounts();
+  const papers = Object.fromEntries(STAGE_BUCKETS.map((k) => [k, []])) as unknown as BibliometricsStages["papers"];
+  const newest = [...pubs].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.pmid.localeCompare(a.pmid));
+  for (const p of newest) {
+    const k = displayStage(p.translationalStage, p.translationalStageConfidence) ?? "none";
+    counts[k]++;
+    papers[k].push({
+      pmid: p.pmid,
+      title: p.title,
+      journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
+      year: p.year,
+    });
+  }
+  return { counts, shares: roundedShares(counts), papers, portfolioHref: null };
+}
+
+/** What the stage section counts, under its heading. */
+export const STAGES_NOTE =
+  "Research articles matching the Authorship and year filters above. Select a count to list its papers.";
 
 /** "Senior", "First", "Co-author" */
 export const POSITION_LABEL: Record<BibliometricsPosition, string> = {
