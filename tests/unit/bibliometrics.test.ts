@@ -6,7 +6,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn() }));
+const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn(), reach: vi.fn() }));
 vi.mock("@/lib/edit/request", async () => {
   const { NextResponse } = await import("next/server");
   return {
@@ -21,6 +21,7 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/edit/bibliometrics-loader", () => ({ loadBibliometricsReport: h.load }));
 vi.mock("@/lib/edit/bibliometrics-docx", () => ({ buildBibliometricsDocx: h.docx }));
 vi.mock("@/lib/edit/bibliometrics-patents", () => ({ patentReportHref: h.patentHref }));
+vi.mock("@/lib/edit/downstream-reach-entry", () => ({ loadScholarReach: h.reach }));
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
 import { GET } from "@/app/api/edit/bibliometrics/route";
@@ -344,6 +345,7 @@ describe("GET /api/edit/bibliometrics", () => {
     }));
     h.patentHref.mockResolvedValue("/edit/reports/patent-citations?person=zzz9002");
     h.docx.mockResolvedValue(Buffer.from("docx"));
+    h.reach.mockResolvedValue(null);
   });
 
   it("404s before any session or database work unless the flag is exactly on", async () => {
@@ -404,5 +406,39 @@ describe("GET /api/edit/bibliometrics", () => {
   it("404s for a cwid with no scholar", async () => {
     h.load.mockResolvedValue(null);
     expect((await get()).status).toBe(404);
+  });
+
+  it("the report request answers exactly as before and never loads the Downstream reach block", async () => {
+    expect(await (await get()).json()).toEqual({ ok: true, report: await h.load.mock.results[0]!.value });
+    await get("authorship=lead&from=2020");
+    await get("format=docx");
+    expect(h.reach).not.toHaveBeenCalled();
+  });
+
+  it("part=reach answers the block alone, for the target scholar and the viewer's session", async () => {
+    const reach = { lines: [{ type: "clinical", label: "Clinical studies", papers: 3, href: "/edit/reports/27?person=zzz9002" }], note: "n" };
+    h.reach.mockResolvedValue(reach);
+    expect(await (await get("cwid=zzz9002&part=reach")).json()).toEqual({ ok: true, reach });
+    expect(h.reach).toHaveBeenCalledWith("zzz9002", SESSION);
+    // The report is not loaded for it.
+    expect(h.load).not.toHaveBeenCalled();
+  });
+
+  it("part=reach sits behind the same flag, session and target check as the report", async () => {
+    h.authz.mockResolvedValue({ ok: false, reason: "not_self" });
+    expect((await get("cwid=zzz9002&part=reach")).status).toBe(403);
+    h.identity.mockResolvedValue(null);
+    expect((await get("part=reach")).status).toBe(401);
+    vi.stubEnv("EDIT_BIBLIOMETRICS", "off");
+    expect((await get("part=reach")).status).toBe(404);
+    expect(h.reach).not.toHaveBeenCalled();
+  });
+
+  it("part=reach answers null when there is no block, or it fails to load", async () => {
+    expect(await (await get("part=reach")).json()).toEqual({ ok: true, reach: null });
+    h.reach.mockRejectedValue(new Error("boom"));
+    const res = await get("part=reach");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, reach: null });
   });
 });

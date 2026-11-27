@@ -28,6 +28,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { loadArticleList, NO_STAGE_LABEL } from "@/lib/edit/article-count-report";
+import { loadPortfolioReachTile } from "@/lib/edit/downstream-reach-entry";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 import {
   activityListScope,
@@ -164,7 +165,7 @@ function Segmented({
   );
 }
 
-function Tile({ label, value, sub }: { label: string; value: string; sub: React.ReactNode }) {
+function Tile({ label, value, sub }: { label: string; value: React.ReactNode; sub: React.ReactNode }) {
   return (
     <div className="bg-apollo-surface border-apollo-border flex flex-col gap-1 rounded-xl border px-5 py-4">
       <span className="text-muted-foreground text-xs tracking-[0.05em] uppercase">{label}</span>
@@ -185,12 +186,22 @@ function WorkLine({ w }: { w: RecentWork }) {
 }
 
 export async function renderTranslationalPortfolioReport({
+  session,
   searchParams,
   basePath,
 }: AdminReportProps): Promise<ReportRender> {
   const p = parsePortfolioParams(toSearchParams(searchParams));
   const choices = await loadPortfolioChoices();
-  const data = await loadPortfolio(p, choices);
+  const [data, reach] = await Promise.all([
+    loadPortfolio(p, choices),
+    // A door into report 27, counted by that report: null unless it is on, the
+    // viewer can open it, and it would list exactly this page's scope. Its
+    // failure leaves the page as it was.
+    loadPortfolioReachTile(p, session).catch((err: unknown) => {
+      console.error("[translational-portfolio] downstream reach tile failed", err);
+      return null;
+    }),
+  ]);
   const articles =
     p.view === "activities" && !p.cwid && data.activities.pmids.length > 0
       ? await (async () => {
@@ -442,6 +453,33 @@ export async function renderTranslationalPortfolioReport({
             }
           />
           <Tile label={NO_STAGE_LABEL} value={pct(exactShares(data.all).none)} sub="Low confidence, or outside the spectrum" />
+          {reach && (
+            <Tile
+              label="T0 and T1 publications later cited by clinical studies"
+              value={
+                <>
+                  <Link
+                    href={reach.citedHref}
+                    aria-label={`${reach.cited.toLocaleString()} T0 and T1 publications cited by clinical studies, in the Downstream reach report`}
+                    className="text-apollo-slate hover:underline"
+                    data-testid="portfolio-reach-cited"
+                  >
+                    {reach.cited.toLocaleString()}
+                  </Link>{" "}
+                  of{" "}
+                  <Link
+                    href={reach.totalHref}
+                    aria-label={`${reach.total.toLocaleString()} T0 and T1 publications in scope, in the Downstream reach report`}
+                    className="text-apollo-slate hover:underline"
+                    data-testid="portfolio-reach-total"
+                  >
+                    {reach.total.toLocaleString()}
+                  </Link>
+                </>
+              }
+              sub="Of the T0 and T1 publications in these filters. Clinical studies by a publication's own authors are not counted."
+            />
+          )}
         </section>
 
         {/* Share by stage over time. */}

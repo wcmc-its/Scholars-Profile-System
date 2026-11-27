@@ -90,10 +90,19 @@ import {
   type ReachType,
   type ReachView,
 } from "@/lib/edit/downstream-reach-report";
+import {
+  loadPortfolioReachTile,
+  loadScholarReach,
+  portfolioReachParams,
+  REACH_REPORT_PATH,
+  SCHOLAR_REACH_NOTE,
+  scholarReachParams,
+} from "@/lib/edit/downstream-reach-entry";
 import { PATENT_SOURCES } from "@/lib/edit/patent-citations-report";
 import { POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
 import { REPORTS } from "@/lib/edit/report-registry";
+import { parsePortfolioParams } from "@/lib/edit/translational-portfolio-report";
 import { Prisma } from "@/lib/generated/prisma/client";
 
 const parse = (qs = "") => parseReachParams(new URLSearchParams(qs));
@@ -1319,5 +1328,210 @@ describe("the workbook", () => {
       fx.scholars = SCHOLARS;
       fx.pubs = PUBS;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two doors into the report (`downstream-reach-entry.ts`): the scholar's
+// Bibliometrics block and the portfolio report's tile. Same rule: each number
+// equals the row count of the list its link opens.
+// ---------------------------------------------------------------------------
+
+/** A door's link, as the query string the report page would parse. */
+const qsOf = (href: string) => {
+  expect(href.startsWith(`${REACH_REPORT_PATH}?`)).toBe(true);
+  return href.slice(REACH_REPORT_PATH.length + 1);
+};
+const N2_ADMIN = () => h.manageable.mockResolvedValue(units({ departments: [{ code: "N2" }] }));
+
+describe("the Bibliometrics tab's Downstream reach block", () => {
+  async function block(cwid: string, session = SUPER) {
+    const want = scholarReachParams(cwid);
+    if (want) cur = await resolveReachParams(want, session);
+    return loadScholarReach(cwid, session);
+  }
+
+  it("each line's number is the row count of the list its link opens", async () => {
+    const reach = (await block("aaa1001"))!;
+    expect(reach.lines.map((l) => [l.type, l.papers])).toEqual([
+      // 101, 102, 105 (No stage), 107 (2019) and 109 (middle author); 103 is cited only by the authors' own article.
+      ["clinical", 5],
+      // 101; 104's trial is the authors' own.
+      ["trial", 1],
+      ["policy", 2],
+      ["patent", 3],
+    ]);
+    for (const l of reach.lines) expect(await listLength(qsOf(l.href)), l.type).toBe(l.papers);
+    expect(reach.note).toBe(SCHOLAR_REACH_NOTE);
+  });
+
+  it("covers every stage, year and author position, and its links say so", async () => {
+    const reach = (await block("aaa1001"))!;
+    for (const l of reach.lines) {
+      const p = parse(qsOf(l.href));
+      expect(p).toMatchObject({
+        people: ["aaa1001"],
+        ctypes: [l.type],
+        stages: [],
+        positions: [],
+        units: [],
+        types: [],
+        from: null,
+        to: null,
+        basis: "cy",
+        includeOwn: false,
+        area: null,
+        view: "publications",
+        showAll: false,
+      });
+      expect(qsOf(l.href)).toContain("stage=any");
+    }
+    // The report's default (T0 and T1, 2020 on) would list fewer.
+    const clinical = reach.lines.find((l) => l.type === "clinical")!;
+    expect(await listLength("person=aaa1001&ctype=clinical&stage=T0&stage=T1&from=2020")).toBeLessThan(clinical.papers);
+  });
+
+  it("always has one line per citing type: a zero is a line, and a link to its empty list", async () => {
+    const reach = (await block("bbb1002"))!;
+    expect(reach.lines.map((l) => l.type)).toEqual([...REACH_TYPES]);
+    expect(reach.lines.find((l) => l.type === "patent")!.papers).toBe(0);
+    for (const l of reach.lines) expect(await listLength(qsOf(l.href)), l.type).toBe(l.papers);
+    // Their only authorship is unconfirmed: nothing cites their work, and the
+    // block says so in four zeros instead of going missing.
+    const none = (await block("ddd1004"))!;
+    expect(none.lines.map((l) => [l.type, l.papers])).toEqual(REACH_TYPES.map((t) => [t, 0]));
+    for (const l of none.lines) expect(await listLength(qsOf(l.href)), l.type).toBe(0);
+  });
+
+  it("is absent with the flag off, and reads nothing", async () => {
+    vi.stubEnv("DOWNSTREAM_REACH_REPORT", "off");
+    expect(await loadScholarReach("aaa1001", SUPER)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+    expect(h.manageable).not.toHaveBeenCalled();
+  });
+
+  it("is absent for a viewer who cannot open the report, and reads no publication", async () => {
+    // Administers nothing: report 27 is not theirs to open.
+    expect(await loadScholarReach("aaa1001", ADMIN)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("gives a unit administrator nothing for a scholar outside their units, and the report's own numbers inside them", async () => {
+    N2_ADMIN();
+    expect(await block("aaa1001", ADMIN)).toBeNull();
+    const reach = (await block("bbb1002", ADMIN))!;
+    expect(reach.lines.map((l) => l.type)).toEqual([...REACH_TYPES]);
+    for (const l of reach.lines) expect(await listLength(qsOf(l.href), ADMIN), l.type).toBe(l.papers);
+    // The scope rides in the query, never in the link.
+    expect(calls().every((c) => !readsPeopleOrPapers(c.text) || c.values.includes("N2"))).toBe(true);
+    for (const l of reach.lines) expect(l.href).not.toContain("N2");
+  });
+
+  it("shows nothing for an identifier the report's link cannot carry", async () => {
+    expect(scholarReachParams("x".repeat(17))).toBeNull();
+    expect(await loadScholarReach("x".repeat(17), SUPER)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("the portfolio report's Downstream reach tile", () => {
+  const portfolio = (qs: string) => parsePortfolioParams(new URLSearchParams(qs));
+  async function tile(qs: string, session = SUPER) {
+    const want = portfolioReachParams(portfolio(qs));
+    if (want) cur = await resolveReachParams(want, session);
+    return loadPortfolioReachTile(portfolio(qs), session);
+  }
+
+  it("N and M are the row counts of the lists their links open, for each filter state", async () => {
+    for (const qs of [
+      "from=2020&to=2024",
+      "from=2019&to=2022",
+      "unit=dept:N1&from=2020&to=2024",
+      "unit=dept:N2&from=2020&to=2024",
+      "area=area_a&from=2020&to=2024",
+      "cwid=aaa1001&from=2020&to=2024",
+      "unit=dept:N1&area=area_a&cwid=aaa1001&from=2021&to=2023",
+      // A stage pick on the page is not carried: the tile stays T0 and T1.
+      "stage=T2&from=2020&to=2024",
+    ]) {
+      const t = (await tile(qs))!;
+      expect(await listLength(qsOf(t.citedHref)), `N ${qs}`).toBe(t.cited);
+      expect(await listLength(qsOf(t.totalHref)), `M ${qs}`).toBe(t.total);
+      expect(t.cited).toBeLessThanOrEqual(t.total);
+    }
+    // 101, 102, 109, 113 and 114 of the nine T0 and T1 papers of 2020 to 2024 in scope
+    // (103 is cited only by its authors' own article; 104, 108 and 111 by no clinical study).
+    expect(await tile("from=2020&to=2024")).toMatchObject({ cited: 5, total: 9 });
+  });
+
+  it("the links carry the page's unit, years and area, stage T0 and T1, citing type clinical", async () => {
+    const t = (await tile("unit=dept:N1&area=area_a&from=2021&to=2023&stage=T2&by=area&view=scholars&page=3"))!;
+    const cited = parse(qsOf(t.citedHref));
+    expect(cited).toMatchObject({
+      units: ["dept:N1"],
+      area: "area_a",
+      from: 2021,
+      to: 2023,
+      basis: "cy",
+      stages: ["T0", "T1"],
+      ctypes: ["clinical"],
+      people: [],
+      positions: [],
+      types: [],
+      includeOwn: false,
+      view: "publications",
+      showAll: false,
+      page: 1,
+    });
+    // M: the same filters, every publication in scope.
+    expect(parse(qsOf(t.totalHref))).toEqual({ ...cited, showAll: true });
+  });
+
+  it("one scholar in scope is that scholar's first- or senior-author papers, as on the page", async () => {
+    const t = (await tile("cwid=aaa1001&from=2020&to=2024"))!;
+    expect(parse(qsOf(t.citedHref))).toMatchObject({ people: ["aaa1001"], positions: ["first", "last"] });
+    // 109 is a middle authorship: in the unfiltered tile, not in this one.
+    const all = (await tile("from=2020&to=2024"))!;
+    expect(t.total).toBeLessThan(all.total);
+  });
+
+  it("is absent with the flag off, and reads nothing", async () => {
+    vi.stubEnv("DOWNSTREAM_REACH_REPORT", "off");
+    expect(await loadPortfolioReachTile(portfolio("from=2020&to=2024"), SUPER)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+    expect(h.manageable).not.toHaveBeenCalled();
+  });
+
+  it("is absent for a viewer who cannot open the report", async () => {
+    expect(await loadPortfolioReachTile(portfolio("from=2020&to=2024"), ADMIN)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("is absent where report 27 would narrow the page for a unit administrator, and counts nothing", async () => {
+    N2_ADMIN();
+    // The page shows all of WCM, or another unit; report 27 would list only N2.
+    for (const qs of ["from=2020&to=2024", "unit=dept:N1&from=2020&to=2024", "unit=dept:N1&unit=dept:N2&from=2020&to=2024", "cwid=bbb1002&from=2020&to=2024"]) {
+      expect(await tile(qs, ADMIN), qs).toBeNull();
+    }
+    expect(calls().some((c) => readsPeopleOrPapers(c.text))).toBe(false);
+  });
+
+  it("is shown to a unit administrator for their own unit, with the report's numbers for them", async () => {
+    N2_ADMIN();
+    const t = (await tile("unit=dept:N2&from=2020&to=2024", ADMIN))!;
+    expect(await listLength(qsOf(t.citedHref), ADMIN)).toBe(t.cited);
+    expect(await listLength(qsOf(t.totalHref), ADMIN)).toBe(t.total);
+    // The same unit, seen by a superuser: the scope adds nothing to it.
+    h.manageable.mockResolvedValue(units());
+    expect(await tile("unit=dept:N2&from=2020&to=2024")).toEqual(t);
+  });
+
+  it("is absent for a filter the report's link cannot carry", async () => {
+    // The portfolio page accepts a longer identifier than report 27's `person`.
+    const long = `cwid=${"x".repeat(20)}&from=2020&to=2024`;
+    expect(portfolio(long).cwid).toHaveLength(20);
+    expect(portfolioReachParams(portfolio(long))).toBeNull();
+    expect(await loadPortfolioReachTile(portfolio(long), SUPER)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
   });
 });

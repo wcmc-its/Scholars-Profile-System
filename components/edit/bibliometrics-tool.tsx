@@ -36,6 +36,7 @@ import {
   type BibliometricsPaper,
   type BibliometricsReport,
 } from "@/lib/edit/bibliometrics";
+import type { ScholarReach } from "@/lib/edit/downstream-reach-entry";
 import { sanitizePubTitle } from "@/lib/utils";
 
 const PATH = "/api/edit/bibliometrics";
@@ -59,6 +60,10 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
     yearTo: null,
   });
   const [report, setReport] = React.useState<BibliometricsReport | null>(null);
+  // Kept with the scholar it was loaded for, so one scholar's block is never
+  // drawn on another's tab.
+  const [loadedReach, setLoadedReach] = React.useState<{ cwid: string; reach: ScholarReach | null } | null>(null);
+  const reach = loadedReach?.cwid === entityId ? loadedReach.reach : null;
   const [failed, setFailed] = React.useState(false);
   const query = bibliometricsQuery(entityId, filters);
 
@@ -78,6 +83,18 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
       });
     return () => ctrl.abort();
   }, [query]);
+
+  // The Downstream reach block depends on the scholar alone: its own request,
+  // so the report does not wait for it and a filter change does not repeat it.
+  // Any failure leaves the tab without the block.
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`${PATH}?${new URLSearchParams({ cwid: entityId, part: "reach" })}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { reach?: ScholarReach | null }) => setLoadedReach({ cwid: entityId, reach: d.reach ?? null }))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [entityId]);
 
   const updated = report
     ? new Date(`${report.asOf}T00:00:00Z`).toLocaleDateString("en-US", {
@@ -113,7 +130,7 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
         </Alert>
       ) : null}
       {report ? (
-        <Report report={report} filters={filters} setFilters={setFilters} />
+        <Report report={report} reach={reach} filters={filters} setFilters={setFilters} />
       ) : failed ? null : (
         <p className="text-muted-foreground text-sm">Loading…</p>
       )}
@@ -123,10 +140,13 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
 
 function Report({
   report: r,
+  reach,
   filters,
   setFilters,
 }: {
   report: BibliometricsReport;
+  /** The "Downstream reach" block; null when the viewer gets none. */
+  reach: ScholarReach | null;
   /** The controls follow the local choice; `r` catches up when its fetch lands. */
   filters: BibliometricsFilters;
   setFilters: React.Dispatch<React.SetStateAction<BibliometricsFilters>>;
@@ -375,6 +395,44 @@ function Report({
               </a>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {reach ? (
+        <section className={CARD} data-testid="bibliometrics-reach">
+          <h3 className={EYEBROW}>Downstream reach</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-apollo-surface-2 text-apollo-ink-2">
+                <th scope="col" className={TH}>
+                  Cited by
+                </th>
+                <th scope="col" className={`${TH} text-right`}>
+                  Publications cited
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {reach.lines.map((l) => (
+                <tr key={l.type} className="border-apollo-border border-b last:border-b-0">
+                  <th scope="row" className="p-2.5 text-left font-normal">
+                    {l.label}
+                  </th>
+                  <td className="p-2.5 text-right align-top">
+                    <a
+                      href={l.href}
+                      className={LINK}
+                      aria-label={`${plural(l.papers, "publication", "publications")} cited by ${l.label.toLowerCase()}, in the Downstream reach report`}
+                      data-testid={`bibliometrics-reach-${l.type}`}
+                    >
+                      {l.papers.toLocaleString()}
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-apollo-ink-2 text-[13px]">{reach.note}</p>
         </section>
       ) : null}
 
