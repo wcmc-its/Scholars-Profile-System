@@ -2075,10 +2075,10 @@ export class AppStack extends Stack {
         // from `etl:policy-citations`; US patents from
         // `etl:patent-citations:import`). Render-only; each is === "on", and
         // with both off the detail payload and the modal are unchanged.
-        // Staging on; prod off until the owner has reviewed the section there.
+        // On in both envs (owner decision, 2026-11-26).
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        TRIAL_CITATIONS_MODAL: envConfig.envName === "staging" ? "on" : "off",
-        PATENT_CITATIONS_MODAL: envConfig.envName === "staging" ? "on" : "off",
+        TRIAL_CITATIONS_MODAL: "on",
+        PATENT_CITATIONS_MODAL: "on",
         // Internal program roster (trainees and mentors, some of them minors).
         //   EDIT_PROGRAM_ROSTER -- the page, its API and the
         //     `program_roster_editor` role; off = 404 and no directory check.
@@ -2102,17 +2102,16 @@ export class AppStack extends Stack {
         // and GET /api/edit/bibliometrics (the report and its Word download),
         // read via isBibliometricsEnabled() (=== "on"); off = no rail item and
         // the route 404s. Read-only, computed at request time from publication
-        // rows. Staging on; prod off until the figures are reconciled against
-        // Publication Manager's report.
+        // rows. On in both envs (owner decision, 2026-11-26).
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        EDIT_BIBLIOMETRICS: envConfig.envName === "staging" ? "on" : "off",
+        EDIT_BIBLIOMETRICS: "on",
         // PATENT_CITATIONS_REPORT -- report 25 on /edit/reports and
         // GET /api/edit/reports/patent-citations (its Excel download), read
         // via isPatentCitationsReportEnabled() (=== "on"); off = absent from
         // the index and both 404. Read-only, over what the patent-citations
-        // import loaded. Staging on; prod off until the staging review.
+        // import loaded. On in both envs (owner decision, 2026-11-26).
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        PATENT_CITATIONS_REPORT: envConfig.envName === "staging" ? "on" : "off",
+        PATENT_CITATIONS_REPORT: "on",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff
