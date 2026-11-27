@@ -58,6 +58,15 @@ const BADGE = "inline-flex items-center gap-1 rounded-full border px-2.5 text-xs
 const BADGE_AUTHORITY = `${BADGE} border-apollo-slate bg-apollo-slate-tint py-px font-semibold text-[#274158]`;
 const BADGE_TINT = `${BADGE} border-apollo-slate-tint-border bg-apollo-slate-tint py-px text-[#274158]`;
 const TH = "px-2.5 py-2 text-left text-xs font-medium";
+/** Author position in byline order, light to dark: one slate hue (an ordinal
+ *  ramp, validated: monotone lightness, light end 2.48:1 on the white card;
+ *  the table's numbers and each segment's hover text carry the values). */
+const POSITION_FILL = { first: "#8fa7c2", co: "#5f7d9e", senior: "#34506e" } as const;
+const OUTPUT_ROWS = [
+  ["First author", "first"],
+  ["Senior author", "senior"],
+  ["Co-author", "co"],
+] as const;
 const SELECT =
   "border-apollo-border-strong bg-apollo-surface min-h-11 rounded-lg border px-2.5 text-sm";
 
@@ -202,18 +211,19 @@ function Report({
           <table className="min-w-0 flex-[1_1_260px] text-sm">
             <caption className="pb-1.5 text-left font-semibold">By author position</caption>
             <tbody>
-              {(
-                [
-                  ["First author", r.output.first],
-                  ["Senior author", r.output.senior],
-                  ["Co-author", r.output.coAuthor],
-                ] as const
-              ).map(([label, n]) => (
+              {OUTPUT_ROWS.map(([label, key]) => (
                 <tr key={label} className="border-apollo-border border-b">
                   <th scope="row" className="py-2 text-left font-normal">
+                    <span
+                      aria-hidden
+                      className="mr-2 inline-block size-2.5 rounded-[2px] align-[-1px]"
+                      style={{ backgroundColor: POSITION_FILL[key] }}
+                    />
                     {label}
                   </th>
-                  <td className="py-2 text-right">{n.toLocaleString()}</td>
+                  <td className="py-2 text-right">
+                    {(key === "co" ? r.output.coAuthor : r.output[key]).toLocaleString()}
+                  </td>
                 </tr>
               ))}
               <tr>
@@ -228,16 +238,30 @@ function Report({
             <div className="text-sm font-semibold">By year, last 10 years</div>
             <div
               role="img"
-              aria-label={`Research articles per year: ${r.output.byYear.map((y) => `${y.year}, ${y.count}`).join("; ")}`}
+              aria-label={`Research articles per year, by author position: ${r.output.byYear.map((y) => `${yearTip(y)}`).join("; ")}`}
               className="border-apollo-border-strong flex h-[120px] items-end gap-2 border-b pt-[18px]"
             >
               {r.output.byYear.map((y) => (
+                // Senior at the base, then co-author, then first author on top; a
+                // 2px card-colored gap between segments, rounded only at the top.
+                // ponytail: native `title` tooltips; a styled hover layer if asked.
                 <div
                   key={y.year}
-                  title={`${y.year}: ${y.count}`}
-                  className="bg-apollo-slate flex-1 rounded-t-[3px]"
+                  title={yearTip(y)}
+                  data-testid={`bibliometrics-year-${y.year}`}
+                  className="flex flex-1 flex-col-reverse gap-[2px] overflow-hidden rounded-t-[4px]"
                   style={{ height: `${(y.count / peak) * 100}%` }}
-                />
+                >
+                  {(["senior", "co", "first"] as const).map((k) =>
+                    y[k] > 0 ? (
+                      <div
+                        key={k}
+                        title={`${y.year}, ${OUTPUT_ROWS.find((row) => row[1] === k)![0].toLowerCase()}: ${y[k]}`}
+                        style={{ flexGrow: y[k], flexBasis: 0, backgroundColor: POSITION_FILL[k] }}
+                      />
+                    ) : null,
+                  )}
+                </div>
               ))}
             </div>
             <div className="text-apollo-ink-2 flex justify-between text-xs">
@@ -593,6 +617,10 @@ function StagesSection({ stages }: { stages: BibliometricsStages }) {
     </section>
   );
 }
+
+/** "2019: 41 (first 6, senior 28, co-author 7)" */
+const yearTip = (y: BibliometricsReport["output"]["byYear"][number]) =>
+  `${y.year}: ${y.count}${y.count > 0 ? ` (first ${y.first}, senior ${y.senior}, co-author ${y.co})` : ""}`;
 
 function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
   const [open, setOpen] = React.useState(false);

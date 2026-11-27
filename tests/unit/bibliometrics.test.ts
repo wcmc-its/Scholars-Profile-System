@@ -174,8 +174,10 @@ describe("buildBibliometricsReport — figures", () => {
     ]);
     expect(r.output).toMatchObject({ first: 2, senior: 1, coAuthor: 1, total: 4 });
     expect(r.output.byYear).toHaveLength(10);
-    expect(r.output.byYear[0]).toEqual({ year: 2017, count: 1 });
-    expect(r.output.byYear[9]).toEqual({ year: 2026, count: 2 });
+    expect(r.output.byYear[0]).toEqual({ year: 2017, count: 1, first: 0, senior: 1, co: 0 });
+    expect(r.output.byYear[9]).toEqual({ year: 2026, count: 2, first: 2, senior: 0, co: 0 });
+    // Each year's split adds up to its count.
+    for (const y of r.output.byYear) expect(y.first + y.senior + y.co).toBe(y.count);
     expect(r.yearRange).toEqual({ min: 2016, max: 2026 });
   });
 
