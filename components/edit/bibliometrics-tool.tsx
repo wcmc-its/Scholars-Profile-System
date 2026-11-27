@@ -11,6 +11,7 @@ import * as React from "react";
 import { Download, Landmark, Lock } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
+import { AuthorPills } from "@/components/edit/reports/author-pills";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
@@ -413,6 +414,7 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
               </>
             ) : null}
           </div>
+          {p.wcmAuthors.length > 0 ? <AuthorPills authors={p.wcmAuthors} /> : null}
           {hasCitations ? (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {p.authority.map((a) => (

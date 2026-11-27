@@ -84,6 +84,8 @@ export type BibliometricsPaper = {
   /** First three authors; `bold` marks the scholar when among them. */
   authors: Array<{ name: string; bold: boolean }>;
   etAl: boolean;
+  /** The paper's WCM authors in byline order, filled by the loader. */
+  wcmAuthors: Array<{ cwid: string; name: string }>;
   journal: string | null;
   /** "2014;59(6):765-73" */
   dated: string;
@@ -227,6 +229,7 @@ function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
       bold: i === p.position - 1 && surname !== "" && name.toLowerCase().includes(surname),
     })),
     etAl: names.length > 3,
+    wcmAuthors: [],
     journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
     dated: [p.year, locator].filter(Boolean).join(";"),
     doi: p.doi,
