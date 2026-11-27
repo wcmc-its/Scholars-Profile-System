@@ -246,7 +246,40 @@ describe("buildPortfolioWorkbook", () => {
     const ws = (await sheet(0)).getWorksheet("By year")!;
     const row = ws.getRow(2).values as unknown[];
     expect(row[2]).toBe(10);
-    expect((row.slice(3) as number[]).reduce((s, n) => s + n, 0)).toBe(10);
+    // Columns 3-7 are the five bucket counts; the share columns follow them.
+    expect((row.slice(3, 8) as number[]).reduce((s, n) => s + n, 0)).toBe(10);
+  });
+  it("puts Stage assigned and the staged shares beside the counts", async () => {
+    const ws = (await sheet(0)).getWorksheet("Departments")!;
+    const head = ws.getRow(1).values as unknown[];
+    expect(head.slice(10)).toEqual(["Stage assigned (%)", "T0 share of staged (%)", "T1 share of staged (%)", "T2 share of staged (%)", "T3–4 share of staged (%)"]);
+    // Area one: 82 staged of 91; 60/1/20/1 of the 82 staged (T2 takes the leftover point).
+    expect((ws.getRow(3).values as unknown[]).slice(10)).toEqual([90, 73, 1, 25, 1]);
+  });
+});
+
+describe("loadPortfolio's area scholar counts", () => {
+  it("count the people the Scholars list shows: first or senior author, at least the minimum, picked stages", async () => {
+    const texts: string[] = [];
+    // A grouping's name is a bound value, not SQL text: route by the values.
+    (db.read as unknown as Record<string, unknown>).$queryRaw = vi.fn(async (q: { sql?: string; values?: unknown[] } | string[]) => {
+      const text = Array.isArray(q) ? q.join("?") : String(q.sql);
+      const values = Array.isArray(q) ? [] : (q.values ?? []);
+      texts.push(text);
+      if (values.includes("areaPeople")) return [{ k: "areaPeople", g: "a1", st: null, n: 4n }];
+      if (values.includes("area")) return [{ k: "area", g: "a1", st: "T0", n: 60n }];
+      return [];
+    });
+    const choices: PortfolioChoices = {
+      facets: { roleCategories: [], departments: [], centers: [], institutions: [] },
+      labels: new Map(),
+      areas: [{ id: "a1", label: "Area one" }],
+    };
+    const d = await loadPortfolio(parsePortfolioParams(new URLSearchParams("from=2024&to=2025&by=area&stage=T2")), choices);
+    const people = texts.find((t) => t.includes("HAVING"))!;
+    expect(people).toMatch(/is_first = 1 OR pa\.is_last = 1/);
+    expect(people).toMatch(/HAVING COUNT\(DISTINCT x\.pmid\) >= \?/);
+    expect(d.table.find((r) => r.key === "a1")?.note).toBe("4 scholars");
   });
 });
 

@@ -212,6 +212,13 @@ describe("report 26's redesigned page", () => {
     expect(within(li).getByRole("link", { name: "91" }).getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/91/");
   });
 
+  it("keeps every unit of an old several-unit link through a rail change, and says so", async () => {
+    const { container } = await page({ ...SP, unit: ["dept:N1", "dept:N2"] });
+    const form = within(container).getAllByTestId("portfolio-filters")[0];
+    expect([...form.querySelectorAll('input[type="hidden"][name="unit"]')].map((i) => i.getAttribute("value"))).toEqual(["dept:N2"]);
+    expect(within(container).getAllByTestId("portfolio-rail-units-note")[0].textContent).toContain("This link selects 2 units");
+  });
+
   it("leaves the scholar list out of a printout over the export cap, and only then", async () => {
     h.portfolio.mockResolvedValue({ ...DATA, scholars: { total: 50, rows: [scholar(1)] } });
     const at = await page();

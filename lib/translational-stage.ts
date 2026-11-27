@@ -175,7 +175,7 @@ export function stageAssignedShare(c: StageCounts): number {
 /** How a stage is counted, in report 26's Download and the Bibliometrics
  *  report's definitions. */
 export const STAGE_RULE =
-  "ReCiterAI assigns a translational stage from the abstract or summary. A stage counts only when the model was not unsure; low-confidence records and those outside the spectrum are under No stage. Shares are among records with a stage, so the four stages add up to 100%; how many records have a stage is shown separately, as Stage assigned.";
+  "ReCiterAI assigns a translational stage from the abstract or summary. A stage counts only when the model was not unsure; low-confidence records and those outside the spectrum are under No stage. Shares are among records with a stage, so the four stages add up to 100%.";
 
 /** The label for a paper with no displayable stage. */
 export const NO_STAGE_LABEL = "No stage";

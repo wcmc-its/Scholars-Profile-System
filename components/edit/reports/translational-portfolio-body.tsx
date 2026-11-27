@@ -202,13 +202,15 @@ function MixBar({ counts, picked, height = 28, labels = true }: { counts: StageC
       {TRANSLATIONAL_STAGES.filter((k) => ex[k] > 0).map((k) => (
         <span
           key={k}
-          className={cn(
-            "flex items-center justify-center text-xs font-medium tabular-nums",
-            picked.length > 0 && !picked.includes(k) && "opacity-35",
-          )}
-          style={{ width: `${ex[k]}%`, background: STAGE_FILL[k].bg, color: STAGE_FILL[k].ink }}
+          className="relative flex items-center justify-center text-xs font-medium tabular-nums"
+          style={{ width: `${ex[k]}%`, color: picked.length > 0 && !picked.includes(k) ? "#1a1a1a" : STAGE_FILL[k].ink }}
         >
-          {labels && ex[k] >= 7 ? `${shown[k]}%` : null}
+          {/* The fill fades for an unpicked stage; the label does not. */}
+          <span
+            className={cn("absolute inset-0", picked.length > 0 && !picked.includes(k) && "opacity-35")}
+            style={{ background: STAGE_FILL[k].bg }}
+          />
+          {labels && ex[k] >= 7 ? <span className="relative">{shown[k]}%</span> : null}
         </span>
       ))}
     </span>
@@ -356,7 +358,13 @@ export async function renderTranslationalPortfolioReport({
   const years = Array.from({ length: 40 }, (_, i) => new Date().getUTCFullYear() - i);
   const gapCount = data.areaCoverage.sized - data.areaCoverage.spanning;
   const rail = (
-    <ReportRail resetHref={chips.some((c) => c.removeHref !== null) ? resetHref : null} resetLabel="Clear all" help="Filters apply automatically." testId="portfolio-rail">
+    <ReportRail
+      resetHref={chips.some((c) => c.removeHref !== null) ? resetHref : null}
+      resetLabel="Clear all"
+      help="Filters apply automatically."
+      className="print:hidden"
+      testId="portfolio-rail"
+    >
       <AutoSubmitForm action={basePath} className="group" data-testid="portfolio-filters">
         {p.stages.map((s) => (
           <input key={s} type="hidden" name="stage" value={s} />
@@ -365,6 +373,11 @@ export async function renderTranslationalPortfolioReport({
         {p.view !== "scholars" && <input type="hidden" name="view" value={p.view} />}
         {p.cwid && <input type="hidden" name="cwid" value={p.cwid} />}
         {p.allRows && <input type="hidden" name="rows" value="all" />}
+        {/* A link with several units keeps them all through a rail change; the
+            radio list shows the first (see the note under it). */}
+        {p.units.slice(1).map((u) => (
+          <input key={u} type="hidden" name="unit" value={u} />
+        ))}
         <RailSection label="Scholar" summary={data.person?.name ?? "Anyone"} defaultOpen testId="portfolio-rail-scholar">
           <input
             type="search"
@@ -405,6 +418,14 @@ export async function renderTranslationalPortfolioReport({
             searchPlaceholder="Search org units…"
             collapseAfter={6}
           />
+          {p.units.length > 1 && (
+            <p className="text-muted-foreground text-xs" data-testid="portfolio-rail-units-note">
+              This link selects {p.units.length} units: {unitName}.{" "}
+              <Link href={href({ units: [p.units[0]] })} className={LINK}>
+                Use one
+              </Link>
+            </p>
+          )}
         </RailSection>
         <RailSection
           label="Research area"
@@ -612,7 +633,7 @@ export async function renderTranslationalPortfolioReport({
                   return (
                     <QueryButton
                       key={k}
-                      action={basePath}
+                      action={`${basePath}#stages`}
                       qs={portfolioQueryString({ ...p, stages: next, page: 1 })}
                       pressed={on}
                       label={`${code(k)} ${TRANSLATIONAL_STAGE_LABELS[k]}. ${on ? "Stop focusing on this stage." : "Focus on this stage."}`}
@@ -909,6 +930,11 @@ export async function renderTranslationalPortfolioReport({
                 </div>
               )}
 
+              {!data.person && pages > 1 && (
+                <p className="text-muted-foreground hidden pt-2 text-xs print:block">
+                  This printout holds page {p.page.toLocaleString()} of {pages.toLocaleString()} of the list.
+                </p>
+              )}
               {!data.person && pages > 1 && (
                 <nav aria-label="Pages" className="border-apollo-border flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3.5 print:hidden">
                   <span className="text-muted-foreground grow text-[13px]">

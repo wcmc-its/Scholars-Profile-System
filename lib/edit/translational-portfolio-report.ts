@@ -72,6 +72,8 @@ import {
   isTranslationalStage,
   STAGE_BUCKETS,
   STAGE_RULE,
+  stageAssignedShare,
+  stagedShares,
   stagedTotal,
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
@@ -303,8 +305,10 @@ function scopedRows(ac: ArticleCountParams, extra: Prisma.Sql, byYear = true): P
   return Prisma.sql`(${scopedSelect(ac, extra, byYear)}) x`;
 }
 
-/** `areaPeople`: distinct scholars (not publications) per research area, the
- *  area table's second line; its count lands in the `none` bucket. */
+/** `areaPeople`: per research area, the scholars the Scholars list would show
+ *  for that area (run over the list's first / senior scope, at least
+ *  `MIN_SCHOLAR_ACTIVITIES` papers in the picked stages), so the area table's
+ *  "N scholars" link opens a list of N; its count lands in the `none` bucket. */
 type Grouping = "all" | "year" | "cwid" | "areaPeople" | UnitTab;
 
 /** How each grouping maps a scoped row to its group: the unit rule
@@ -356,11 +360,18 @@ async function stageCounts<G extends Grouping>(
   extra: Prisma.Sql,
   gs: readonly G[],
   byYear = true,
+  /** `areaPeople` only: the stages a scholar's papers must be in (`rankScholars`). */
+  pick: readonly TranslationalStage[] = TRANSLATIONAL_STAGES,
 ): Promise<Map<G, Map<string, StageCounts>>> {
   const branches = gs.map((g) => {
     const { key, join } = groupSql(g);
     if (g === "areaPeople")
-      return Prisma.sql`SELECT ${g} AS k, ${key} AS g, NULL AS st, COUNT(DISTINCT x.cwid) AS n FROM x ${join} GROUP BY g`;
+      return Prisma.sql`SELECT ${g} AS k, t.g, NULL AS st, COUNT(*) AS n FROM (
+          SELECT ${key} AS g, x.cwid FROM x ${join}
+           WHERE x.st IN (${Prisma.join([...pick])})
+           GROUP BY ${key}, x.cwid
+          HAVING COUNT(DISTINCT x.pmid) >= ${MIN_SCHOLAR_ACTIVITIES}
+        ) t GROUP BY t.g`;
     // Area counts publications: the distinct (pmid, stage) set `u`, not every authorship.
     const from = g === "area" ? Prisma.sql`u x` : Prisma.sql`x`;
     return Prisma.sql`SELECT ${g} AS k, ${key} AS g, x.st, COUNT(DISTINCT x.pmid) AS n FROM ${from} ${join} GROUP BY g, x.st`;
@@ -530,15 +541,17 @@ export async function loadPortfolio(
 
   // One scholar's or one area's papers: their own index beats driving from the year window.
   const byYear = !p.cwid && p.areas.length === 0;
-  const [counts, baselineMap, centers, byCwid, lookup, person] = await Promise.all([
-    stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? (["areaPeople"] as const) : [p.by])], byYear),
+  // The Scholars list's groupings share one query over its first / senior scope.
+  const scholarGroups = [...(showScholars ? (["cwid"] as const) : []), ...(p.by === "area" ? (["areaPeople"] as const) : [])];
+  const [counts, baselineMap, centers, scholarCounts, lookup, person] = await Promise.all([
+    stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? [] : [p.by])], byYear),
     p.units.length > 0
       ? stageCounts(articleScope(p, { units: [] }), extra, ["all"], byYear).then((m) => m.get("all")!)
       : Promise.resolve(null),
     p.by === "center" ? centerSizes() : Promise.resolve(new Map<string, { members: number; departments: number }>()),
-    showScholars
-      ? stageCounts(acScholars, extra, ["cwid"], byYear).then((m) => m.get("cwid")!)
-      : Promise.resolve(new Map<string, StageCounts>()),
+    scholarGroups.length > 0
+      ? stageCounts(acScholars, extra, scholarGroups, byYear, p.stages.length > 0 ? p.stages : TRANSLATIONAL_STAGES)
+      : Promise.resolve(new Map<"cwid" | "areaPeople", Map<string, StageCounts>>()),
     opts.forExport ? Promise.resolve([]) : lookupScholars(p.q),
     p.cwid && !opts.forExport ? loadScholars([p.cwid]) : Promise.resolve(new Map<string, PortfolioScholar>()),
   ]);
@@ -546,7 +559,9 @@ export async function loadPortfolio(
   const byYearMap = counts.get("year")!;
   const areaMap = counts.get("area")!;
   const tableMap = p.by === "area" ? null : counts.get(p.by)!;
-  const areaPeople = counts.get("areaPeople") ?? new Map<string, StageCounts>();
+  const byCwid = scholarCounts.get("cwid") ?? new Map<string, StageCounts>();
+  // ponytail: with an area filter set, a row's count is within that filter while its link replaces it; rare, left as is.
+  const areaPeople = scholarCounts.get("areaPeople") ?? new Map<string, StageCounts>();
 
   const allCounts = all.get("all") ?? emptyCounts();
   const years = [];
@@ -698,12 +713,19 @@ export function describePortfolioCriteria(
     ["Scholar", p.cwid ?? "All (first or senior author when one scholar is chosen)"],
     ["Record type", "Publications"],
     ["Counting rule", COUNTING_RULE],
-    ["Stage rule", STAGE_RULE],
+    ["Stage rule", `${STAGE_RULE} How many have a stage is shown separately, as Stage assigned.`],
     ["Scholars rule", SCHOLAR_RULE],
   ];
 }
 
 const bucketHeads = () => STAGE_BUCKETS.map((k) => (k === "none" ? NO_STAGE_LABEL : translationalStageDisplay(k)));
+/** The page's figures beside the counts: Stage assigned, then each stage's
+ *  share of the staged publications (whole percents, as the page rounds them). */
+const shareHeads = () => ["Stage assigned (%)", ...TRANSLATIONAL_STAGES.map((k) => `${k.replace("-", "–")} share of staged (%)`)];
+const shareCells = (c: StageCounts) => {
+  const s = stagedShares(c);
+  return [Math.round(stageAssignedShare(c)), ...TRANSLATIONAL_STAGES.map((k) => s[k])];
+};
 
 export async function buildPortfolioWorkbook(
   p: PortfolioParams,
@@ -715,18 +737,25 @@ export async function buildPortfolioWorkbook(
   const counts = (c: StageCounts) => STAGE_BUCKETS.map((k) => c[k]);
 
   const years = wb.addWorksheet("By year");
-  years.addRow(["Year", "Publications", ...bucketHeads()]);
+  years.addRow(["Year", "Publications", ...bucketHeads(), ...shareHeads()]);
   boldRow(years, 1);
-  for (const r of data.byYear) years.addRow([r.year, countsTotal(r.counts), ...counts(r.counts)]);
-  years.addRow(["Total", countsTotal(data.all), ...counts(data.all)]);
+  for (const r of data.byYear) years.addRow([r.year, countsTotal(r.counts), ...counts(r.counts), ...shareCells(r.counts)]);
+  years.addRow(["Total", countsTotal(data.all), ...counts(data.all), ...shareCells(data.all)]);
   boldRow(years, years.rowCount);
 
   const table = wb.addWorksheet(UNIT_TABS[p.by].label);
-  table.addRow([UNIT_TABS[p.by].head, "Note", "Gaps", "Publications", ...bucketHeads()]);
+  table.addRow([UNIT_TABS[p.by].head, "Note", "Gaps", "Publications", ...bucketHeads(), ...shareHeads()]);
   boldRow(table, 1);
-  table.addRow(["All of Weill Cornell Medicine", "Baseline", "", countsTotal(data.baseline), ...counts(data.baseline)]);
+  table.addRow(["All of Weill Cornell Medicine", "Baseline", "", countsTotal(data.baseline), ...counts(data.baseline), ...shareCells(data.baseline)]);
   for (const r of data.table)
-    table.addRow([r.label, r.note, r.gaps.map((s) => s.replace("-", "–")).join(", "), countsTotal(r.counts), ...counts(r.counts)]);
+    table.addRow([
+      r.label,
+      r.note,
+      r.gaps.map((s) => s.replace("-", "–")).join(", "),
+      countsTotal(r.counts),
+      ...counts(r.counts),
+      ...shareCells(r.counts),
+    ]);
   table.getColumn(1).width = 44;
   table.getColumn(2).width = 40;
 

@@ -105,8 +105,9 @@ export async function ConsoleShell({
       >
         Skip to content
       </a>
-      {/* Console chrome never prints (report 26's PDF is the page printed). */}
-      <div className="print:hidden">
+      {/* Console chrome never prints (report 26's PDF is the page printed).
+          `contents`: the wrapper adds no box, so the bar's `sticky` still sticks. */}
+      <div className="contents print:hidden">
         <ConsoleTopBar variant="console">
           <AdminSubnav
             active={active}
