@@ -30,6 +30,26 @@ export const TRANSLATIONAL_STAGE_LABELS: Record<TranslationalStage, string> = {
   "T3-4": "Practice and population health",
 };
 
+/** One-line definitions, shared by the About page (`/about#translational-stage`,
+ *  which prints them after "(T0): ") and the console's stage hovers, so the two
+ *  cannot drift. Lower-case first letter as the About sentence reads; a hover
+ *  shows it with `stageDefinition`. */
+export const TRANSLATIONAL_STAGE_DEFINITIONS: Record<TranslationalStage, string> = {
+  T0: "how biology and disease work, studied in cells, animals or models.",
+  T1: "moving a discovery toward people, including first studies in humans.",
+  T2: "testing whether an intervention works in patients.",
+  "T3-4": "how care is delivered in practice and what it does for the health of populations.",
+};
+
+export const NO_STAGE_DEFINITION =
+  "No stage is shown when the model is unsure, when the record does not fit this spectrum, or when ReCiterAI has not summarized it yet.";
+
+/** A stage's definition as a stand-alone sentence ("T0" → "How biology…"). */
+export function stageDefinition(s: TranslationalStage): string {
+  const d = TRANSLATIONAL_STAGE_DEFINITIONS[s];
+  return d.charAt(0).toUpperCase() + d.slice(1);
+}
+
 /** Whether a value is one of the four displayable stages. */
 export function isTranslationalStage(v: unknown): v is TranslationalStage {
   return typeof v === "string" && (TRANSLATIONAL_STAGES as readonly string[]).includes(v);

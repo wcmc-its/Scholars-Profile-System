@@ -399,7 +399,7 @@ export type ArticleCountRow = {
 
 /** The SQL form of `displayStage` (`lib/api/topic-activity.ts`): low confidence
  *  hidden, NULL confidence shown. */
-const STAGE_NOT_LOW = Prisma.sql`(p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')`;
+export const STAGE_NOT_LOW = Prisma.sql`(p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')`;
 
 /** The year each counted article falls in: the calendar year of publication,
  *  the fiscal year of its PubMed add date, or (date-added window) the
@@ -499,6 +499,8 @@ export type ArticleRow = {
   articleType: string | null;
   /** The stage as displayed (`displayStage`), else null. */
   stage: TranslationalStage | null;
+  /** The stored confidence ("high" / "medium") behind a shown stage, else null. */
+  stageConfidence?: string | null;
   jif: number | null;
   dateAdded: string | null;
   doi: string | null;
@@ -551,13 +553,14 @@ type RawArticleRow = {
  *  `opts.year` narrows to one year of the basis (the page's year pick). */
 export async function loadArticleList(
   p: ArticleCountParams,
-  opts: { year?: number | null } = {},
+  /** `extra`: an `AND …` clause on top (report 26's area / person / page of pmids). */
+  opts: { year?: number | null; extra?: Prisma.Sql } = {},
 ): Promise<ArticleRow[]> {
   const yearPick =
     opts.year !== undefined && opts.year !== null
       ? Prisma.sql`AND ${articleYearExpr(p)} = ${opts.year}`
       : Prisma.empty;
-  const { yearExpr, fromWhere } = scopeSql(p, yearPick);
+  const { yearExpr, fromWhere } = scopeSql(p, Prisma.sql`${yearPick} ${opts.extra ?? Prisma.empty}`);
   const raw = await db.read.$queryRaw<RawArticleRow[]>`
     SELECT p.pmid, ${yearExpr} AS y, p.title, p.journal, p.year, p.volume, p.issue, p.pages,
            p.full_authors_string, p.authors_string, p.publication_type, p.date_added_to_entrez, p.doi,
@@ -588,6 +591,9 @@ export async function loadArticleList(
         year: Number(r.y),
         articleType: r.publication_type,
         stage: displayStage(r.translational_stage, r.translational_stage_confidence),
+        stageConfidence: displayStage(r.translational_stage, r.translational_stage_confidence)
+          ? r.translational_stage_confidence
+          : null,
         jif: r.jif === null ? null : Number(r.jif),
         dateAdded: r.date_added_to_entrez ? r.date_added_to_entrez.toISOString().slice(0, 10) : null,
         doi: r.doi,

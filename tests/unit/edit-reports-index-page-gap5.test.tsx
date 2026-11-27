@@ -114,6 +114,11 @@ vi.mock("@/lib/edit/policy-citations-report", () => ({
 // Report 25 (Patent citations): its gate is the flag PATENT_CITATIONS_REPORT
 // and report 24's rule together (`patent-citations-report.test.ts`).
 vi.mock("@/lib/edit/patent-citations-report", () => ({ canViewPatentCitationsReport: mockCanViewPatentCitations }));
+// Report 26 (Translational portfolio): its gate is report 8's plus two flags
+// (`translational-portfolio-report.test.ts`); closed here.
+vi.mock("@/lib/edit/translational-portfolio-report", () => ({
+  canViewTranslationalPortfolioReport: vi.fn().mockResolvedValue(false),
+}));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
 vi.mock("@/lib/db", () => ({

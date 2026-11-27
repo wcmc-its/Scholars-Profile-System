@@ -87,6 +87,7 @@ import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
 import { canViewPatentCitationsReport } from "@/lib/edit/patent-citations-report";
+import { canViewTranslationalPortfolioReport } from "@/lib/edit/translational-portfolio-report";
 import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import { db } from "@/lib/db";
 import {
@@ -216,10 +217,11 @@ export default async function EditReportsIndexPage({
   // Reports 8 (Article counts: unit administrators + grants) and 9 (Top
   // clinical and high-impact journal publications: grants) ride a second
   // pseudo-unit. (Report 10, Display titles, is the Titles queue now.)
-  const [canArticleCount, canPolicyCitations, canPatentCitations, highImpactScopes, grantAttributionScopes] = await Promise.all([
+  const [canArticleCount, canPolicyCitations, canPatentCitations, canPortfolio, highImpactScopes, grantAttributionScopes] = await Promise.all([
     canViewArticleCountReport(session),
     canViewPolicyCitationsReport(session),
     canViewPatentCitationsReport(session),
+    canViewTranslationalPortfolioReport(session),
     getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),
     isGrantAttributionQueueEnabled() ? getReportScopes(session, GRANT_ATTRIBUTION_REPORT) : new Set<string>(),
   ]);
@@ -245,6 +247,15 @@ export default async function EditReportsIndexPage({
       : []),
     ...(canPatentCitations
       ? [catalogEntry(meta, 25, { mode: "unit", audience: ADMIN_AUDIENCE, rule: POLICY_CITATIONS_ACCESS_RULE })]
+      : []),
+    ...(canPortfolio
+      ? [
+          // Report 8's audience and badge.
+          catalogEntry(meta, 26, {
+            ...(await loadReportAccessPopoverProps(ARTICLE_COUNT_REPORT, session, ARTICLE_COUNT_ACCESS_NOTE)),
+            audience: ADMIN_AUDIENCE,
+          }),
+        ]
       : []),
     ...(session.isSuperuser
       ? [

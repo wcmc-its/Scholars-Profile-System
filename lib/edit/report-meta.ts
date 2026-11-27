@@ -79,6 +79,7 @@ export const REPORT_KEYS = [
   "23",
   "24",
   "25",
+  "26",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -289,6 +290,13 @@ export const REPORT_META_DEFAULTS: Record<
     name: "Patent citations",
     summary:
       "Publications cited in a US patent, by publication, by invention or by person, with related patents counted once. Open to every unit administrator, for the units they administer.",
+    descriptionHtml: null,
+  },
+  "26": {
+    slug: "translational-portfolio",
+    name: "Translational portfolio",
+    summary:
+      "Where publications sit between basic research and population health (translational stages T0 to T3–4), by year, unit and research area, with the scholars doing the work at each stage.",
     descriptionHtml: null,
   },
 };

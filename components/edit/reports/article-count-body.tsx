@@ -439,7 +439,7 @@ export function unplacedScholars(
   return out;
 }
 
-function toCitationRow(a: ArticleRow): CitationRow {
+export function toCitationRow(a: ArticleRow): CitationRow {
   const authors = citationAuthors(a);
   return {
     key: a.pmid,
