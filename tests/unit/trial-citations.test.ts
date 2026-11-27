@@ -1,6 +1,7 @@
 /** Trial citations (etl:policy-citations, trials pass): the pure shaping, the
  *  ClinicalTrials.gov client, and the proof that a citing trial stored at level
- *  `trial`, or a citing patent at level `patent` (etl/patent-citations), changes
+ *  `trial`, a citing patent at level `patent` (etl/patent-citations) or a citing
+ *  clinical article at level `clinical` (etl/clinical-citations), changes
  *  nothing the existing readers show: report 24, the public badges, the
  *  publication modal and the Bibliometrics tab. NCT numbers, patent numbers,
  *  PMIDs, people and sponsors are invented. */
@@ -42,7 +43,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 
 const RANKED = ["authority", "guideline", "consensus", "review"];
 /** The levels `citing_document` holds that are not ranked. */
-const UNRANKED = ["trial", "patent"];
+const UNRANKED = ["trial", "patent", "clinical"];
 
 const study = (nct: string, references: Array<{ pmid?: string; type?: string }>): CtgovStudy => ({
   protocolSection: {
@@ -211,6 +212,7 @@ describe("a citing trial or patent changes none of the existing counts", () => {
     expect(text).toContain("FROM publication WHERE authority_count > 0 OR guideline_count > 0 OR consensus_count > 0 OR review_count > 0");
     expect(text).not.toContain("trial");
     expect(text).not.toContain("patent");
+    expect(text).not.toContain("clinical");
   });
 
   it("report 24, live path: the aggregate (counts and the newest citing year) is over the ranked levels only", () => {
@@ -229,7 +231,7 @@ describe("a citing trial or patent changes none of the existing counts", () => {
     expect(call(1).text).toContain("WHERE d.level IN (?,?,?)");
     for (const level of UNRANKED) expect(call(1).values).not.toContain(level);
     // The workbook's Citations sheet, with no Level picked and with an unranked level asked for by URL.
-    for (const qs of ["level=", "level=trial", "level=patent"]) {
+    for (const qs of ["level=", "level=trial", "level=patent", "level=clinical"]) {
       h.queryRaw.mockClear();
       await loadCitationPairs(parse(qs), [{ pmid: "111", title: "t" }]);
       expect(call(0).text).toContain("WHERE d.level IN (?,?,?,?)");
@@ -260,13 +262,13 @@ describe("a citing trial or patent changes none of the existing counts", () => {
       external_id: String(id),
       locations: null,
     });
-    h.queryRaw.mockResolvedValueOnce([row(1, "guideline"), row(2, "trial"), row(3, "patent")]);
+    h.queryRaw.mockResolvedValueOnce([row(1, "guideline"), row(2, "trial"), row(3, "patent"), row(4, "clinical")]);
     const docs = (await loadCitingDocuments(parse(), ["111"])).get("111")!;
     expect(docs.map((d) => [d.id, d.level])).toEqual([[1, "guideline"]]);
   });
 
   it("public badges: the rollup the row renders has no trial or patent in it", () => {
-    const row = { authorityBodies: null, guidelineCount: 0, reviewCount: 0, trialCount: 7, patentFamilyCount: 12 };
+    const row = { authorityBodies: null, guidelineCount: 0, reviewCount: 0, trialCount: 7, patentFamilyCount: 12, clinicalCiteCount: 40 };
     expect(toPolicyRollup(row)).toBeNull();
     expect(toPolicyRollup({ ...row, guidelineCount: 2 })).toEqual({ authority: [], guidelines: 2, reviews: 0 });
   });
@@ -309,7 +311,9 @@ describe("a citing trial or patent changes none of the existing counts", () => {
     };
     const before = await payload([doc(1, "guideline", "pubmed")]);
     expect(before!.docs.map((d) => d.id)).toEqual([1]);
-    expect(await payload([doc(1, "guideline", "pubmed"), doc(2, "trial", "ctgov"), doc(3, "patent", "ros")])).toEqual(before);
+    expect(
+      await payload([doc(1, "guideline", "pubmed"), doc(2, "trial", "ctgov"), doc(3, "patent", "ros"), doc(4, "clinical", "pubmed")]),
+    ).toEqual(before);
   });
 
   it("Bibliometrics tab: distinct citing documents are counted at the ranked levels only", async () => {

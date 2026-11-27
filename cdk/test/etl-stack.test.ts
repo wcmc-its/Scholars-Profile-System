@@ -2524,6 +2524,15 @@ describe("EtlStack", () => {
     expect(params.TaskDefinition).toBe("sps-etl-sources-staging");
   });
 
+  it("ClinicalCitationsWeekly runs on the sources family, right after PolicyCitationsWeekly", () => {
+    const asl = aslFrom(buildEtlStack("staging").template, "scholars-weekly-staging");
+    const params = asl.States.TaskClinicalCitationsWeekly.Parameters as { TaskDefinition: string };
+    expect(params.TaskDefinition).toBe("sps-etl-sources-staging");
+    // The two share PubMed documents: the policy step stores a guideline first.
+    const order = JSON.stringify(asl);
+    expect(order.indexOf('"TaskPolicyCitationsWeekly":')).toBeLessThan(order.indexOf('"TaskClinicalCitationsWeekly":'));
+  });
+
   // #2196 -- ack-with-expiry for a continue-tier step failure. Acks are exercised
   // through the `stepAckOverrides` test seam on a real continue-tier step (Asms)
   // so no checked-in StepSpec has to carry one.

@@ -1540,6 +1540,8 @@ export class EtlStack extends Stack {
       "etl:mentoring:refresh",
       // Reads reciterdb analysis_nih_cites (the citation links).
       "etl:policy-citations",
+      // Reads reciterdb analysis_nih_cites_clin (the clinical citation links).
+      "etl:clinical-citations",
     ]);
     // The ReCiter ADMIN key: only the scripts that call the engine's HTTP API.
     // `etl:reciter-refresh` is operator-run on this def by hand (not a step), so
@@ -2506,6 +2508,15 @@ export class EtlStack extends Stack {
       // etl/policy-citations/index.ts), so the step runs about 40 minutes every week by design.
       // `continue` — writes only add rows, so a miss just delays new citations a week.
       { id: "PolicyCitationsWeekly", npmScript: "etl:policy-citations", external: true, tier: "continue" },
+      // Clinical citations (etl/clinical-citations) — the clinical articles (iCite's
+      // flag) citing our publications. Reads the links from reciterdb, so external:true
+      // (the Reciter secret), plus PubMed ESummary over NAT egress for citing articles
+      // not stored yet, on a 30-minute budget (FETCH_BUDGET_MIN in
+      // etl/clinical-citations/index.ts). After PolicyCitationsWeekly: the two share
+      // PubMed documents, and an article that step stores as a guideline or review is
+      // not stored again as clinical. `continue` — writes only add rows, so a miss just
+      // delays new citations a week.
+      { id: "ClinicalCitationsWeekly", npmScript: "etl:clinical-citations", external: true, tier: "continue" },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
@@ -2836,6 +2847,8 @@ export class EtlStack extends Stack {
         // The five prod runs to 2026-11-22 took 4.9h to 5.3h (2.6h to 3.1h
         // before 2026-10-25). PolicyCitationsWeekly adds about 2h on top: its
         // Bookshelf pass covers every paper each run (BOOKSHELF_BUDGET_MIN).
+        // ClinicalCitationsWeekly adds at most its 30-minute PubMed budget
+        // (FETCH_BUDGET_MIN) plus the link read.
         maxDuration: Duration.hours(8),
         stateMachine: this.weeklyStateMachine,
       },

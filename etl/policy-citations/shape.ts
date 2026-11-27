@@ -29,8 +29,8 @@ export interface CitingDoc {
   title: string;
   year: number | null;
   url: string;
-  /** "trial" and "patent" are not ranked levels (see `POLICY_LEVELS`, lib/citations/policy-rollup.ts). */
-  level: Level | "trial" | "patent";
+  /** "trial", "patent" and "clinical" are not ranked levels (see `POLICY_LEVELS`, lib/citations/policy-rollup.ts). */
+  level: Level | "trial" | "patent" | "clinical";
   issuingBody: string | null;
   dedupKey: string;
   /** Citation fields. PubMed fills all but `publisher`; Bookshelf fills only that. */
@@ -123,9 +123,24 @@ export function pubmedLevel(
   return null;
 }
 
+/**
+ * The level a stored PubMed document moves to, or null to leave it alone.
+ * `typed` is what PubMed's publication types say now (`pubmedLevel`). A paper
+ * indexed as a review can later be typed as a guideline; and an article
+ * etl:clinical-citations stored as `clinical` that turns out to be a guideline,
+ * consensus statement or review moves up to that level, so it is one document
+ * at one level and is counted once. Nothing ever moves down to `clinical`.
+ */
+export function retypedLevel(
+  stored: string,
+  typed: Exclude<Level, "authority"> | null,
+): Exclude<Level, "authority"> | null {
+  return typed && stored !== typed ? typed : null;
+}
+
 export function pubmedDoc(
   pmid: number,
-  level: Exclude<Level, "authority">,
+  level: Exclude<Level, "authority"> | "clinical",
   summary: PubmedSummary,
 ): CitingDoc {
   const title = cleanTitle(summary.title ?? "") || `PMID ${pmid}`;

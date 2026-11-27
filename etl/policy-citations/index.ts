@@ -24,8 +24,13 @@
  *      is stored, flagged on the link (`evidence.ownTrial`), and not counted.
  *      If this pass fails, the rollup still runs and the run then fails.
  *   4. Recompute the rollups on `publication`: `authority_bodies`, a count per
- *      level, the newest ranked citing document's year, `trial_count`, and
- *      `patent_family_count` (citing patents are loaded by etl/patent-citations).
+ *      level, the newest ranked citing document's year, `trial_count`,
+ *      `patent_family_count` (citing patents are loaded by etl/patent-citations)
+ *      and `clinical_cite_count` (clinical articles, by etl/clinical-citations).
+ *
+ * PubMed documents are shared with etl/clinical-citations, which stores citing
+ * clinical articles at level `clinical`. Pass 1 moves such a row up when PubMed
+ * types it as a guideline, consensus statement or review (`retypedLevel`).
  *
  * Writes only ever add: a document or link is inserted if new and left alone
  * otherwise, so `first_seen_at` is the date we first saw a citation and a
@@ -53,6 +58,8 @@ import { assertSourceVolume } from "../../lib/etl-guard";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { withEtlRun } from "@/lib/etl-run";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
+import { CLINICAL_COUNT_SQL } from "../clinical-citations/shape";
 import { BACKGROUND_TERM, ctgovStudies, referencesTerm } from "./ctgov";
 import { bookshelfCiters, esummary, harvestPmids } from "./ncbi";
 import {
@@ -66,6 +73,7 @@ import {
   CITATION_FIELDS,
   pubmedDoc,
   pubmedLevel,
+  retypedLevel,
   type CitingDoc,
   type PubmedSummary,
 } from "./shape";
@@ -179,10 +187,12 @@ async function pubmedPass(pmids: string[], partial: boolean): Promise<number> {
 
   if (scanned === 0) throw new Error("analysis_nih_cites returned no citation links for the corpus.");
   if (!partial) {
+    // The ranked levels only: PubMed documents at level `clinical` are not
+    // this pass's, and there are more of their links than of these.
     assertSourceVolume("policy-citations:pubmed-links", {
       incoming: links.length,
       existing: await db.write.publicationCitingDocument.count({
-        where: { citingDocument: { source: "pubmed" } },
+        where: { citingDocument: { source: "pubmed", level: { in: [...POLICY_LEVELS] } } },
       }),
       maxDropPct: 50,
     });
@@ -216,10 +226,11 @@ async function pubmedPass(pmids: string[], partial: boolean): Promise<number> {
   }
   await backfillCitations(refill);
 
-  // A paper indexed as a review can later be typed as a guideline.
+  // A paper indexed as a review can later be typed as a guideline, and one
+  // stored as a clinical article can turn out to be any of the three.
   for (const level of ["guideline", "consensus", "review"] as const) {
     const retyped = citing
-      .filter((p) => pubmedLevel(p, sets) === level && existing.has(String(p)) && existing.get(String(p))!.level !== level)
+      .filter((p) => existing.has(String(p)) && retypedLevel(existing.get(String(p))!.level, pubmedLevel(p, sets)) === level)
       .map(String);
     for (const batch of chunks(retyped, INSERT_BATCH)) {
       await db.write.citingDocument.updateMany({
@@ -448,7 +459,9 @@ async function rollup(): Promise<void> {
   // `latest_citing_year`, which report 24 sorts on. Own trials are not counted.
   // Nor is a patent: `patent_family_count` is distinct inventions, since a patent
   // document's dedup key is its family (etl/patent-citations, which loads them
-  // and keeps this one column current between weekly runs).
+  // and keeps this one column current between weekly runs). Nor is a clinical
+  // article: `clinical_cite_count` is the same expression etl/clinical-citations
+  // writes, recomputed here because pass 1 can move a clinical row up a level.
   const counts = await db.write.$executeRaw`
     UPDATE publication p
       LEFT JOIN (
@@ -460,6 +473,7 @@ async function rollup(): Promise<void> {
                COUNT(DISTINCT CASE WHEN d.level = 'trial'
                      AND COALESCE(JSON_CONTAINS(l.evidence, 'true', '$.ownTrial'), 0) = 0 THEN d.dedup_key END) AS t,
                COUNT(DISTINCT CASE WHEN d.level = 'patent' THEN d.dedup_key END) AS pf,
+               ${CLINICAL_COUNT_SQL} AS cc,
                MAX(CASE WHEN d.level IN ('authority', 'guideline', 'consensus', 'review') THEN d.year END) AS y
           FROM publication_citing_document l
           JOIN citing_document d ON d.id = l.citing_document_id
@@ -468,11 +482,11 @@ async function rollup(): Promise<void> {
        SET p.authority_count = COALESCE(x.a, 0), p.guideline_count = COALESCE(x.g, 0),
            p.consensus_count = COALESCE(x.c, 0), p.review_count = COALESCE(x.r, 0),
            p.latest_citing_year = x.y, p.trial_count = COALESCE(x.t, 0),
-           p.patent_family_count = COALESCE(x.pf, 0)
+           p.patent_family_count = COALESCE(x.pf, 0), p.clinical_cite_count = COALESCE(x.cc, 0)
      WHERE p.authority_count <> COALESCE(x.a, 0) OR p.guideline_count <> COALESCE(x.g, 0)
         OR p.consensus_count <> COALESCE(x.c, 0) OR p.review_count <> COALESCE(x.r, 0)
         OR NOT (p.latest_citing_year <=> x.y) OR p.trial_count <> COALESCE(x.t, 0)
-        OR p.patent_family_count <> COALESCE(x.pf, 0)`;
+        OR p.patent_family_count <> COALESCE(x.pf, 0) OR p.clinical_cite_count <> COALESCE(x.cc, 0)`;
 
   const authority = await db.write.publicationCitingDocument.findMany({
     where: { citingDocument: { level: "authority" } },

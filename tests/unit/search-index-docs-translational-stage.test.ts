@@ -104,3 +104,11 @@ describe("buildPublicationDoc — translationalStage", () => {
     );
   });
 });
+
+describe("buildPublicationDoc — clinicalCiteCount", () => {
+  it("emits the count for a paper clinical articles cite, and omits it otherwise", () => {
+    expect(buildPublicationDoc(pub({ clinicalCiteCount: 12 }), NO_SUP)!.clinicalCiteCount).toBe(12);
+    expect(Object.hasOwn(buildPublicationDoc(pub({ clinicalCiteCount: 0 }), NO_SUP)!, "clinicalCiteCount")).toBe(false);
+    expect(Object.hasOwn(buildPublicationDoc(pub({}), NO_SUP)!, "clinicalCiteCount")).toBe(false);
+  });
+});
