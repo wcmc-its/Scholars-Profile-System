@@ -53,6 +53,13 @@
  * query starts from `publication_citing_document` or `citing_document` except
  * the two keyed lookups for a `doc` filter.
  *
+ * Every query that tests authorship is driven from `publication` under
+ * `STRAIGHT_JOIN` (the scope total included, `loadScopeTotal`), so it is as
+ * selective as the publication filters are. The Citing documents view is not
+ * computed for a selection wider than `REACH_DOCS_PAPER_CEILING` cited papers
+ * (`docsTooWide`): the tab and the download's sheet then say so, and show no
+ * count of citing documents.
+ *
  * Server-only (`@/lib/db`).
  */
 import ExcelJS from "exceljs";
@@ -195,6 +202,40 @@ export const REACH_PAGE_SIZE = 50;
 export const REACH_LIST_CAP = 5000;
 /** The download's Citing documents sheet carries at most this many rows. */
 export const REACH_DOCS_CAP = 20_000;
+/**
+ * The Citing documents view is listed only while the selection covers at most
+ * this many cited papers (the Publications tab's count: papers in scope cited
+ * by a ticked type). Above it the grouped query (`docGroupsSql`) is not run:
+ * the tab and the download's sheet say the selection is too wide, and no count
+ * of citing documents is shown, since a number is only shown with its list.
+ *
+ * Why. The view groups every link of the cited papers into one row per citing
+ * document, and that cost grows with the links read, whatever the indexes.
+ * Measured on staging (about 205,000 publications, 1.3 million citing links):
+ *   - the default selection (T0 and T1 from 2020; 3,732 cited papers): about
+ *     0.9 s;
+ *   - every stage and every year (111,360 cited papers): 17 to 35 s, and the
+ *     connection was closed before an answer came back, so the page errored;
+ *   - the same grouping cut down to clinical documents alone, with no own-work
+ *     test: still 6 to 10 s. So this is the cost of grouping about a million
+ *     links, not a missing index.
+ * 20,000 is a starting value between the two measured ends, not a tuned one.
+ * The check is free: the cited papers are already loaded for the Publications
+ * tab (`loadReachCounts`). A view filtered to one paper (`pmid`) or one person
+ * is far below it.
+ *
+ * Upgrade path: a precomputed table of each citing document's paper count
+ * (one row per document and cited paper, or the count per document under the
+ * default own-work rule), maintained by the citation imports, so the listing
+ * reads rows instead of grouping links. With it the ceiling can go.
+ */
+export const REACH_DOCS_PAPER_CEILING = 20_000;
+/** Whether a selection covering this many cited papers is too wide to list
+ *  its citing documents. */
+export const docsTooWide = (citedPapers: number): boolean => citedPapers > REACH_DOCS_PAPER_CEILING;
+/** What the tab and the sheet both tell the reader to do about it. */
+export const REACH_DOCS_NARROW_HINT = "Narrow it by unit, years, stage, research area or person.";
+
 /** Citing-document filters one URL can carry (each narrows the papers further). */
 export const MAX_DOC_FILTERS = 5;
 
@@ -647,10 +688,20 @@ export function sortReachPublications<T extends ReachPubCounts>(
 }
 
 /** Every publication in scope, cited or not: the "of M" in the first tile.
- *  The same scope as `loadScopePage`, which lists them. */
+ *  The same scope as `loadScopePage`, which lists them.
+ *
+ *  `STRAIGHT_JOIN` pins the order as written, as in `okSql`: the publications
+ *  under their own filters, then each one's authorships by index. It changes
+ *  the plan and not the result. Left to itself MySQL drove this from a full
+ *  scan of `publication_author` (measured on staging: `pa` type ALL, 299,227
+ *  rows; 3.0 to 5.2 s for T0 and T1 with no year filter, 4.3 to 6.9 s for
+ *  every stage), while the counts query beside it, driven from `publication`,
+ *  answered the default view in under a second. Do not rewrite the authorship
+ *  test as `EXISTS` or `IN (subquery)`: the optimizer turns either into a
+ *  semi-join that scans `publication_author` first again (6 to 13 s). */
 export async function loadScopeTotal(p: ReachParams): Promise<number> {
   const raw = await db.read.$queryRaw<{ n: Num }[]>`
-    SELECT COUNT(DISTINCT p.pmid) AS n
+    SELECT STRAIGHT_JOIN COUNT(DISTINCT p.pmid) AS n
       FROM publication p
       JOIN publication_author pa ON pa.pmid = p.pmid
       JOIN scholar s ON s.cwid = pa.cwid
@@ -943,7 +994,10 @@ export async function loadReachDocTotal(p: ReachParams): Promise<number> {
  *  carries the total (`COUNT(*) OVER ()`, taken before the `LIMIT`). Paged in
  *  SQL: the list can run to hundreds of thousands of clinical articles.
  *  Characters 2 to 5 of `rep` are the year ("9999" for none, which sorts
- *  last). */
+ *  last).
+ *
+ *  Not guarded here: a caller checks `docsTooWide` against the cited papers
+ *  first, as `loadReach` does, and does not call this above the ceiling. */
 export async function loadReachDocs(
   p: ReachParams,
   limit: number,
@@ -1038,9 +1092,14 @@ export type ReachData = {
   pubMatched: number;
   /** `limit` of them from `offset`, counts only (no row details). */
   pubs: ReachPubCounts[];
-  /** Citing documents listed; null when the view was not asked for. */
+  /** Citing documents listed; null when the view was not asked for, or was
+   *  withheld (`docsWithheld`): no list, so no count. */
   docTotal: number | null;
   docs: ReachDocCounts[];
+  /** Set when the Citing documents view was asked for and not computed because
+   *  the selection is too wide (`docsTooWide`): the cited papers it covers,
+   *  which is `pubTotal`. null otherwise. */
+  docsWithheld: number | null;
   /** Every listed person (the search applied); null when not asked for. */
   people: ReachPersonRow[] | null;
   /** Every listed person, whatever the search: what the People tab counts,
@@ -1057,6 +1116,10 @@ export type ReachData = {
  * The Citing documents and People listings each cost a query of their own, so
  * a view that is not asked for is not loaded, and its tab then carries no
  * count (a number is only shown with its list).
+ *
+ * The Citing documents listing waits for the counts: above
+ * `REACH_DOCS_PAPER_CEILING` cited papers its query is not run at all
+ * (`docsWithheld`).
  */
 export async function loadReach(
   p: ReachParams,
@@ -1066,8 +1129,16 @@ export async function loadReach(
   const want = (v: ReachView) => opts.views.includes(v);
   const types = tickedTypes(p);
   const everything = p.showAll && want("publications");
-  // Fetched once: the People view, with own work counted, is folded from it.
+  // Fetched once: the People view, with own work counted, is folded from it,
+  // and the Citing documents view is run only if these are few enough.
   const loadingCounts = loadReachCounts(p);
+  const loadingDocs = !want("documents")
+    ? null
+    : loadingCounts.then((rows) =>
+        docsTooWide(listedFor(rows, types).length)
+          ? null
+          : loadReachDocs(p, opts.docLimit ?? opts.limit, opts.docLimit ? 0 : offset),
+      );
   const [counts, scopeTotal, hits, scopePage, docPage, people] = await Promise.all([
     loadingCounts,
     loadScopeTotal(p),
@@ -1075,7 +1146,7 @@ export async function loadReach(
       ? searchPublications(p, p.q, usesRollups(p) ? citedSql(ROLLUP_COL, types) : Prisma.sql`1 = 1`)
       : null,
     everything ? loadScopePage(p, opts.limit, offset) : null,
-    want("documents") ? loadReachDocs(p, opts.docLimit ?? opts.limit, opts.docLimit ? 0 : offset) : null,
+    loadingDocs,
     !want("people")
       ? null
       : usesRollups(p)
@@ -1098,6 +1169,7 @@ export async function loadReach(
         : [],
     docTotal: docPage?.total ?? null,
     docs: docPage?.rows ?? [],
+    docsWithheld: want("documents") && docPage === null ? listed.length : null,
     people:
       people === null
         ? null
@@ -1209,8 +1281,16 @@ const sheetNote = (shown: number, total: number, what: string, cap: number) =>
     ? `Lists the first ${shown.toLocaleString()} of ${total.toLocaleString()} ${what} in the order above (the limit is ${cap.toLocaleString()}). Narrow the filters to list the rest.`
     : `Lists all ${total.toLocaleString()} ${what} (the limit is ${cap.toLocaleString()}).`;
 
+/** The one line the Citing documents sheet, and its Criteria row, carry when
+ *  the listing was withheld. */
+export const docsWithheldNote = (citedPapers: number): string =>
+  `Not listed: this selection is too wide to list citing documents. It covers ${citedPapers.toLocaleString()} cited publications (the Publications sheet), and citing documents are listed for at most ${REACH_DOCS_PAPER_CEILING.toLocaleString()}. ${REACH_DOCS_NARROW_HINT}`;
+
 /**
  * The workbook: Publications, Citing documents, People, Criteria.
+ *
+ * Above `REACH_DOCS_PAPER_CEILING` the Citing documents sheet carries one note
+ * and no rows (`docsWithheldNote`), and the Criteria sheet says the same.
  *
  * The People sheet lists EVERY matching person. This is report 24's decided,
  * named exception to the 50-scholar export cap (`SCHOLAR_EXPORT_CAP`,
@@ -1227,6 +1307,8 @@ export async function buildReachWorkbook(
     pubTotal: number;
     docs: ReachDocRow[];
     docTotal: number;
+    /** `ReachData.docsWithheld`: the sheet then carries a note and no rows. */
+    docsWithheld?: number | null;
     people: ReachPersonRow[];
   },
   generatedAt: Date,
@@ -1269,8 +1351,14 @@ export async function buildReachWorkbook(
     ["Citing document", "Type", "Journal, body or number", "Year", "WCM papers cited", "Link"],
     [70, 26, 36, 8, 14, 46],
   );
-  for (const d of data.docs) {
-    docs.addRow([plain(d.title), d.kind, d.source ? plain(d.source) : d.source, d.year, d.papers, d.url]);
+  const withheld = data.docsWithheld ?? null;
+  if (withheld !== null) {
+    // No rows and no count of them: one line saying why.
+    docs.addRow([docsWithheldNote(withheld)]);
+  } else {
+    for (const d of data.docs) {
+      docs.addRow([plain(d.title), d.kind, d.source ? plain(d.source) : d.source, d.year, d.papers, d.url]);
+    }
   }
   docs.getColumn(1).alignment = { wrapText: true, vertical: "top" };
 
@@ -1296,7 +1384,9 @@ export async function buildReachWorkbook(
     ["Publications sheet", sheetNote(data.pubs.length, data.pubTotal, "publications", REACH_LIST_CAP)],
     [
       "Citing documents sheet",
-      `One row per citing document of the types above. ${sheetNote(data.docs.length, data.docTotal, "citing documents", REACH_DOCS_CAP)}`,
+      withheld !== null
+        ? docsWithheldNote(withheld)
+        : `One row per citing document of the types above. ${sheetNote(data.docs.length, data.docTotal, "citing documents", REACH_DOCS_CAP)}`,
     ],
     [
       "People sheet",

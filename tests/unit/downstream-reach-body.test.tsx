@@ -146,6 +146,7 @@ const data = (over: Partial<ReachData> = {}): ReachData => ({
   pubs: PUBS,
   docTotal: null,
   docs: [],
+  docsWithheld: null,
   people: null,
   peopleTotal: null,
   ...over,
