@@ -85,6 +85,7 @@ import { renderClinicalTrialsReport } from "@/components/edit/reports/clinical-t
 import { renderCoreGrantsReport } from "@/components/edit/reports/core-grants-body";
 import { renderCoreOutputReport } from "@/components/edit/reports/core-output-over-time-body";
 import { renderCoreUsersReport } from "@/components/edit/reports/core-users-body";
+import { renderDownstreamReachReport } from "@/components/edit/reports/downstream-reach-body";
 import { renderGrantAttributionReport } from "@/components/edit/reports/grant-attribution-body";
 import { renderNihBiosketchesReport } from "@/components/edit/reports/nih-biosketches-body";
 import { renderMyncbiDiscrepanciesReport } from "@/components/edit/reports/myncbi-discrepancies-body";
@@ -116,6 +117,7 @@ import {
   HIGH_IMPACT_PUBS_REPORT,
   MENTORED_PUBS_REPORT,
 } from "@/lib/edit/report-access";
+import { canViewDownstreamReachReport } from "@/lib/edit/downstream-reach-report";
 import { canViewPatentCitationsReport } from "@/lib/edit/patent-citations-report";
 import { canViewTranslationalPortfolioReport } from "@/lib/edit/translational-portfolio-report";
 import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
@@ -297,6 +299,17 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     canView: canViewTranslationalPortfolioReport,
     headerAside: true,
     render: renderTranslationalPortfolioReport,
+  },
+  // Downstream reach (clinical studies, trials, guidelines and policy, patents
+  // citing a paper). Report 24's access rule; 404s while
+  // DOWNSTREAM_REACH_REPORT is off (`canView` checks, before any read).
+  "27": {
+    n: "27",
+    gate: "admin",
+    canView: canViewDownstreamReachReport,
+    accessRule: POLICY_CITATIONS_ACCESS_RULE,
+    headerAside: true,
+    render: renderDownstreamReachReport,
   },
 };
 

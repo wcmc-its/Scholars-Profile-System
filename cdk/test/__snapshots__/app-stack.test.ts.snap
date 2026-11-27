@@ -983,6 +983,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "DOWNSTREAM_REACH_REPORT",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN",
                 "Value": "ITS:Library:Scholars/program-roster-editor-role",
               },
@@ -6266,6 +6270,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "REPORT_TRANSLATIONAL_PORTFOLIO",
+                "Value": "on",
+              },
+              {
+                "Name": "DOWNSTREAM_REACH_REPORT",
                 "Value": "on",
               },
               {

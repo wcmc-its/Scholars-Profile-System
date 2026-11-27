@@ -119,6 +119,11 @@ vi.mock("@/lib/edit/patent-citations-report", () => ({ canViewPatentCitationsRep
 vi.mock("@/lib/edit/translational-portfolio-report", () => ({
   canViewTranslationalPortfolioReport: vi.fn().mockResolvedValue(false),
 }));
+// Report 27 (Downstream reach): its gate is the flag DOWNSTREAM_REACH_REPORT
+// and report 24's rule together (`downstream-reach-report.test.ts`); closed here.
+vi.mock("@/lib/edit/downstream-reach-report", () => ({
+  canViewDownstreamReachReport: vi.fn().mockResolvedValue(false),
+}));
 // `report_meta` (names + blurbs, `loadReportMeta`) — an empty table, so the
 // catalog renders from the hardcoded defaults.
 vi.mock("@/lib/db", () => ({

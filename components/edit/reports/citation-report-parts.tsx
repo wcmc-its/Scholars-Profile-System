@@ -138,6 +138,8 @@ export function CitationRail({
   citing,
   personOptions,
   personNote,
+  counts = true,
+  personSearch = true,
 }: {
   basePath: string;
   /** The report's test-id prefix ("policy-citations"). */
@@ -153,6 +155,13 @@ export function CitationRail({
   /** The Person facet's options; a ticked person must be among them. */
   personOptions: RailChecklistOption[];
   personNote: string;
+  /** false: no numbers beside the options (report 27 shows a number only
+   *  where it links to the list it counts). */
+  counts?: boolean;
+  /** false: the Person facet lists only the people already ticked, so it has
+   *  no search box (there is nobody else to find), and with nobody ticked it
+   *  is the note alone. */
+  personSearch?: boolean;
 }) {
   // A viewer narrowed to their units is offered only those (a department's
   // divisions ride along): anything else could only return nothing.
@@ -196,10 +205,18 @@ export function CitationRail({
       .map((t) => ({ value: t, label: t, count: 0 })),
   ];
   const published = yearSpan(params.from, params.to, fiscalLabel(params)) ?? "Any";
+  /** The options as the checklists get them: with their counts, or without. */
+  const shown = (options: readonly RailChecklistOption[]): RailChecklistOption[] =>
+    counts ? [...options] : options.map(({ value, label, title }) => ({ value, label, title }));
+  const peopleLabel = counts ? "People" : undefined;
   return (
     <ReportRail
       resetHref={resetHref}
-      help="Filters apply automatically. Numbers next to units and person types count active people."
+      help={
+        counts
+          ? "Filters apply automatically. Numbers next to units and person types count active people."
+          : "Filters apply automatically."
+      }
       testId={`${testId}-rail`}
     >
       {scope !== null && (
@@ -259,11 +276,11 @@ export function CitationRail({
               <RailChecklist
                 name="unit"
                 roomy
-                options={unitOptions}
+                options={shown(unitOptions)}
                 selected={params.units}
                 searchPlaceholder="Search org units…"
                 collapseAfter={8}
-                countLabel="People"
+                countLabel={peopleLabel}
               />
             </RailSection>
           )}
@@ -277,9 +294,9 @@ export function CitationRail({
             <RailChecklist
               name="type"
               roomy
-              options={typeOptions}
+              options={shown(typeOptions)}
               selected={params.types}
-              countLabel="People"
+              countLabel={peopleLabel}
             />
           </RailSection>
           <RailSection
@@ -287,15 +304,17 @@ export function CitationRail({
             summary={summarize(personOptions.filter((o) => params.people.includes(o.value)).map((o) => o.label))}
             testId={`${testId}-person`}
           >
-            <RailChecklist
-              name="person"
-              roomy
-              options={personOptions}
-              selected={params.people}
-              searchPlaceholder="Find a person"
-              collapseAfter={5}
-              countLabel="Papers"
-            />
+            {(personSearch || personOptions.length > 0) && (
+              <RailChecklist
+                name="person"
+                roomy
+                options={shown(personOptions)}
+                selected={params.people}
+                searchPlaceholder={personSearch ? "Find a person" : undefined}
+                collapseAfter={5}
+                countLabel={counts ? "Papers" : undefined}
+              />
+            )}
             <span className="text-muted-foreground text-xs">{personNote}</span>
           </RailSection>
           <RailSection
@@ -323,20 +342,20 @@ export function CitationRail({
                 <RailChecklist
                   name="unit"
                   roomy
-                  options={institutionOptions}
+                  options={shown(institutionOptions)}
                   selected={params.units}
-                  countLabel="People"
+                  countLabel={peopleLabel}
                 />
               )}
               {centerOptions.length > 0 && (
                 <RailChecklist
                   name="unit"
                   roomy
-                  options={centerOptions}
+                  options={shown(centerOptions)}
                   selected={params.units}
                   searchPlaceholder="Search centers…"
                   collapseAfter={6}
-                  countLabel="People"
+                  countLabel={peopleLabel}
                 />
               )}
             </RailSection>
