@@ -4,7 +4,7 @@
  * client (tests/unit/patent-citations.test.ts).
  */
 import { db } from "../../lib/db";
-import { assertSourceVolume } from "../../lib/etl-guard";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import type { CitingDoc } from "../policy-citations/shape";
 import {
   decideSharedId,
@@ -122,18 +122,30 @@ export type LoadSummary = {
   notInDatabase: { documents: number; links: number; inventions: number; publications: number };
   /** Publications here that the extract never considered. */
   unconsidered: number;
-  written: { mappings: number; documents: number; documentsRefreshed: number; links: number; linksRefreshed: number; rollup: number } | null;
+  /** What a pruning load deletes (or would, on a dry run): stored rows the file no longer carries. */
+  pruned: { documents: number; links: number } | null;
+  written: {
+    mappings: number;
+    documents: number;
+    documentsRefreshed: number;
+    links: number;
+    linksRefreshed: number;
+    linksDeleted: number;
+    documentsDeleted: number;
+    rollup: number;
+  } | null;
 };
 
 /**
  * Load a parsed extract. Documents and links are inserted if new; an existing
  * document's title, year, family key and details, and an existing link's
  * evidence, are rewritten when the file says otherwise (new patent tables
- * regroup families; a new release restates a score). Nothing is deleted.
- * // ponytail: a link the next dataset release drops stays. Removal belongs
- * // with the refresh step, behind assertPruneVolume, keyed on `evidence.release`.
+ * regroup families; a new release restates a score). With `prune` (the weekly
+ * refresh), stored links and documents the file no longer carries are
+ * deleted, behind a guard on how many; without it (the hand-run import)
+ * nothing is deleted.
  */
-export async function loadExtract(x: Extract, opts: { dryRun?: boolean } = {}): Promise<LoadSummary> {
+export async function loadExtract(x: Extract, opts: { dryRun?: boolean; prune?: boolean } = {}): Promise<LoadSummary> {
   const { docs, links, unreadable, dropped, unresolved } = shapeExtract(x);
   if (unreadable.length > 0) console.warn(`${unreadable.length} documents skipped, id not a US patent number: ${unreadable.join(", ")}`);
   if (dropped.noDocument + dropped.belowFloor > 0) {
@@ -178,6 +190,7 @@ export async function loadExtract(x: Extract, opts: { dryRun?: boolean } = {}): 
       publications: [...cited].filter((p) => !inCorpus.has(p)).length,
     },
     unconsidered: corpus.filter((p) => !x.considered.has(p)).length,
+    pruned: null,
     written: null,
   };
   const line = (o: LoadSummary["file"]) =>
@@ -195,9 +208,19 @@ export async function loadExtract(x: Extract, opts: { dryRun?: boolean } = {}): 
   });
   assertSourceVolume("patent-citations:documents", { incoming: docs.length, existing: stored.size, floor: 1, maxDropPct: MAX_DROP_PCT });
   assertSourceVolume("patent-citations:links", { incoming: links.length, existing: storedLinks.size, floor: 1, maxDropPct: MAX_DROP_PCT });
+  const fileLinks = new Set(links.map(storedKey));
+  const fileDocs = new Set(docs.map((d) => d.externalId));
+  const staleLinks = opts.prune ? [...storedLinks.keys()].filter((k) => !fileLinks.has(k)) : [];
+  const staleDocs = opts.prune ? [...stored.values()].filter((d) => !fileDocs.has(d.externalId)).map((d) => d.id) : [];
+  if (opts.prune) {
+    summary.pruned = { documents: staleDocs.length, links: staleLinks.length };
+    console.log(`Stored but not in the file (deleted by this load): ${staleLinks.length} links, ${staleDocs.length} documents.`);
+    assertPruneVolume("patent-citations:prune-links", { pruning: staleLinks.length, of: storedLinks.size, maxPct: MAX_DROP_PCT });
+    assertPruneVolume("patent-citations:prune-documents", { pruning: staleDocs.length, of: stored.size, maxPct: MAX_DROP_PCT });
+  }
   if (opts.dryRun) return summary;
 
-  const written = { mappings: 0, documents: 0, documentsRefreshed: 0, links: 0, linksRefreshed: 0, rollup: 0 };
+  const written = { mappings: 0, documents: 0, documentsRefreshed: 0, links: 0, linksRefreshed: 0, linksDeleted: 0, documentsDeleted: 0, rollup: 0 };
   const checkedAt = new Date(x.header.mappedAt);
   for (const batch of chunks(x.maps, INSERT_BATCH)) {
     written.mappings += (
@@ -247,6 +270,23 @@ export async function loadExtract(x: Extract, opts: { dryRun?: boolean } = {}): 
     written.links += (await db.write.publicationCitingDocument.createMany({ data: batch, skipDuplicates: true })).count;
   }
 
+  // Links first: a stale document's links are all stale (a carried link carries its document).
+  for (const batch of chunks(staleLinks, UPDATE_BATCH * 5)) {
+    written.linksDeleted += (
+      await db.write.publicationCitingDocument.deleteMany({
+        where: {
+          OR: batch.map((k) => {
+            const [pmid, id] = k.split("|");
+            return { pmid, citingDocumentId: Number(id) };
+          }),
+        },
+      })
+    ).count;
+  }
+  for (const batch of chunks(staleDocs, INSERT_BATCH)) {
+    written.documentsDeleted += (await db.write.citingDocument.deleteMany({ where: { id: { in: batch } } })).count;
+  }
+
   // Only this column: a hand-run patent load must not be able to move the
   // ranked counts. The same expression is in the weekly rollup
   // (etl/policy-citations/index.ts), which then keeps it current.
@@ -263,7 +303,8 @@ export async function loadExtract(x: Extract, opts: { dryRun?: boolean } = {}): 
      WHERE p.patent_family_count <> COALESCE(x.pf, 0)`;
   console.log(
     `Written: ${written.mappings} paper mappings, ${written.documents} documents (${written.documentsRefreshed} refreshed), ` +
-      `${written.links} links (${written.linksRefreshed} refreshed); patent_family_count changed on ${written.rollup} publications.`,
+      `${written.links} links (${written.linksRefreshed} refreshed), deleted ${written.linksDeleted} links and ${written.documentsDeleted} documents; ` +
+      `patent_family_count changed on ${written.rollup} publications.`,
   );
   return { ...summary, written };
 }

@@ -992,6 +992,14 @@ export class EtlStack extends Stack {
       // the first weekly step (Sunday 12:00 UTC) because ReCiter's daily retrieval
       // starts at 17:30 UTC. The SecureString must exist in SSM before deploy or
       // every ETL task fails to start.
+      // USPTO Open Data Portal key for the PatentsView downloads (etl:patent-citations:refresh,
+      // sent only to *.uspto.gov). A personal key, by decision (2026-11-27). The SecureString
+      // must exist in SSM before deploy or every ETL task fails to start.
+      USPTO_ODP_API_KEY: ecs.Secret.fromSsmParameter(
+        ssm.StringParameter.fromSecureStringParameterAttributes(this, "UsptoOdpApiKey", {
+          parameterName: `/sps/${env}/etl/uspto-odp-api-key`,
+        }),
+      ),
       NCBI_SHARED_API_KEY: ecs.Secret.fromSsmParameter(
         ssm.StringParameter.fromSecureStringParameterAttributes(this, "NcbiApiKey", {
           parameterName: `/sps/${env}/etl/ncbi-api-key`,
@@ -2519,6 +2527,14 @@ export class EtlStack extends Stack {
       // not stored again as clinical. `continue` — writes only add rows, so a miss just
       // delays new citations a week.
       { id: "ClinicalCitationsWeekly", npmScript: "etl:clinical-citations", external: true, tier: "continue" },
+      // Patent citations (etl/patent-citations/refresh.ts) — rebuilds the Reliance on
+      // Science extract against this env's publication list and loads it, pruning links a
+      // new release drops (behind the 20% guards). Zenodo + the USPTO portal (key below)
+      // + OpenAlex over NAT egress, source files cached under scratch-input/patent-
+      // citations/ in the curation-backup bucket (read: scratch-input/*, write: grantPut).
+      // About 4.5 GB of files on the task's disk and 4.5 GB of memory; a few minutes
+      // after the first run's downloads. `continue` — a miss leaves last week's links.
+      { id: "PatentCitationsWeekly", npmScript: "etl:patent-citations:refresh", external: false, tier: "continue" },
       // Citation links (etl/citation-links) — which Scholars publications cite which,
       // into publication_citation. Reads analysis_nih_cites from reciterdb, so
       // external:true (the Reciter secret); no other egress. `continue` — writes only

@@ -388,10 +388,17 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
     },
   },
   PubMedSystematicReviews: { cadence: "weekly" }, // PubMedSystematicReviewsWeekly
-  // Hand-run per Reliance on Science release (etl:patent-citations:import), so
-  // no step runs it. Annual so Data sync lists it and the heartbeat says when
-  // a year has passed without a fresh load.
-  "PatentCitations-Import": { cadence: "annual" },
+  // PatentCitationsWeekly (etl:patent-citations:refresh): rebuilds the extract
+  // and loads it every Sunday. The hand-run etl:patent-citations:import still
+  // writes `PatentCitations-Import`, untracked: it is the fallback, not a cadence.
+  PatentCitations: {
+    cadence: "weekly",
+    ack: {
+      until: "2026-12-21",
+      reason:
+        "etl:patent-citations:refresh is new: no run on record until the first Sunday in each env; remove once both envs have a successful run",
+    },
+  },
   FeedbackDigest: { cadence: "weekly" }, // scholars-feedback-digest-<env>, Mondays
   // ED email-visibility bridge (export -> S3 -> import). Only the import writes a
   // row; built only where edEmailVisibilityBridgeEnabled (staging today).
@@ -549,6 +556,7 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
 export const UNSCHEDULED: Readonly<Record<string, string>> = {
   "ClinicalTrials-Import": "hand-run bridge import (etl:clinical-trials:import)",
   "DataSharing-Import": "hand-run bridge import (etl:data-sharing:import)",
+  "PatentCitations-Import": "hand-run fallback of the tracked PatentCitations refresh (etl:patent-citations:import)",
   "ED-StewardNames-Import": "hand-run (etl:ed:import-steward-names)",
   "ED-Student-Programs": "hand-run (etl:ed:student-programs)",
   "InfoEd-Biosketch-backfill": "hand-run --backfill of the tracked InfoEd-Biosketch step",

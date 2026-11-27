@@ -87,6 +87,7 @@
     "etl:citation-links": "tsx etl/citation-links/index.ts",
     "etl:patent-citations:extract": "tsx etl/patent-citations/extract.ts",
     "etl:patent-citations:import": "tsx etl/patent-citations/import.ts",
+    "etl:patent-citations:refresh": "NODE_OPTIONS=--max-old-space-size=6144 tsx etl/patent-citations/refresh.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
     "etl:nsf": "tsx etl/nsf/index.ts",
     "etl:gates:probe": "tsx etl/gates/probe.ts",
