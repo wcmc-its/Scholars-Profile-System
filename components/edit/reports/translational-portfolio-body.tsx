@@ -22,6 +22,7 @@ import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
 import { ArticleCitationList } from "@/components/edit/reports/article-citation-list";
 import { toCitationRow } from "@/components/edit/reports/article-count-body";
 import { ReportCard } from "@/components/edit/reports/report-ui";
+import { PubTitle } from "@/components/publication/pub-html";
 import { StageBadge } from "@/components/publication/stage-badge";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Button } from "@/components/ui/button";
@@ -176,7 +177,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub: React.
 function WorkLine({ w }: { w: RecentWork }) {
   return (
     <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-      <span>{w.title.replace(/<[^>]+>/g, "").replace(/\.+$/, "")}</span>
+      <PubTitle value={w.title.trim().replace(/\.+$/, "")} />
       <span className="text-muted-foreground text-xs">{w.year}</span>
       <StageBadge stage={w.stage} />
     </span>
