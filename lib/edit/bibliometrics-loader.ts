@@ -119,6 +119,23 @@ export async function loadBibliometricsReport(
     }
   }
 
+  // The listed papers' WCM authors, for the author chips. Unranked rows
+  // (position 0, #2227) go last, not first.
+  const coauthors = await db.read.publicationAuthor.findMany({
+    where: {
+      pmid: { in: report.papers.rows.map((p) => p.pmid) },
+      isConfirmed: true,
+      scholar: { deletedAt: null },
+    },
+    select: { pmid: true, position: true, scholar: { select: { cwid: true, preferredName: true } } },
+  });
+  for (const p of report.papers.rows) {
+    p.wcmAuthors = coauthors
+      .filter((a) => a.pmid === p.pmid && a.scholar)
+      .sort((a, b) => (a.position || Infinity) - (b.position || Infinity))
+      .map((a) => ({ cwid: a.scholar!.cwid, name: a.scholar!.preferredName }));
+  }
+
   // ponytail: `readPolicyCitations` lists the 100 most recent reviews per paper
   // and counts the rest, so the Word document inherits that ceiling.
   await Promise.all(

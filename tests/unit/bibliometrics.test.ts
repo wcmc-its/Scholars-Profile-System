@@ -260,6 +260,17 @@ describe("most impactful papers", () => {
     expect(other!.authors.some((a) => a.bold)).toBe(false);
     expect(other!.etAl).toBe(false);
   });
+
+  it("drops the ((…)) markers the stored author string puts around WCM authors", () => {
+    const [marked] = build([
+      pub({ nihPercentile: 99, position: 2, authorsString: "((Quill A)), ((Vale J)), Marsh T" }),
+    ]).papers.rows;
+    expect(marked!.authors).toEqual([
+      { name: "Quill A", bold: false },
+      { name: "Vale J", bold: true },
+      { name: "Marsh T", bold: false },
+    ]);
+  });
 });
 
 describe("parseBibliometricsFilters", () => {

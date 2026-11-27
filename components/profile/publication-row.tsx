@@ -117,7 +117,7 @@ export function PublicationRow({
               type="button"
               onClick={openPolicy}
               aria-haspopup="dialog"
-              className={`${badge} border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white hover:opacity-90`}
+              className={`${badge} border-[var(--color-accent-slate)] bg-[#ecf1f6] font-semibold text-[#274158] hover:bg-[#d5e0ec]`}
             >
               <Landmark className="size-3" strokeWidth={2} aria-hidden="true" />
               {authorityBadgeLabel(a.body, a.count)}

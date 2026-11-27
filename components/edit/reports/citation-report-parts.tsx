@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 
 import { AutoSubmitForm } from "@/components/edit/auto-submit-form";
+export { AuthorPills } from "@/components/edit/reports/author-pills";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { RailChecklist, type RailChecklistOption } from "@/components/edit/reports/rail-checklist";
 import { RailSection, ReportRail } from "@/components/edit/reports/report-ui";
@@ -59,11 +60,6 @@ export function summarize(labels: string[], all = "Any"): string {
 }
 
 export const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
-
-const initials = (name: string) => {
-  const words = name.split(/\s+/).filter(Boolean);
-  return ((words[0]?.[0] ?? "") + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase();
-};
 
 /** A year `<select>`, "Any" first, from next year (the fiscal basis runs a
  *  year ahead: FY2027 starts July 2026) back sixty. */
@@ -445,33 +441,6 @@ export function personCardFooter(onlyHref: string, bibliometrics: string | null)
       </Link>
     ),
   };
-}
-
-/** A publication's WCM authors as pills, each with its hover card. */
-export function AuthorPills({
-  authors,
-  footer,
-}: {
-  authors: readonly { cwid: string; name: string }[];
-  footer?: PersonFooter;
-}) {
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {authors.map((a) => (
-        <ScholarHoverCard key={a.cwid} cwid={a.cwid} footer={footer?.(a.cwid)}>
-          <span className="border-border bg-background inline-flex items-center gap-2 rounded-full border py-[3px] pr-3 pl-1 text-[13px] leading-[1.3] font-semibold">
-            <span
-              aria-hidden
-              className="bg-apollo-surface-2 border-apollo-border-strong text-muted-foreground inline-flex size-6 items-center justify-center rounded-full border text-[10px]"
-            >
-              {initials(a.name)}
-            </span>
-            {a.name}
-          </span>
-        </ScholarHoverCard>
-      ))}
-    </div>
-  );
 }
 
 /** The By person tables' first cell: the name with its hover card, the CWID
