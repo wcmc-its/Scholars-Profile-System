@@ -26,12 +26,22 @@ const h = vi.hoisted(() => {
       update: vi.fn(async ({ where, data }: { where: { source_externalId: Row }; data: Row }) => {
         Object.assign(t.doc.find((d) => d.externalId === where.source_externalId.externalId)!, data);
       }),
+      deleteMany: vi.fn(async ({ where }: { where: { id: { in: number[] } } }) => {
+        const gone = t.doc.filter((d) => where.id.in.includes(d.id as number));
+        for (const d of gone) t.doc.splice(t.doc.indexOf(d), 1);
+        return { count: gone.length };
+      }),
     },
     publicationCitingDocument: {
       findMany: vi.fn(async () => t.link),
       createMany: insert(t.link, (l) => `${l.pmid}|${l.citingDocumentId}`),
       updateMany: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
         Object.assign(t.link.find((l) => l.pmid === where.pmid && l.citingDocumentId === where.citingDocumentId)!, data);
+      }),
+      deleteMany: vi.fn(async ({ where }: { where: { OR: Row[] } }) => {
+        const gone = t.link.filter((l) => where.OR.some((w) => w.pmid === l.pmid && w.citingDocumentId === l.citingDocumentId));
+        for (const l of gone) t.link.splice(t.link.indexOf(l), 1);
+        return { count: gone.length };
       }),
     },
     publicationOpenalex: { createMany: insert(t.openalex, (m) => `${m.pmid}|${m.openalexId}`) },
@@ -362,7 +372,7 @@ describe("loading an extract", () => {
     expect(summary.file).toEqual({ documents: 3, links: 3, inventions: 2, publications: 2 });
     expect(summary.notInDatabase).toEqual({ documents: 3, links: 3, inventions: 2, publications: 1 });
     expect(summary.unconsidered).toBe(0);
-    expect(summary.written).toEqual({ mappings: 2, documents: 3, documentsRefreshed: 0, links: 3, linksRefreshed: 0, rollup: 0 });
+    expect(summary.written).toEqual({ mappings: 2, documents: 3, documentsRefreshed: 0, links: 3, linksRefreshed: 0, linksDeleted: 0, documentsDeleted: 0, rollup: 0 });
 
     const ros = h.t.doc.filter((d) => d.source === "ros");
     expect(ros.map((d) => [d.externalId, d.level, d.dedupKey])).toEqual([
@@ -395,7 +405,7 @@ describe("loading an extract", () => {
     const after = structuredClone(h.t);
     const again = await loadExtract(extract());
     expect(again.notInDatabase).toEqual({ documents: 0, links: 0, inventions: 0, publications: 1 });
-    expect(again.written).toEqual({ mappings: 0, documents: 0, documentsRefreshed: 0, links: 0, linksRefreshed: 0, rollup: 0 });
+    expect(again.written).toEqual({ mappings: 0, documents: 0, documentsRefreshed: 0, links: 0, linksRefreshed: 0, linksDeleted: 0, documentsDeleted: 0, rollup: 0 });
     expect({ ...h.t, sql: [] }).toEqual({ ...after, sql: [] });
     expect(h.write.citingDocument.update).not.toHaveBeenCalled();
     expect(h.write.publicationCitingDocument.updateMany).not.toHaveBeenCalled();
@@ -424,11 +434,58 @@ describe("loading an extract", () => {
     expect(h.t.link).toHaveLength(3);
   });
 
-  it("never deletes, and leaves the other sources' documents alone", async () => {
+  it("never deletes without prune, and leaves the other sources' documents alone", async () => {
     await loadExtract(extract());
+    const dropped = readExtract(extractLines({ links: [{ t: "link", pmid: "111", doc: "us-90000001-b2", score: 10, where: "both" }] }));
+    process.env.ETL_GUARD_BYPASS = "all";
+    const summary = await loadExtract(dropped);
+    expect(summary.pruned).toBeNull();
     expect(h.t.doc[0]).toEqual({ id: 900, source: "pubmed", externalId: "5550001", level: "guideline", dedupKey: "k" });
-    expect(Object.keys(h.write.citingDocument)).not.toContain("deleteMany");
-    expect(Object.keys(h.write.publicationCitingDocument)).not.toContain("deleteMany");
+    expect(h.write.citingDocument.deleteMany).not.toHaveBeenCalled();
+    expect(h.write.publicationCitingDocument.deleteMany).not.toHaveBeenCalled();
+    expect(h.t.link).toHaveLength(3);
+  });
+
+  describe("pruning (the weekly refresh)", () => {
+    const dropOne = () =>
+      readExtract(
+        extractLines({
+          links: [
+            { t: "link", pmid: "111", doc: "us-90000001-b2", score: 10, where: "both" },
+            { t: "link", pmid: "111", doc: "us-2030900001-a1", score: 8, where: "body" },
+          ],
+        }),
+      );
+
+    it("deletes the links and documents the file no longer carries, and nothing of other sources", async () => {
+      await loadExtract(extract());
+      process.env.ETL_GUARD_BYPASS = "all"; // one of three is over the 20% guards
+      const summary = await loadExtract(dropOne(), { prune: true });
+      expect(summary.pruned).toEqual({ documents: 1, links: 1 });
+      expect(summary.written).toMatchObject({ linksDeleted: 1, documentsDeleted: 1 });
+      expect(h.t.doc.map((d) => d.externalId)).toEqual(["5550001", "us-90000001-b2", "us-2030900001-a1"]);
+      expect(h.t.link.map((l) => l.pmid)).toEqual(["111", "111"]);
+    });
+
+    it("refuses a prune over 20% before any write, and a dry run reports it", async () => {
+      await loadExtract(extract());
+      h.t.openalex.length = 0;
+      h.t.sql.length = 0;
+      process.env.ETL_GUARD_BYPASS = "patent-citations:links,patent-citations:documents";
+      await expect(loadExtract(dropOne(), { prune: true })).rejects.toThrow("patent-citations:prune-links");
+      expect(h.t.link).toHaveLength(3);
+      expect(h.t.openalex).toHaveLength(0);
+      process.env.ETL_GUARD_BYPASS = "all";
+      expect((await loadExtract(dropOne(), { prune: true, dryRun: true })).pruned).toEqual({ documents: 1, links: 1 });
+      expect(h.t.link).toHaveLength(3);
+    });
+
+    it("deletes nothing when the file carries everything stored", async () => {
+      await loadExtract(extract());
+      const again = await loadExtract(extract(), { prune: true });
+      expect(again.pruned).toEqual({ documents: 0, links: 0 });
+      expect(h.write.publicationCitingDocument.deleteMany).not.toHaveBeenCalled();
+    });
   });
 
   it("a dry run reports and writes nothing", async () => {

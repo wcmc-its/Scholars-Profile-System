@@ -370,10 +370,10 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
     description: "Clinical trials, clinical studies and guidelines that cite our publications.",
     origin: "external", // ReCiterDB clinical citation links (iCite) + PubMed
   },
-  "PatentCitations-Import": {
+  PatentCitations: {
     label: "Patent Citations",
-    description: "US patents that cite our publications, loaded by hand from each Reliance on Science release.",
-    origin: "external", // Reliance on Science (Zenodo) + USPTO PatentsView, extracted on a laptop
+    description: "US patents that cite our publications, rebuilt every week from the latest Reliance on Science release.",
+    origin: "external", // Reliance on Science (Zenodo) + USPTO PatentsView, extracted in the weekly ETL task
   },
   CitationLinks: {
     label: "Citation Links",
