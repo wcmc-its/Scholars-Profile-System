@@ -959,6 +959,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "CLINICAL_CITATIONS_MODAL",
+                "Value": "off",
+              },
+              {
                 "Name": "EDIT_PROGRAM_ROSTER",
                 "Value": "on",
               },
@@ -6238,6 +6242,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "PATENT_CITATIONS_MODAL",
+                "Value": "on",
+              },
+              {
+                "Name": "CLINICAL_CITATIONS_MODAL",
                 "Value": "on",
               },
               {

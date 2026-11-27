@@ -1,7 +1,8 @@
 /**
- * Registered clinical trials and US patents that cite one publication, as the
- * publication modal's "Trials and patents" section shows them. Pure shaping:
- * the read is `readTrialPatentCitations` (lib/api/publication-detail.ts).
+ * Registered clinical trials, US patents and clinical studies that cite one
+ * publication, as the publication modal's "Trials and patents" section shows
+ * them. Pure shaping: the reads are `readTrialPatentCitations` and
+ * `readClinicalCitations` (lib/api/publication-detail.ts).
  *
  * Neither is a ranked level (`POLICY_LEVELS`, policy-rollup.ts), so none of
  * this reaches the "Guidelines and policy" section, report 24 or the
@@ -15,6 +16,9 @@ export function trialCitationsModalOn(): boolean {
 }
 export function patentCitationsModalOn(): boolean {
   return process.env.PATENT_CITATIONS_MODAL === "on";
+}
+export function clinicalCitationsModalOn(): boolean {
+  return process.env.CLINICAL_CITATIONS_MODAL === "on";
 }
 
 export type CitingTrial = {
@@ -49,10 +53,31 @@ export type CitingInvention = {
   related: number;
 };
 
+/** One clinical article that cites the paper (iCite's clinical citations). */
+export type CitingClinicalStudy = {
+  id: number;
+  title: string;
+  /** The PubMed record; null when the stored URL is not on that host. */
+  url: string | null;
+  journal: string | null;
+  year: number | null;
+  /** The citing article shares a confirmed author with the paper: listed, not counted. */
+  ownWork: boolean;
+};
+
+/**
+ * One page of the clinical studies, newest first. `count` leaves out the
+ * authors' own work, as `publication.clinical_cite_count` does; `total` is
+ * every study, and the list pages to it.
+ */
+export type ClinicalCitations = { items: CitingClinicalStudy[]; count: number; total: number };
+
 export type TrialPatentCitations = {
   /** `count` leaves out the authors' own trials; `total` is every trial, sent or not. */
   trials?: { items: CitingTrial[]; count: number; total: number };
   inventions?: { items: CitingInvention[]; total: number };
+  /** The first page; the modal loads the rest (`clinicalCitationsPath`, clinical-page.ts). */
+  clinical?: ClinicalCitations;
 };
 
 // ponytail: the first 50 of each group are sent, newest first, with the true
@@ -61,6 +86,7 @@ export type TrialPatentCitations = {
 export const TRIAL_PATENT_CAP = 50;
 
 const TRIAL_HOST = "https://clinicaltrials.gov/";
+const PUBMED_HOST = "https://pubmed.ncbi.nlm.nih.gov/";
 /** The patent page host the importer stores (`patentDoc`, etl/patent-citations/shape.ts). */
 const PATENT_HOST = "https://patents.google.com/";
 
@@ -155,6 +181,50 @@ function toTrial({ evidence, citingDocument: d }: TrialPatentLink): CitingTrial 
     startYear: d.year,
     nctId: d.externalId,
     ownTrial: obj(evidence).ownTrial === true,
+  };
+}
+
+/** One clinical link row as the read returns it. */
+export type ClinicalLink = {
+  evidence: unknown;
+  citingDocument: {
+    id: number;
+    title: string;
+    year: number | null;
+    url: string;
+    journal: string | null;
+    journalAbbrev: string | null;
+  };
+};
+
+/** The authors' own work, from a link's `evidence` (`OWN_WORK`, etl/clinical-citations/shape.ts). */
+export const isOwnWorkEvidence = (evidence: unknown): boolean => obj(evidence).ownWork === true;
+
+export function toClinicalStudy({ evidence, citingDocument: d }: ClinicalLink): CitingClinicalStudy {
+  return {
+    id: d.id,
+    title: d.title,
+    url: allowed(d.url, PUBMED_HOST),
+    journal: d.journalAbbrev || d.journal || null,
+    year: d.year,
+    ownWork: isOwnWorkEvidence(evidence),
+  };
+}
+
+/**
+ * One page of clinical studies from its rows (already ordered and cut by the
+ * read) and the `evidence` of every clinical link of the paper, or undefined
+ * when the paper has none.
+ */
+export function shapeClinicalCitations(
+  page: readonly ClinicalLink[],
+  everyEvidence: readonly unknown[],
+): ClinicalCitations | undefined {
+  if (everyEvidence.length === 0) return undefined;
+  return {
+    items: page.map(toClinicalStudy),
+    count: everyEvidence.filter((e) => !isOwnWorkEvidence(e)).length,
+    total: everyEvidence.length,
   };
 }
 

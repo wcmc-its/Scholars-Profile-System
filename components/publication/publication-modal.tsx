@@ -12,7 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { ArrowUpRight, Download, FileText, FlaskConical, HelpCircle, Landmark } from "lucide-react";
+import { ArrowUpRight, Download, FileText, FlaskConical, HelpCircle, Landmark, Stethoscope } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -21,7 +21,14 @@ import { methodologyHref } from "@/lib/methodology-anchors";
 import { translationalStageDisplay } from "@/lib/translational-stage";
 import type { PolicyCitingDoc } from "@/lib/api/publication-detail";
 import { plural, policyDocCitation } from "@/lib/citations/policy-rollup";
-import type { CitingInvention, CitingTrial, TrialPatentCitations } from "@/lib/citations/trials-patents";
+import { CLINICAL_PAGE_SIZE, clinicalCitationsPath } from "@/lib/citations/clinical-page";
+import type {
+  CitingClinicalStudy,
+  CitingInvention,
+  CitingTrial,
+  ClinicalCitations,
+  TrialPatentCitations,
+} from "@/lib/citations/trials-patents";
 import type {
   PublicationDetailCore,
   PublicationDetailMethodFamily,
@@ -358,8 +365,12 @@ function ModalContent({
   }
   const trialPatent = payload.trialPatentCitations;
   if (trialPatent) {
-    // Trials counted (the authors' own are listed, not counted) plus inventions.
-    const n = (trialPatent.trials?.count ?? 0) + (trialPatent.inventions?.total ?? 0);
+    // Trials counted (the authors' own are listed, not counted) plus inventions
+    // plus clinical studies counted (the same rule).
+    const n =
+      (trialPatent.trials?.count ?? 0) +
+      (trialPatent.inventions?.total ?? 0) +
+      (trialPatent.clinical?.count ?? 0);
     tabs.push({ key: "trials", label: "Trials and patents", count: n > 0 ? n.toLocaleString() : null });
   }
   tabs.push({
@@ -624,7 +635,7 @@ function ModalContent({
           pmid={pub.pmid}
         />
         {policy ? <PolicySection docs={policy.docs} reviewTotal={policy.reviewTotal} /> : null}
-        {trialPatent ? <TrialPatentSection citations={trialPatent} /> : null}
+        {trialPatent ? <TrialPatentSection pmid={pub.pmid} citations={trialPatent} /> : null}
         {/* #3259 — citing pubs are PubMed-keyed; external pubs have no list to show. */}
         {pubSource(pub.pmid).isPubmed ? (
           <CitingPubsSection
@@ -1459,9 +1470,7 @@ function TrialRow({ trial: t }: { trial: CitingTrial }) {
       <div>
         <TrialPatentTitle label={t.title} url={t.url} />
         {t.ownTrial ? (
-          <span className="text-muted-foreground border-apollo-border-strong ml-1 inline-block rounded-full border px-2 py-px text-xs">
-            Authors&rsquo; own trial
-          </span>
+          <span className={OWN_LABEL}>Authors&rsquo; own trial</span>
         ) : null}
       </div>
       {metaLine([
@@ -1492,8 +1501,159 @@ function InventionRow({ invention: p }: { invention: CitingInvention }) {
   );
 }
 
-function TrialPatentSection({ citations }: { citations: TrialPatentCitations }) {
-  const { trials, inventions } = citations;
+const OWN_LABEL =
+  "text-muted-foreground border-apollo-border-strong ml-1 inline-block rounded-full border px-2 py-px text-xs";
+
+function ClinicalStudyRow({ study: s }: { study: CitingClinicalStudy }) {
+  return (
+    <>
+      <div>
+        <TrialPatentTitle label={s.title} url={s.url} />
+        {s.ownWork ? <span className={OWN_LABEL}>By the authors</span> : null}
+      </div>
+      {metaLine([s.journal, s.year !== null && String(s.year), s.ownWork && "not included in the count"])}
+    </>
+  );
+}
+
+/**
+ * The clinical studies card. Same card as `TrialPatentGroup`, but the list is
+ * never cut: the first five rows, then "Show more" reveals the page the payload
+ * carried and after that loads the next page, until every study is listed.
+ */
+function ClinicalStudiesGroup({ pmid, clinical }: { pmid: string; clinical: ClinicalCitations }) {
+  const [items, setItems] = useState(clinical.items);
+  const [total, setTotal] = useState(clinical.total);
+  /** Pages held, whatever they contained: the next page starts after them. */
+  const [pages, setPages] = useState(1);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  /** Read by screen readers; shown only when a load failed. */
+  const [status, setStatus] = useState<{ text: string; failed: boolean }>({ text: "", failed: false });
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const fewerRef = useRef<HTMLButtonElement | null>(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  const visible = expanded ? items : items.slice(0, TRIAL_PATENT_INITIAL_VISIBLE);
+  const unloaded = pages * CLINICAL_PAGE_SIZE < total;
+  const hasMore = expanded ? unloaded : items.length > TRIAL_PATENT_INITIAL_VISIBLE || unloaded;
+  const showing = (n: number, of: number) =>
+    `Showing ${n.toLocaleString()} of ${plural(of, "clinical study", "clinical studies")}.`;
+
+  // "Show more" goes away once the last page is in. If it had focus, hand the
+  // focus to its neighbour so it is not dropped to the top of the page.
+  const hadFocus = useRef(false);
+  useEffect(() => {
+    if (!hasMore && hadFocus.current) fewerRef.current?.focus();
+    hadFocus.current = false;
+  }, [hasMore]);
+  // "Show fewer" goes away on collapse; "Show more" is always there to take over.
+  const fewerHadFocus = useRef(false);
+  useEffect(() => {
+    if (!expanded && fewerHadFocus.current) moreRef.current?.focus();
+    fewerHadFocus.current = false;
+  }, [expanded]);
+
+  async function showMore() {
+    if (loading) return;
+    hadFocus.current = document.activeElement === moreRef.current;
+    if (!expanded) {
+      setExpanded(true);
+      setStatus({ text: showing(items.length, total), failed: false });
+      return;
+    }
+    setLoading(true);
+    setStatus({ text: "Loading more clinical studies.", failed: false });
+    try {
+      const r = await fetch(clinicalCitationsPath(pmid, pages * CLINICAL_PAGE_SIZE));
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const page = (await r.json()) as ClinicalCitations;
+      if (!live.current) return;
+      // A study can move between pages if the list changed since the modal opened.
+      const held = new Set(items.map((i) => i.id));
+      const next = [...items, ...page.items.filter((i) => !held.has(i.id))];
+      // An empty page is the end, whatever the total said.
+      const nextTotal = page.items.length > 0 ? Math.max(page.total, next.length) : next.length;
+      setItems(next);
+      setPages(pages + 1);
+      setTotal(nextTotal);
+      setStatus({ text: showing(next.length, nextTotal), failed: false });
+    } catch {
+      if (live.current) {
+        setStatus({ text: "More clinical studies could not be loaded. Try again.", failed: true });
+      }
+    } finally {
+      if (live.current) setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-apollo-border flex flex-col gap-2.5 rounded-[10px] border p-4">
+      <div className="flex flex-wrap items-center gap-x-[7px] text-sm font-semibold">
+        <Stethoscope className="size-[15px]" strokeWidth={2} aria-hidden="true" />
+        Clinical studies
+        <span className="text-muted-foreground font-normal">· {clinical.count.toLocaleString()}</span>
+      </div>
+      <p className="text-muted-foreground text-[13px] leading-[1.45]">
+        Clinical articles in PubMed that cite this paper, such as reports of clinical trials and
+        clinical studies.
+      </p>
+      <ul className="flex flex-col gap-[9px]">
+        {visible.map((s) => (
+          <li key={s.id} className="flex flex-col gap-0.5 text-sm leading-[1.45]">
+            <ClinicalStudyRow study={s} />
+          </li>
+        ))}
+        {expanded && unloaded ? (
+          <li className="text-muted-foreground text-[13px]">
+            The {items.length.toLocaleString()} most recent of {total.toLocaleString()} are listed.
+          </li>
+        ) : null}
+      </ul>
+      <p role="status" className={status.failed ? "text-muted-foreground text-[13px]" : "sr-only"}>
+        {status.text}
+      </p>
+      {hasMore || expanded ? (
+        <div className="flex flex-wrap gap-x-3">
+          {hasMore ? (
+            <button
+              ref={moreRef}
+              type="button"
+              onClick={showMore}
+              aria-disabled={loading}
+              className={`min-h-11 px-1 text-sm ${ACCENT_LINK}`}
+            >
+              {loading ? "Loading…" : "Show more"}
+            </button>
+          ) : null}
+          {expanded && items.length > TRIAL_PATENT_INITIAL_VISIBLE ? (
+            <button
+              ref={fewerRef}
+              type="button"
+              onClick={() => {
+                fewerHadFocus.current = document.activeElement === fewerRef.current;
+                setExpanded(false);
+                setStatus({ text: "", failed: false });
+              }}
+              className={`min-h-11 px-1 text-sm ${ACCENT_LINK}`}
+            >
+              Show fewer
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TrialPatentSection({ pmid, citations }: { pmid: string; citations: TrialPatentCitations }) {
+  const { trials, inventions, clinical } = citations;
   return (
     <section data-sec="trials" className="flex flex-col gap-3.5 pt-7">
       <SectionHeading>Trials and patents</SectionHeading>
@@ -1521,12 +1681,14 @@ function TrialPatentSection({ citations }: { citations: TrialPatentCitations }) 
           row={(p) => <InventionRow invention={p} />}
         />
       ) : null}
+      {clinical ? <ClinicalStudiesGroup key={pmid} pmid={pmid} clinical={clinical} /> : null}
       <p className="text-muted-foreground text-xs leading-normal">
         Sources:{" "}
         {[
           trials && "ClinicalTrials.gov",
           inventions &&
             "Reliance on Science (Marx and Fuegi), CC BY-NC 4.0, with patent details from USPTO PatentsView. US patents only. Patents usually cite a paper years after it is published, so recent papers show few or none",
+          clinical && "PubMed and NIH iCite",
         ]
           .filter(Boolean)
           .join("; ")}
