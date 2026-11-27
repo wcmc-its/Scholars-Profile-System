@@ -19,6 +19,10 @@
  *   - The rail shows no counts beside its options, and a tab that was not
  *     loaded carries no count. The People tab counts everyone listed, whatever
  *     the search, because its link drops the search.
+ *   - A selection too wide to list its citing documents (`docsWithheld`) shows
+ *     a message in place of the list, and no count of citing documents: not on
+ *     the tab, and no pager. The one number in the message, the cited papers,
+ *     links to the Publications view that lists them.
  *   - Every count's link is named for what it opens (`aria-label`), not by
  *     its digits alone.
  *
@@ -65,6 +69,7 @@ import { db } from "@/lib/db";
 import { NO_STAGE_LABEL } from "@/lib/edit/article-count-report";
 import { bibliometricsHref, loadBibliometricsAccess } from "@/lib/edit/bibliometrics-access";
 import {
+  docsTooWide,
   isDownstreamReachReportEnabled,
   isReachDefault,
   loadModalCounts,
@@ -78,6 +83,8 @@ import {
   parseReachParams,
   REACH_COUNTING_RULE,
   REACH_DOC_SORT_LABEL,
+  REACH_DOCS_NARROW_HINT,
+  REACH_DOCS_PAPER_CEILING,
   REACH_LIST_CAP,
   REACH_PAGE_SIZE,
   REACH_SORT_LABEL,
@@ -553,6 +560,8 @@ export async function renderDownstreamReachReport({
         <span className="text-muted-foreground text-xs" data-testid={`${TEST}-download-note`}>
           Publications, Citing documents, People and Criteria sheets
           {data.pubTotal > REACH_LIST_CAP && " · Publications lists the first rows only; the Criteria sheet says how many"}
+          {docsTooWide(data.pubTotal) &&
+            " · Citing documents is not listed for a selection this wide; the Criteria sheet says so"}
         </span>
       </>
     ),
@@ -663,6 +672,19 @@ export async function renderDownstreamReachReport({
                 )}
                 {pager(data.pubMatched)}
               </PublicationModalProvider>
+            ) : view === "documents" && data.docsWithheld != null ? (
+              <p className="text-muted-foreground px-4 py-3 text-[13px]" data-testid={`${TEST}-docs-too-wide`}>
+                This selection is too wide to list citing documents. It covers{" "}
+                <Link
+                  href={href(links.cited())}
+                  aria-label={`${noun(data.docsWithheld, PUBLICATIONS)} cited downstream in this selection`}
+                  className={LINK}
+                >
+                  {data.docsWithheld.toLocaleString()}
+                </Link>{" "}
+                cited papers, and citing documents are listed for at most{" "}
+                {REACH_DOCS_PAPER_CEILING.toLocaleString()}. {REACH_DOCS_NARROW_HINT}
+              </p>
             ) : view === "documents" ? (
               <>
                 {toolbar(
