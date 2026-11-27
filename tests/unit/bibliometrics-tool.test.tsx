@@ -193,6 +193,36 @@ describe("BibliometricsTool", () => {
     );
   });
 
+  it("lists the citing inventions on the card and under a paper, for a viewer with no report access", async () => {
+    const r = report(12, [14, 1]);
+    const inv = (id: number, title: string, papers: number) => ({
+      id,
+      title,
+      url: `https://patents.google.com/patent/US9000000${id}B2/en`,
+      holder: "Example Biotech, Inc.",
+      year: 2020 + id,
+      granted: true,
+      number: `US 9000000${id} B2`,
+      related: 0,
+      papers,
+    });
+    r.patents = { ...r.patents, inventions: 2, dataEnd: "31 December 2025", reportHref: null, list: [inv(1, "Widget calibration", 2), inv(2, "Compound and uses", 1)] };
+    r.papers.rows[1]!.citingPatents = { items: [inv(2, "Compound and uses", 1)], total: 1 };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const card = await screen.findByTestId("bibliometrics-patents");
+    expect(within(card).getByText("Widget calibration").closest("a")!.getAttribute("href")).toBe("https://patents.google.com/patent/US90000001B2/en");
+    expect(card.textContent).toContain("cites 2 papers");
+    expect(card.textContent).toContain("cites 1 paper");
+    expect(within(card).queryByTestId("bibliometrics-patents-report")).toBeNull();
+    // Under the paper, behind "More", as the publication modal lists them.
+    const row = screen.getByTestId("bibliometrics-paper-90000101");
+    fireEvent.click(within(row).getByRole("button", { name: "More" }));
+    const below = document.getElementById("bibliometrics-citing-90000101")!;
+    expect(within(below).getByText("Patents that cite this paper")).toBeTruthy();
+    expect(within(below).getByText("Compound and uses")).toBeTruthy();
+  });
+
   it("shows the patents line, each paper's count and the Excel download when a patent cites the work", async () => {
     respondWithPatents("/edit/reports/patent-citations?person=zzz9001");
     render(<BibliometricsTool entityId="zzz9001" />);

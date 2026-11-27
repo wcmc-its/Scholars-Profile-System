@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   scholar: vi.fn(),
   authorships: vi.fn(),
   queryRaw: vi.fn(),
+  links: vi.fn(),
   suppressions: vi.fn(),
 }));
 vi.mock("@/lib/db", () => ({
@@ -24,6 +25,7 @@ vi.mock("@/lib/db", () => ({
     read: {
       scholar: { findUnique: h.scholar },
       publicationAuthor: { findMany: h.authorships },
+      publicationCitingDocument: { findMany: h.links },
       $queryRaw: h.queryRaw,
     },
     write: {},
@@ -158,20 +160,60 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
+/** A stored patent document, as the tab's links read selects it. */
+const patentDoc = (id: number, dedupKey: string, year: number, grant: boolean) => ({
+  id,
+  level: "patent",
+  externalId: grant ? `us-9000000${id}-b2` : `us-202200000${id}-a1`,
+  title: `Example composition ${id}`,
+  year,
+  url: `https://patents.google.com/patent/US9000000${id}B2/en`,
+  dedupKey,
+  details: grant
+    ? { kind: "grant", grantDate: `${year}-01-02`, assignees: ["Example Biotech, Inc."], inventors: [{ first: "Ben", last: "Fixture" }] }
+    : { kind: "application", publicationDate: `${year}-03-04`, assignees: [], inventors: [{ first: "Ada", last: "Sample" }] },
+});
+/** One family of three documents cites both papers; an application cites the first alone. */
+const LINKS = [
+  { pmid: "90000101", evidence: {}, citingDocument: patentDoc(2, "15000001", 2019, true) },
+  { pmid: "90000101", evidence: {}, citingDocument: patentDoc(3, "15000001", 2020, true) },
+  { pmid: "90000101", evidence: {}, citingDocument: patentDoc(4, "15000001", 2023, true) },
+  { pmid: "90000101", evidence: {}, citingDocument: patentDoc(1, "17000002", 2022, false) },
+  { pmid: "90000102", evidence: {}, citingDocument: patentDoc(2, "15000001", 2019, true) },
+];
+beforeEach(() => h.links.mockResolvedValue(LINKS));
+
 describe("the tab load", () => {
   it("adds one count of citing inventions, over the scholar's visible cited papers only", async () => {
     const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
-    expect(report!.patents).toEqual({
+    expect(report!.patents).toMatchObject({
       papers: 2,
       inventions: 2,
       dataEnd: "31 December 2025", // nothing stored: the fallback
       reportHref: null,
     });
-    const patentQueries = calls().filter((c) => c.text.includes("'patent'"));
-    expect(patentQueries).toHaveLength(1);
-    expect(patentQueries[0]!.text).toContain("WHERE l.pmid IN (?,?) AND d.level = 'patent'");
-    expect(patentQueries[0]!.values).toEqual(VISIBLE_CITED);
+    expect(h.links).toHaveBeenCalledTimes(1);
+    expect(h.links.mock.calls[0]![0].where).toEqual({ pmid: { in: VISIBLE_CITED }, citingDocument: { level: "patent" } });
+    expect(calls().filter((c) => c.text.includes("'patent'"))).toHaveLength(0);
     expect(report!.papers.rows.find((p) => p.pmid === "90000101")!.patents).toBe(2);
+  });
+
+  it("lists the inventions on the card, most of the scholar's papers cited first, for every viewer", async () => {
+    const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
+    expect(report!.patents.list.map((i) => [i.title, i.papers, i.granted, i.related])).toEqual([
+      ["Example composition 2", 2, true, 2], // the family's earliest grant stands for it
+      ["Example composition 1", 1, false, 0],
+    ]);
+    expect(report!.patents.list[0]!.holder).toBe("Example Biotech, Inc.");
+  });
+
+  it("lists each listed paper's own citing inventions, as the publication modal does", async () => {
+    const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
+    const first = report!.papers.rows.find((p) => p.pmid === "90000101")!;
+    expect(first.citingPatents!.total).toBe(2);
+    expect(first.citingPatents!.items.map((i) => i.year)).toEqual([2022, 2019]); // newest first
+    // Only listed papers get a list; one no patent cites gets none.
+    for (const p of report!.papers.rows) if (p.patents === 0) expect(p.citingPatents).toBeNull();
   });
 
   it("asks nothing about patents when no visible paper is cited in one", async () => {
@@ -179,8 +221,9 @@ describe("the tab load", () => {
       args.where.cwid ? PAPERS.slice(2).map(authorship) : [],
     );
     const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
-    expect(report!.patents).toMatchObject({ papers: 0, inventions: 0, dataEnd: null });
+    expect(report!.patents).toMatchObject({ papers: 0, inventions: 0, list: [], dataEnd: null });
     expect(calls().filter((c) => c.text.includes("'patent'"))).toHaveLength(0);
+    expect(h.links).not.toHaveBeenCalled();
   });
 });
 

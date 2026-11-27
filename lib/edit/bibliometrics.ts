@@ -7,6 +7,7 @@
  * types and the tests need no mocks. The loader is `bibliometrics-loader.ts`.
  */
 import type { PolicyCitingDoc } from "@/lib/api/publication-detail";
+import type { CitingInvention, ScholarInvention } from "@/lib/citations/trials-patents";
 import { formatVolIssuePages } from "@/lib/citation";
 import { toPolicyRollup } from "@/lib/citations/policy-rollup";
 import {
@@ -117,6 +118,9 @@ export type BibliometricsPaper = {
   patents: number;
   /** Citing documents, filled by the loader for listed papers that have any. */
   citing: PolicyCitingDoc[];
+  /** Citing inventions, newest first, as the publication modal lists them;
+   *  filled by the loader for listed papers that have any. */
+  citingPatents: { items: CitingInvention[]; total: number } | null;
   reviewTotal: number;
 };
 
@@ -138,6 +142,9 @@ export type BibliometricsPatents = {
   papers: number;
   /** Distinct inventions citing them, filled by the loader. */
   inventions: number;
+  /** The inventions, most of the scholar's papers cited first (the first
+   *  `TRIAL_PATENT_CAP`), filled by the loader. Shown to every viewer of the tab. */
+  list: ScholarInvention[];
   /** Where the patent data ends ("31 December 2025"), filled by the loader. */
   dataEnd: string | null;
   /** Report 25 filtered to this scholar, filled by the route; null when the
@@ -293,6 +300,7 @@ function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
     reviews: p.reviewCount,
     patents: p.patentFamilyCount,
     citing: [],
+    citingPatents: null,
     reviewTotal: p.reviewCount,
   };
 }
@@ -460,6 +468,7 @@ export function buildBibliometricsReport(input: {
     patents: {
       papers: input.visible.filter((p) => p.patentFamilyCount > 0).length,
       inventions: 0,
+      list: [],
       dataEnd: null,
       reportHref: null,
     },
