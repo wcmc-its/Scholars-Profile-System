@@ -121,7 +121,9 @@ describe("BibliometricsTool", () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
     render(<BibliometricsTool entityId="zzz9001" />);
     const section = await screen.findByTestId("bibliometrics-stages");
-    expect(section.textContent).toContain("50%");
+    // One staged paper of two: T2 is 100% of the papers WITH a stage; No stage has no share.
+    expect(section.textContent).toContain("100%");
+    expect(section.textContent).not.toContain("50%");
     expect(screen.queryByText("Full translational profile", { exact: false })).toBeNull();
     const counts = section.querySelectorAll("button[aria-expanded]");
     expect(counts).toHaveLength(2); // T2 and No stage; zero rows are not buttons

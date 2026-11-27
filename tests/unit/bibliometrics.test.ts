@@ -474,7 +474,8 @@ describe("translational stage section", () => {
     ];
     const s = withStages(pubs).stages!;
     expect(s.counts).toEqual({ T0: 2, T1: 0, T2: 1, "T3-4": 0, none: 3 });
-    expect(Object.values(s.shares).reduce((a, b) => a + b, 0)).toBe(100);
+    // Shares are among the 3 staged papers only (No stage is not in the denominator).
+    expect(s.shares).toEqual({ T0: 67, T1: 0, T2: 33, "T3-4": 0 });
     expect(s.papers.T0.map((p) => p.year)).toEqual([2022, 2019]);
     expect(Object.values(s.papers).flat()).toHaveLength(6);
     expect(s.portfolioHref).toBeNull();

@@ -119,9 +119,10 @@ export function exactShares(c: StageCounts): StageCounts {
   return out;
 }
 
-/** Whole-percent shares that add up to exactly 100 (largest remainder), so
- *  every row, column and chart the page draws sums to 100% with No stage. All
- *  zero for an empty set. */
+/** Whole-percent shares of every bucket, No stage included, that add up to
+ *  exactly 100 (largest remainder). All zero for an empty set. The reports
+ *  show `stagedShares` instead; this stays for callers that want the mix of
+ *  everything. */
 export function roundedShares(c: StageCounts): StageCounts {
   const ex = exactShares(c);
   const out = emptyCounts();
@@ -136,10 +137,45 @@ export function roundedShares(c: StageCounts): StageCounts {
   return out;
 }
 
+export type StageShares = Record<TranslationalStage, number>;
+
+/** Exact shares (0–100) of the four T stages among the STAGED records only:
+ *  No stage is left out of the denominator. All zero when nothing is staged. */
+export function exactStagedShares(c: StageCounts): StageShares {
+  const t = stagedTotal(c);
+  const out: StageShares = { T0: 0, T1: 0, T2: 0, "T3-4": 0 };
+  if (t > 0) for (const k of TRANSLATIONAL_STAGES) out[k] = (c[k] / t) * 100;
+  return out;
+}
+
+/** Whole-percent shares of the four T stages among staged records, adding up
+ *  to exactly 100 (largest remainder). All zero when nothing is staged. How
+ *  many records have a stage is a separate figure (`stageAssignedShare`), so a
+ *  year with more unstaged records does not shrink every stage. */
+export function stagedShares(c: StageCounts): StageShares {
+  const ex = exactStagedShares(c);
+  const out: StageShares = { T0: 0, T1: 0, T2: 0, "T3-4": 0 };
+  if (stagedTotal(c) === 0) return out;
+  let left = 100;
+  for (const k of TRANSLATIONAL_STAGES) {
+    out[k] = Math.floor(ex[k]);
+    left -= out[k];
+  }
+  const order = [...TRANSLATIONAL_STAGES].sort((a, b) => ex[b] - Math.floor(ex[b]) - (ex[a] - Math.floor(ex[a])));
+  for (let i = 0; i < left; i++) out[order[i]] += 1;
+  return out;
+}
+
+/** The share (0–100, exact) of records that have a stage. 0 for an empty set. */
+export function stageAssignedShare(c: StageCounts): number {
+  const t = countsTotal(c);
+  return t > 0 ? (stagedTotal(c) / t) * 100 : 0;
+}
+
 /** How a stage is counted, in report 26's Download and the Bibliometrics
  *  report's definitions. */
 export const STAGE_RULE =
-  "ReCiterAI assigns a translational stage from the abstract or summary. A stage counts only when the model was not unsure; low-confidence records and those outside the spectrum are under No stage, so every row adds up to 100%.";
+  "ReCiterAI assigns a translational stage from the abstract or summary. A stage counts only when the model was not unsure; low-confidence records and those outside the spectrum are under No stage. Shares are among records with a stage, so the four stages add up to 100%; how many records have a stage is shown separately, as Stage assigned.";
 
 /** The label for a paper with no displayable stage. */
 export const NO_STAGE_LABEL = "No stage";

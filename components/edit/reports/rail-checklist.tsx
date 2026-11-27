@@ -32,6 +32,7 @@ export function RailChecklist({
   collapseAfter = Infinity,
   searchPlaceholder,
   roomy = false,
+  single = false,
   testId,
 }: {
   /** The query-string key each checkbox submits. */
@@ -51,6 +52,9 @@ export function RailChecklist({
    * and an empty list keeps its header and says "No matches.".
    */
   roomy?: boolean;
+  /** Radio buttons instead of checkboxes: exactly one option submits (report
+   *  26's Org unit). Give an "all" option with value "" to allow none. */
+  single?: boolean;
   testId?: string;
 }) {
   const [query, setQuery] = useState("");
@@ -109,7 +113,7 @@ export function RailChecklist({
                 } ${dim ? "opacity-50" : ""}`}
               >
                 <input
-                  type="checkbox"
+                  type={single ? "radio" : "checkbox"}
                   name={name}
                   value={o.value}
                   defaultChecked={o.checked}

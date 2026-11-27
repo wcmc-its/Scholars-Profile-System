@@ -101,47 +101,50 @@ export async function ConsoleShell({
       {/* Skip link — first focusable element, jumps past the bar's tabs to the page. */}
       <a
         href="#console-main"
-        className="bg-apollo-maroon text-apollo-maroon-foreground sr-only z-50 rounded-md px-3 py-2 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2"
+        className="bg-apollo-maroon text-apollo-maroon-foreground sr-only z-50 rounded-md px-3 py-2 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2 print:hidden"
       >
         Skip to content
       </a>
-      <ConsoleTopBar variant="console">
-        <AdminSubnav
-          active={active}
-          pendingSlugRequests={pendingSlugRequests}
-          pendingHonors={pendingHonors}
-          titlesTab={tabs.titles}
-          pendingTitles={titlesPill}
-          grantAttributionTab={tabs.grantAttribution}
-          pendingGrantAttribution={grantsPill}
-          superuserSurfaces={session.isSuperuser}
-          profilesTab={tabs.profiles}
-          unitsTab={tabs.units || unitsTab}
-          administratorsTab={tabs.administrators ? 0 : null}
-          methodsTab={tabs.methods ? 0 : null}
-          roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
-          dataSharingTab={tabs.dataSharing ? 0 : null}
-          researchSecurityTab={tabs.researchSecurity}
-          reportsTab={tabs.reports || reportsTab}
-          newsTab={tabs.news}
-          pendingNews={newsPill}
-          pendingClips={clipsPill}
-          coresTab={tabs.cores}
-          slugsTab={tabs.slugs}
-          usageTab={tabs.usage}
-          orcidCoverageTab={tabs.orcidCoverage}
-          orcidQueueTab={tabs.orcidQueue}
-          pendingOrcidQueue={orcidPill}
-          coiTab={tabs.coi}
-          activityTab={tabs.activity}
-          etlStatusTab={tabs.etlStatus}
-          viewerCanUseMatcha={session.isDeveloper === true || session.isObserver === true}
-        />
-      </ConsoleTopBar>
+      {/* Console chrome never prints (report 26's PDF is the page printed). */}
+      <div className="print:hidden">
+        <ConsoleTopBar variant="console">
+          <AdminSubnav
+            active={active}
+            pendingSlugRequests={pendingSlugRequests}
+            pendingHonors={pendingHonors}
+            titlesTab={tabs.titles}
+            pendingTitles={titlesPill}
+            grantAttributionTab={tabs.grantAttribution}
+            pendingGrantAttribution={grantsPill}
+            superuserSurfaces={session.isSuperuser}
+            profilesTab={tabs.profiles}
+            unitsTab={tabs.units || unitsTab}
+            administratorsTab={tabs.administrators ? 0 : null}
+            methodsTab={tabs.methods ? 0 : null}
+            roleVocabularyTab={tabs.roleVocabulary ? 0 : null}
+            dataSharingTab={tabs.dataSharing ? 0 : null}
+            researchSecurityTab={tabs.researchSecurity}
+            reportsTab={tabs.reports || reportsTab}
+            newsTab={tabs.news}
+            pendingNews={newsPill}
+            pendingClips={clipsPill}
+            coresTab={tabs.cores}
+            slugsTab={tabs.slugs}
+            usageTab={tabs.usage}
+            orcidCoverageTab={tabs.orcidCoverage}
+            orcidQueueTab={tabs.orcidQueue}
+            pendingOrcidQueue={orcidPill}
+            coiTab={tabs.coi}
+            activityTab={tabs.activity}
+            etlStatusTab={tabs.etlStatus}
+            viewerCanUseMatcha={session.isDeveloper === true || session.isObserver === true}
+          />
+        </ConsoleTopBar>
+      </div>
       <main
         id="console-main"
         tabIndex={-1}
-        className="mx-auto max-w-[var(--max-content)] px-6 py-8"
+        className="mx-auto max-w-[var(--max-content)] px-6 py-8 print:max-w-none print:p-0"
       >
         {session.isObserver ? (
           <p
