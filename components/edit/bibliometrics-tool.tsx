@@ -40,7 +40,8 @@ const CARD = "bg-apollo-surface border-apollo-border flex flex-col gap-3 rounded
 const EYEBROW = "text-apollo-ink-2 text-xs font-medium tracking-[0.06em] uppercase";
 const LINK = "text-apollo-slate hover:underline";
 const BADGE = "inline-flex items-center gap-1 rounded-full border px-2.5 text-xs leading-[18px] font-medium";
-const BADGE_FILLED = `${BADGE} border-apollo-slate bg-apollo-slate py-0.5 text-white`;
+// Health authority: the guideline tint with a slate outline and bolder text.
+const BADGE_AUTHORITY = `${BADGE} border-apollo-slate bg-apollo-slate-tint py-px font-semibold text-[#274158]`;
 const BADGE_TINT = `${BADGE} border-apollo-slate-tint-border bg-apollo-slate-tint py-px text-[#274158]`;
 const TH = "px-2.5 py-2 text-left text-xs font-medium";
 const SELECT =
@@ -327,7 +328,7 @@ function Report({
                     {l.bodies.length > 0 ? (
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {l.bodies.map((b) => (
-                          <span key={b.body} className={BADGE_FILLED}>
+                          <span key={b.body} className={BADGE_AUTHORITY}>
                             {b.body} · {b.count}
                           </span>
                         ))}
@@ -415,7 +416,7 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
           {hasCitations ? (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {p.authority.map((a) => (
-                <span key={a.body} className={BADGE_FILLED}>
+                <span key={a.body} className={BADGE_AUTHORITY}>
                   <Landmark className="size-3" strokeWidth={2} aria-hidden />
                   {authorityBadgeLabel(a.body, a.count)}
                 </span>
