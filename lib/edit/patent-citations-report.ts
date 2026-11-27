@@ -206,7 +206,7 @@ const WHERE_SQL = Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(l.evidence, '$.where'))`;
  *  One digit, four, ten (`parseRep`). */
 const REP_SQL = Prisma.sql`CONCAT(IF(${KIND_SQL} = 'application', '1', '0'), LPAD(COALESCE(d.year, 9999), 4, '0'), LPAD(d.id, 10, '0'))`;
 
-function parseRep(rep: string): { id: number; year: number | null; application: boolean } {
+export function parseRep(rep: string): { id: number; year: number | null; application: boolean } {
   const year = Number(rep.slice(1, 5));
   return { id: Number(rep.slice(5)), year: year === 9999 ? null : year, application: rep[0] === "1" };
 }

@@ -86,6 +86,7 @@ import {
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { canViewArticleCountReport } from "@/lib/edit/article-count-report";
+import { canViewDownstreamReachReport } from "@/lib/edit/downstream-reach-report";
 import { canViewPatentCitationsReport } from "@/lib/edit/patent-citations-report";
 import { canViewTranslationalPortfolioReport } from "@/lib/edit/translational-portfolio-report";
 import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
@@ -217,11 +218,12 @@ export default async function EditReportsIndexPage({
   // Reports 8 (Article counts: unit administrators + grants) and 9 (Top
   // clinical and high-impact journal publications: grants) ride a second
   // pseudo-unit. (Report 10, Display titles, is the Titles queue now.)
-  const [canArticleCount, canPolicyCitations, canPatentCitations, canPortfolio, highImpactScopes, grantAttributionScopes] = await Promise.all([
+  const [canArticleCount, canPolicyCitations, canPatentCitations, canPortfolio, canDownstreamReach, highImpactScopes, grantAttributionScopes] = await Promise.all([
     canViewArticleCountReport(session),
     canViewPolicyCitationsReport(session),
     canViewPatentCitationsReport(session),
     canViewTranslationalPortfolioReport(session),
+    canViewDownstreamReachReport(session),
     getReportScopes(session, HIGH_IMPACT_PUBS_REPORT),
     isGrantAttributionQueueEnabled() ? getReportScopes(session, GRANT_ATTRIBUTION_REPORT) : new Set<string>(),
   ]);
@@ -256,6 +258,9 @@ export default async function EditReportsIndexPage({
             audience: ADMIN_AUDIENCE,
           }),
         ]
+      : []),
+    ...(canDownstreamReach
+      ? [catalogEntry(meta, 27, { mode: "unit", audience: ADMIN_AUDIENCE, rule: POLICY_CITATIONS_ACCESS_RULE })]
       : []),
     ...(session.isSuperuser
       ? [

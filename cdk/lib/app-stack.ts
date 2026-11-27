@@ -2128,6 +2128,14 @@ export class AppStack extends Stack {
         // both envs (staging review 2026-11-27).
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
         REPORT_TRANSLATIONAL_PORTFOLIO: "on",
+        // DOWNSTREAM_REACH_REPORT -- report 27 on /edit/reports and
+        // GET /api/edit/reports/downstream-reach (its Excel download), read via
+        // isDownstreamReachReportEnabled() (=== "on"); off = absent from the
+        // index, both 404, and no query runs. Read-only, over what the
+        // clinical, trial, policy and patent citation imports loaded. Staging
+        // first; prod stays off until reviewed there.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        DOWNSTREAM_REACH_REPORT: envConfig.envName === "staging" ? "on" : "off",
         SCHOLARS_PROGRAM_ROSTER_EDITOR_GROUP_CN: "ITS:Library:Scholars/program-roster-editor-role",
         // `observer` role (2026-09-30) -- read-only view of the whole /edit
         // console (steward parity) plus read-only "View as", for trusted staff

@@ -6,7 +6,7 @@
  * Same pure-function shape as `lib/api/profile.ts` etc. — the route file
  * (`app/api/publications/[pmid]/route.ts`) is a thin delegator.
  */
-import { parseLocations, POLICY_LEVELS, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { parseLocations, POLICY_LEVELS, POLICY_REVIEWS_CAP, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
 import { CLINICAL_PAGE_SIZE, parseClinicalOffset } from "@/lib/citations/clinical-page";
 import {
   clinicalCitationsModalOn,
@@ -154,8 +154,6 @@ export type PolicyCitingDoc = {
   /** Bookshelf only: the chapters and sections that cite the paper. */
   locations: Array<{ url: string; label: string }>;
 };
-
-const POLICY_REVIEWS_CAP = 100;
 
 function firstAuthors(authors: string | null): string | null {
   if (!authors) return null;

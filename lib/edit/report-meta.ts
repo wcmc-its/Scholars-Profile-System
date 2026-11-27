@@ -80,6 +80,7 @@ export const REPORT_KEYS = [
   "24",
   "25",
   "26",
+  "27",
 ] as const;
 export type ReportKey = (typeof REPORT_KEYS)[number];
 
@@ -112,6 +113,22 @@ const MENTORED_PUBS_DESCRIPTION_HTML = [
   "<li><strong>Faculty-asserted</strong> — Added by the mentor on their Scholars profile, or confirmed there from a co-authorship suggestion.</li>",
   "<li><strong>Self-reported (Faculty Review)</strong> — Mentees the faculty member listed in the annual Faculty Review Tool, whether or not they added them to their profile. Counted only when linked to a WCM person (matched by name, or linked by the mentor in Scholars); no year.</li>",
   "</ul>",
+].join("\n");
+
+/** Report 27's default description: what each citing type is and where it
+ *  comes from, the own-work rule and the stage caveat. On the `overview` tag
+ *  allowlist; re-sanitized on read like a stored row (`ReportHeader`). */
+const DOWNSTREAM_REACH_DESCRIPTION_HTML = [
+  "<p>How publications, especially basic (T0) and early-translation (T1) ones, were later taken up by clinical work. A publication counts when at least one citing document of a checked type cites it. Every number on the page opens the list of what it counts.</p>",
+  "<ul>",
+  "<li><strong>Clinical studies</strong>: articles that cite the paper and that NIH iCite flags as clinical, meaning a clinical trial, clinical study or guideline by PubMed publication type. Titles, journals and years come from PubMed.</li>",
+  "<li><strong>Registered trials</strong>: studies on ClinicalTrials.gov that list the paper as a background reference.</li>",
+  "<li><strong>Guidelines and policy</strong>: health authority documents on NCBI Bookshelf (WHO, NICE, CDC, AHRQ, the National Academies), and clinical guidelines, consensus statements and systematic reviews in PubMed. Report 24 lists the same documents.</li>",
+  "<li><strong>Patents</strong>: US patents that cite the paper, from Reliance on Science (Marx and Fuegi), CC BY-NC 4.0, with patent details from USPTO PatentsView. Related patents (one patent family) count as one invention. A patent citing a paper does not mean the paper's authors hold the patent. Report 25 lists the same inventions.</li>",
+  "</ul>",
+  "<p>The authors' own work is left out unless you uncheck that filter: a clinical article that shares a confirmed WCM author with the paper it cites, or a registered trial one of the paper's authors is an investigator on.</p>",
+  "<p>ReCiterAI assigns each publication's translational stage from its abstract or summary. Nobody reviews the stages by hand. A stage counts only when the model was not unsure, and everything else is under No stage. A later stage is not a better one.</p>",
+  "<p>The People view counts a scholar's first- or senior-author publications and lists scholars with at least three, ordered by count. It describes where their work was taken up, not its quality.</p>",
 ].join("\n");
 
 /** The hardcoded defaults — the strings `app/edit/reports/page.tsx` and the
@@ -298,6 +315,13 @@ export const REPORT_META_DEFAULTS: Record<
     summary:
       "Where publications sit between basic research and population health (translational stages T0 to T3–4), by year, unit and research area, with the scholars doing the work at each stage.",
     descriptionHtml: null,
+  },
+  "27": {
+    slug: "downstream-reach",
+    name: "Downstream reach",
+    summary:
+      "How publications, especially basic and early-translation ones, were later cited by clinical studies, registered trials, guidelines and policy documents, and patents, by publication, by citing document or by person. Open to every unit administrator, for the units they administer.",
+    descriptionHtml: DOWNSTREAM_REACH_DESCRIPTION_HTML,
   },
 };
 

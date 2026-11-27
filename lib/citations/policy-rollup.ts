@@ -19,6 +19,10 @@ export type PolicyRollup = {
  */
 export const POLICY_LEVELS = ["authority", "guideline", "consensus", "review"] as const;
 
+/** Systematic reviews the publication modal lists for one paper; the rest are
+ *  counted and not listed (`readPolicyCitations`, lib/api/publication-detail.ts). */
+export const POLICY_REVIEWS_CAP = 100;
+
 /** Server-side gate for the public badges and the modal section. */
 export function policyCitationBadgesOn(): boolean {
   return process.env.POLICY_CITATION_BADGES === "on";
