@@ -2533,6 +2533,15 @@ describe("EtlStack", () => {
     expect(order.indexOf('"TaskPolicyCitationsWeekly":')).toBeLessThan(order.indexOf('"TaskClinicalCitationsWeekly":'));
   });
 
+  it("CitationLinksWeekly runs on the sources family, after ClinicalCitationsWeekly and before SearchIndexWeekly", () => {
+    const asl = aslFrom(buildEtlStack("staging").template, "scholars-weekly-staging");
+    const params = asl.States.TaskCitationLinksWeekly.Parameters as { TaskDefinition: string };
+    expect(params.TaskDefinition).toBe("sps-etl-sources-staging");
+    const order = JSON.stringify(asl);
+    expect(order.indexOf('"TaskClinicalCitationsWeekly":')).toBeLessThan(order.indexOf('"TaskCitationLinksWeekly":'));
+    expect(order.indexOf('"TaskCitationLinksWeekly":')).toBeLessThan(order.indexOf('"TaskSearchIndexWeekly":'));
+  });
+
   // #2196 -- ack-with-expiry for a continue-tier step failure. Acks are exercised
   // through the `stepAckOverrides` test seam on a real continue-tier step (Asms)
   // so no checked-in StepSpec has to carry one.

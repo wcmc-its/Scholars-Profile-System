@@ -576,8 +576,9 @@ describe("/edit/etl-status page", () => {
     expect(stripe?.className).not.toMatch(/emerald|green|red|destructive|amber/);
     // …and it is not counted against the operator: the summary bar files it as
     // accepted, never as failing.
-    expect(screen.getByTestId("etl-status-count-accepted").textContent).toContain(
-      "known issue, accepted",
+    // Other acked sources may be live on the same day, so one or more.
+    expect(screen.getByTestId("etl-status-count-accepted").textContent).toMatch(
+      /known issues?, accepted/,
     );
   });
 

@@ -936,6 +936,23 @@ model PublicationCitingDocument {
   @@map("publication_citing_document")
 }
 
+/// A citation between two publications in Scholars: `citingPmid` cites
+/// `citedPmid`. Both ends are rows of `publication`; a paper citing itself is
+/// left out. Loaded by `etl:citation-links` from reciterdb
+/// `analysis_nih_cites`, and only ever added to. Keyed both ways round, so
+/// "who cites this paper" and "what this paper cites" are both index reads.
+/// No foreign keys, as `PublicationCitingDocument`: the reciter ETL can drop
+/// and re-add a publication, and `firstSeenAt` has to survive that.
+model PublicationCitation {
+  citedPmid   String   @map("cited_pmid") @db.VarChar(32)
+  citingPmid  String   @map("citing_pmid") @db.VarChar(32)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+
+  @@id([citedPmid, citingPmid])
+  @@index([citingPmid, citedPmid])
+  @@map("publication_citation")
+}
+
 /// An OpenAlex work id of a PubMed-keyed publication. The patent dataset names
 /// papers by OpenAlex id, and a paper can have two, so this is a side table and
 /// not a column. Filled by `etl:patent-citations:import`. No FK to Publication:
