@@ -52,10 +52,12 @@ const LIGHT_BOX = "bg-apollo-surface-2 rounded-[10px]";
 const FILTERED_BADGE =
   "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate rounded-full border px-2 py-px text-xs font-medium";
 const LINK = "text-apollo-slate hover:underline";
-/** Author position in byline order, light to dark: one slate hue (an ordinal
- *  ramp, validated: monotone lightness, light end 2.48:1 on the white card;
- *  the table's numbers and each segment's hover text carry the values). */
-const POSITION_FILL = { first: "#8fa7c2", co: "#5f7d9e", senior: "#34506e" } as const;
+/** Author position: first author amber, co-author and senior two blues
+ *  (Paul's pick 11-28 from the mockup's set). Validated with the dataviz
+ *  validator on #ffffff: every check passes (lightness band, chroma, CVD
+ *  ΔE 20.3, normal-vision ΔE 20.4); co-author is 2.89:1, so the position
+ *  table beside the chart and each segment's hover text carry the values. */
+const POSITION_FILL = { first: "#a67012", co: "#6f9ad6", senior: "#2d5c9e" } as const;
 const OUTPUT_ROWS = [
   ["First author", "first"],
   ["Senior author", "senior"],
@@ -242,6 +244,9 @@ function Report({
 }) {
   const unrated = unratedNote(r);
   const peak = Math.max(1, ...r.output.byYear.map((y) => y.count));
+  // An even top, so the middle gridline is a whole number.
+  const axisMax = Math.ceil(peak / 2) * 2;
+  const thisYear = Number(r.asOf.slice(0, 4));
   return (
     <div className="flex flex-col pb-2" data-testid="bibliometrics-report">
       <section className={`${SECTION} pt-6`}>
@@ -315,38 +320,61 @@ function Report({
                   ? `By year, ${r.output.byYear[0]!.year} to ${r.output.byYear.at(-1)!.year}`
                   : "By year"}
             </div>
-            <div
-              role="img"
-              aria-label={`Research articles per year, by author position: ${r.output.byYear.map((y) => `${yearTip(y)}`).join("; ")}`}
-              className="border-apollo-border-strong flex h-[120px] items-end gap-2 border-b pt-[18px]"
-            >
-              {r.output.byYear.map((y) => (
-                // Senior at the base, then co-author, then first author on top; a
-                // 2px card-colored gap between segments, rounded only at the top.
-                // ponytail: native `title` tooltips; a styled hover layer if asked.
+            <div className="flex gap-2">
+              {/* The y-axis: the top, middle and zero gridlines' values. */}
+              <div
+                aria-hidden
+                className="text-apollo-ink-2 flex h-[150px] flex-col justify-between text-right text-xs leading-none tabular-nums"
+              >
+                <span className="-mt-1.5">{axisMax}</span>
+                <span>{axisMax / 2}</span>
+                <span className="-mb-1">0</span>
+              </div>
+              <div className="min-w-0 flex-1">
                 <div
-                  key={y.year}
-                  title={yearTip(y)}
-                  data-testid={`bibliometrics-year-${y.year}`}
-                  className="flex flex-1 flex-col-reverse gap-[2px] overflow-hidden rounded-t-[4px]"
-                  style={{ height: `${(y.count / peak) * 100}%` }}
+                  role="img"
+                  aria-label={`Research articles per year, by author position: ${r.output.byYear.map((y) => `${yearTip(y)}`).join("; ")}`}
+                  className="border-apollo-border-strong relative flex h-[150px] items-end gap-2 border-b"
                 >
-                  {(["senior", "co", "first"] as const).map((k) =>
-                    y[k] > 0 ? (
-                      <div
-                        key={k}
-                        title={`${y.year}, ${OUTPUT_ROWS.find((row) => row[1] === k)![0].toLowerCase()}: ${y[k]}`}
-                        style={{ flexGrow: y[k], flexBasis: 0, backgroundColor: POSITION_FILL[k] }}
-                      />
-                    ) : null,
-                  )}
+                  <div aria-hidden className="border-apollo-border absolute inset-x-0 top-0 border-t" />
+                  <div aria-hidden className="border-apollo-border absolute inset-x-0 top-1/2 border-t" />
+                  {r.output.byYear.map((y) => (
+                    // Senior at the base, then co-author, then first author on top; a
+                    // 2px card-colored gap between segments, rounded only at the top.
+                    // ponytail: native `title` tooltips; a styled hover layer if asked.
+                    <div
+                      key={y.year}
+                      title={yearTip(y)}
+                      data-testid={`bibliometrics-year-${y.year}`}
+                      className="relative flex flex-1 flex-col-reverse gap-[2px] overflow-hidden rounded-t-[4px]"
+                      style={{ height: `${(y.count / axisMax) * 100}%` }}
+                    >
+                      {(["senior", "co", "first"] as const).map((k) =>
+                        y[k] > 0 ? (
+                          <div
+                            key={k}
+                            title={`${y.year}, ${OUTPUT_ROWS.find((row) => row[1] === k)![0].toLowerCase()}: ${y[k]}`}
+                            style={{ flexGrow: y[k], flexBasis: 0, backgroundColor: POSITION_FILL[k] }}
+                          />
+                        ) : null,
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+                <div className="text-apollo-ink-2 mt-1 flex gap-2 text-xs tabular-nums" data-testid="bibliometrics-year-labels">
+                  {r.output.byYear.map((y, i) => (
+                    // Every year on a wide screen; every other one on a phone, so they never collide.
+                    <span key={y.year} className={`flex-1 text-center whitespace-nowrap ${i % 2 ? "max-sm:invisible" : ""}`}>
+                      {y.year}
+                      {y.year === thisYear ? "*" : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
-            <div className="text-apollo-ink-2 flex justify-between text-xs">
-              <span>{r.output.byYear[0]?.year}</span>
-              <span>{r.output.byYear[r.output.byYear.length - 1]?.year}</span>
-            </div>
+            {r.output.byYear.at(-1)?.year === thisYear ? (
+              <p className="text-apollo-ink-2 text-xs">{thisYear}* is year to date.</p>
+            ) : null}
           </div>
         </div>
       </section>
