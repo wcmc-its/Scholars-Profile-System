@@ -202,6 +202,12 @@ export default async function EditReportPage({
           : null;
     if (key === null || !PARTNER_REPORT_KEYS.has(key)) notFound();
   }
+  // A report that hands this request off (report 26's `?cwid=` → the
+  // scholar's page, which runs its own gate).
+  if (def.gate === "admin" && def.redirectTo) {
+    const to = def.redirectTo(new URLSearchParams(querySuffix(sp)));
+    if (to) redirect(to);
+  }
 
   let back: string;
   // Deferred so the grant list (person gate), the shell counts and the

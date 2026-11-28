@@ -133,10 +133,10 @@ describe("BibliometricsTool", () => {
     expect(counts[0]!.getAttribute("aria-expanded")).toBe("true");
     expect(listed()).toBeTruthy();
     cleanup();
-    r.stages!.portfolioHref = "/edit/reports/translational-portfolio?cwid=zzz9001";
+    r.stages!.portfolioHref = "/edit/scholar/zzz9001/translational-portfolio";
     render(<BibliometricsTool entityId="zzz9001" />);
     expect((await screen.findByText("Full translational profile", { exact: false })).getAttribute("href")).toBe(
-      "/edit/reports/translational-portfolio?cwid=zzz9001",
+      "/edit/scholar/zzz9001/translational-portfolio",
     );
   });
 
