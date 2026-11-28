@@ -33,15 +33,22 @@
  * (`personFilterSql`) on the investigator, so a cross-department award counts
  * once in each department holding a row on it. A research area is the
  * ReciterAI area score of the grant or trial text (`area_text_key` →
- * `area_signal_topic`, the 0.3 floor), which exists only for leadership-role
- * InfoEd grants and NCT trials started 2020 or later, so under an area filter
- * the older ones drop out (the page says so).
+ * `area_signal_topic`, the 0.3 floor). It exists for NCT trials started 2020
+ * or later and for the grants `isAreaInputGrant` sends (every leadership-role
+ * funding award active in 2020 or later, InfoEd or RePORTER, faculty only), so
+ * under an area filter the others drop out (the page says so).
  *
  * Server-only (`@/lib/db`).
  */
 import { loadEntitySuppressions } from "@/lib/api/manual-layer";
 import { TOPIC_ACTIVITY_SCORE_FLOOR } from "@/lib/api/topic-activity";
-import { AREA_GRANT_ROLES, AREA_SIGNAL_GRANT_EXCLUDED_TOPICS, AREA_TRIAL_PI_ROLE } from "@/lib/area-signals";
+import {
+  AREA_GRANT_ROLES,
+  AREA_SIGNAL_GRANT_EXCLUDED_TOPICS,
+  AREA_TRIAL_PI_ROLE,
+  GRANT_PROGRAM_TYPES,
+  NON_FUNDING_INTAKE,
+} from "@/lib/area-signals";
 import { isHiddenTrialStatus } from "@/lib/clinical-trial-status";
 import { db } from "@/lib/db";
 import { phaseKey, phaseLabel } from "@/lib/edit/clinical-trials-report";
@@ -51,17 +58,12 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { trialDates } from "@/lib/search-trial-evidence";
 import { emptyCounts, trialStageFromPhaseKey, type StageCounts, type TranslationalStage } from "@/lib/translational-stage";
 
-export const GRANT_PROGRAM_TYPES: readonly string[] = ["Grant", "Career", "Contract with funding"];
-/** InfoEd intake types that are agreements, not funding. Substrings, so a new
- *  variant of one ("Outgoing Material Transfer Agreement") is dropped too. */
-const NON_FUNDING_INTAKE = /material transfer|data use|confidential|consulting|service agreement/i;
-
 export const GRANT_RULE =
   "Grants: awards where the scholar is PI, Co-PI or subaward PI; program type Grant, Career or Contract with funding, not agreements (material transfer, data use, confidentiality, consulting, service). An award counts once however many WCM investigators hold it (renewal years are one award) and counts in every year it was active.";
 export const TRIAL_RULE =
   "Clinical trials: studies where the scholar is the principal investigator, not withdrawn or suspended. A trial counts once and counts in every year from its start to its primary completion (still running: to this year). Its stage comes from its phase.";
 export const ACTIVITY_AREA_RULE =
-  "Under a research area filter, only grants and trials with a research area count: leadership-role grants and registered trials started 2020 or later.";
+  "Under a research area filter, only grants and trials with a research area count: leadership-role grants active in 2020 or later and registered trials started 2020 or later.";
 
 /** The filters grants and trials honor; the stage pick does not apply (no stages yet). */
 export type ActivityScope = {

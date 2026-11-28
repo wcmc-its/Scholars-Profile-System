@@ -297,3 +297,71 @@ describe("projectAreaSignals", () => {
     expect(db.texts.size).toBe(120);
   });
 });
+
+describe("translational stage on AREASIGNAL# (grant texts)", () => {
+  const one = (over: Record<string, unknown>) => buildAreaSignalWrites([rec(K1, over)], TOPICS);
+
+  it("writes a valid stage and confidence as a pair", () => {
+    const m = one({ translational_stage: "T3-4", translational_stage_confidence: "medium" });
+    expect(m.texts[0]).toMatchObject({ translationalStage: "T3-4", translationalStageConfidence: "medium" });
+    expect(m.withStage).toBe(1);
+    expect(m.skippedBadStage).toBe(0);
+  });
+
+  it("a stage with no confidence writes confidence NULL, so a stale one cannot outlive it", () => {
+    const m = one({ translational_stage: "NA" });
+    expect(m.texts[0]).toMatchObject({ translationalStage: "NA", translationalStageConfidence: null });
+  });
+
+  it("an item with no stage leaves both fields absent (the stored stage is kept)", () => {
+    const m = one({});
+    expect("translationalStage" in m.texts[0]).toBe(false);
+    expect("translationalStageConfidence" in m.texts[0]).toBe(false);
+    expect(m.withStage).toBe(0);
+    expect(m.skippedBadStage).toBe(0);
+  });
+
+  it("skips and counts an unrecognized stage or confidence, writing neither", () => {
+    const m = buildAreaSignalWrites(
+      [
+        rec(K1, { translational_stage: "T5", translational_stage_confidence: "high" }),
+        rec(K2, { translational_stage: "T1", translational_stage_confidence: "certain" }),
+      ],
+      TOPICS,
+    );
+    for (const t of m.texts) {
+      expect("translationalStage" in t).toBe(false);
+      expect("translationalStageConfidence" in t).toBe(false);
+    }
+    expect(m.texts).toHaveLength(2); // the text and its areas still land
+    expect(m.topics).toHaveLength(4);
+    expect(m.skippedBadStage).toBe(2);
+  });
+
+  it("skips and counts a confidence with no stage", () => {
+    const m = one({ translational_stage_confidence: "high" });
+    expect("translationalStage" in m.texts[0]).toBe(false);
+    expect("translationalStageConfidence" in m.texts[0]).toBe(false);
+    expect(m.skippedBadStage).toBe(1);
+  });
+
+  it("the writer's update omits the stage when the item has none", async () => {
+    const db = fakeDb();
+    const updates: Record<string, unknown>[] = [];
+    const upsert = db.client.areaSignalText.upsert;
+    db.client.areaSignalText.upsert = async (args) => {
+      updates.push(args.update as Record<string, unknown>);
+      return upsert(args);
+    };
+    await projectAreaSignals(
+      buildAreaSignalWrites(
+        [rec(K1, { translational_stage: "T1", translational_stage_confidence: "high" }), rec(K2)],
+        TOPICS,
+      ),
+      db.client,
+    );
+    expect(updates[0]).toMatchObject({ translationalStage: "T1", translationalStageConfidence: "high" });
+    expect("translationalStage" in updates[1]).toBe(false);
+    expect("translationalStageConfidence" in updates[1]).toBe(false);
+  });
+});

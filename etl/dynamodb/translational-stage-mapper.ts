@@ -63,8 +63,31 @@ export type TranslationalStageWritePlan = {
   skippedUnrecognized: number;
 };
 
-const present = (v: unknown): boolean =>
+export const present = (v: unknown): boolean =>
   v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "");
+
+export type StagePair = {
+  translationalStage: RawTranslationalStage;
+  translationalStageConfidence: TranslationalStageConfidence | null;
+};
+
+/**
+ * The stage + confidence pair on one ReciterAI item: the pair when the stage is
+ * valid and the confidence is valid or absent, `"unrecognized"` when either is
+ * present but not a known value, `null` when there is no stage. Shared by
+ * Block 4 (IMPACT#, below) and Block 10 (AREASIGNAL#, ./area-signal-mapper.ts)
+ * so the two read the same values the same way.
+ */
+export function readStagePair(
+  stageRaw: unknown,
+  confidenceRaw: unknown,
+): StagePair | "unrecognized" | null {
+  const stage = parseTranslationalStage(stageRaw);
+  if (!stage) return present(stageRaw) ? "unrecognized" : null;
+  const confidence = parseTranslationalStageConfidence(confidenceRaw);
+  if (!confidence && present(confidenceRaw)) return "unrecognized";
+  return { translationalStage: stage, translationalStageConfidence: confidence };
+}
 
 /**
  * One write per IMPACT# item that carries a valid stage and whose pmid we
@@ -79,13 +102,9 @@ export function buildTranslationalStageWrites(
   let skippedMissingPublication = 0;
   let skippedUnrecognized = 0;
   for (const it of items) {
-    const stage = parseTranslationalStage(it.translational_stage);
-    if (!stage) {
-      if (present(it.translational_stage)) skippedUnrecognized += 1;
-      continue;
-    }
-    const confidence = parseTranslationalStageConfidence(it.translational_stage_confidence);
-    if (!confidence && present(it.translational_stage_confidence)) {
+    const pair = readStagePair(it.translational_stage, it.translational_stage_confidence);
+    if (pair === null) continue;
+    if (pair === "unrecognized") {
       skippedUnrecognized += 1;
       continue;
     }
@@ -95,11 +114,7 @@ export function buildTranslationalStageWrites(
       skippedMissingPublication += 1;
       continue;
     }
-    byPmid.set(pmid, {
-      pmid,
-      translationalStage: stage,
-      translationalStageConfidence: confidence,
-    });
+    byPmid.set(pmid, { pmid, ...pair });
   }
   return { writes: [...byPmid.values()], skippedMissingPublication, skippedUnrecognized };
 }

@@ -22,10 +22,26 @@
  * absent or malformed one lands as SQL NULL, meaning unassigned: "none fits"
  * is a valid upstream answer and is never defaulted to a subarea. A primary
  * that is not a slug in that entry's subtopic_ids is dropped.
+ *
+ * `translational_stage` / `translational_stage_confidence` (optional; ReciterAI
+ * writes them on grant texts it read from an abstract) land on
+ * `area_signal_text` as a pair, read by the same `readStagePair` as the
+ * publication stage. Write-only-when-present, as for publications: a row whose
+ * item has no stage keeps the stage already stored. That is safe here because
+ * the key IS the text (a SHA-256 of title + abstract), so a stored stage can
+ * never describe a different text than the row's; when the text changes the
+ * grant gets a new key and a new row. The whole row still follows the item:
+ * when the AREASIGNAL# item goes away the guarded prune deletes the row, stage
+ * and all. Keeping it also covers the window between a re-score that rewrote
+ * the item and ReciterAI's stage pass that refills it. An unrecognized stage or
+ * confidence (or a confidence with no stage) is counted and not written, so a
+ * spelling change upstream shows in the log and never writes NULL over a
+ * stored low confidence, which would make that stage displayable.
  */
 import { Prisma } from "@/lib/generated/prisma/client";
 import type { AreaSignalRecord } from "./partition";
 import { replaceFloor } from "./projection-replace";
+import { present, readStagePair, type StagePair } from "./translational-stage-mapper";
 
 export const AREA_SIGNAL_PK_PREFIX = "AREASIGNAL#";
 const PK_SHAPE = /^AREASIGNAL#(grant|trial):([A-Za-z0-9]{8,64})$/;
@@ -37,7 +53,7 @@ export type AreaSignalTextWrite = {
   synopsisModel: string | null;
   taxonomyVersion: string | null;
   scoredAt: Date | null;
-};
+} & Partial<StagePair>;
 
 /** SQL NULL for an absent Json? column (Prisma.JsonNull would write JSON `null`). */
 type JsonOrDbNull = Prisma.InputJsonValue | typeof Prisma.DbNull;
@@ -59,6 +75,11 @@ export type AreaSignalMap = {
   skippedBadScore: number;
   /** Area rows that carry a primary subarea. */
   withPrimarySubarea: number;
+  /** Texts whose item carried a valid stage (written this run). */
+  withStage: number;
+  /** Texts whose stage or confidence was present but not a known value, or a
+   *  confidence with no stage. Their stored stage is left as it was. */
+  skippedBadStage: number;
 };
 
 const str = (v: unknown, max: number): string | null =>
@@ -127,6 +148,8 @@ export function buildAreaSignalWrites(
     skippedUnknownTopic: 0,
     skippedBadScore: 0,
     withPrimarySubarea: 0,
+    withStage: 0,
+    skippedBadStage: 0,
   };
   const seen = new Set<string>();
   for (const r of records) {
@@ -139,6 +162,12 @@ export function buildAreaSignalWrites(
     const textKey = m[2];
     if (seen.has(textKey)) continue;
     seen.add(textKey);
+    const stage = readStagePair(r.translational_stage, r.translational_stage_confidence);
+    if (stage === "unrecognized" || (stage === null && present(r.translational_stage_confidence))) {
+      out.skippedBadStage += 1;
+    } else if (stage) {
+      out.withStage += 1;
+    }
     out.texts.push({
       textKey,
       kind,
@@ -146,6 +175,9 @@ export function buildAreaSignalWrites(
       synopsisModel: str(r.synopsis_model, 128),
       taxonomyVersion: str(r.taxonomy_version, 64),
       scoredAt: date(r.scored_at),
+      // Absent keys, not nulls: Prisma leaves an undefined field untouched on
+      // update, which is the keep-when-absent rule above.
+      ...(stage && stage !== "unrecognized" ? stage : {}),
     });
     // Best score per area, with the subareas of the entry that gave it.
     const best = new Map<string, { score: number; subareas: Subareas }>();

@@ -11,9 +11,16 @@
  * chain after ClinicalTrialsWeekly (that step full-replaces `clinical_trial`,
  * which nulls every trial's key until this re-derives it).
  *
- * Eligibility is lib/area-signals.ts, shared with the ranking. Only scholars the
- * ranking can reach are read (the top-scholars carve: active, not deleted,
- * full-time faculty), so nothing is scored that could never move a card.
+ * Eligibility is lib/area-signals.ts. Trials use the ranking's own predicate.
+ * Grants use `isAreaInputGrant`, a superset of the ranking's
+ * `isEligibleAreaGrant`: every leadership-role funding award active in 2020 or
+ * later, InfoEd or RePORTER, so report 26 can stage and area-filter each grant
+ * it counts. The ranking and topic feeds re-apply the narrower predicate at
+ * read time, so the extra texts never move a card. Trials are read only for
+ * scholars the ranking can reach (the top-scholars carve: active, not deleted,
+ * full-time faculty); grants for every active scholar, since report 26 counts
+ * every active scholar's grants. The topic feed re-applies the faculty carve
+ * (`loadGrantCandidates`), so a non-faculty grant's text never reaches a topic page.
  * Suppressed grants are not sent; `hideFunding` / `hideClinicalTrials` are
  * applied at read time instead, since a scholar can flip them back any day.
  * A grant whose abstract fails the title check (lib/grant-abstract-match.ts,
@@ -41,9 +48,9 @@ import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { loadAllGrantSuppressions } from "@/lib/api/manual-layer";
 import {
   AREA_GRANT_ROLES,
-  AREA_GRANT_SOURCE,
   AREA_SIGNAL_START_DATE,
   AREA_TRIAL_PI_ROLE,
+  isAreaInputGrant,
   isEligibleAreaGrant,
   isEligibleAreaTrial,
 } from "@/lib/area-signals";
@@ -59,6 +66,9 @@ const scholarCarve: Prisma.ScholarWhereInput = {
   status: "active",
   roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
 };
+
+/** Grants: every active scholar (report 26's population), not just the ranking's. */
+const grantScholarCarve: Prisma.ScholarWhereInput = { deletedAt: null, status: "active" };
 
 function chunks<T>(xs: readonly T[], n: number): T[][] {
   const out: T[][] = [];
@@ -77,15 +87,17 @@ const dryRun = process.argv.includes("--dry-run");
 
 async function main(): Promise<number> {
   const now = new Date();
+  const areaSince = new Date(`${AREA_SIGNAL_START_DATE}T00:00:00Z`);
 
   // ----- grants -----------------------------------------------------------
   const [grantRows, suppressed] = await Promise.all([
     db.write.grant.findMany({
+      // Active in 2020 or later. A row that STARTED then is always included,
+      // even with a bad end date, so the superset over the ranking's rule holds.
       where: {
-        source: AREA_GRANT_SOURCE,
         role: { in: [...AREA_GRANT_ROLES] },
-        startDate: { gte: new Date(`${AREA_SIGNAL_START_DATE}T00:00:00Z`) },
-        scholar: scholarCarve,
+        OR: [{ startDate: { gte: areaSince } }, { endDate: { gte: areaSince } }],
+        scholar: grantScholarCarve,
       },
       select: {
         id: true,
@@ -95,6 +107,8 @@ async function main(): Promise<number> {
         title: true,
         abstract: true,
         startDate: true,
+        endDate: true,
+        intakeType: true,
         primeSponsor: true,
         directSponsor: true,
         nihIc: true,
@@ -104,7 +118,7 @@ async function main(): Promise<number> {
     }),
     loadAllGrantSuppressions(db.write),
   ]);
-  const grants = grantRows.filter((g) => isEligibleAreaGrant(g) && !suppressed.has(g.externalId));
+  const grants = grantRows.filter((g) => isAreaInputGrant(g) && !suppressed.has(g.externalId));
 
   // ----- trials -----------------------------------------------------------
   const piRows = await db.write.personClinicalTrial.findMany({
@@ -171,6 +185,9 @@ async function main(): Promise<number> {
       dryRun,
       grantRowsRead: grantRows.length,
       grantRowsEligible: grants.length,
+      // Of those, the rows the ranking also counts, and the RePORTER rows.
+      grantRowsRankingEligible: grants.filter(isEligibleAreaGrant).length,
+      grantRowsReporter: grants.filter((g) => g.source !== "InfoEd").length,
       grantTexts: grantItems.length,
       grantTextsFull: grantItems.filter((i) => i.mode === "full").length,
       grantAbstractsDropped: plan.grantAbstractsDropped,
