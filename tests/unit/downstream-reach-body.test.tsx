@@ -387,6 +387,9 @@ describe("report 27 page", () => {
     const asc = await page({ ctype: ["clinical", "trial"], basis: "cy", sort: "clinical", order: "asc" });
     const clinical = asc.getByTestId("downstream-reach-sort-clinical");
     expect(clinical.closest("th")!.getAttribute("aria-sort")).toBe("ascending");
+    // The rail keeps the order across a filter change.
+    const form = asc.getAllByTestId("downstream-reach-filters")[0];
+    expect(form.querySelector<HTMLInputElement>('input[type="hidden"][name="order"]')?.value).toBe("asc");
     expect(queryOf(clinical.getAttribute("href")).get("order")).toBeNull();
   });
 

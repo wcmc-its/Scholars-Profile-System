@@ -800,9 +800,11 @@ describe("where the counts come from", () => {
     expect(sortReachPublications(rows, "oldest", REACH_TYPES).map((r) => r.pmid)).toEqual(["1", "3", "2"]);
   });
 
-  it("order=asc rides only with a count sort", () => {
+  it("order=asc rides only with a count sort; a type not ticked sorts by the Total", () => {
     expect(reachQueryString(parse("sort=trial&order=asc"))).toContain("order=asc");
     expect(reachQueryString(parse("sort=oldest&order=asc"))).not.toContain("order");
+    expect(parse("sort=trial&order=asc&ctype=patent")).toMatchObject({ sort: "cited", asc: false });
+    expect(parse("sort=trial&ctype=trial&ctype=patent")).toMatchObject({ sort: "trial" });
   });
 });
 

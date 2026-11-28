@@ -175,6 +175,7 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
         <>
           <input type="hidden" name="view" value={params.view} />
           <input type="hidden" name="sort" value={params.sort} />
+          {params.asc && <input type="hidden" name="order" value="asc" />}
           <input type="hidden" name="dsort" value={params.docSort} />
           {params.q && <input type="hidden" name="q" value={params.q} />}
           {params.pmid && <input type="hidden" name="pmid" value={params.pmid} />}
@@ -736,6 +737,7 @@ export async function renderDownstreamReachReport({
                     </Link>
                   </p>
                 ) : (
+                  // A new Sort by pick starts highest first, so the toolbar drops `order`.
                   toolbar(
                     { q: "", sort: "cited", asc: false },
                     <>

@@ -366,6 +366,13 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
   // tab click from another view drops them, and no chip or Criteria row names
   // a filter the lists were not taken under.
   const connections = view === "connections";
+  const ctypes = among("ctype", REACH_TYPES);
+  // A type's sort needs its column: a type not ticked sorts by the Total.
+  const sortGiven = one("sort", Object.keys(REACH_SORT_LABEL) as ReachSort[], "cited");
+  const sort =
+    (REACH_TYPES as readonly string[]).includes(sortGiven) && ctypes.length > 0 && !ctypes.includes(sortGiven as ReachType)
+      ? "cited"
+      : sortGiven;
   return {
     types,
     units,
@@ -375,15 +382,15 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
     from: bare ? DEFAULT_FROM : from,
     to,
     stages: stages.length > 0 ? stages : sp.getAll("stage").includes(STAGE_ANY) ? [] : [...DEFAULT_STAGES],
-    ctypes: among("ctype", REACH_TYPES),
+    ctypes,
     includeOwn: own.includes("in") && !own.includes("out"),
     area: /^[A-Za-z0-9_-]{1,128}$/.test(area) ? area : null,
     pmid: !connections && /^\d{1,16}$/.test(pmid) ? pmid : null,
     docs: connections ? [] : docs,
     showAll: sp.get("show") === "all",
     view,
-    sort: one("sort", Object.keys(REACH_SORT_LABEL) as ReachSort[], "cited"),
-    asc: sp.get("order") === "asc",
+    sort,
+    asc: sp.get("order") === "asc" && isCountSort(sort) && sort === sortGiven,
     docSort: one("dsort", Object.keys(REACH_DOC_SORT_LABEL) as ReachDocSort[], "papers"),
     q,
     page,
