@@ -189,6 +189,7 @@ export function portfolioReachParams(p: PortfolioParams): ReachParams | null {
   if (p.insts.length > 0) return null;
   return expressible({
     ...base(),
+    types: p.types,
     units: p.units,
     people: p.cwid ? [p.cwid] : [],
     positions: p.cwid ? ["first", "last"] : [],

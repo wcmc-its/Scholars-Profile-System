@@ -31,8 +31,9 @@
  * people ranking's `firstOrLast`), lists only those with at least
  * `MIN_SCHOLAR_ACTIVITIES`, and sorts by count.
  *
- * URL (all optional; a bad value falls back, never a 400): `unit` (the shared
- * who-filter vocabulary, `parsePersonFilter`), `from` / `to`, `area` (topic
+ * URL (all optional; a bad value falls back, never a 400): `unit` and `type`
+ * (the shared who-filter vocabulary, `parsePersonFilter`; no `type` = everyone,
+ * the baseline keeps the type), `from` / `to`, `area` (topic
  * id, repeated), `gaps=1` (Research areas tab: gapped areas only), `rows=all`
  * (the whole unit table), `stage` (repeated), `cwid` (scope to one scholar),
  * `q` (name / CWID lookup), `by` (table tab), `view` (`scholars`, the default,
@@ -145,6 +146,8 @@ export type PortfolioParams = {
   /** Encoded unit values (`dept:` / `div:` / `center:` + CODE). The rail sends
    *  one; the parser keeps accepting several, as report 8's links do. */
   units: string[];
+  /** Person types (repeated `type`, `role_category`); none = everyone, as in report 8. */
+  types: string[];
   from: number;
   to: number;
   /** Research area topic ids (repeated `area`); a publication in ANY counts. */
@@ -197,9 +200,10 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
   const to = Math.max(from, int("to", d.to, 1900, 2100));
   const cwid = sp.get("cwid")?.trim() ?? "";
   const by = sp.get("by");
-  const unitValues = parsePersonFilter(sp).unitValues;
+  const { types, unitValues } = parsePersonFilter(sp);
   return {
     units: unitValues.filter((u) => !u.startsWith("inst:")),
+    types: [...new Set(types)].filter((t) => /^[A-Za-z0-9_-]{1,64}$/.test(t)).slice(0, 20),
     from,
     to,
     areas: [...new Set(sp.getAll("area").map((a) => a.trim()))].filter((a) => /^[A-Za-z0-9_-]{1,128}$/.test(a)).slice(0, 50),
@@ -232,6 +236,7 @@ export function parsePortfolioReportParams(sp: URLSearchParams): PortfolioParams
 export function portfolioQueryString(p: PortfolioParams): string {
   const q = new URLSearchParams();
   for (const u of p.units) q.append("unit", u);
+  for (const t of p.types) q.append("type", t);
   q.set("from", String(p.from));
   q.set("to", String(p.to));
   for (const a of p.areas) q.append("area", a);
@@ -333,7 +338,7 @@ const stageCase = () => Prisma.sql`CASE WHEN p.translational_stage IN (${Prisma.
  *  or senior-author papers (`pos: "either"` plus the cwid clause). */
 function articleScope(p: PortfolioParams, opts: { stages?: TranslationalStage[]; units?: string[] } = {}): ArticleCountParams {
   return {
-    types: [],
+    types: p.types,
     units: opts.units ?? p.units,
     atypes: [...PORTFOLIO_ARTICLE_TYPES],
     stages: opts.stages ?? [],
@@ -635,7 +640,7 @@ export async function loadPortfolio(
   const byYear = !p.cwid && p.areas.length === 0;
   // The Scholars list's groupings share one query over its first / senior scope.
   const scholarGroups = [...(showScholars ? (["cwid"] as const) : []), ...(p.by === "area" ? (["areaPeople"] as const) : [])];
-  const activityScope: ActivityScope = { from: p.from, to: p.to, units: p.units, insts: p.insts, areas: p.areas };
+  const activityScope: ActivityScope = { from: p.from, to: p.to, types: p.types, units: p.units, insts: p.insts, areas: p.areas };
   const wcmScope: ActivityScope = { ...activityScope, units: [], insts: [] };
   const wcmTrialsWanted = p.units.length > 0 && (opts.forExport || p.act === "trials");
   const [counts, baselineMap, centers, scholarCounts, person, grants, trials, wcmGrants, wcmTrials] = await Promise.all([
@@ -857,7 +862,7 @@ export function describePortfolioCriteria(
   return [
     ["Report", "26. Translational portfolio"],
     ["Generated", generatedAt.toISOString()],
-    ...personFilterCriteria({ types: [], unitValues: p.units }, choices.labels, (r) => formatRoleCategory(r) ?? ""),
+    ...personFilterCriteria({ types: p.types, unitValues: p.units }, choices.labels, (r) => formatRoleCategory(r) ?? ""),
     ["Years", `${p.from}–${p.to} (calendar year of publication)`],
     ["Research area", areas],
     ["Primary institution", p.insts.length > 0 ? p.insts.map(institutionDisplayName).join("; ") : "All"],

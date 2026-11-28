@@ -346,12 +346,15 @@ export async function renderTranslationalPortfolioReport({
   const unitName = p.units.map((u) => choices.labels.get(u) ?? u).join(", ");
   const areaLabel = new Map(choices.areas.map((a) => [a.id, a.label]));
   const instLabel = (c: string) => institutionDisplayName(c);
+  const roleLabel = new Map(choices.facets.roleCategories.map((o) => [o.value, o.label]));
+  const typeLabel = (t: string) => roleLabel.get(t) ?? t;
   const instSummary = p.insts.length === 0 ? "All institutions" : p.insts.length <= 2 ? p.insts.map(instLabel).join(", ") : `${p.insts.length} selected`;
   const defaults = defaultYears();
 
   // The active filters, each removable where it has a default to fall back to.
   const chips: FilterChip[] = [
     { group: "Unit", value: unitName || "All of Weill Cornell Medicine", removeHref: p.units.length > 0 ? href({ units: [] }) : null },
+    ...p.types.map((t) => ({ group: "Person type", value: typeLabel(t), removeHref: href({ types: p.types.filter((x) => x !== t) }) })),
     ...p.insts.map((i) => ({ group: "Institution", value: instLabel(i), removeHref: href({ insts: p.insts.filter((x) => x !== i) }) })),
     {
       group: "Years",
@@ -441,6 +444,28 @@ export async function renderTranslationalPortfolioReport({
               </Link>
             </p>
           )}
+        </RailSection>
+        <RailSection
+          label="Person type"
+          summary={p.types.length === 0 ? "Everyone" : p.types.length <= 2 ? p.types.map(typeLabel).join(", ") : `${p.types.length} selected`}
+          defaultOpen={p.types.length > 0}
+          testId="portfolio-rail-type"
+        >
+          <RailChecklist
+            name="type"
+            roomy
+            options={[
+              ...choices.facets.roleCategories.map((o) => ({ value: o.value, label: o.label })),
+              // A link's type with no facet row still shows, so it can be unticked.
+              ...p.types.filter((t) => !roleLabel.has(t)).map((t) => ({ value: t, label: t })),
+            ]}
+            selected={p.types}
+            searchPlaceholder="Search person types…"
+            collapseAfter={6}
+          />
+          <p className="text-muted-foreground text-xs">
+            None checked = everyone.{p.units.length > 0 && " The All of WCM row counts the same types."}
+          </p>
         </RailSection>
         <RailSection label="Primary institution" summary={instSummary} defaultOpen={p.insts.length > 0} testId="portfolio-rail-inst">
           <RailChecklist

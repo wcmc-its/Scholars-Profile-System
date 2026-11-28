@@ -110,7 +110,7 @@ export type ScholarPortfolioParams = ScholarScope & {
 };
 
 /** The report filters a link from before `r` carried beside the page's own. */
-const REPORT_KEYS = ["unit", "inst", "from", "to", "area"] as const;
+const REPORT_KEYS = ["unit", "type", "inst", "from", "to", "area"] as const;
 const pick = (sp: URLSearchParams, keys: readonly string[]) =>
   new URLSearchParams([...sp].filter(([k]) => keys.includes(k)));
 
