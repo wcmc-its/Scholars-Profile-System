@@ -2,10 +2,12 @@
  * Report 26 — "Translational portfolio" body. Mockup: the Design canvas
  * "Translational portfolio: sidebar layout" (Main artboard; sample data only).
  * Grants and clinical trials are counted beside publications (tiles, the unit
- * table, the scholar rows, their own lists) with no stage yet: the canvas's
- * stage bars and toggles for them wait for those records to carry one (plan
- * 2026-11-27-translational-portfolio-redesign-plan.md, PRs 5–6). Their rules:
- * `lib/edit/translational-portfolio-activities.ts`.
+ * table, the scholar rows, their own lists; rules in
+ * `lib/edit/translational-portfolio-activities.ts`). Trials carry a stage from
+ * their trial phase: "Stage mix by activity" puts the two series side by side, and
+ * "Show stages of" / "Stage shares for" (`act`) switch the chart and the table
+ * between them. A series is never mixed into the other's shares. Grants have
+ * no stage until ReciterAI assigns one (plan PR 6).
  *
  * Layout: the filter rail (`ReportLayout`; one GET `AutoSubmitForm`: scholar
  * lookup, years, org unit, research areas, and "On this page"), then the
@@ -91,6 +93,7 @@ import { profilePath } from "@/lib/profile-url";
 import {
   NO_STAGE_DEFINITION,
   stageDefinition,
+  TRIAL_STAGE_RULE,
   TRANSLATIONAL_STAGE_LABELS,
   TRANSLATIONAL_STAGES,
   type TranslationalStage,
@@ -332,8 +335,9 @@ export async function renderTranslationalPortfolioReport({
   const canOpen = await loadBibliometricsAccess(data.scholars.rows.map((s) => s.cwid));
   const hasSel = p.stages.length > 0;
   const total = countsTotal(data.all);
-  const first = data.byYear[0]?.counts;
-  const last = data.byYear[data.byYear.length - 1]?.counts;
+  const first = data.byYear[0] && (p.act === "trials" ? data.byYear[0].trialCounts : data.byYear[0].counts);
+  const lastYear = data.byYear[data.byYear.length - 1];
+  const last = lastYear && (p.act === "trials" ? lastYear.trialCounts : lastYear.counts);
   const yearsLabel = p.from === p.to ? String(p.from) : `${p.from} to ${p.to}`;
   const shareIn = (c: StageCounts | undefined, ks: readonly TranslationalStage[]) =>
     c ? ks.reduce((n, k) => n + exactStagedShares(c)[k], 0) : 0;
@@ -390,6 +394,7 @@ export async function renderTranslationalPortfolioReport({
         ))}
         {p.by !== "dept" && <input type="hidden" name="by" value={p.by} />}
         {p.view !== "scholars" && <input type="hidden" name="view" value={p.view} />}
+        {p.act !== "pubs" && <input type="hidden" name="act" value={p.act} />}
         {p.allRows && <input type="hidden" name="rows" value="all" />}
         {/* A link with several units keeps them all through a rail change; the
             radio list shows the first (see the note under it). */}
@@ -477,6 +482,7 @@ export async function renderTranslationalPortfolioReport({
         <span className={cn(EYEBROW, "mx-2 mb-2 tracking-[0.08em]")}>On this page</span>
         {[
           ["#portfolio-summary", "Summary"],
+          ["#activity", "By activity"],
           ["#stages", "Over time"],
           ["#units", p.units.length > 0 ? "Inside this unit" : "By unit or research area"],
           ["#items", "Scholars, publications, grants and trials"],
@@ -493,35 +499,56 @@ export async function renderTranslationalPortfolioReport({
   // Stage mix over time: a row per year, then all of WCM for comparison on a
   // unit view, else every year together.
   const wcmBaseline = p.units.length > 0;
+  // Whose stages the chart and the table show: publications, or clinical trials.
+  const trialsAct = p.act === "trials";
+  const actNoun = trialsAct ? "clinical trials" : "publications";
+  const actAll = trialsAct ? data.trialStages.all : data.all;
+  const yearCounts = (r: PortfolioData["byYear"][number]) => (trialsAct ? r.trialCounts : r.counts);
+  const rowCounts = (r: PortfolioData["table"][number]) => (trialsAct ? r.trialCounts : r.counts);
+  const actItems = (q: Partial<PortfolioParams>, hash: string) =>
+    (["pubs", "trials"] as const).map((k) => ({
+      key: k,
+      label: k === "pubs" ? "Publications" : "Clinical trials",
+      href: href({ ...q, act: k }, hash),
+      on: p.act === k,
+    }));
   const mixRows: { label: string; counts: StageCounts; base?: boolean }[] = [
-    ...data.byYear.map((r) => ({ label: String(r.year), counts: r.counts })),
-    wcmBaseline ? { label: "All of WCM", counts: data.baseline, base: true } : { label: "All years", counts: data.all, base: true },
+    ...data.byYear.map((r) => ({ label: String(r.year), counts: yearCounts(r) })),
+    wcmBaseline
+      ? { label: "All of WCM", counts: trialsAct ? data.trialStages.baseline : data.baseline, base: true }
+      : { label: "All years", counts: actAll, base: true },
   ];
-  const mixAria = (c: StageCounts) => {
-    if (stagedTotal(c) === 0) return "No publications with a stage";
+  /** A stage bar's reading: the staged shares and how many have a stage. */
+  const mixAriaOf = (c: StageCounts, noun: string) => {
+    if (stagedTotal(c) === 0) return `No ${noun} with a stage`;
     const s = stagedShares(c);
     return `${TRANSLATIONAL_STAGES.map((k) => `${code(k)} ${s[k]}%`).join(", ")}; stage assigned ${pct(stageAssignedShare(c))}`;
   };
+  const mixAria = (c: StageCounts) => mixAriaOf(c, actNoun);
+
 
   // The unit table.
   const tab = UNIT_TABS[p.by];
-  const overall = exactStagedShares(data.all);
+  const overall = exactStagedShares(trialsAct ? data.trialStages.all : data.all);
   const scopeName = unitName || "Weill Cornell Medicine";
   const tableRows = p.allRows ? data.table : data.table.slice(0, TABLE_PREVIEW_ROWS);
   const rowNoun = tab.label.toLowerCase();
   const sortNote = hasSel ? `sorted by share in ${stagesLabel(p.stages)}` : p.by === "area" ? "sorted by thinnest stage" : "sorted by volume";
+  /** A stage cell opens the row's scholars in that stage, or under `act=trials` its trials. */
   const cellLink = (k: TranslationalStage, rowHref: string) => {
     const q = new URLSearchParams(rowHref);
     q.delete("stage");
     q.append("stage", k);
     q.delete("view");
+    if (trialsAct) q.set("view", "trials");
     q.delete("page");
     return `${basePath}?${q}#items`;
   };
-  /** A row's Grants or Trials list (the stage pick does not apply to them). */
+  /** A row's whole Grants or Trials list (every stage, as the count is). */
   const listLink = (v: "grants" | "trials", rowHref: string) => {
     const q = new URLSearchParams(rowHref);
     q.set("view", v);
+    q.delete("stage");
     q.delete("page");
     return `${basePath}?${q}#items`;
   };
@@ -533,7 +560,8 @@ export async function renderTranslationalPortfolioReport({
     grants: data.grantList.total,
     trials: data.trialList.total,
   }[p.view];
-  const stagedList = p.view === "scholars" || p.view === "activities";
+  // The lists a stage can filter (grants have no stage yet).
+  const stagedList = p.view !== "grants";
   const pages = Math.max(1, Math.ceil(listTotal / PORTFOLIO_PAGE_SIZE));
   const fromN = listTotal === 0 ? 0 : (p.page - 1) * PORTFOLIO_PAGE_SIZE + 1;
   const toN = Math.min(listTotal, p.page * PORTFOLIO_PAGE_SIZE);
@@ -598,11 +626,11 @@ export async function renderTranslationalPortfolioReport({
               <Tile
                 label={`Clinical trials, ${yearsLabel}`}
                 value={
-                  <Link href={href({ view: "trials" }, "#items")} className="hover:underline" data-testid="portfolio-trials-total">
+                  <Link href={href({ view: "trials", stages: [] }, "#items")} className="hover:underline" data-testid="portfolio-trials-total">
                     {data.trials.toLocaleString()}
                   </Link>
                 }
-                sub={p.areas.length > 0 ? "Only trials with a research area. No stage yet." : "Active in these years, as principal investigator. No stage yet."}
+                sub={`${pct(stageAssignedShare(data.trialStages.all))} have a stage, from their trial phase${p.areas.length > 0 ? ". Only trials with a research area" : ""}`}
               />
               {data.areaCoverage.sized > 0 && (
               <Tile
@@ -652,14 +680,79 @@ export async function renderTranslationalPortfolioReport({
               )}
             </section>
 
+            {/* Stage mix by activity: each series on its own 100%. */}
+            <section id="activity" aria-labelledby="activity-h" className="bg-apollo-surface border-apollo-border flex scroll-mt-24 flex-col gap-3 rounded-xl border px-6 py-5 print:break-inside-avoid" data-testid="portfolio-by-activity">
+              <div className="flex flex-col gap-1">
+                <h2 id="activity-h" className={H2}>
+                  Stage mix by activity, {yearsLabel}
+                </h2>
+                <span className="text-muted-foreground text-[13px]">
+                  Each row adds up to 100% of its own staged items. The rows count different things, so compare their shape, not their size.
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <div role="table" aria-label="Stage mix by activity" className="flex min-w-[400px] flex-col gap-1.5 sm:min-w-[560px]">
+                  <div role="row" className={cn(EYEBROW, "grid grid-cols-[112px_minmax(0,1fr)_112px] gap-4 sm:grid-cols-[180px_minmax(0,1fr)_180px]")}>
+                    <span role="columnheader">Activity</span>
+                    <span role="columnheader">Share of staged items</span>
+                    <span role="columnheader">Stage assigned</span>
+                  </div>
+                  {(
+                    [
+                      { k: "pubs", name: "Publications", n: countsTotal(data.all), counts: data.all as StageCounts | null, list: href({ view: "activities" }, "#items") },
+                      { k: "trials", name: "Clinical trials", n: data.trials, counts: data.trialStages.all as StageCounts | null, list: href({ view: "trials", stages: [] }, "#items") },
+                      { k: "grants", name: "Grants", n: data.grants, counts: null, list: href({ view: "grants" }, "#items") },
+                    ] as const
+                  ).map((r) => {
+                    const cov = r.counts ? stageAssignedShare(r.counts) : 0;
+                    return (
+                      <div key={r.k} role="row" className="grid grid-cols-[112px_minmax(0,1fr)_112px] items-center gap-4 sm:grid-cols-[180px_minmax(0,1fr)_180px]" data-testid={`portfolio-activity-${r.k}`}>
+                        <span role="rowheader" className="flex flex-col text-[13px]">
+                          {r.k === "grants" ? (
+                            <span className="font-medium">{r.name}</span>
+                          ) : (
+                            <Link href={href({ act: r.k }, "#stages")} aria-current={p.act === r.k ? "true" : undefined} className={cn(LINK, "font-medium", p.act === r.k && "underline")}>
+                              {r.name}
+                            </Link>
+                          )}
+                          <Link href={r.list} className="text-muted-foreground text-xs tabular-nums hover:underline" aria-label={`${r.n.toLocaleString()} ${r.name.toLowerCase()}. Show them.`}>
+                            {r.n.toLocaleString()}
+                          </Link>
+                        </span>
+                        <span role="cell" aria-label={r.counts ? mixAriaOf(r.counts, r.name.toLowerCase()) : "No stage yet"}>
+                          {r.counts && stagedTotal(r.counts) > 0 ? (
+                            <MixBar counts={r.counts} picked={p.stages} />
+                          ) : (
+                            <span className="text-muted-foreground text-[13px]">{r.counts ? `No ${r.name.toLowerCase()} with a stage` : "No stage yet"}</span>
+                          )}
+                        </span>
+                        <span role="cell" className="flex items-center gap-2.5">
+                          <span className="bg-apollo-surface-2 h-1.5 grow rounded-[3px]" aria-hidden>
+                            <span className="block h-1.5 rounded-[3px]" style={{ width: `${cov}%`, background: COVERAGE }} />
+                          </span>
+                          <span className="w-10 text-right text-[13px] tabular-nums">{r.counts && countsTotal(r.counts) > 0 ? pct(cov) : "–"}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Select Publications or Clinical trials to show its stages in Stage mix over time and the table below. {TRIAL_STAGE_RULE} Grants have no stage yet.
+              </p>
+            </section>
+
             {/* Stage mix over time. */}
             <section id="stages" aria-labelledby="stages-h" className="bg-apollo-surface border-apollo-border flex scroll-mt-24 flex-col gap-[18px] rounded-xl border px-6 py-5 print:break-inside-avoid">
               <div className="flex flex-col gap-1">
-                <h2 id="stages-h" className={H2}>
-                  Stage mix over time
-                </h2>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 id="stages-h" className={H2}>
+                    Stage mix over time
+                  </h2>
+                  <Segmented label="Show stages of" items={actItems({}, "#stages")} />
+                </div>
                 <span className="text-muted-foreground text-[13px]">
-                  Among publications with a stage, so each year adds up to 100%. How many have a stage is on the right.
+                  Among {actNoun} with a stage, so each year adds up to 100%. How many have a stage is on the right.
                 </span>
               </div>
               <div role="group" aria-label="Focus on a stage" className="-mt-1.5 flex flex-wrap gap-x-1 gap-y-0.5" data-testid="portfolio-stage-focus">
@@ -688,14 +781,14 @@ export async function renderTranslationalPortfolioReport({
               </div>
               <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3">
                 <div className="bg-apollo-surface-2 flex flex-col gap-0.5 rounded-lg px-3.5 py-3">
-                  <span className={EYEBROW}>{hasSel ? stagesLabel(p.stages) : "T2 and T3–4"}, of staged publications</span>
+                  <span className={EYEBROW}>{hasSel ? stagesLabel(p.stages) : "T2 and T3–4"}, of staged {actNoun}</span>
                   <span className="text-[22px] font-semibold tracking-[-0.025em] tabular-nums">
                     {thenNow(shareIn(first, hasSel ? p.stages : ["T2", "T3-4"]), shareIn(last, hasSel ? p.stages : ["T2", "T3-4"]))}
                   </span>
                   <span className="text-muted-foreground text-[13px]">Shares leave out publications with no stage.</span>
                 </div>
                 <div className="bg-apollo-surface-2 flex flex-col gap-0.5 rounded-lg px-3.5 py-3">
-                  <span className={EYEBROW}>Publications with a stage</span>
+                  <span className={EYEBROW}>{trialsAct ? "Clinical trials" : "Publications"} with a stage</span>
                   <span className="text-[22px] font-semibold tracking-[-0.025em] tabular-nums">
                     {thenNow(first ? stageAssignedShare(first) : 0, last ? stageAssignedShare(last) : 0)}
                   </span>
@@ -706,7 +799,7 @@ export async function renderTranslationalPortfolioReport({
                 <div role="table" aria-label="Stage mix by year" className="flex min-w-[400px] flex-col gap-1.5 sm:min-w-[560px]" data-testid="portfolio-stage-rows">
                   <div role="row" className={cn(EYEBROW, "grid grid-cols-[48px_minmax(0,1fr)_112px] sm:grid-cols-[96px_minmax(0,1fr)_180px] gap-4")}>
                     <span role="columnheader">Year</span>
-                    <span role="columnheader">Share of staged publications</span>
+                    <span role="columnheader">Share of staged {actNoun}</span>
                     <span role="columnheader">Stage assigned</span>
                   </div>
                   {mixRows.map((r) => {
@@ -720,7 +813,7 @@ export async function renderTranslationalPortfolioReport({
                           {stagedTotal(r.counts) > 0 ? (
                             <MixBar counts={r.counts} picked={p.stages} />
                           ) : (
-                            <span className="text-muted-foreground text-[13px]">No publications with a stage</span>
+                            <span className="text-muted-foreground text-[13px]">No {actNoun} with a stage</span>
                           )}
                         </span>
                         <span role="cell" className="flex items-center gap-2.5">
@@ -751,16 +844,19 @@ export async function renderTranslationalPortfolioReport({
                     {p.units.length > 0 ? `Inside ${unitName}` : "By unit or research area"}
                   </h2>
                   <span className="text-muted-foreground text-[13px]">
-                    Publications, {yearsLabel}, {sortNote}. Shares are of publications with a stage, as in Stage mix above.
+                    {trialsAct ? "Clinical trials" : "Publications"}, {yearsLabel}, {sortNote}. Shares are of {actNoun} with a stage, as in Stage mix above.
                     Grants and trials count each award or trial once per row.
                     {p.by === "div" && " A division's row counts its members, including hand-added ones."}
                     {p.by === "center" && " Center activities also count toward their members' departments, so rows here overlap."}
                   </span>
                 </div>
+                <div className="flex flex-wrap items-center gap-3">
+                <Segmented label="Stage shares for" items={actItems({}, "#units")} />
                 <Segmented
                   label="Break down by"
                   items={(Object.keys(UNIT_TABS) as UnitTab[]).map((k) => ({ key: k, label: UNIT_TABS[k].label, href: href({ by: k, gaps: false, allRows: false }, "#units"), on: p.by === k }))}
                 />
+                </div>
               </div>
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs">
                 <span className="inline-flex items-center gap-2">
@@ -769,7 +865,7 @@ export async function renderTranslationalPortfolioReport({
                   </span>
                   {scopeName} overall
                 </span>
-                {p.by === "area" && (
+                {p.by === "area" && !trialsAct && (
                   <span className="inline-flex items-center gap-1.5">
                     <GapTag />
                     under {GAP_SHARE}% of an area&rsquo;s staged publications, for areas with {MIN_AREA_SIZE} or more
@@ -779,7 +875,7 @@ export async function renderTranslationalPortfolioReport({
               <div className="border-apollo-border overflow-x-auto rounded-lg border">
                 <table className="w-full min-w-[960px] border-collapse text-[13px]" data-testid="portfolio-table">
                   <caption className="sr-only">
-                    Share of publications with a stage, by translational stage, by {tab.head.toLowerCase()}. {COUNTING_RULE}
+                    Share of {actNoun} with a stage, by translational stage, by {tab.head.toLowerCase()}. {COUNTING_RULE}
                   </caption>
                   <thead>
                     <tr className="bg-apollo-surface-2 text-muted-foreground text-left text-xs">
@@ -807,10 +903,11 @@ export async function renderTranslationalPortfolioReport({
                   </thead>
                   <tbody>
                     {tableRows.map((r) => {
-                      const shares = stagedShares(r.counts);
-                      const ex = exactStagedShares(r.counts);
-                      const staged = stagedTotal(r.counts) > 0;
-                      const cov = stageAssignedShare(r.counts);
+                      const rc = rowCounts(r);
+                      const shares = stagedShares(rc);
+                      const ex = exactStagedShares(rc);
+                      const staged = stagedTotal(rc) > 0;
+                      const cov = stageAssignedShare(rc);
                       return (
                         <tr key={r.key} className="border-apollo-border border-t">
                           <th scope="row" className="px-3 py-2.5 text-left font-normal">
@@ -843,11 +940,12 @@ export async function renderTranslationalPortfolioReport({
                             </td>
                           ))}
                           <td className="min-w-[92px] px-2.5 py-2.5">
-                            <span className="block tabular-nums">{pct(cov)}</span>
+                            <span className="block tabular-nums">{countsTotal(rc) > 0 ? pct(cov) : "–"}</span>
                             <ThinBar share={cov} color={COVERAGE} />
                           </td>
                           {TRANSLATIONAL_STAGES.map((k) => {
-                            const gap = r.gaps.includes(k);
+                            // Gaps are a publication rule.
+                            const gap = !trialsAct && r.gaps.includes(k);
                             const fig = staged ? `${shares[k]}%` : "–";
                             return (
                               <td key={k} className={cn("min-w-[92px] px-2.5 py-2.5", gap && "bg-apollo-page")}>
@@ -855,7 +953,7 @@ export async function renderTranslationalPortfolioReport({
                                   {staged ? (
                                     <Link
                                       href={cellLink(k, r.href)}
-                                      aria-label={`${fig} in ${code(k)}${gap ? ", a gap" : ""}, ${r.label}. Show scholars.`}
+                                      aria-label={`${fig} in ${code(k)}${gap ? ", a gap" : ""}, ${r.label}. Show ${trialsAct ? "trials" : "scholars"}.`}
                                       className={cn("hover:underline", p.stages.includes(k) && "font-semibold")}
                                     >
                                       {fig}
@@ -903,14 +1001,18 @@ export async function renderTranslationalPortfolioReport({
                       ? `Scholars${unitName ? ` in ${unitName}` : ""}${hasSel ? ` with ${stagesLabel(p.stages)} work` : ""}`
                       : p.view === "activities"
                         ? `Publications${hasSel ? ` in ${stagesLabel(p.stages)}` : ""}${unitName ? `, ${unitName}` : ""}`
-                        : `${p.view === "grants" ? "Grants" : "Clinical trials"}${unitName ? `, ${unitName}` : ""}`}
+                        : p.view === "grants"
+                          ? `Grants${unitName ? `, ${unitName}` : ""}`
+                          : `Clinical trials${hasSel ? ` in ${stagesLabel(p.stages)}` : ""}${unitName ? `, ${unitName}` : ""}`}
                   </h2>
                   <span className="text-muted-foreground text-[13px]">
                     {p.view === "scholars"
                       ? `First or senior author, at least ${MIN_SCHOLAR_ACTIVITIES} staged publications, ordered by count. ${rangeLabel}.`
                       : p.view === "activities"
                         ? `Newest first. ${rangeLabel}.`
-                        : `Newest first, active ${yearsLabel}. No stage yet${hasSel ? ", so the stage filter does not apply" : ""}. ${rangeLabel}.`}
+                        : p.view === "grants"
+                          ? `Newest first, active ${yearsLabel}. No stage yet${hasSel ? ", so the stage filter does not apply" : ""}. ${rangeLabel}.`
+                          : `Newest first, active ${yearsLabel}, staged by trial phase. ${rangeLabel}.`}
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
@@ -923,7 +1025,7 @@ export async function renderTranslationalPortfolioReport({
                       { key: "trials", label: "Trials", href: href({ view: "trials" }, "#items"), on: p.view === "trials" },
                     ]}
                   />
-                  {stagedList && (
+                  {(p.view === "scholars" || p.view === "activities") && (
                     <a href={searchHref} className={cn(LINK, "text-[13px] print:hidden")}>
                       Open in Scholars search
                     </a>
@@ -969,7 +1071,7 @@ export async function renderTranslationalPortfolioReport({
                   ))}
                 </ActivityList>
               ) : p.view === "trials" ? (
-                <ActivityList empty={`No clinical trials were active in this scope, ${yearsLabel}.`} testId="portfolio-trials">
+                <ActivityList empty={`No clinical trials${hasSel ? ` in ${stagesLabel(p.stages)}` : ""} were active in this scope, ${yearsLabel}.`} testId="portfolio-trials">
                   {data.trialList.rows.map((t) => (
                     <TrialItem key={t.key} t={t} />
                   ))}
@@ -1049,7 +1151,7 @@ export async function renderTranslationalPortfolioReport({
               </p>
               <p className="text-muted-foreground text-xs">{COUNTING_RULE}</p>
               <p className="text-muted-foreground text-xs">
-                {GRANT_RULE} {TRIAL_RULE} {ACTIVITY_AREA_RULE} Grants and trials have no stage yet.
+                {GRANT_RULE} {TRIAL_RULE} {TRIAL_STAGE_RULE} {ACTIVITY_AREA_RULE} Grants have no stage yet.
               </p>
               <a href={methodologyHref("translationalStage")} className={cn(LINK, "self-start text-[13px] font-medium print:hidden")}>
                 How stages are defined
@@ -1226,7 +1328,7 @@ function TrialItem({ t }: { t: PortfolioTrial & { names: Map<string, string> } }
         </span>
       </span>
       <span className="text-xs">Principal investigator: {investigators(t.people, t.names, false)}</span>
-      {NO_STAGE_YET}
+      <span>{t.stage ? <StageTag stage={t.stage} /> : <span className="text-muted-foreground text-xs">No stage</span>}</span>
     </li>
   );
 }
