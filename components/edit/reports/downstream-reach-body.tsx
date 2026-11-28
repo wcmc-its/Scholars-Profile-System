@@ -65,7 +65,7 @@ import {
   connectionsPageCwids,
   loadConnectionsPage,
 } from "@/components/edit/reports/downstream-reach-connections";
-import { FilterChips, RailSection, ReportCard, ReportLayout, ReportStats } from "@/components/edit/reports/report-ui";
+import { FilterChips, RailSection, ReportCard, ReportLayout } from "@/components/edit/reports/report-ui";
 import { PubTitle } from "@/components/publication/pub-html";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
 import { StageTag } from "@/components/edit/reports/translational-portfolio-body";
@@ -82,6 +82,7 @@ import {
   loadModalHidden,
   loadReach,
   loadReachAreas,
+  loadReachBaseline,
   MIN_REACH_PAPERS,
   MODAL_SECTION,
   modalGroupsOn,
@@ -100,7 +101,10 @@ import {
   REACH_TYPE_CITED,
   REACH_TYPE_LABEL,
   REACH_TYPES,
+  reachBaselineLabel,
+  reachBaselineParams,
   reachChips,
+  reachShare,
   reachTotal,
   reachLinks,
   reachQueryString,
@@ -126,6 +130,8 @@ import { loadPersonNames, UNKNOWN_PERSON } from "@/lib/edit/policy-citations-rep
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 import { cn, htmlToPlainText } from "@/lib/utils";
 
+/** A headline figure: big, and a link like every count in the tables. */
+const BIG = "text-[40px] leading-none font-bold tracking-[-0.02em] tabular-nums";
 const RAIL_LEGEND = "mb-1.5 p-0 text-[13px] font-medium";
 const TEST = "downstream-reach";
 
@@ -575,12 +581,14 @@ export async function renderDownstreamReachReport({
   const { view } = params;
   const types = tickedTypes(params);
   const offset = (params.page - 1) * REACH_PAGE_SIZE;
-  const [facets, areas, data, connections] = await Promise.all([
+  const [facets, areas, data, connections, baseline] = await Promise.all([
     loadDataQualityFacets(db.read),
     loadReachAreas(),
     loadReach(params, { views: [view], limit: REACH_PAGE_SIZE, offset }),
     // Only when its tab is open: no Connections query runs for another view.
     view === "connections" ? loadConnectionsPage(params, offset, REACH_PAGE_SIZE) : null,
+    // A research area or unit set: the same figure without them (spec D3).
+    loadReachBaseline(params),
   ]);
   const people = (data.people ?? []).slice(offset, offset + REACH_PAGE_SIZE);
   const pagePmids = data.pubs.map((r) => r.pmid);
@@ -609,6 +617,7 @@ export async function renderDownstreamReachReport({
   const href = (q: string) => `${basePath}?${q}`;
   /** The list behind each number (`reachLinks`). */
   const links = reachLinks(params);
+  const baselineLinks = reachLinks(reachBaselineParams(params));
   const bibliometrics = (cwid: string) => (mayOpenBibliometrics.has(cwid) ? bibliometricsHref(cwid) : null);
   const personFooter: PersonFooter = (cwid) =>
     personCardFooter(
@@ -703,51 +712,73 @@ export async function renderDownstreamReachReport({
             }))}
             testId={`${TEST}-chips`}
           />
-          {/* Every tile is a link to the list of exactly what it counts. */}
-          <ReportStats
-            testId={`${TEST}-tiles`}
-            stats={[
-              {
-                label: allTypes
-                  ? "publications in scope were cited downstream"
-                  : `publications in scope were cited by ${typePhrase(types)}`,
-                value: (
-                  <>
-                    <Link
-                      href={href(links.cited())}
-                      aria-label={`${noun(data.pubTotal, PUBLICATIONS)} ${allTypes ? "cited downstream" : `cited by ${typePhrase(types)}`}`}
-                      className={LINK}
-                      data-testid={`${TEST}-tile-cited`}
-                    >
-                      {data.pubTotal.toLocaleString()}
-                    </Link>
-                    <span className="text-muted-foreground px-2 text-xl font-normal tracking-normal">of</span>
-                    <Link
-                      href={href(links.scope())}
-                      aria-label={`${noun(data.scopeTotal, PUBLICATIONS)} in scope, cited or not`}
-                      className={LINK}
-                      data-testid={`${TEST}-tile-scope`}
-                    >
-                      {data.scopeTotal.toLocaleString()}
-                    </Link>
-                  </>
-                ),
-              },
-              ...REACH_TYPES.map((t) => ({
-                label: REACH_TYPE_CITED[t],
-                value: (
+          {/* The headline (spec D1, D2): every figure links to the list of exactly what it counts. */}
+          <section className="flex flex-col gap-4" aria-label="Headline figures" data-testid={`${TEST}-tiles`}>
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+              <p className="m-0 text-base">
+                <Link
+                  href={href(links.cited())}
+                  aria-label={`${noun(data.pubTotal, PUBLICATIONS)} ${allTypes ? "cited downstream" : `cited by ${typePhrase(types)}`}`}
+                  className={cn(LINK, BIG)}
+                  data-testid={`${TEST}-tile-cited`}
+                >
+                  {data.pubTotal.toLocaleString()}
+                </Link>
+                <span className="text-muted-foreground px-2 text-xl">of</span>
+                <Link
+                  href={href(links.scope())}
+                  aria-label={`${noun(data.scopeTotal, PUBLICATIONS)} in scope, cited or not`}
+                  className={cn(LINK, BIG)}
+                  data-testid={`${TEST}-tile-scope`}
+                >
+                  {data.scopeTotal.toLocaleString()}
+                </Link>{" "}
+                publications in scope were {allTypes ? "cited downstream" : `cited by ${typePhrase(types)}`}{" "}
+                <strong className="tabular-nums" data-testid={`${TEST}-tile-share`}>
+                  ({reachShare(data.pubTotal, data.scopeTotal)})
+                </strong>
+              </p>
+              {baseline && (
+                <p className="text-muted-foreground m-0 text-sm" data-testid={`${TEST}-baseline`}>
+                  {reachBaselineLabel(params)}: <strong className="text-foreground">{reachShare(baseline.cited, baseline.scope)}</strong> (
                   <Link
-                    href={href(links.type(t))}
-                    aria-label={`${noun(data.typePapers[t], PUBLICATIONS)} ${REACH_TYPE_CITED[t]}`}
+                    href={href(baselineLinks.cited())}
+                    aria-label={`${noun(baseline.cited, PUBLICATIONS)} cited downstream, any research area or unit`}
                     className={LINK}
-                    data-testid={`${TEST}-tile-${t}`}
                   >
-                    {data.typePapers[t].toLocaleString()}
+                    {baseline.cited.toLocaleString()}
+                  </Link>{" "}
+                  of{" "}
+                  <Link
+                    href={href(baselineLinks.scope())}
+                    aria-label={`${noun(baseline.scope, PUBLICATIONS)} in scope, any research area or unit`}
+                    className={LINK}
+                  >
+                    {baseline.scope.toLocaleString()}
                   </Link>
-                ),
-              })),
-            ]}
-          />
+                  )
+                </p>
+              )}
+            </div>
+            <dl className="m-0 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+              {REACH_TYPES.map((t) => (
+                <div key={t} className="flex min-w-0 flex-col-reverse">
+                  <dt className="text-muted-foreground text-sm">papers {REACH_TYPE_CITED[t]}</dt>
+                  <dd className="m-0">
+                    <Link
+                      href={href(links.type(t))}
+                      aria-label={`${noun(data.typePapers[t], PUBLICATIONS)} ${REACH_TYPE_CITED[t]}`}
+                      className={cn(LINK, "text-[28px] leading-none font-bold tabular-nums")}
+                      data-testid={`${TEST}-tile-${t}`}
+                    >
+                      {data.typePapers[t].toLocaleString()}
+                    </Link>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-muted-foreground m-0 text-xs">A paper can count under more than one type.</p>
+          </section>
           <ReportCard className="overflow-hidden p-0 sm:p-0">
             <nav className="border-apollo-border flex flex-wrap gap-x-5 gap-y-1 border-b px-4" aria-label="Report views">
               {tab("publications", "Publications", data.pubTotal)}

@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   open: vi.fn(),
   scope: { value: null as string[] | null },
   access: vi.fn(),
+  baseline: vi.fn(),
   footers: new Map<string, ScholarCardFooter | undefined>(),
 }));
 
@@ -45,6 +46,7 @@ vi.mock("@/lib/edit/downstream-reach-report", async (actual) => ({
   withReachDocDetails: h.docs,
   loadModalCounts: h.modal,
   loadModalHidden: h.hidden,
+  loadReachBaseline: h.baseline,
   loadReachAreas: async () => [{ id: "area_a", label: "Example area" }],
 }));
 vi.mock("@/lib/edit/policy-citations-report", async (actual) => ({
@@ -183,6 +185,8 @@ function expectEveryNumberLinked(root: HTMLElement) {
     const parent = node.parentElement!;
     // A zero's screen-reader text stands for the dash, which counts nothing.
     if (parent.classList.contains("sr-only") && node.textContent === "0") continue;
+    // A share of two linked counts ("(45%)") counts nothing itself.
+    if (/^\(?\d+%\)?$/.test(node.textContent ?? "")) continue;
     expect(parent.closest("a, button"), `"${node.textContent}" is not a link`).not.toBeNull();
   }
   return seen;
@@ -198,6 +202,7 @@ beforeEach(() => {
   h.docs.mockReset().mockResolvedValue([]);
   h.modal.mockReset().mockResolvedValue(MODAL);
   h.hidden.mockReset().mockResolvedValue(new Set());
+  h.baseline.mockReset().mockResolvedValue(null);
   vi.stubEnv("DOWNSTREAM_REACH_REPORT", "on");
   for (const flag of ON) vi.stubEnv(flag, "on");
 });
@@ -229,6 +234,22 @@ describe("report 27 page", () => {
     expect(subtitle).not.toMatch(/\d|units|Department|Example area|own work/);
   });
 
+  it("a research area or unit: the baseline without them, its N and M linked to their lists", async () => {
+    h.baseline.mockResolvedValue({ cited: 3100, scope: 10000 });
+    const view = await page({ area: "area_a", unit: "dept:N1", basis: "cy" });
+    const base = view.getByTestId("downstream-reach-baseline");
+    expect(base.textContent).toBe("WCM overall: 31% (3,100 of 10,000)");
+    const links = reachLinks({ ...paramsOf("area=area_a&unit=dept:N1&basis=cy"), area: null, units: [] });
+    const [n, m] = within(base).getAllByRole("link");
+    expect([n.getAttribute("href"), m.getAttribute("href")]).toEqual([`${BASE}?${links.cited()}`, `${BASE}?${links.scope()}`]);
+    expect(queryOf(n.getAttribute("href")).get("area")).toBeNull();
+    expect(queryOf(n.getAttribute("href")).getAll("unit")).toEqual([]);
+    expectEveryNumberLinked(base);
+    cleanup();
+    h.scope.value = ["dept:N1"];
+    expect((await page({ area: "area_a", basis: "cy" })).getByTestId("downstream-reach-baseline").textContent).toContain("All your units: 31%");
+  });
+
   it("the tiles: N of M cited downstream and one per citing type, each a link to the list it counts", async () => {
     const view = await page();
     const tiles = view.getByTestId("downstream-reach-tiles");
@@ -245,10 +266,18 @@ describe("report 27 page", () => {
       expect(queryOf(tile(t).getAttribute("href")).getAll("ctype")).toEqual([t]);
     }
     expect(tiles.textContent).toContain("publications in scope were cited downstream");
+    // 1,875 of 4,210, rounded; the caption says why the types add up to more.
+    expect(view.getByTestId("downstream-reach-tile-share").textContent).toBe("(45%)");
+    expect(tiles.textContent).toContain("A paper can count under more than one type.");
+    expect(tiles.textContent).toContain("papers cited by clinical studies");
+    // No area or unit: no baseline.
+    expect(view.queryByTestId("downstream-reach-baseline")).toBeNull();
+    expect(h.baseline).toHaveBeenCalledTimes(1);
     expect(tiles.textContent).toContain("cited by clinical studies");
     expect(tiles.textContent).toContain("cited in patents");
     expect(tiles.textContent).toContain("cited in systematic reviews");
-    expect(expectEveryNumberLinked(tiles)).toBe(7);
+    // Seven counts and the share.
+    expect(expectEveryNumberLinked(tiles)).toBe(8);
     // Each tile's link is named for the list it opens, so two numbers side by side can be told apart.
     expect(["cited", "scope", "clinical", "trial", "policy", "review", "patent"].map((id) => tile(id).getAttribute("aria-label"))).toEqual([
       "1,875 publications cited downstream",
