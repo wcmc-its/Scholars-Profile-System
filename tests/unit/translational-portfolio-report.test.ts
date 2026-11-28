@@ -171,10 +171,10 @@ describe("params", () => {
     expect(p.insts).toEqual(["HSS", "WCMC-Q", "CU GHS"]);
     expect(parsePortfolioParams(new URLSearchParams(portfolioQueryString(p)))).toEqual(p);
   });
-  it("falls back on bad values and defaults to 2020 through the last complete year", () => {
+  it("falls back on bad values and defaults to 2020 through the current year", () => {
     const p = parsePortfolioParams(new URLSearchParams("stage=NA&stage=T9&by=nope&view=x&area=<x>&cwid=a;b&unit=inst:X"));
     const y = new Date().getUTCFullYear();
-    expect(p).toMatchObject({ stages: [], by: "dept", view: "scholars", areas: [], gaps: false, allRows: false, cwid: null, units: [], from: 2020, to: y - 1 });
+    expect(p).toMatchObject({ stages: [], by: "dept", view: "scholars", areas: [], gaps: false, allRows: false, cwid: null, units: [], from: 2020, to: y });
   });
   it("defaults to the Scholars list and leaves the default out of the URL", () => {
     const p = parsePortfolioParams(new URLSearchParams("from=2020&to=2024"));
@@ -204,10 +204,14 @@ describe("buildPortfolioWorkbook", () => {
   };
   const data = (scholars: number): PortfolioData => ({
     all: c(4, 3, 2, 1, 0),
-    byYear: [{ year: 2025, counts: c(4, 3, 2, 1, 0) }],
+    grants: 7,
+    trials: 2,
+    byYear: [{ year: 2025, counts: c(4, 3, 2, 1, 0), grants: 7, trials: 2, trialCounts: c(0, 1, 1, 0, 0) }],
+    trialStages: { all: c(0, 1, 1, 0, 0), baseline: c(0, 5, 10, 2, 3) },
     baseline: c(4, 3, 2, 1, 0),
+    baselineActivities: { grants: 70, trials: 20 },
     table: [
-      { key: "a1", label: "Area one", href: "", note: "12 scholars", noteHref: null, gaps: ["T1", "T3-4"], counts: c(60, 1, 20, 1, 9) },
+      { key: "a1", label: "Area one", href: "", note: "12 scholars", noteHref: null, gaps: ["T1", "T3-4"], counts: c(60, 1, 20, 1, 9), grants: 5, trials: 1, trialCounts: c(0, 0, 1, 0, 0) },
     ],
     areaCoverage: { sized: 0, spanning: 0 },
     areaOrder: [],
@@ -222,11 +226,14 @@ describe("buildPortfolioWorkbook", () => {
         n: 3,
         counts: c(3, 0, 0, 0, 0),
         works: [],
+        grants: 1,
+        trials: 0,
       })),
     },
     person: null,
-    lookup: [],
-    activities: { total: 10, pmids: [] },
+      activities: { total: 10, pmids: [] },
+    grantList: { total: 0, rows: [] },
+    trialList: { total: 0, rows: [] },
   });
   const sheet = async (n: number) => {
     const wb = new ExcelJS.Workbook();
@@ -258,9 +265,30 @@ describe("buildPortfolioWorkbook", () => {
   it("puts Stage assigned and the staged shares beside the counts", async () => {
     const ws = (await sheet(0)).getWorksheet("Departments")!;
     const head = ws.getRow(1).values as unknown[];
-    expect(head.slice(10)).toEqual(["Stage assigned (%)", "T0 share of staged (%)", "T1 share of staged (%)", "T2 share of staged (%)", "T3–4 share of staged (%)"]);
-    // Area one: 82 staged of 91; 60/1/20/1 of the 82 staged (T2 takes the leftover point).
-    expect((ws.getRow(3).values as unknown[]).slice(10)).toEqual([90, 73, 1, 25, 1]);
+    expect(head.slice(10)).toEqual([
+      "Stage assigned (%)",
+      "T0 share of staged (%)",
+      "T1 share of staged (%)",
+      "T2 share of staged (%)",
+      "T3–4 share of staged (%)",
+      "Grants",
+      "Clinical trials",
+      "Trials: T0",
+      "Trials: T1",
+      "Trials: T2",
+      "Trials: T3–4",
+      "Trials: No stage",
+    ]);
+    // Area one: 82 staged of 91; 60/1/20/1 of the 82 staged (T2 takes the leftover point); then 5 grants, 1 trial (T2).
+    expect((ws.getRow(3).values as unknown[]).slice(10)).toEqual([90, 73, 1, 25, 1, 5, 1, 0, 0, 1, 0, 0]);
+    // The all-of-WCM row carries the baseline grants and trials, and the trials' stages.
+    expect((ws.getRow(2).values as unknown[]).slice(15)).toEqual([70, 20, 0, 5, 10, 2, 3]);
+  });
+  it("counts grants and trials by year and in total, once each in the total", async () => {
+    const ws = (await sheet(0)).getWorksheet("By year")!;
+    expect((ws.getRow(1).values as unknown[]).slice(-7, -5)).toEqual(["Grants", "Clinical trials"]);
+    expect((ws.getRow(2).values as unknown[]).slice(-7)).toEqual([7, 2, 0, 1, 1, 0, 0]);
+    expect((ws.getRow(3).values as unknown[]).slice(-7)).toEqual([7, 2, 0, 1, 1, 0, 0]);
   });
 });
 
@@ -317,8 +345,8 @@ describe("loadPortfolio", () => {
     expect(texts.filter((t) => t.includes("UNION ALL"))).toHaveLength(1);
     expect(d.all).toEqual(c(3, 0, 0, 0, 2));
     expect(d.byYear).toEqual([
-      { year: 2024, counts: c(3, 0, 0, 0, 0) },
-      { year: 2025, counts: c(0, 0, 0, 0, 2) },
+      { year: 2024, counts: c(3, 0, 0, 0, 0), grants: 0, trials: 0, trialCounts: c(0, 0, 0, 0, 0) },
+      { year: 2025, counts: c(0, 0, 0, 0, 2), grants: 0, trials: 0, trialCounts: c(0, 0, 0, 0, 0) },
     ]);
     expect(d.table.map((r) => [r.key, r.counts])).toEqual([["dept:x", c(0, 1, 0, 0, 0)]]);
     expect(d.activities.pmids).toEqual(["9"]);
@@ -353,8 +381,102 @@ describe("copy", () => {
       "components/edit/reports/translational-portfolio-scholar-client.tsx",
       "app/edit/scholar/[cwid]/translational-portfolio/page.tsx",
     ]) {
-      const text = readFileSync(path.resolve(__dirname, "../..", f), "utf8");
+      // A trial's own phase is fine, named as such ("Trial phase"); a stage never is.
+      const text = readFileSync(path.resolve(__dirname, "../..", f), "utf8").replace(/\btrial phases?\b/gi, "");
       expect(text, f).not.toMatch(/\bphases?\b/i);
     }
+  });
+});
+
+describe("loadPortfolio's grants and trials", () => {
+  it("counts each award once per department, scholar and active year, beside the publications", async () => {
+    const reads = db.read as unknown as Record<string, unknown>;
+    reads.suppression = { findMany: vi.fn(async () => []) };
+    reads.areaSignalTopic = { findMany: vi.fn(async () => []) };
+    reads.scholar = { findMany: vi.fn(async () => [{ cwid: "aaa1001", preferredName: "Example Person", primaryTitle: null, primaryDepartment: null, slug: null }]) };
+    reads.$queryRaw = vi.fn(async (q: { sql?: string; values?: unknown[] }) => {
+      const text = String(q.sql);
+      if (text.includes("FROM `grant` g"))
+        return [
+          { id: "1", cwid: "aaa1001", title: "T", role: "PI", funder: "NCI", award_number: "1 R01 CA000001-01", external_id: "INFOED-1-aaa1001", intake_type: "Grant", start_date: new Date("2023-01-01T00:00:00Z"), end_date: new Date("2025-12-31T00:00:00Z"), area_text_key: null, dc: "x" },
+          { id: "2", cwid: "bbb2002", title: "T", role: "Co-PI", funder: "NCI", award_number: "1 R01 CA000001-01", external_id: "INFOED-1-bbb2002", intake_type: "Grant", start_date: new Date("2023-01-01T00:00:00Z"), end_date: new Date("2025-12-31T00:00:00Z"), area_text_key: null, dc: "x" },
+        ];
+      if (text.includes("person_clinical_trial")) return [];
+      // A grouping's name is a bound value: the Scholars list's query groups by cwid.
+      if (text.includes("WITH x AS"))
+        return (q.values ?? []).includes("cwid") ? [{ k: "cwid", g: "aaa1001", st: "T1", n: 4n }] : [{ k: "dept", g: "x", st: "T1", n: 4n }];
+      return [];
+    });
+    // A window no other test uses: the grouped counts are cached by their SQL (`cachedRead`).
+    const d = await loadPortfolio(parsePortfolioParams(new URLSearchParams("from=2023&to=2025")), {
+      facets: { roleCategories: [], departments: [], centers: [], institutions: [] },
+      labels: new Map(),
+      areas: [],
+    });
+    expect(d.grants).toBe(1);
+    expect(d.byYear.map((y) => y.grants)).toEqual([1, 1, 1]);
+    expect(d.table.map((r) => [r.key, r.grants, r.trials])).toEqual([["x", 1, 0]]);
+    expect(d.scholars.rows.map((s) => [s.cwid, s.grants])).toEqual([["aaa1001", 1]]);
+  });
+});
+
+describe("loadPortfolio's trial stages", () => {
+  const trialRow = (pn: string, phase: string, dc: string) => ({
+    protocol_number: pn, nct_number: `NCT-${pn}`, title: "T", phase, status: "OPEN TO ACCRUAL", status_date: null, ctgov_status: null,
+    start_date: "2023-01", start_date_type: "ACTUAL", primary_completion_date: null, primary_completion_date_type: null,
+    first_ota_date: null, area_text_key: null, cwid: "aaa1001", role: "Principal Investigator", dc,
+  });
+  const choices = { facets: { roleCategories: [], departments: [], centers: [], institutions: [] }, labels: new Map(), areas: [] } as PortfolioChoices;
+  const mock = (pubRows: { k: string; g: string; st: string; n: bigint }[]) => {
+    const reads = db.read as unknown as Record<string, unknown>;
+    reads.suppression = { findMany: vi.fn(async () => []) };
+    reads.areaSignalTopic = { findMany: vi.fn(async () => []) };
+    reads.scholar = { findMany: vi.fn(async () => []) };
+    const calls: { sql: string; values: unknown[] }[] = [];
+    reads.$queryRaw = vi.fn(async (q: { sql?: string; values?: unknown[] }) => {
+      const text = String(q.sql);
+      calls.push({ sql: text, values: q.values ?? [] });
+      if (text.includes("person_clinical_trial"))
+        return [trialRow("1", "PHASE1", "a"), trialRow("2", "PHASE3", "b"), trialRow("3", "PHASE3", "b"), trialRow("4", "NA", "a")];
+      if (text.includes("WITH x AS")) return pubRows;
+      return [];
+    });
+    return calls;
+  };
+
+  it("counts each row's trials by stage, sorts by them under act=trials, and keeps the publications as they were", async () => {
+    mock([
+      { k: "dept", g: "a", st: "T0", n: 50n },
+      { k: "dept", g: "b", st: "T0", n: 5n },
+    ]);
+    // A window no other test uses: grouped counts are cached by their SQL.
+    const d = await loadPortfolio(parsePortfolioParams(new URLSearchParams("from=2022&to=2026&act=trials&stage=T2&view=trials")), choices);
+    expect(d.trialStages.all).toEqual(c(0, 1, 2, 0, 1));
+    // Sorted by share of staged trials in the pick (T2): b (2 of 2) before a (0 of 1).
+    expect(d.table.map((r) => [r.key, r.trialCounts, countsTotal(r.counts)])).toEqual([
+      ["b", c(0, 0, 2, 0, 0), 5],
+      ["a", c(0, 1, 0, 0, 1), 50],
+    ]);
+    // The Trials list follows the stage pick; the tile total does not.
+    expect(d.trialList.total).toBe(2);
+    expect(d.trials).toBe(4);
+    expect(d.byYear.find((y) => y.year === 2024)?.trialCounts).toEqual(c(0, 1, 2, 0, 1));
+  });
+
+  it("loads all of WCM's trials for the baseline row on a unit view under act=trials only", async () => {
+    const calls = mock([]);
+    await loadPortfolio(parsePortfolioParams(new URLSearchParams("unit=dept:a&from=2021&to=2026")), choices);
+    expect(calls.filter((q) => q.sql.includes("person_clinical_trial"))).toHaveLength(1);
+    calls.length = 0;
+    const d = await loadPortfolio(parsePortfolioParams(new URLSearchParams("unit=dept:a&from=2021&to=2026&act=trials")), choices);
+    expect(calls.filter((q) => q.sql.includes("person_clinical_trial"))).toHaveLength(2);
+    expect(d.trialStages.baseline).toEqual(c(0, 1, 2, 0, 1));
+  });
+
+  it("round-trips act in the query string", () => {
+    const p = parsePortfolioParams(new URLSearchParams("act=trials"));
+    expect(p.act).toBe("trials");
+    expect(portfolioQueryString(p)).toContain("act=trials");
+    expect(portfolioQueryString(parsePortfolioParams(new URLSearchParams("act=bogus")))).not.toContain("act=");
   });
 });

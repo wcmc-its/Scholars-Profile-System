@@ -107,6 +107,37 @@ const DATA: ScholarPortfolio = {
       counts: { T0: 2, T1: 0, T2: 1, "T3-4": 0, none: 0 },
     },
   ],
+  grants: [
+    {
+      key: "R01CA000001",
+      title: "An example award",
+      funder: "NCI",
+      awardNumber: "5 R01 CA000001-03",
+      start: "2021-04-01",
+      end: "2026-03-31",
+      years: [2021, 2022],
+      people: [{ cwid: "abc1234", role: "PI" }],
+      deptCodes: [],
+      areas: [],
+    },
+  ],
+  trials: [
+    {
+      key: "NCT00000001",
+      protocolNumber: "P-1",
+      nct: "NCT00000001",
+      title: "An example trial",
+      trialPhase: "Phase 2",
+      stage: "T2",
+      status: "OPEN TO ACCRUAL",
+      startYear: 2022,
+      endYear: null,
+      years: [2022],
+      people: [{ cwid: "abc1234", role: "Principal Investigator" }],
+      deptCodes: [],
+      areas: [],
+    },
+  ],
 };
 
 async function open(query: Record<string, string | string[]> = { from: "2021", to: "2022" }) {
@@ -127,6 +158,10 @@ beforeEach(() => {
   h.data.mockResolvedValue(DATA);
 });
 afterEach(cleanup);
+
+/** The link back (`r`) rides on every page link; these tests check the page's own scope. */
+const R_PARAM = /&r=[^#]*/;
+const noR = (href: string | null) => (href ?? "").replace(R_PARAM, "");
 
 describe("the gate", () => {
   it("sends a visitor with no session to the login, returning to this exact URL", async () => {
@@ -197,7 +232,7 @@ describe("the body", () => {
   it("counts each stage, and each count opens the list filtered to it", async () => {
     const c = await open();
     const tiles = within(c).getByTestId("scholar-portfolio-summary");
-    const link = (name: RegExp) => within(tiles).getByRole("link", { name }).getAttribute("href");
+    const link = (name: RegExp) => noR(within(tiles).getByRole("link", { name }).getAttribute("href"));
     expect(link(/^5 publications/)).toBe(`${BASE}?from=2021&to=2022#p-pubs`);
     expect(link(/^2 T0 publications/)).toBe(`${BASE}?from=2021&to=2022&stage=T0#p-pubs`);
     expect(link(/^1 T2 publications/)).toBe(`${BASE}?from=2021&to=2022&stage=T2#p-pubs`);
@@ -251,7 +286,7 @@ describe("the body", () => {
     expect(within(p1).getByTestId("scholar-portfolio-range").textContent).toContain(
       "1 to 25 of 30",
     );
-    expect(within(p1).getByRole("link", { name: "Next" }).getAttribute("href")).toBe(
+    expect(noR(within(p1).getByRole("link", { name: "Next" }).getAttribute("href"))).toBe(
       `${BASE}?from=2021&to=2022&page=2#p-pubs`,
     );
     cleanup();
@@ -275,7 +310,7 @@ describe("the body", () => {
       ["2022", "0", "0", "1", "1", "0", "2"],
     ]);
     const year = within(chart).getAllByTestId("year-column")[0];
-    expect(year.getAttribute("href")).toBe(`${BASE}?from=2021&to=2021`);
+    expect(noR(year.getAttribute("href"))).toBe(`${BASE}?from=2021&to=2021`);
     expect(year.getAttribute("aria-label")).toBe(
       "2021: 3 publications (T0 2, T1 0, T2 0, T3–4 0, No stage 1). Show only 2021.",
     );
@@ -308,7 +343,7 @@ describe("the body", () => {
     expect(
       within(row)
         .getByRole("link", { name: "3 papers in Example area. Show only this area." })
-        .getAttribute("href"),
+        .getAttribute("href")?.replace(R_PARAM, ""),
     ).toBe(`${BASE}?from=2021&to=2022&area=area_a#p-pubs`);
     expect(within(row).getByRole("img").getAttribute("aria-label")).toBe(
       "T0 2, T1 0, T2 1, T3–4 0, No stage 0",
@@ -321,12 +356,12 @@ describe("the body", () => {
     const year = within(within(c).getByTestId("scholar-portfolio-years")).getAllByTestId(
       "year-column",
     )[0];
-    expect(year.getAttribute("href")).toBe(`${BASE}?from=2021&to=2021&authorship=all`);
+    expect(noR(year.getAttribute("href"))).toBe(`${BASE}?from=2021&to=2021&authorship=all`);
     const row = within(c).getByTestId("scholar-portfolio-area");
     expect(
       within(row)
         .getByRole("link", { name: "3 papers in Example area. Show only this area." })
-        .getAttribute("href"),
+        .getAttribute("href")?.replace(R_PARAM, ""),
     ).toBe(`${BASE}?from=2021&to=2022&area=area_a&authorship=all#p-pubs`);
   });
 
@@ -345,7 +380,8 @@ describe("the body", () => {
     const hidden = [...form.querySelectorAll('input[type="hidden"]')].map(
       (i) => `${i.getAttribute("name")}=${i.getAttribute("value")}`,
     );
-    expect(hidden).toEqual(["unit=dept:N1", "inst=INST1"]);
+    // The report's filters ride in one `r`, apart from the page's own.
+    expect(hidden).toEqual(["r=unit=dept%3AN1&from=2021&to=2022&inst=INST1"]);
     expect(form.textContent).toContain("Include middle-author papers");
   });
 });
@@ -374,5 +410,44 @@ describe("the research area card", () => {
     expect(
       within(card).getByRole("link", { name: "Open the Example area page" }).getAttribute("href"),
     ).toBe("/topics/area_a");
+  });
+});
+
+describe("funding and clinical trials", () => {
+  it("lists this scholar's awards and trials with role, years and identifiers, stage not yet assigned", async () => {
+    const c = await open();
+    const grants = within(c).getByTestId("scholar-portfolio-grants");
+    expect(grants.querySelector("h2")!.textContent).toBe("Funding");
+    expect(grants.textContent).toContain("1 award");
+    const g = within(grants).getByTestId("scholar-portfolio-grant");
+    expect(g.textContent).toContain("PI·2021–2026");
+    expect(g.textContent).toContain("Award 5 R01 CA000001-03");
+    expect(g.textContent).toContain("Stage not yet assigned");
+
+    const trials = within(c).getByTestId("scholar-portfolio-trials");
+    const t = within(trials).getByTestId("scholar-portfolio-trial");
+    expect(t.textContent).toContain("Phase 2·Principal investigator·2022–·Open to accrual");
+    expect(within(t).getByRole("link", { name: "NCT00000001" }).getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT00000001");
+    // The scholar rows' counts on the report land here.
+    expect(grants.id).toBe("funding");
+    expect(trials.id).toBe("trials");
+  });
+
+  it("says when there are none", async () => {
+    h.data.mockResolvedValue({ ...DATA, grants: [], trials: [] });
+    const c = await open();
+    expect(within(c).getByTestId("scholar-portfolio-grants").textContent).toContain("No awards in these years.");
+    expect(within(c).getByTestId("scholar-portfolio-trials").textContent).toContain("No clinical trials in these years.");
+  });
+});
+
+describe("trial stages on the scholar page", () => {
+  it("tags a trial with the stage from its trial phase, and an unphased one with No stage", async () => {
+    const t = within(await open()).getByTestId("scholar-portfolio-trial");
+    expect(t.textContent).toContain("T2");
+    expect(t.textContent).not.toContain("Stage not yet assigned");
+    cleanup();
+    h.data.mockResolvedValue({ ...DATA, trials: [{ ...DATA.trials[0], stage: null, trialPhase: "Not applicable" }] });
+    expect(within(await open()).getByTestId("scholar-portfolio-trial").textContent).toContain("No stage");
   });
 });

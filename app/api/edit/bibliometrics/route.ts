@@ -8,7 +8,9 @@
  *
  * `part=reach` answers `{ reach }` instead: the tab's "Downstream reach"
  * block, or null unless `DOWNSTREAM_REACH_REPORT` is on and the viewer can
- * open report 27 for this scholar (`loadScholarReach`). It is its own request
+ * open report 27 for this scholar (`loadScholarReach`), with its Connections
+ * line when that view opens for this scholar (`loadScholarConnections`, run
+ * beside it, so the block does not wait twice). It is its own request
  * because it depends on the scholar alone: the tab does not wait for it, and a
  * filter change does not run it again. It is scoped to the viewer, so it is
  * not part of the report model or the Word document.
@@ -28,7 +30,7 @@ import { loadBibliometricsReport } from "@/lib/edit/bibliometrics-loader";
 import { patentReportHref } from "@/lib/edit/bibliometrics-patents";
 import { isTranslationalPortfolioReportEnabled } from "@/lib/edit/translational-portfolio-report";
 import { scholarPortfolioPath } from "@/lib/edit/translational-portfolio-scholar";
-import { loadScholarReach } from "@/lib/edit/downstream-reach-entry";
+import { loadScholarConnections, loadScholarReach } from "@/lib/edit/downstream-reach-entry";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { editError, editOk, logEditFailure, resolveEditIdentity } from "@/lib/edit/request";
@@ -62,12 +64,17 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   if (params.get("part") === "reach") {
-    // A door into another report: its failure leaves the tab without the block.
-    const reach = await loadScholarReach(targetCwid, session).catch((err: unknown) => {
+    // A door into another report: its failure leaves the tab without the block,
+    // and the Connections line's failure leaves the block without that line.
+    const failed = (err: unknown) => {
       logEditFailure(PATH, err);
       return null;
-    });
-    return editOk({ reach });
+    };
+    const [reach, connections] = await Promise.all([
+      loadScholarReach(targetCwid, session).catch(failed),
+      loadScholarConnections(targetCwid, session).catch(failed),
+    ]);
+    return editOk({ reach: reach && connections ? { ...reach, connections } : reach });
   }
 
   try {

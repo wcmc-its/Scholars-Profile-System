@@ -6,7 +6,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn(), reach: vi.fn() }));
+const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn(), reach: vi.fn(), connections: vi.fn() }));
 vi.mock("@/lib/edit/request", async () => {
   const { NextResponse } = await import("next/server");
   return {
@@ -21,7 +21,7 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
 vi.mock("@/lib/edit/bibliometrics-loader", () => ({ loadBibliometricsReport: h.load }));
 vi.mock("@/lib/edit/bibliometrics-docx", () => ({ buildBibliometricsDocx: h.docx }));
 vi.mock("@/lib/edit/bibliometrics-patents", () => ({ patentReportHref: h.patentHref }));
-vi.mock("@/lib/edit/downstream-reach-entry", () => ({ loadScholarReach: h.reach }));
+vi.mock("@/lib/edit/downstream-reach-entry", () => ({ loadScholarReach: h.reach, loadScholarConnections: h.connections }));
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
 import { GET } from "@/app/api/edit/bibliometrics/route";
@@ -367,6 +367,7 @@ describe("GET /api/edit/bibliometrics", () => {
     h.patentHref.mockResolvedValue("/edit/reports/patent-citations?person=zzz9002");
     h.docx.mockResolvedValue(Buffer.from("docx"));
     h.reach.mockResolvedValue(null);
+    h.connections.mockResolvedValue(null);
   });
 
   it("404s before any session or database work unless the flag is exactly on", async () => {

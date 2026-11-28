@@ -47,6 +47,13 @@ import { TOPIC_ACTIVITY_SCORE_FLOOR } from "@/lib/api/topic-activity";
 import { NO_STAGE_LABEL } from "@/lib/edit/article-count-report";
 import { COUNTING_RULE, defaultYears } from "@/lib/edit/translational-portfolio-report";
 import {
+  ACTIVITY_AREA_RULE,
+  GRANT_RULE,
+  TRIAL_RULE,
+  type PortfolioGrant,
+  type PortfolioTrial,
+} from "@/lib/edit/translational-portfolio-activities";
+import {
   AUTHORSHIP_RULE_ALL,
   AUTHORSHIP_RULE_DEFAULT,
   filterByStage,
@@ -54,6 +61,7 @@ import {
   MIN_SCHOLAR_AREA_PAPERS,
   papersByYear,
   parseScholarPortfolioParams,
+  rolesOf,
   SCHOLAR_PAGE_SIZE,
   scholarPortfolioPath,
   scholarPortfolioQueryString,
@@ -72,6 +80,7 @@ import { profilePath } from "@/lib/profile-url";
 import {
   countsTotal,
   STAGE_BUCKETS,
+  TRIAL_STAGE_RULE,
   TRANSLATIONAL_STAGE_LABELS,
   type StageBucket,
   type StageCounts,
@@ -108,7 +117,8 @@ export function toSearchParams(sp: Record<string, string | string[] | undefined>
 export const scholarPortfolioXlsxHref = (cwid: string, p: ScholarPortfolioParams) =>
   `/api/edit/reports/translational-portfolio-scholar?${new URLSearchParams([
     ["cwid", cwid],
-    ...new URLSearchParams(scholarPortfolioQueryString({ ...p, page: 1 })),
+    // The link back (`r`) is no part of the download.
+    ...[...new URLSearchParams(scholarPortfolioQueryString({ ...p, page: 1 }))].filter(([k]) => k !== "r"),
   ])}`;
 
 /** The page's header: back link, headshot, the name as the h1, title ·
@@ -246,13 +256,8 @@ export async function ScholarPortfolioBody({
       testId="scholar-portfolio-rail"
     >
       <AutoSubmitForm action={base} className="group" data-testid="scholar-portfolio-filters">
-        {/* The report's filters, for the link back; and the list's stage. */}
-        {p.units.map((u) => (
-          <input key={u} type="hidden" name="unit" value={u} />
-        ))}
-        {p.insts.map((i) => (
-          <input key={i} type="hidden" name="inst" value={i} />
-        ))}
+        {/* The report's state, for the link back; and the list's stage. */}
+        <input type="hidden" name="r" value={p.back} />
         {p.stage && <input type="hidden" name="stage" value={p.stage} />}
         <RailSection
           label="Publication year"
@@ -346,6 +351,8 @@ export async function ScholarPortfolioBody({
           ["#p-summary", "Summary"],
           ["#p-time", "Publications by year"],
           ["#p-areas", "By research area"],
+          ["#funding", "Funding"],
+          ["#trials", "Clinical trials"],
           ["#p-pubs", "Publications and stages"],
           ["#p-howto", "How to read this"],
         ].map(([to, label]) => (
@@ -621,6 +628,35 @@ export async function ScholarPortfolioBody({
             )}
           </section>
 
+          <ActivitySection
+            id="funding"
+            title="Funding"
+            note={`Awards active ${yearsLabel} where they are PI, Co-PI or subaward PI, from WCM sponsored research and NIH RePORTER records. Each award counts once, renewal years included.${p.areas.length > 0 ? " Under an area filter, only grants with a research area are listed." : ""}`}
+            count={data.grants.length}
+            noun={["award", "awards"]}
+            empty="No awards in these years."
+            testId="scholar-portfolio-grants"
+          >
+            {data.grants.map((g) => (
+              <GrantRow key={g.key} g={g} roles={rolesOf(g, scholar.cwid)} />
+            ))}
+          </ActivitySection>
+
+          <ActivitySection
+            id="trials"
+            title="Clinical trials"
+            note={`Trials active ${yearsLabel} with them as principal investigator, staged by trial phase.${p.areas.length > 0 ? " Under an area filter, only trials with a research area are listed." : ""}`}
+            count={data.trials.length}
+            noun={["trial", "trials"]}
+            empty="No clinical trials in these years."
+            testId="scholar-portfolio-trials"
+          >
+            {data.trials.map((x) => (
+              <TrialRow key={x.key} t={x} />
+            ))}
+            {/* ponytail: the stage counts stay in the rows; a per-stage summary if a scholar's trial list grows long. */}
+          </ActivitySection>
+
           {/* Publications and stages. */}
           <ReportCard className="flex scroll-mt-24 flex-col gap-1 px-6 py-5 sm:px-6 sm:py-5">
             <div
@@ -741,6 +777,9 @@ export async function ScholarPortfolioBody({
             <p className="text-muted-foreground text-xs">
               {p.middle ? AUTHORSHIP_RULE_ALL : AUTHORSHIP_RULE_DEFAULT} {COUNTING_RULE}
             </p>
+            <p className="text-muted-foreground text-xs">
+              {GRANT_RULE} {TRIAL_RULE} {TRIAL_STAGE_RULE} {ACTIVITY_AREA_RULE} Grants have no translational stage yet.
+            </p>
             <a
               href={methodologyHref("translationalStage")}
               className={cn(LINK, "self-start text-[13px] font-medium print:hidden")}
@@ -833,6 +872,131 @@ function PaperRow({ w }: { w: ScholarPaper }) {
             className="text-apollo-ink-2 inline-flex rounded-full border bg-white px-2 py-px text-xs leading-normal"
             style={{ borderColor: NO_STAGE_EDGE }}
           >
+            {NO_STAGE_LABEL}
+          </span>
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** Funding or Clinical trials: a heading with the list's own count, then the list. */
+function ActivitySection({
+  id,
+  title,
+  note,
+  count,
+  noun,
+  empty,
+  testId,
+  children,
+}: {
+  id: string;
+  title: string;
+  note: string;
+  count: number;
+  noun: [string, string];
+  empty: string;
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      id={id}
+      aria-labelledby={`${id}-h`}
+      className="bg-apollo-surface border-apollo-border flex min-w-0 scroll-mt-24 flex-col gap-1 rounded-xl border px-6 py-5"
+      data-testid={testId}
+    >
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex flex-col gap-1">
+          <h2 id={`${id}-h`} className={H2}>
+            {title}
+          </h2>
+          <span className="text-muted-foreground text-[13px]">{note}</span>
+        </div>
+        <span className="text-muted-foreground text-[13px] tabular-nums">
+          {count.toLocaleString()} {count === 1 ? noun[0] : noun[1]}
+        </span>
+      </div>
+      {count === 0 ? (
+        <p className="text-muted-foreground border-apollo-border border-t py-3 text-sm">{empty}</p>
+      ) : (
+        <ul className="m-0 list-none p-0">{children}</ul>
+      )}
+    </section>
+  );
+}
+
+const NOT_YET_STAGED = (
+  <span>
+    <span className="text-apollo-ink-2 inline-flex rounded-full border border-dashed bg-white px-2 py-px text-xs leading-normal" style={{ borderColor: NO_STAGE_EDGE }}>
+      Stage not yet assigned
+    </span>
+  </span>
+);
+
+function GrantRow({ g, roles }: { g: PortfolioGrant; roles: string[] }) {
+  return (
+    <li className="border-apollo-border flex flex-col gap-1.5 border-t py-3.5 print:break-inside-avoid" data-testid="scholar-portfolio-grant">
+      <span className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-xs">
+        <span>{roles.join(", ")}</span>
+        <span aria-hidden>·</span>
+        <span className="tabular-nums">
+          {g.start.slice(0, 4)}–{g.end.slice(0, 4)}
+        </span>
+      </span>
+      <span className="text-sm leading-[1.45]">{g.title}</span>
+      <span className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-xs">
+        <span>{g.funder}</span>
+        {g.awardNumber && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="tabular-nums">Award {g.awardNumber}</span>
+          </>
+        )}
+      </span>
+      {NOT_YET_STAGED}
+    </li>
+  );
+}
+
+function TrialRow({ t }: { t: PortfolioTrial }) {
+  return (
+    <li className="border-apollo-border flex flex-col gap-1.5 border-t py-3.5 print:break-inside-avoid" data-testid="scholar-portfolio-trial">
+      <span className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-xs">
+        {t.trialPhase && (
+          <>
+            <span>{t.trialPhase}</span>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        <span>Principal investigator</span>
+        <span aria-hidden>·</span>
+        <span className="tabular-nums">
+          {t.startYear}–{t.endYear ?? ""}
+        </span>
+        {t.status && (
+          <>
+            <span aria-hidden>·</span>
+            <span>{t.status.charAt(0) + t.status.slice(1).toLowerCase()}</span>
+          </>
+        )}
+      </span>
+      <span className="text-sm leading-[1.45]">{t.title}</span>
+      <span className="text-muted-foreground text-xs">
+        {t.nct ? (
+          <a href={`https://clinicaltrials.gov/study/${t.nct}`} target="_blank" rel="noopener noreferrer" className={LINK}>
+            {t.nct}
+          </a>
+        ) : (
+          <>Protocol {t.protocolNumber}</>
+        )}
+      </span>
+      <span>
+        {t.stage ? (
+          <StageTag stage={t.stage} />
+        ) : (
+          <span className="text-apollo-ink-2 inline-flex rounded-full border bg-white px-2 py-px text-xs leading-normal" style={{ borderColor: NO_STAGE_EDGE }}>
             {NO_STAGE_LABEL}
           </span>
         )}

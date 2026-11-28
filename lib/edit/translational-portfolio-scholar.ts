@@ -20,6 +20,11 @@
  * comes from `is_first` / `is_last`, never from `position` (0 there means
  * "rank unknown").
  *
+ * Grants and clinical trials: the report's rules
+ * (`lib/edit/translational-portfolio-activities.ts`) for this scholar, under
+ * the page's years and research areas, listed. Trials carry their trial phase's
+ * stage; grants have none yet.
+ *
  * Counts only: one person's few dozen papers make a percentage swing on one
  * misassigned stage, and the page compares this scholar with nobody.
  *
@@ -42,13 +47,23 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
+import {
+  ACTIVITY_AREA_RULE,
+  GRANT_RULE,
+  loadPortfolioGrants,
+  loadPortfolioTrials,
+  TRIAL_RULE,
+  type PortfolioGrant,
+  type PortfolioTrial,
+} from "@/lib/edit/translational-portfolio-activities";
 import { resolveEditIdentity } from "@/lib/edit/request";
 import {
   COUNTING_RULE,
   isTranslationalPortfolioReportEnabled,
   parsePortfolioParams,
   PORTFOLIO_PAGE_SIZE,
-  portfolioUnitInsts,
+  portfolioQueryString,
+  type PortfolioParams,
 } from "@/lib/edit/translational-portfolio-report";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -58,6 +73,7 @@ import {
   emptyCounts,
   isTranslationalStage,
   STAGE_RULE,
+  TRIAL_STAGE_RULE,
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
   type StageCounts,
@@ -74,91 +90,98 @@ export const AUTHORSHIP_RULE_DEFAULT = "First- or senior-author publications onl
 export const AUTHORSHIP_RULE_ALL = "Every confirmed authorship: first, senior and middle author.";
 
 const CWID_RE = /^[A-Za-z0-9]{2,32}$/;
-const INST_RE = /^[A-Za-z0-9 _-]{1,32}$/;
-
 export type ListStage = TranslationalStage | "none";
 
-/** The report filters the page carries: its own scope (years, areas) and the
- *  rest only for the link back (units, institutions). */
-export type CarriedFilters = {
-  units: string[];
-  insts: string[];
-  from: number;
-  to: number;
-  areas: string[];
-};
+/** The page's own scope: years and research areas. A report link seeds them
+ *  from the report's; after that they are the page's alone. */
+export type ScholarScope = { from: number; to: number; areas: string[] };
 
-export type ScholarPortfolioParams = CarriedFilters & {
+export type ScholarPortfolioParams = ScholarScope & {
   /** `authorship=all`: middle-author papers too. */
   middle: boolean;
   /** The paper list's stage filter; null = every paper. */
   stage: ListStage | null;
   page: number;
+  /** The report's own query string (`r`), canonical, for the link back. Kept
+   *  apart from the page's scope so a filter picked here never leaks into the
+   *  report, or on to the next scholar opened from it. */
+  back: string;
 };
 
-/** Primary institution codes, kept for the link back: the repeated `inst`
- *  and report 8's `unit=inst:CODE` form (which `parsePortfolioParams` leaves
- *  out of `units`), so either spelling of a report URL carries it. */
-function parseInsts(sp: URLSearchParams): string[] {
-  return [...new Set([...sp.getAll("inst"), ...portfolioUnitInsts(sp)].map((c) => c.trim()))]
-    .filter((c) => INST_RE.test(c))
-    .slice(0, 50);
-}
+/** The report filters a link from before `r` carried beside the page's own. */
+const REPORT_KEYS = ["unit", "inst", "from", "to", "area"] as const;
+const pick = (sp: URLSearchParams, keys: readonly string[]) =>
+  new URLSearchParams([...sp].filter(([k]) => keys.includes(k)));
 
-/** The report filters a report URL carries to a scholar's page. Same parser
- *  as the report (`parsePortfolioParams`), so the two read a link alike. */
-export function carriedFilters(sp: URLSearchParams): CarriedFilters {
-  const p = parsePortfolioParams(sp);
-  return { units: p.units, insts: parseInsts(sp), from: p.from, to: p.to, areas: p.areas };
+/** The report's state as a canonical query string: parsed and re-serialized,
+ *  so `r` can only ever hold report filters. Never one scholar. */
+function reportBack(rp: PortfolioParams): string {
+  return portfolioQueryString({ ...rp, cwid: null });
 }
 
 export function parseScholarPortfolioParams(sp: URLSearchParams): ScholarPortfolioParams {
   const st = sp.get("stage");
   const page = Number.parseInt(sp.get("page") ?? "", 10);
+  // The page's scope reads `from` / `to` / `area` with the report's parser.
+  const own = parsePortfolioParams(sp);
+  const r = sp.get("r");
   return {
-    ...carriedFilters(sp),
+    from: own.from,
+    to: own.to,
+    areas: own.areas,
     middle: sp.get("authorship") === "all",
     stage: st === "none" ? "none" : isTranslationalStage(st) ? st : null,
     page: Number.isFinite(page) ? Math.min(10_000, Math.max(1, page)) : 1,
+    // No `r` (a link from before it): the report under the report filters this
+    // URL carries, never the page's own list filters (`stage`, `page`).
+    back: reportBack(parsePortfolioParams(r !== null ? new URLSearchParams(r) : pick(sp, REPORT_KEYS))),
   };
 }
 
-function carriedQuery(f: CarriedFilters): URLSearchParams {
-  const q = new URLSearchParams();
-  for (const u of f.units) q.append("unit", u);
-  q.set("from", String(f.from));
-  q.set("to", String(f.to));
-  for (const a of f.areas) q.append("area", a);
-  for (const i of f.insts) q.append("inst", i);
-  return q;
+/** The report's params the link back opens (its unit names the link). */
+export function backParams(p: ScholarPortfolioParams): PortfolioParams {
+  return parsePortfolioParams(new URLSearchParams(p.back));
 }
 
 export function scholarPortfolioQueryString(p: ScholarPortfolioParams): string {
-  const q = carriedQuery(p);
+  const q = new URLSearchParams();
+  q.set("from", String(p.from));
+  q.set("to", String(p.to));
+  for (const a of p.areas) q.append("area", a);
   if (p.middle) q.set("authorship", "all");
   if (p.stage) q.set("stage", p.stage);
   if (p.page > 1) q.set("page", String(p.page));
+  q.set("r", p.back);
   return q.toString();
 }
 
 export const scholarPortfolioPath = (cwid: string) =>
   `/edit/scholar/${encodeURIComponent(cwid)}/translational-portfolio`;
 
-/** A scholar's page under the report's current filters. */
-export function scholarPortfolioHref(cwid: string, f: CarriedFilters): string {
-  return `${scholarPortfolioPath(cwid)}?${carriedQuery(f)}`;
+/** A scholar's page opened from the report: its scope seeded from the
+ *  report's years and areas, and the report's whole state kept for the way back. */
+export function scholarPortfolioHref(cwid: string, report: PortfolioParams): string {
+  return `${scholarPortfolioPath(cwid)}?${scholarPortfolioQueryString({
+    from: report.from,
+    to: report.to,
+    areas: report.areas,
+    middle: false,
+    stage: null,
+    page: 1,
+    back: reportBack(report),
+  })}`;
 }
 
-/** The report under the filters the page carries. */
-export function reportHrefFor(reportBase: string, f: CarriedFilters): string {
-  return `${reportBase}?${carriedQuery(f)}`;
+/** The report as it was when this scholar's page was opened. */
+export function reportHrefFor(reportBase: string, p: ScholarPortfolioParams): string {
+  return `${reportBase}?${p.back}`;
 }
 
 /** Report 26 with `?cwid=` (an old link, or the Bibliometrics tab's before
  *  this page): the scholar's page under the same filters, else null. */
 export function portfolioCwidRedirect(sp: URLSearchParams): string | null {
-  const cwid = parsePortfolioParams(sp).cwid;
-  return cwid ? scholarPortfolioHref(cwid, carriedFilters(sp)) : null;
+  const p = parsePortfolioParams(sp);
+  return p.cwid ? scholarPortfolioHref(p.cwid, p) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +295,15 @@ export type ScholarPortfolio = {
    *  all in scope, while another area's count would be an overlap no link
    *  can open). */
   areas: ScholarArea[];
+  /** This scholar's grant projects and trials in the page's years and areas, newest first. */
+  grants: PortfolioGrant[];
+  trials: PortfolioTrial[];
 };
+
+/** This scholar's roles on a grant or trial, strongest first, each once. */
+export function rolesOf(item: { people: { cwid: string; role: string }[] }, cwid: string): string[] {
+  return [...new Set(item.people.filter((x) => x.cwid === cwid).map((x) => x.role))];
+}
 
 /** Report 8's params for this scholar: no unit (a scholar's papers are
  *  theirs, whatever unit the report was on), and the authorship rule. */
@@ -319,7 +350,9 @@ export async function loadScholarPortfolio(
   cwid: string,
   p: ScholarPortfolioParams,
 ): Promise<ScholarPortfolio> {
-  const raw = await db.read.$queryRaw<
+  const activityScope = { from: p.from, to: p.to, units: [], insts: [], areas: p.areas, cwid };
+  const [raw, grants, trials] = await Promise.all([
+    db.read.$queryRaw<
     {
       pmid: string;
       title: string;
@@ -329,7 +362,10 @@ export async function loadScholarPortfolio(
       l: unknown;
       st: string | null;
     }[]
-  >(scholarPapersSql(cwid, p));
+  >(scholarPapersSql(cwid, p)),
+    loadPortfolioGrants(activityScope),
+    loadPortfolioTrials(activityScope),
+  ]);
   const pmids = raw.map((r) => r.pmid);
   // publication_topic has a row per (pmid, author, area): the report's rule is
   // any row of the paper at or over the floor, so dedupe to (pmid, area).
@@ -389,6 +425,8 @@ export async function loadScholarPortfolio(
         counts: stageCountsOf(list),
       }))
       .sort(byCount),
+    grants,
+    trials,
   };
 }
 
@@ -468,6 +506,10 @@ export function describeScholarPortfolioCriteria(
     ],
     ["Counting rule", COUNTING_RULE],
     ["Stage rule", STAGE_RULE],
+    ["Grant rule", GRANT_RULE],
+    ["Trial rule", TRIAL_RULE],
+    ["Trial stage rule", TRIAL_STAGE_RULE],
+    ...(p.areas.length > 0 ? ([["Grants and trials under an area", ACTIVITY_AREA_RULE]] as [string, string][]) : []),
   ];
 }
 
@@ -492,6 +534,18 @@ export async function buildScholarPortfolioWorkbook(
     ]);
   ws.getColumn(2).width = 80;
   ws.getColumn(3).width = 36;
+  const gs = wb.addWorksheet("Grants");
+  gs.addRow(["Title", "Funder", "Award number", "Role", "Start", "End", "Translational stage"]);
+  boldRow(gs, 1);
+  for (const g of data.grants)
+    gs.addRow([g.title, g.funder, g.awardNumber ?? "", rolesOf(g, scholar.cwid).join(", "), g.start, g.end, "Not yet assigned"]);
+  gs.getColumn(1).width = 80;
+  const ts = wb.addWorksheet("Clinical trials");
+  ts.addRow(["Title", "NCT number", "Protocol number", "Trial phase", "Status", "Start year", "End year", "Translational stage"]);
+  boldRow(ts, 1);
+  for (const x of data.trials)
+    ts.addRow([x.title, x.nct ?? "", x.protocolNumber, x.trialPhase ?? "", x.status ?? "", x.startYear, x.endYear ?? "", x.stage ? translationalStageDisplay(x.stage) : NO_STAGE_LABEL]);
+  ts.getColumn(1).width = 80;
   const areaLabel = new Map(data.areaChoices.map((a) => [a.id, a.label]));
   addCriteriaSheet(wb, describeScholarPortfolioCriteria(p, scholar, areaLabel, generatedAt));
   return workbookBuffer(wb);

@@ -9,20 +9,31 @@
  * narrow within them. `DOWNSTREAM_REACH_REPORT` off → 404, before the session
  * or any query is read · no session → 401 · no unit to see → 403. `no-store`.
  *
- * The People sheet lists every matching person. This is a NAMED EXCEPTION to
- * the 50-scholar export cap (`SCHOLAR_EXPORT_CAP`, `lib/api/export-scholars.ts`),
- * on this route only; the shared cap stays as it is for every other export.
- * It is report 24's exception (the report owner, 2026-11-24: "I'm fine with
- * breaking our per person rule. The report is kind of pointless otherwise."),
- * extended to this report's People view by the same owner on 2026-11-26
- * (downstream reach plan, decision 3). The sheet carries name, CWID, org unit,
- * person type, primary institution and counts, and no contact details.
+ * The People sheet lists every matching person, and the Connections sheet
+ * (below) every colleague. This is a NAMED EXCEPTION to the 50-scholar export
+ * cap (`SCHOLAR_EXPORT_CAP`, `lib/api/export-scholars.ts`), covering the
+ * People and Connections sheets of this route only; the shared cap stays as
+ * it is for every other export. It is report 24's exception (the report
+ * owner, 2026-11-24: "I'm fine with breaking our per person rule. The report
+ * is kind of pointless otherwise."), extended to this report's People view by
+ * the same owner on 2026-11-26 (downstream reach plan, decision 3) and to its
+ * Connections sheet on 2026-11-28 (decision 9). Both sheets carry name, CWID,
+ * org unit, person type, primary institution and counts, and no contact
+ * details.
+ *
+ * Taken from the Connections view with one scholar (`view=connections`), the
+ * workbook adds a Connections sheet (`connectionsSheet`): both lists, every
+ * row, one row per pair of scholars, with no contact details; the Criteria
+ * sheet records the scholar and the rule. From any other view, or without one
+ * scholar the view opens for, there is no such sheet and no Connections query
+ * runs.
  */
 import { NextResponse } from "next/server";
 
 import { loadDataQualityFacets } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
+import { connectionsSheet, loadReachConnections } from "@/lib/edit/downstream-reach-connections";
 import {
   buildReachWorkbook,
   isDownstreamReachReportEnabled,
@@ -54,11 +65,12 @@ export async function GET(request: Request) {
     limit: REACH_LIST_CAP,
     docLimit: REACH_DOCS_CAP,
   });
-  const [pubs, docs, labels, areas] = await Promise.all([
+  const [pubs, docs, labels, areas, connections] = await Promise.all([
     withReachPublicationDetails(params, data.pubs),
     withReachDocDetails(data.docs),
     params.units.length > 0 || params.scope !== null ? loadDataQualityFacets(db.read).then(unitLabels) : undefined,
     params.area ? loadReachAreas() : [],
+    params.view === "connections" ? loadReachConnections(params) : null,
   ]);
   const buffer = await buildReachWorkbook(
     params,
@@ -73,6 +85,7 @@ export async function GET(request: Request) {
     generatedAt,
     labels,
     new Map(areas.map((a) => [a.id, a.label])),
+    connections?.status === "ok" ? connectionsSheet(connections) : undefined,
   );
   const filename = `Downstream reach ${generatedAt.toISOString().slice(0, 10)}.xlsx`;
 

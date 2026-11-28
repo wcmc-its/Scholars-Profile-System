@@ -17,6 +17,7 @@
  *
  * Server-only (`@/lib/db`, through the report's loader).
  */
+import { connectionLinks, loadReachConnections } from "@/lib/edit/downstream-reach-connections";
 import {
   canViewDownstreamReachReport,
   loadReach,
@@ -71,6 +72,17 @@ export type ScholarReach = {
   lines: ScholarReachLine[];
   /** What the block counts, in the words the tab shows. */
   note: string;
+  /** "Colleagues citing this work who have never co-authored with this
+   *  scholar" (`loadScholarConnections`);
+   *  absent when the viewer gets no such line. */
+  connections?: ScholarConnections;
+};
+
+export type ScholarConnections = {
+  /** Rows of the Connections view's "Cite S's work" list. */
+  colleagues: number;
+  /** Report 27's Connections view for this scholar, which lists them. */
+  href: string;
 };
 
 /** The block's scope, stated: it is what every link in it carries. */
@@ -108,6 +120,37 @@ export async function loadScholarReach(cwid: string, session: SessionLike): Prom
     href: reachHref(links.type(t)),
   }));
   return { lines, note: SCHOLAR_REACH_NOTE };
+}
+
+/** The Connections line's scope: the block's own (one scholar, every stage,
+ *  all years), on the Connections view. */
+export function scholarConnectionsParams(cwid: string): ReachParams | null {
+  return expressible({ ...base(), people: [cwid], stages: [], from: null, to: null, view: "connections" });
+}
+
+/**
+ * The block's line "Colleagues citing this work who have never co-authored
+ * with this scholar: N" (every stage, all years), where N is the row count of the Connections view's "Cite S's work" list under the
+ * params its link carries, loaded by that view's own loader. null when the
+ * flag is off, the viewer cannot open report 27, or the view would not open
+ * for this scholar for this viewer (inactive, or outside their units).
+ *
+ * Kept apart from `loadScholarReach` so the block's other lines do not wait
+ * on it: the route runs the two side by side. The cost is the view's own: a
+ * few indexed lookups from the scholar's first- and senior-author papers
+ * (`downstream-reach-connections.ts`).
+ */
+export async function loadScholarConnections(
+  cwid: string,
+  session: SessionLike,
+): Promise<ScholarConnections | null> {
+  if (!(await canViewDownstreamReachReport(session))) return null;
+  const want = scholarConnectionsParams(cwid);
+  if (!want) return null;
+  const params = await resolveReachParams(want, session);
+  const c = await loadReachConnections(params, ["cited"]);
+  if (c.status !== "ok") return null;
+  return { colleagues: c.cited.length, href: reachHref(connectionLinks(params).lists()) };
 }
 
 // ---------------------------------------------------------------------------
