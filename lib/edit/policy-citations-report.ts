@@ -596,7 +596,7 @@ export type PubDetails = {
   doi: string | null;
   /** The confirmed, active WCM authors the viewer may see (everyone for a
    *  superuser, their units' people for a unit administrator), in byline order. */
-  authors: { cwid: string; name: string; position: Position }[];
+  authors: { cwid: string; name: string; position: Position; roleCategory?: string | null }[];
 };
 
 export type PubRow = PubCounts &
@@ -620,11 +620,12 @@ export async function loadPublicationDetails(
       doi: string | null;
       cwid: string;
       preferred_name: string;
+      role_category: string | null;
       is_first: number | boolean;
       is_last: number | boolean;
     }[]
   >`
-      SELECT p.pmid, p.title, p.journal, p.doi, s.cwid, s.preferred_name, pa.is_first, pa.is_last
+      SELECT p.pmid, p.title, p.journal, p.doi, s.cwid, s.preferred_name, s.role_category, pa.is_first, pa.is_last
         FROM publication p
         JOIN publication_author pa ON pa.pmid = p.pmid
         JOIN scholar s ON s.cwid = pa.cwid
@@ -641,6 +642,7 @@ export async function loadPublicationDetails(
       cwid: r.cwid,
       name: r.preferred_name,
       position: r.is_first ? "first" : r.is_last ? "last" : "middle",
+      roleCategory: r.role_category,
     });
   }
   return out;

@@ -3766,6 +3766,13 @@ model AreaSignalText {
   taxonomyVersion String?   @map("taxonomy_version") @db.VarChar(64)
   scoredAt        DateTime? @map("scored_at")
   refreshedAt     DateTime  @default(now()) @map("refreshed_at")
+  /// ReCiterAI translational stage of a grant text read from its abstract ("T0" |
+  /// "T1" | "T2" | "T3-4" | "NA") and the confidence in it ("high" | "medium" |
+  /// "low"), from the same AREASIGNAL# record. Title-only texts get none. Stored
+  /// raw, as on `Publication`; `displayStage` in lib/translational-stage.ts
+  /// decides what is shown.
+  translationalStage           String? @map("translational_stage") @db.VarChar(8)
+  translationalStageConfidence String? @map("translational_stage_confidence") @db.VarChar(8)
 
   topics AreaSignalTopic[]
 

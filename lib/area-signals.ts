@@ -43,6 +43,17 @@ const TRAINING_TITLE = /fellowship|training (grant|program)|development program|
 const CONFERENCE_MECHANISM = /^(R13|U13)/;
 const CONFERENCE_TITLE = /annual meeting|conference|summit|symposium|workshop|congress|\bPSDP\b|\(scholar:/i;
 
+/**
+ * Report 26's funding-award rule (lib/edit/translational-portfolio-activities.ts
+ * imports it from here): program type Grant, Career or Contract with funding,
+ * and not an agreement intake. Here so the pure input predicate below can use
+ * it; that module is server-only.
+ */
+export const GRANT_PROGRAM_TYPES: readonly string[] = ["Grant", "Career", "Contract with funding"];
+/** InfoEd intake types that are agreements, not funding. Substrings, so a new
+ *  variant of one ("Outgoing Material Transfer Agreement") is dropped too. */
+export const NON_FUNDING_INTAKE = /material transfer|data use|confidential|consulting|service agreement/i;
+
 /** A grant abstract at least this long is synopsized; shorter text is scored title-first. */
 export const AREA_GRANT_FULL_TEXT_MIN_CHARS = 200;
 
@@ -78,6 +89,34 @@ export function isEligibleAreaGrant(g: AreaGrantCandidate): boolean {
     return false;
   }
   return true;
+}
+
+export type AreaGrantInputCandidate = AreaGrantCandidate & {
+  endDate: Date;
+  intakeType: string | null;
+};
+
+/**
+ * Whether etl/area-signal-inputs sends this grant's text to ReciterAI. Wider
+ * than `isEligibleAreaGrant` on purpose (grant translational stage plan,
+ * 2026-11-28): every leadership-role funding award active in 2020 or later,
+ * InfoEd or RePORTER, so report 26 can give each grant it counts a stage and
+ * research areas. It is a SUPERSET of `isEligibleAreaGrant`, so no row that is
+ * keyed today loses its key.
+ *
+ * Sending is not counting. The topic ranking and the topic-page grant feed
+ * (lib/api/area-signal-points.ts, lib/api/topic-activity.ts) keep re-applying
+ * `isEligibleAreaGrant` with its own source and start-date filters at read
+ * time, so a text scored only through the wider rule never moves a card or
+ * enters a feed. Only readers that take `area_text_key` as given (report 26)
+ * see the new texts.
+ */
+export function isAreaInputGrant(g: AreaGrantInputCandidate): boolean {
+  if (isEligibleAreaGrant(g)) return true;
+  if (!AREA_GRANT_ROLES.includes(g.role)) return false;
+  if (g.endDate.getTime() < Date.parse(`${AREA_SIGNAL_START_DATE}T00:00:00Z`)) return false;
+  if (!GRANT_PROGRAM_TYPES.includes(g.programType ?? "")) return false;
+  return !NON_FUNDING_INTAKE.test(g.intakeType ?? "");
 }
 
 export type AreaTrialCandidate = {

@@ -59,13 +59,12 @@ import {
   toSearchParams,
   type PersonFooter,
 } from "@/components/edit/reports/citation-report-parts";
-import { ModalCount, PaperTitle } from "@/components/edit/reports/downstream-reach-client";
+import { AtLeastOneChecklist, ModalCount, PaperTitle } from "@/components/edit/reports/downstream-reach-client";
 import {
   ConnectionsPanel,
   connectionsPageCwids,
   loadConnectionsPage,
 } from "@/components/edit/reports/downstream-reach-connections";
-import { RailChecklist } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout, ReportStats } from "@/components/edit/reports/report-ui";
 import { PubTitle } from "@/components/publication/pub-html";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
@@ -89,6 +88,7 @@ import {
   modalListsExactly,
   parseReachParams,
   REACH_COUNTING_RULE,
+  REACH_DEFINITION,
   REACH_DOC_SORT_LABEL,
   REACH_DOCS_NARROW_HINT,
   REACH_DOCS_PAPER_CEILING,
@@ -101,6 +101,7 @@ import {
   REACH_TYPE_LABEL,
   REACH_TYPES,
   reachChips,
+  reachTotal,
   reachLinks,
   reachQueryString,
   resolveReachParams,
@@ -112,6 +113,7 @@ import {
   withReachPublicationDetails,
   type ModalCounts,
   type ReachDocRow,
+  type ReachNotable,
   type ReachDocSort,
   type ReachParams,
   type ReachPersonRow,
@@ -120,9 +122,9 @@ import {
   type ReachType,
 } from "@/lib/edit/downstream-reach-report";
 import { unitLabels } from "@/lib/edit/person-filter";
-import { fiscalLabel, loadPersonNames, UNKNOWN_PERSON, yearSpan } from "@/lib/edit/policy-citations-report";
+import { loadPersonNames, UNKNOWN_PERSON } from "@/lib/edit/policy-citations-report";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 
 const RAIL_LEGEND = "mb-1.5 p-0 text-[13px] font-medium";
 const TEST = "downstream-reach";
@@ -174,6 +176,7 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
         <>
           <input type="hidden" name="view" value={params.view} />
           <input type="hidden" name="sort" value={params.sort} />
+          {params.asc && <input type="hidden" name="order" value="asc" />}
           <input type="hidden" name="dsort" value={params.docSort} />
           {params.q && <input type="hidden" name="q" value={params.q} />}
           {params.pmid && <input type="hidden" name="pmid" value={params.pmid} />}
@@ -187,7 +190,7 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
               <input type="hidden" name="dir" value={params.dir} />
             </>
           )}
-          {/* The form was submitted: no stage ticked then means every stage. */}
+          {/* The form was submitted: no stage ticked (no JS) then means every stage. */}
           <input type="hidden" name="stage" value={STAGE_ANY} />
           {/* Sent always; the ticked box below adds "out", which wins. */}
           <input type="hidden" name="own" value="in" />
@@ -200,13 +203,11 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
           <>
             <fieldset className="m-0 border-0 px-[18px] pt-0 pb-3" data-testid={`${TEST}-ctype`}>
               <legend className={RAIL_LEGEND}>Citing type</legend>
-              <RailChecklist
+              <AtLeastOneChecklist
                 name="ctype"
-                roomy
                 options={REACH_TYPES.map((t) => ({ value: t, label: REACH_TYPE_LABEL[t] }))}
-                selected={params.ctypes}
+                selected={tickedTypes(params)}
               />
-              <p className="text-muted-foreground mt-1 text-xs">None checked = all.</p>
               <label className="border-apollo-rail-border mt-3 flex cursor-pointer items-center gap-2 border-t pt-2.5 text-sm">
                 <input
                   type="checkbox"
@@ -221,13 +222,11 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
             </fieldset>
             <fieldset className="m-0 border-0 px-[18px] pt-0 pb-3" data-testid={`${TEST}-stage`}>
               <legend className={RAIL_LEGEND}>Stage of the cited paper</legend>
-              <RailChecklist
+              <AtLeastOneChecklist
                 name="stage"
-                roomy
                 options={STAGE_KEYS.map((k) => ({ value: k, label: stageKeyLabel(k) }))}
-                selected={params.stages}
+                selected={params.stages.length > 0 ? params.stages : STAGE_KEYS}
               />
-              <p className="text-muted-foreground mt-1 text-xs">None checked = every stage.</p>
             </fieldset>
             <RailSection
               label="Research area"
@@ -253,6 +252,72 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
   );
 }
 
+/** The row's most notable citing document (spec C), then "+N more" for the
+ *  rest of what the row counts, which opens them all. */
+function NotableLine({ doc, more, moreHref }: { doc: ReachNotable; more: number; moreHref: string }) {
+  const parts = [doc.id, doc.facts, doc.type === "trial" ? null : doc.year].filter((x) => x !== null && x !== "");
+  const title = htmlToPlainText(doc.title, Number.POSITIVE_INFINITY);
+  return (
+    <div className="mt-1.5 flex min-w-0 items-baseline gap-1.5 text-[13px]" data-testid={`${TEST}-notable`}>
+      <span className="bg-apollo-surface-2 shrink-0 rounded px-1.5 py-px text-xs font-medium">{doc.kind}</span>
+      {parts.map((x) => (
+        <span key={String(x)} className="text-muted-foreground shrink-0">
+          {x} ·
+        </span>
+      ))}
+      <ExternalLink href={doc.url} className="min-w-0 truncate" title={title}>
+        {title}
+      </ExternalLink>
+      {more > 0 && (
+        <Link
+          href={moreHref}
+          aria-label={`${noun(more, ["more citing document", "more citing documents"])} of this paper`}
+          className={cn(LINK, "shrink-0")}
+        >
+          +{more.toLocaleString()} more
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/** A count column's header (spec B3): a link that sorts by it, highest first,
+ *  and lowest first on the next click; `aria-sort` says which. Plain text when
+ *  the list does not sort (every publication in scope, newest first). */
+function SortTH({
+  label,
+  sort,
+  current,
+  sortHref,
+  className,
+}: {
+  label: string;
+  sort: "cited" | ReachType;
+  current: { sort: ReachSort; asc: boolean } | null;
+  sortHref: (sort: ReachSort, asc: boolean) => string;
+  className?: string;
+}) {
+  const on = current?.sort === sort;
+  const asc = on && current!.asc;
+  return (
+    <th
+      className={cn(TH, "text-right whitespace-normal", className)}
+      aria-sort={current === null ? undefined : on ? (asc ? "ascending" : "descending") : "none"}
+    >
+      {current === null ? (
+        label
+      ) : (
+        <Link href={sortHref(sort, on && !asc)} className="hover:underline" data-testid={`${TEST}-sort-${sort}`}>
+          {label}
+          <span aria-hidden className={cn("ml-1", on ? "" : "invisible")}>
+            {asc ? "▲" : "▼"}
+          </span>
+        </Link>
+      )}
+    </th>
+  );
+}
+
 function PublicationTable({
   pubs,
   types,
@@ -261,6 +326,9 @@ function PublicationTable({
   on,
   docsHref,
   footer,
+  sorted,
+  sortHref,
+  match,
 }: {
   pubs: ReachPubRow[];
   types: readonly ReachType[];
@@ -269,9 +337,14 @@ function PublicationTable({
   /** Papers the modal will not open (`loadModalHidden`). */
   hidden: ReadonlySet<string>;
   on: Record<ReachType, boolean>;
-  /** The Citing documents view filtered to one paper and type. */
-  docsHref: (pmid: string, type: ReachType) => string;
+  /** The Citing documents view filtered to one paper and type (null: every ticked type). */
+  docsHref: (pmid: string, type: ReachType | null) => string;
   footer: PersonFooter;
+  /** The current order; null when the list does not sort. */
+  sorted: { sort: ReachSort; asc: boolean } | null;
+  sortHref: (sort: ReachSort, asc: boolean) => string;
+  /** Authors who put the paper in scope (the person-type filter), if one is set. */
+  match?: (a: ReachPubRow["authors"][number]) => boolean;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -279,11 +352,9 @@ function PublicationTable({
         <thead>
           <tr className="bg-apollo-surface-2 text-left">
             <th className={TH}>Publication</th>
-            <th className={TH}>Stage</th>
+            <SortTH label="Total" sort="cited" current={sorted} sortHref={sortHref} className="font-semibold" />
             {types.map((t) => (
-              <th key={t} className={cn(TH, "text-right whitespace-normal")}>
-                {REACH_TYPE_LABEL[t]}
-              </th>
+              <SortTH key={t} label={REACH_TYPE_LABEL[t]} sort={t} current={sorted} sortHref={sortHref} />
             ))}
           </tr>
         </thead>
@@ -299,17 +370,40 @@ function PublicationTable({
                   <PaperTitle pmid={r.pmid} title={r.title} />
                 )}
                 <div className="text-muted-foreground mt-0.5 leading-normal">
-                  <PubMeta pub={r} copy />
+                  <PubMeta
+                    pub={r}
+                    copy
+                    extra={
+                      r.stage === "none" ? (
+                        <span className="text-xs">{NO_STAGE_LABEL}</span>
+                      ) : (
+                        <span data-testid="pub-row-stage">
+                          <StageTag stage={r.stage} />
+                        </span>
+                      )
+                    }
+                  />
                 </div>
-                <AuthorPills authors={r.authors} footer={footer} />
+                {r.notable && (
+                  <NotableLine
+                    doc={r.notable}
+                    more={reachTotal(r, types) - 1}
+                    moreHref={docsHref(r.pmid, null)}
+                  />
+                )}
+                <AuthorPills authors={r.authors} footer={footer} max={3} match={match} />
               </td>
-              <td className={TD}>
-                {r.stage === "none" ? (
-                  <span className="text-muted-foreground text-xs">{NO_STAGE_LABEL}</span>
+              <td className={cn(TD, "text-right text-[15px] font-semibold")} data-testid={`${TEST}-cell-total`}>
+                {reachTotal(r, types) > 0 ? (
+                  <Link
+                    href={docsHref(r.pmid, null)}
+                    aria-label={`${reachTotal(r, types).toLocaleString()} citing documents of this paper`}
+                    className={LINK}
+                  >
+                    {reachTotal(r, types).toLocaleString()}
+                  </Link>
                 ) : (
-                  <span data-testid="pub-row-stage">
-                    <StageTag stage={r.stage} />
-                  </span>
+                  <Dash />
                 )}
               </td>
               {types.map((t) => {
@@ -553,18 +647,19 @@ export async function renderDownstreamReachReport({
       testId={`${TEST}-pager`}
     />
   );
-  const published = yearSpan(params.from, params.to, fiscalLabel(params));
-  const stagesText =
-    params.stages.length > 0 ? `at ${params.stages.map(stageKeyLabel).join(", ")}` : "at every stage";
+  // The Sort by options for the ticked types only, in step with the headers.
+  const sortOptions = Object.fromEntries(
+    (Object.keys(REACH_SORT_LABEL) as ReachSort[])
+      .filter((k) => !(REACH_TYPES as readonly string[]).includes(k) || types.includes(k as ReachType))
+      .map((k) => [k, REACH_SORT_LABEL[k]]),
+  ) as Record<ReachSort, string>;
   const allTypes = params.ctypes.length === 0 || params.ctypes.length === REACH_TYPES.length;
 
   return {
+    // A fixed definition (spec E1): the chips are the one live summary of the filters.
     subtitle: (
       <p className="text-muted-foreground text-sm" data-testid={`${TEST}-subtitle`}>
-        Publications {stagesText} · {published ? `published ${published}` : "published in any year"} ·{" "}
-        {params.scope === null ? "all units" : params.scope.map((u) => labels.get(u) ?? u).join("; ")} · cited by{" "}
-        {typePhrase(types)}
-        {params.includeOwn ? " · the authors' own work counted" : " · the authors' own work left out"}
+        {REACH_DEFINITION}
       </p>
     ),
     aside: (
@@ -670,11 +765,12 @@ export async function renderDownstreamReachReport({
                     </Link>
                   </p>
                 ) : (
+                  // A new Sort by pick starts highest first, so the toolbar drops `order`.
                   toolbar(
-                    { q: "", sort: "cited" },
+                    { q: "", sort: "cited", asc: false },
                     <>
                       <SearchField label="Search title, PMID or author" placeholder="e.g. 12345678" value={params.q} />
-                      <SortSelect<ReachSort> name="sort" value={params.sort} options={REACH_SORT_LABEL} />
+                      <SortSelect<ReachSort> name="sort" value={params.sort} options={sortOptions} />
                     </>,
                   )
                 )}
@@ -686,6 +782,9 @@ export async function renderDownstreamReachReport({
                   on={modalGroupsOn()}
                   docsHref={(pmid, type) => href(links.paperDocs(pmid, type))}
                   footer={personFooter}
+                  sorted={params.showAll ? null : { sort: params.sort, asc: params.asc }}
+                  sortHref={(sort, asc) => href(reachQueryString(params, { sort, asc }))}
+                  match={params.types.length > 0 ? (a) => params.types.includes(a.roleCategory ?? "") : undefined}
                 />
                 {data.pubMatched === 0 && (
                   <p className="text-muted-foreground px-4 pt-3 text-[13px]">

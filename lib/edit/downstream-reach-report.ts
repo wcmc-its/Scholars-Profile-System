@@ -73,6 +73,7 @@ import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-
 import { TOPIC_ACTIVITY_SCORE_FLOOR } from "@/lib/api/topic-activity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { POLICY_REVIEWS_CAP, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { trialDisplay } from "@/lib/citations/trials-patents";
 import {
   clinicalCitationsModalOn,
   patentCitationsModalOn,
@@ -260,11 +261,21 @@ export const REACH_DOCS_NARROW_HINT = "Narrow it by unit, years, stage, research
 /** Citing-document filters one URL can carry (each narrows the papers further). */
 export const MAX_DOC_FILTERS = 5;
 
+/** The Publications order (spec B3): the Total, one per type (the column
+ *  headers sort by these too), then by publication year. */
 export const REACH_SORT_LABEL = {
   cited: "Most citing documents",
-  year: "Publication year",
+  clinical: "Most clinical studies",
+  trial: "Most registered trials",
+  policy: "Most guidelines and policy",
+  review: "Most systematic reviews",
+  patent: "Most patents",
+  year: "Newest",
+  oldest: "Oldest",
 } as const;
 export type ReachSort = keyof typeof REACH_SORT_LABEL;
+/** The sorts a column header sets: a count, highest first unless `asc`. */
+export const isCountSort = (s: ReachSort): s is "cited" | ReachType => s !== "year" && s !== "oldest";
 
 export const REACH_DOC_SORT_LABEL = {
   papers: "Most papers cited",
@@ -305,6 +316,8 @@ export type ReachParams = WhoParams & {
   showAll: boolean;
   view: ReachView;
   sort: ReachSort;
+  /** `order=asc`: a count sort, lowest first (a header's second click). */
+  asc: boolean;
   /** The Citing documents tab's order (`dsort`). */
   docSort: ReachDocSort;
   /** The current tab's search (`q`); "" = none. */
@@ -323,7 +336,7 @@ export type ReachParams = WhoParams & {
 };
 
 /** View state, not filters: a URL with nothing else is bare. */
-const VIEW_KEYS = new Set(["view", "sort", "dsort", "q", "page", "show", "with", "dir"]);
+const VIEW_KEYS = new Set(["view", "sort", "order", "dsort", "q", "page", "show", "with", "dir"]);
 
 /**
  * Every param is optional; a stray value is dropped. Defaults that do not
@@ -340,7 +353,9 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
   const bare = ![...sp.keys()].some((k) => !VIEW_KEYS.has(k));
   const { among, one, range, types, units, people, positions, basis, q, page } = citationParamReader(sp);
   const [from, to] = range("from", "to");
-  const stages = among("stage", STAGE_KEYS);
+  // Every option ticked is the same as no filter (spec E2): one URL, no chips.
+  const full = <T>(xs: T[], all: readonly T[]): T[] => (xs.length === all.length ? [] : xs);
+  const stages = full(among("stage", STAGE_KEYS), STAGE_KEYS);
   const own = sp.getAll("own");
   const area = sp.get("area")?.trim() ?? "";
   const pmid = sp.get("pmid")?.trim() ?? "";
@@ -354,6 +369,13 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
   // tab click from another view drops them, and no chip or Criteria row names
   // a filter the lists were not taken under.
   const connections = view === "connections";
+  const ctypes = full(among("ctype", REACH_TYPES), REACH_TYPES);
+  // A type's sort needs its column: a type not ticked sorts by the Total.
+  const sortGiven = one("sort", Object.keys(REACH_SORT_LABEL) as ReachSort[], "cited");
+  const sort =
+    (REACH_TYPES as readonly string[]).includes(sortGiven) && ctypes.length > 0 && !ctypes.includes(sortGiven as ReachType)
+      ? "cited"
+      : sortGiven;
   return {
     types,
     units,
@@ -362,15 +384,19 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
     basis,
     from: bare ? DEFAULT_FROM : from,
     to,
-    stages: stages.length > 0 ? stages : sp.getAll("stage").includes(STAGE_ANY) ? [] : [...DEFAULT_STAGES],
-    ctypes: among("ctype", REACH_TYPES),
+    stages:
+      stages.length > 0 || sp.getAll("stage").some((v) => v === STAGE_ANY || (STAGE_KEYS as readonly string[]).includes(v))
+        ? stages
+        : [...DEFAULT_STAGES],
+    ctypes,
     includeOwn: own.includes("in") && !own.includes("out"),
     area: /^[A-Za-z0-9_-]{1,128}$/.test(area) ? area : null,
     pmid: !connections && /^\d{1,16}$/.test(pmid) ? pmid : null,
     docs: connections ? [] : docs,
     showAll: sp.get("show") === "all",
     view,
-    sort: one("sort", Object.keys(REACH_SORT_LABEL) as ReachSort[], "cited"),
+    sort,
+    asc: sp.get("order") === "asc" && isCountSort(sort) && sort === sortGiven,
     docSort: one("dsort", Object.keys(REACH_DOC_SORT_LABEL) as ReachDocSort[], "papers"),
     q,
     page,
@@ -410,6 +436,7 @@ export function reachQueryString(p: ReachParams, over: Partial<ReachParams> = {}
     if (x.dir !== "cited") q.set("dir", x.dir);
   }
   if (x.sort !== "cited") q.set("sort", x.sort);
+  if (x.asc && isCountSort(x.sort)) q.set("order", "asc");
   if (x.docSort !== "papers") q.set("dsort", x.docSort);
   if (x.q) q.set("q", x.q);
   if (x.page > 1) q.set("page", String(x.page));
@@ -419,7 +446,7 @@ export function reachQueryString(p: ReachParams, over: Partial<ReachParams> = {}
 /** Nothing set beyond what a bare URL gets (the "Reset to defaults" test). */
 export function isReachDefault(p: ReachParams): boolean {
   const filters = (x: ReachParams) =>
-    reachQueryString(x, { view: "publications", sort: "cited", docSort: "papers", q: "", showAll: false });
+    reachQueryString(x, { view: "publications", sort: "cited", asc: false, docSort: "papers", q: "", showAll: false });
   return filters(p) === filters(parseReachParams(new URLSearchParams()));
 }
 
@@ -440,8 +467,8 @@ export function reachLinks(p: ReachParams) {
     /** A type's tile: papers cited by that type. */
     type: (t: ReachType) => qs({ view: "publications", ctypes: [t] }),
     /** A Publications cell, when the modal cannot list it: that paper's citing
-     *  documents of one type. */
-    paperDocs: (pmid: string, t: ReachType) => qs({ view: "documents", pmid, ctypes: [t] }),
+     *  documents of one type; with no type (the Total), of every ticked type. */
+    paperDocs: (pmid: string, t: ReachType | null) => qs({ view: "documents", pmid, ...(t ? { ctypes: [t] } : {}) }),
     /** A Citing documents row: the listed papers it cites. null when the URL
      *  can carry no more `doc` filters; the count is then not shown. */
     docPapers: (docId: number) =>
@@ -755,18 +782,45 @@ export function papersByType(rows: readonly ReachCounts[]): ReachCounts {
   return Object.fromEntries(REACH_TYPES.map((t) => [t, listedFor(rows, [t]).length])) as ReachCounts;
 }
 
-/** Every sort falls back to the other key, then the PMID. `types` are the
- *  ticked ones: "most citing documents" adds up those columns only. */
+/** A row's Total: its citing documents of the ticked types (spec B2). No
+ *  document is stored under two types (#3608), so the sum double counts
+ *  nothing; it equals the Citing documents view for the paper and those types. */
+export const reachTotal = (r: ReachCounts, types: readonly ReachType[]): number =>
+  types.reduce((n, t) => n + r[t], 0);
+
+/** A count sort orders by that count (`asc`: lowest first); ties break by the
+ *  Total, highest first, then the newest. "Newest" and "Oldest" order by year,
+ *  then the Total. Then the PMID, so the order is stable. `types` are the
+ *  ticked ones: the Total adds up those columns only. */
 export function sortReachPublications<T extends ReachPubCounts>(
   rows: readonly T[],
   sort: ReachSort,
   types: readonly ReachType[],
+  asc = false,
 ): T[] {
-  const total = (r: T) => types.reduce((n, t) => n + r[t], 0);
+  const total = (r: T) => reachTotal(r, types);
   const byTotal = (a: T, b: T) => total(b) - total(a);
-  const byYear = (a: T, b: T) => (b.year ?? 0) - (a.year ?? 0);
-  const [first, second] = sort === "year" ? [byYear, byTotal] : [byTotal, byYear];
-  return [...rows].sort((a, b) => first(a, b) || second(a, b) || a.pmid.localeCompare(b.pmid));
+  const newest = (a: T, b: T) => (b.year ?? 0) - (a.year ?? 0);
+  const keys: ((a: T, b: T) => number)[] =
+    sort === "year"
+      ? [newest, byTotal]
+      : sort === "oldest"
+        ? [(a, b) => (a.year ?? 9999) - (b.year ?? 9999), byTotal]
+        : [
+            (a, b) => {
+              const d = sort === "cited" ? byTotal(a, b) : b[sort] - a[sort];
+              return asc ? -d : d;
+            },
+            byTotal,
+            newest,
+          ];
+  return [...rows].sort((a, b) => {
+    for (const k of keys) {
+      const d = k(a, b);
+      if (d) return d;
+    }
+    return a.pmid.localeCompare(b.pmid);
+  });
 }
 
 /** Every publication in scope, cited or not: the "of M" in the first tile.
@@ -816,19 +870,136 @@ export async function loadScopePage(
   return raw.map((r) => ({ pmid: r.pmid, year: num(r.year), stage: stageKeyOf(r.stage, r.confidence) }));
 }
 
-export type ReachPubRow = ReachPubCounts & PubDetails;
+/**
+ * Each row's most notable citing document (spec C): the one line an
+ * administrator can quote. Paul reorders the pick here and nowhere else:
+ *   - `REACH_NOTABLE_ORDER`: which type wins. Guidelines and policy lead now
+ *     that systematic reviews are a type of their own (decision 10); reviews,
+ *     not ranked by the spec, sit after clinical studies.
+ *   - `NOTABLE_WITHIN`: the order inside a type, highest first. Trials: phase
+ *     (4, 3, 2, 1, early 1, none), then completed, recruiting or active over
+ *     anything else, over withdrawn, terminated or suspended. Guidelines and
+ *     policy: health authority, guideline, consensus. Patents: granted over
+ *     applications. Clinical studies and reviews: none (no publication type is
+ *     stored for them, so "randomized controlled trial first" is not possible).
+ *   - Then the most recent, then the highest id.
+ * Only documents the row's counts take: the ticked types, under the own-work rule.
+ */
+export const REACH_NOTABLE_ORDER: readonly ReachType[] = ["policy", "trial", "clinical", "review", "patent"];
+const detail = (key: string) => Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(d.details, ${`$.${key}`}))`;
+const NOTABLE_WITHIN: Record<ReachType, Prisma.Sql> = {
+  policy: Prisma.sql`CASE d.level WHEN 'authority' THEN 3 WHEN 'guideline' THEN 2 ELSE 1 END`,
+  trial: Prisma.sql`(CASE WHEN ${detail("phase")} LIKE '%PHASE4%' THEN 5 WHEN ${detail("phase")} LIKE '%PHASE3%' THEN 4
+      WHEN ${detail("phase")} LIKE '%PHASE2%' THEN 3 WHEN ${detail("phase")} LIKE '%EARLY%' THEN 1
+      WHEN ${detail("phase")} LIKE '%PHASE1%' THEN 2 ELSE 0 END) * 3
+    + CASE WHEN ${detail("status")} IN ('COMPLETED', 'RECRUITING', 'ACTIVE_NOT_RECRUITING', 'ENROLLING_BY_INVITATION') THEN 2
+      WHEN ${detail("status")} IN ('WITHDRAWN', 'TERMINATED', 'SUSPENDED') THEN 0 ELSE 1 END`,
+  clinical: Prisma.sql`0`,
+  review: Prisma.sql`0`,
+  patent: Prisma.sql`IF(${detail("kind")} = 'application', 0, 1)`,
+};
+const levelCase = (pick: (t: ReachType, i: number) => Prisma.Sql): Prisma.Sql =>
+  Prisma.sql`CASE ${Prisma.join(
+    REACH_NOTABLE_ORDER.map((t, i) => Prisma.sql`WHEN d.level IN (${Prisma.join([...levelsOf(t)])}) THEN ${pick(t, i)}`),
+    " ",
+  )} END`;
 
-/** The rows of one page, or one sheet, with each publication's own columns
- *  and the authors the viewer may see (`loadPublicationDetails`, report 24's). */
+export type ReachNotable = {
+  type: ReachType;
+  /** "Clinical guideline", "Patent application": `docKind`. */
+  kind: string;
+  /** NCT number, patent number, or the journal or issuing body. */
+  id: string | null;
+  /** Trials: "Phase 2 · Completed". */
+  facts: string | null;
+  year: number | null;
+  title: string;
+  url: string;
+};
+
+/** The pick per PMID (`REACH_NOTABLE_ORDER`), one query per chunk of rows. */
+export async function loadReachNotable(p: ReachParams, pmids: readonly string[]): Promise<Map<string, ReachNotable>> {
+  const out = new Map<string, ReachNotable>();
+  const levels = tickedTypes(p).flatMap(levelsOf);
+  for (let i = 0; i < pmids.length; i += 500) {
+    const raw = await db.read.$queryRaw<
+      {
+        pmid: string;
+        level: string;
+        year: Num | null;
+        title: string;
+        url: string;
+        external_id: string;
+        journal: string | null;
+        journal_abbrev: string | null;
+        issuing_body: string | null;
+        phase: string | null;
+        status: string | null;
+        kind: string | null;
+      }[]
+    >`
+      SELECT x.* FROM (
+        SELECT l.pmid, d.level, d.year, d.title, d.url, d.external_id, d.journal, d.journal_abbrev, d.issuing_body,
+               ${detail("phase")} AS phase, ${detail("status")} AS status, ${detail("kind")} AS kind,
+               ROW_NUMBER() OVER (PARTITION BY l.pmid
+                 ORDER BY ${levelCase((_t, i) => Prisma.sql`${i}`)}, ${levelCase((t) => NOTABLE_WITHIN[t])} DESC,
+                          d.year DESC, d.id DESC) AS rn
+          FROM publication_citing_document l
+          JOIN citing_document d ON d.id = l.citing_document_id
+         WHERE l.pmid IN (${Prisma.join(pmids.slice(i, i + 500))})
+           AND d.level IN (${Prisma.join(levels)})
+           ${countedLinkSql(p)}
+      ) x WHERE x.rn = 1`;
+    for (const r of raw) {
+      const type = reachTypeOfLevel(r.level);
+      if (!type) continue;
+      // JSON_UNQUOTE of a JSON null is the string "null" (staging: 2,538 trials have no phase).
+      const val = (v: string | null) => (v === null || v === "null" ? null : v);
+      const trial = type === "trial" ? trialDisplay({ phase: val(r.phase), status: val(r.status) }) : null;
+      out.set(r.pmid, {
+        type,
+        kind: docKind({ type, level: r.level, application: val(r.kind) === "application" }),
+        id:
+          type === "patent"
+            ? (parsePatentId(r.external_id)?.display ?? r.external_id.toUpperCase())
+            : type === "trial"
+              ? r.external_id
+              : (r.issuing_body ?? r.journal_abbrev ?? r.journal),
+        facts: trial ? [trial.phase, trial.status].filter(Boolean).join(" · ") || null : null,
+        year: num(r.year),
+        title: r.title,
+        url: r.url,
+      });
+    }
+  }
+  return out;
+}
+
+export type ReachPubRow = ReachPubCounts & PubDetails & { notable: ReachNotable | null };
+
+/** The rows of one page, or one sheet, with each publication's own columns,
+ *  the authors the viewer may see (`loadPublicationDetails`, report 24's), and
+ *  its most notable citing document (`loadReachNotable`). */
 export async function withReachPublicationDetails(
   p: ReachParams,
   rows: readonly ReachPubCounts[],
 ): Promise<ReachPubRow[]> {
-  const pubs = await loadPublicationDetails(
-    p,
-    rows.map((r) => r.pmid),
-  );
-  return rows.map((r) => ({ ...r, ...(pubs.get(r.pmid) ?? { title: "", journal: null, doi: null, authors: [] }) }));
+  const types = tickedTypes(p);
+  const [pubs, notable] = await Promise.all([
+    loadPublicationDetails(
+      p,
+      rows.map((r) => r.pmid),
+    ),
+    loadReachNotable(
+      p,
+      rows.filter((r) => types.some((t) => r[t] > 0)).map((r) => r.pmid),
+    ),
+  ]);
+  return rows.map((r) => ({
+    ...r,
+    ...(pubs.get(r.pmid) ?? { title: "", journal: null, doi: null, authors: [] }),
+    notable: notable.get(r.pmid) ?? null,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,7 +1419,7 @@ export async function loadReach(
         ? loadReachPeople(p)
         : loadingCounts.then((rows) => loadReachPeople(p, rows)),
   ]);
-  const listed = sortReachPublications(listedFor(counts, types), p.sort, types);
+  const listed = sortReachPublications(listedFor(counts, types), p.sort, types, p.asc);
   const matched = hits ? listed.filter((r) => hits.has(r.pmid)) : listed;
   const byPmid = new Map(counts.map((r) => [r.pmid, r]));
   const needle = p.view === "people" ? p.q.toLowerCase() : "";
@@ -1320,6 +1491,10 @@ export function reachChips(
   return chips;
 }
 
+/** The report's subtitle: what it is, with no filter values (spec E1). */
+export const REACH_DEFINITION =
+  "WCM publications and the clinical studies, registered trials, guidelines, systematic reviews and patents that cite them.";
+
 export const REACH_COUNTING_RULE =
   "A publication is cited downstream when at least one citing document of a checked type cites it. A clinical study counts once per article; a registered trial, a guideline or policy document, a systematic review and a patent count once however many records or journals carry them, and related patents (one patent family) are one invention. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.";
 
@@ -1364,7 +1539,7 @@ export function describeReachCriteria(
     ],
     [
       "Order",
-      `${REACH_SORT_LABEL[p.sort]} (publications); ${REACH_DOC_SORT_LABEL[p.docSort].toLowerCase()} (citing documents)`,
+      `${REACH_SORT_LABEL[p.sort]}${p.asc && isCountSort(p.sort) ? ", lowest first" : ""} (publications); ${REACH_DOC_SORT_LABEL[p.docSort].toLowerCase()} (citing documents)`,
     ],
     ...(p.q ? ([[p.view === "people" ? "Search (people)" : "Search (publications)", p.q]] as [string, string][]) : []),
     ["Counting rule", REACH_COUNTING_RULE],
@@ -1433,8 +1608,8 @@ export async function buildReachWorkbook(
 
   const pubs = sheet(
     "Publications",
-    ["PMID", "Title", "Journal", "Year", "Stage", "WCM authors", ...types.map((t) => REACH_TYPE_LABEL[t]), "DOI"],
-    [12, 70, 30, 8, 30, 40, ...types.map(() => 14), 28],
+    ["PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Total", ...types.map((t) => REACH_TYPE_LABEL[t]), "Top citing document", "DOI"],
+    [12, 70, 30, 8, 30, 40, 10, ...types.map(() => 14), 60, 28],
   );
   for (const r of data.pubs) {
     pubs.addRow([
@@ -1444,7 +1619,9 @@ export async function buildReachWorkbook(
       r.year,
       stageKeyLabel(r.stage),
       r.authors.map((a) => `${a.name} (${a.position} author)`).join("; "),
+      reachTotal(r, types),
       ...types.map((t) => r[t]),
+      r.notable ? [r.notable.kind, r.notable.id, plain(r.notable.title)].filter(Boolean).join(" · ") : null,
       r.doi,
     ]);
   }

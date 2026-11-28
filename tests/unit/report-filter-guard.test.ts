@@ -157,6 +157,10 @@ const WHO_FILTER_ALLOWLIST: Record<string, { hits: number; reason: string }> = {
     hits: 3,
     reason: "public Spotlight/highlights author pool: full- and part-time faculty, not a person filter",
   },
+  "lib/api/topic-activity.ts": {
+    hits: 1,
+    reason: "public topic activity feed: grants of full- and part-time faculty (the top-scholars carve it was tuned on), not a person filter",
+  },
   "lib/api/browse.ts": {
     hits: 1,
     reason: "public browse tree: loads the divisions of the listed departments, not a person filter",

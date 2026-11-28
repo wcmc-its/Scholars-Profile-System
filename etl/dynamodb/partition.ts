@@ -213,6 +213,9 @@ export type AreaSignalRecord = {
   topic_scores?: unknown;
   taxonomy_version?: string;
   scored_at?: string;
+  /** Grant texts read from an abstract only; see ./area-signal-mapper.ts. */
+  translational_stage?: unknown;
+  translational_stage_confidence?: unknown;
   [key: string]: unknown;
 };
 

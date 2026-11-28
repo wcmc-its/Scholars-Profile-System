@@ -396,10 +396,21 @@ export function personFacetOptions<R extends { cwid: string; name: string }>(
 }
 
 /** An off-site link; anything that is not https renders as plain text. */
-export function ExternalLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {
-  if (!href.startsWith("https://")) return <span className={className}>{children}</span>;
+export function ExternalLink({
+  href,
+  className,
+  title,
+  children,
+}: {
+  href: string;
+  className?: string;
+  /** The full text when `children` is cut short. */
+  title?: string;
+  children: ReactNode;
+}) {
+  if (!href.startsWith("https://")) return <span className={className} title={title}>{children}</span>;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={cn(LINK, className)}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cn(LINK, className)} title={title}>
       {children}
     </a>
   );
@@ -409,9 +420,12 @@ export function ExternalLink({ href, className, children }: { href: string; clas
 export function PubMeta({
   pub,
   copy = false,
+  extra,
 }: {
   pub: { pmid: string; journal: string | null; year: number | null };
   copy?: boolean;
+  /** Shown after the year (report 27's stage tag). */
+  extra?: ReactNode;
 }) {
   const id = citationIdentifier(pub.pmid);
   return (
@@ -422,14 +436,18 @@ export function PubMeta({
         </>
       )}
       {pub.year !== null && <>{pub.year} · </>}
-      {id.href ? (
-        <a href={id.href} target="_blank" rel="noopener noreferrer" className={LINK}>
-          {id.label} {id.value}
-        </a>
-      ) : (
-        `${id.label} ${id.value}`
-      )}
-      {copy && <CopyPmid pmid={id.value} />}
+      {extra && <>{extra} · </>}
+      {/* The PMID and its copy button wrap as one. */}
+      <span className="whitespace-nowrap">
+        {id.href ? (
+          <a href={id.href} target="_blank" rel="noopener noreferrer" className={LINK}>
+            {id.label} {id.value}
+          </a>
+        ) : (
+          `${id.label} ${id.value}`
+        )}
+        {copy && <CopyPmid pmid={id.value} />}
+      </span>
     </>
   );
 }
@@ -626,10 +644,13 @@ export function Pager({
       <span className="text-muted-foreground text-[13px] tabular-nums">
         {total === 0 ? "0" : `${from.toLocaleString()}–${to.toLocaleString()}`} of {total.toLocaleString()}
       </span>
-      <div className="flex gap-2">
-        {step("Previous", Math.min(page - 1, last), page > 1)}
-        {step("Next", page + 1, page < last)}
-      </div>
+      {/* Nothing to step to when everything fits on one page. */}
+      {(last > 1 || page > 1) && (
+        <div className="flex gap-2">
+          {step("Previous", Math.min(page - 1, last), page > 1)}
+          {step("Next", page + 1, page < last)}
+        </div>
+      )}
     </div>
   );
 }

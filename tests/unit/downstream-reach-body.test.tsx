@@ -75,6 +75,7 @@ import { renderDownstreamReachReport } from "@/components/edit/reports/downstrea
 import type { ScholarCardFooter } from "@/components/edit/scholar-hover-card";
 import {
   parseReachParams,
+  REACH_DEFINITION,
   reachLinks,
   type ModalCounts,
   type ReachData,
@@ -92,6 +93,7 @@ afterEach(() => {
 const BASE = "/edit/reports/downstream-reach";
 const pub = (pmid: string, over: Partial<ReachPubRow> = {}): ReachPubRow => ({
   pmid,
+  notable: null,
   year: 2021,
   stage: "T0",
   clinical: 0,
@@ -220,15 +222,11 @@ describe("report 27 page", () => {
     expect(h.reach.mock.calls[0][1]).toEqual({ views: ["people"], limit: 50, offset: 100 });
   });
 
-  it("the header says what is in scope without counting anything", async () => {
-    const view = await page();
+  it("the header is a fixed definition: no filter values, which the chips carry", async () => {
+    const view = await page({ unit: "dept:N1", area: "area_a", type: "full_time_faculty", own: "in", stage: "T2" });
     const subtitle = view.getByTestId("downstream-reach-subtitle").textContent!;
-    expect(subtitle).toContain("Publications at T0 · Basic research, T1 · Early translation");
-    expect(subtitle).toContain("published 2020 or later");
-    expect(subtitle).toContain("all units");
-    expect(subtitle).toContain("the authors' own work left out");
-    // The only digits are the stage codes and the year.
-    expect(subtitle.replace(/T[01]|2020/g, "")).not.toMatch(/\d/);
+    expect(subtitle).toBe(REACH_DEFINITION);
+    expect(subtitle).not.toMatch(/\d|units|Department|Example area|own work/);
   });
 
   it("the tiles: N of M cited downstream and one per citing type, each a link to the list it counts", async () => {
@@ -281,7 +279,7 @@ describe("report 27 page", () => {
     expect(queryOf(tab("documents").getAttribute("href")).get("view")).toBe("documents");
   });
 
-  it("a Publications row: the title opens the modal, the stage is the neutral badge, one column per ticked type", async () => {
+  it("a Publications row: the title opens the modal, the stage sits in the metadata line, a Total then one column per ticked type", async () => {
     const view = await page();
     expect(view.getByTestId("modal-provider")).toBeTruthy();
     const rows = view.getAllByTestId("downstream-reach-pub-row");
@@ -289,12 +287,12 @@ describe("report 27 page", () => {
     const table = view.getByTestId("downstream-reach-publications");
     expect([...table.querySelectorAll("th")].map((th) => th.textContent)).toEqual([
       "Publication",
-      "Stage",
-      "Clinical studies",
-      "Registered trials",
-      "Guidelines and policy",
-      "Systematic reviews",
-      "Patents",
+      "Total▼",
+      "Clinical studies▼",
+      "Registered trials▼",
+      "Guidelines and policy▼",
+      "Systematic reviews▼",
+      "Patents▼",
     ]);
     const first = within(rows[0]);
     fireEvent.click(first.getByTestId("downstream-reach-title"));
@@ -366,16 +364,79 @@ describe("report 27 page", () => {
     expect(queryOf(within(row.getByTestId("downstream-reach-cell-clinical")).getByRole("link").getAttribute("href")).get("view")).toBe("documents");
   });
 
+  it("the most notable citing document: one line under the metadata, its title linked, then +N more", async () => {
+    const trial = { type: "trial" as const, kind: "Registered trial", id: "NCT01234567", facts: "Phase 2 · Completed", year: 2023, title: "A long <i>trial</i> title", url: "https://clinicaltrials.gov/study/NCT01234567" };
+    h.pubs.mockResolvedValue([
+      pub("10000001", { clinical: 2, trial: 1, notable: trial }),
+      pub("10000002", { patent: 1, notable: { type: "patent", kind: "Patent", id: "US 9,000,001 B2", facts: null, year: 2020, title: "A method", url: "https://patents.google.com/patent/US9000001B2" } }),
+    ]);
+    const view = await page({ basis: "cy" });
+    const [one, two] = view.getAllByTestId("downstream-reach-notable");
+    expect(one.textContent).toBe("Registered trialNCT01234567 ·Phase 2 · Completed ·A long trial title+2 more");
+    const title = within(one).getByRole("link", { name: "A long trial title" });
+    expect([title.getAttribute("href"), title.getAttribute("title"), title.getAttribute("target")]).toEqual([trial.url, "A long trial title", "_blank"]);
+    const more = within(one).getByRole("link", { name: "2 more citing documents of this paper" });
+    expect(more.getAttribute("href")).toBe(`${BASE}?${reachLinks(paramsOf("basis=cy")).paperDocs("10000001", null)}`);
+    // A patent shows its year; with nothing else counted there is no "+0 more".
+    expect(two.textContent).toBe("PatentUS 9,000,001 B2 ·2020 ·A method");
+  });
+
+  it("the Total opens the paper's citing documents of every ticked type; each header sorts, then reverses", async () => {
+    const view = await page({ ctype: ["clinical", "trial"], basis: "cy" });
+    const row = within(view.getAllByTestId("downstream-reach-pub-row")[0]);
+    const total = within(row.getByTestId("downstream-reach-cell-total")).getByRole("link");
+    expect(total.textContent).toBe("14");
+    expect(total.getAttribute("href")).toBe(`${BASE}?${reachLinks(paramsOf("ctype=clinical&ctype=trial&basis=cy")).paperDocs("10000001", null)}`);
+    expect(queryOf(total.getAttribute("href")).getAll("ctype")).toEqual(["clinical", "trial"]);
+    const th = (sort: string) => view.getByTestId(`downstream-reach-sort-${sort}`).closest("th")!;
+    expect(th("cited").getAttribute("aria-sort")).toBe("descending");
+    expect(th("clinical").getAttribute("aria-sort")).toBe("none");
+    // The current column's link reverses it; another column's sorts by it, highest first.
+    expect(queryOf(view.getByTestId("downstream-reach-sort-cited").getAttribute("href")).get("order")).toBe("asc");
+    const byClinical = queryOf(view.getByTestId("downstream-reach-sort-clinical").getAttribute("href"));
+    expect([byClinical.get("sort"), byClinical.get("order")]).toEqual(["clinical", null]);
+    // Sort by offers the ticked types only.
+    const options = [...view.container.querySelectorAll<HTMLOptionElement>('select[name="sort"] option')].map((o) => o.value);
+    expect(options).toEqual(["cited", "clinical", "trial", "year", "oldest"]);
+    cleanup();
+    const asc = await page({ ctype: ["clinical", "trial"], basis: "cy", sort: "clinical", order: "asc" });
+    const clinical = asc.getByTestId("downstream-reach-sort-clinical");
+    expect(clinical.closest("th")!.getAttribute("aria-sort")).toBe("ascending");
+    // The rail keeps the order across a filter change.
+    const form = asc.getAllByTestId("downstream-reach-filters")[0];
+    expect(form.querySelector<HTMLInputElement>('input[type="hidden"][name="order"]')?.value).toBe("asc");
+    expect(queryOf(clinical.getAttribute("href")).get("order")).toBeNull();
+  });
+
+  it("author chips: three, picked by the person-type filter, then first and senior author; the rest behind +N more", async () => {
+    const a = (cwid: string, position: "first" | "middle" | "last", roleCategory: string) => ({ cwid, name: `Person ${cwid}`, position, roleCategory });
+    h.pubs.mockResolvedValue([
+      pub("10000001", {
+        clinical: 1,
+        authors: [a("m1", "first", "postdoc"), a("m2", "middle", "postdoc"), a("m3", "middle", "full_time_faculty"), a("m4", "middle", "postdoc"), a("m5", "last", "postdoc")],
+      }),
+    ]);
+    const view = await page({ type: "full_time_faculty", basis: "cy" });
+    const row = within(view.getAllByTestId("downstream-reach-pub-row")[0]);
+    const shown = () => row.getAllByTestId("hover-card").map((c) => c.getAttribute("data-cwid"));
+    expect(shown()).toEqual(["m3", "m1", "m5"]);
+    const more = row.getByTestId("author-pills-more");
+    expect([more.textContent, more.getAttribute("aria-expanded")]).toEqual(["+2 more", "false"]);
+    fireEvent.click(more);
+    expect(shown()).toEqual(["m3", "m1", "m5", "m2", "m4"]);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("only the ticked types have columns", async () => {
     const view = await page({ ctype: ["patent"], basis: "cy" });
     const heads = [...view.getByTestId("downstream-reach-publications").querySelectorAll("th")].map((th) => th.textContent);
-    expect(heads).toEqual(["Publication", "Stage", "Patents"]);
+    expect(heads).toEqual(["Publication", "Total▼", "Patents▼"]);
     cleanup();
     const reviews = await page({ ctype: ["review"], basis: "cy" });
     expect([...reviews.getByTestId("downstream-reach-publications").querySelectorAll("th")].map((th) => th.textContent)).toEqual([
       "Publication",
-      "Stage",
-      "Systematic reviews",
+      "Total▼",
+      "Systematic reviews▼",
     ]);
     // The headline keeps a figure for every type, on one wrapping row.
     expect(reviews.getByTestId("downstream-reach-tile-review").textContent).toBe("2,222");
@@ -386,7 +447,7 @@ describe("report 27 page", () => {
     for (const cell of view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")) {
       expectEveryNumberLinked(cell as HTMLElement);
     }
-    expect(view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")).toHaveLength(10);
+    expect(view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")).toHaveLength(12);
   });
 
   it("the every-publication listing says what it is and how to leave it", async () => {
@@ -518,15 +579,18 @@ describe("report 27 page", () => {
     const rail = within(view.getAllByTestId("downstream-reach-rail")[0]);
     const boxes = (testId: string) =>
       [...rail.getByTestId(testId).querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].map((i) => [i.name, i.value, i.checked]);
+    // Every option the filter includes is ticked: no "none = all" state (spec E2).
     expect(boxes("downstream-reach-ctype")).toEqual([
-      ["ctype", "clinical", false],
-      ["ctype", "trial", false],
-      ["ctype", "policy", false],
-      ["ctype", "review", false],
-      ["ctype", "patent", false],
+      ["", "on", true],
+      ["ctype", "clinical", true],
+      ["ctype", "trial", true],
+      ["ctype", "policy", true],
+      ["ctype", "review", true],
+      ["ctype", "patent", true],
       ["own", "out", true],
     ]);
     expect(boxes("downstream-reach-stage")).toEqual([
+      ["", "on", false],
       ["stage", "T0", true],
       ["stage", "T1", true],
       ["stage", "T2", false],
@@ -557,15 +621,16 @@ describe("report 27 page", () => {
     const rail = within(view.getAllByTestId("downstream-reach-rail")[0]);
     expect(rail.getByTestId<HTMLInputElement>("downstream-reach-own").checked).toBe(false);
     expect(view.getByTestId("downstream-reach-chips").textContent).toContain("Authors' own work:Included");
-    expect(view.getByTestId("downstream-reach-subtitle").textContent).toContain("at every stage");
-    expect(view.getByTestId("downstream-reach-subtitle").textContent).toContain("the authors' own work counted");
+    // Every stage: the stage group is all ticked, and no Stage chip.
+    const stage = rail.getByTestId("downstream-reach-stage");
+    expect([...stage.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every((i) => i.checked)).toBe(true);
+    expect(view.getByTestId("downstream-reach-chips").textContent).not.toContain("Stage:");
   });
 
   it("a unit administrator's units are named, and offered alone", async () => {
     h.scope.value = ["dept:N1"];
     const view = await page();
     expect(view.getAllByTestId("downstream-reach-scope")[0].textContent).toContain("Department of Examples");
-    expect(view.getByTestId("downstream-reach-subtitle").textContent).toContain("Department of Examples");
     expect(view.getByTestId("downstream-reach-chips").textContent).toContain("Unit:Department of Examples");
   });
 
@@ -596,5 +661,39 @@ describe("report 27 page", () => {
     ]) {
       expect(note).toContain(said);
     }
+  });
+});
+
+describe("the rail's checkbox groups (spec E2)", () => {
+  it('"All" ticks every option; the last option, or "All" with everything ticked, cannot be cleared', async () => {
+    const { AtLeastOneChecklist } = await import("@/components/edit/reports/downstream-reach-client");
+    const submits = vi.fn();
+    const view = render(
+      <form onChange={submits}>
+        <AtLeastOneChecklist
+          name="g"
+          options={[
+            { value: "a", label: "A" },
+            { value: "b", label: "B" },
+          ]}
+          selected={["a"]}
+        />
+      </form>,
+    );
+    const [all, a, b] = view.getAllByRole("checkbox") as HTMLInputElement[];
+    expect([all.checked, a.checked, b.checked]).toEqual([false, true, false]);
+    // The last ticked option: the click is cancelled, nothing submits, and the note says why.
+    fireEvent.click(a);
+    expect(a.checked).toBe(true);
+    expect(submits).not.toHaveBeenCalled();
+    expect(view.getByRole("status").textContent).toBe("Choose at least one.");
+    // "All" ticks the rest before the form hears the change.
+    fireEvent.click(all);
+    expect([all.checked, a.checked, b.checked]).toEqual([true, true, true]);
+    expect(submits).toHaveBeenCalledTimes(1);
+    // "All" again would clear everything: refused.
+    fireEvent.click(all);
+    expect([all.checked, a.checked, b.checked]).toEqual([true, true, true]);
+    expect(submits).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 
-import { isEligibleAreaGrant, isEligibleAreaTrial, type AreaGrantCandidate } from "@/lib/area-signals";
+import {
+  isAreaInputGrant,
+  isEligibleAreaGrant,
+  isEligibleAreaTrial,
+  type AreaGrantCandidate,
+  type AreaGrantInputCandidate,
+} from "@/lib/area-signals";
 import {
   AREA_INPUT_PK,
   areaTextKey,
@@ -94,6 +100,78 @@ describe("isEligibleAreaGrant (pilot filters, ported verbatim)", () => {
 
   it("keeps a plain 'meeting' title: the pilot regex names only 'annual meeting'", () => {
     expect(isEligibleAreaGrant(grant({ title: "Meeting the needs of example patients" }))).toBe(true);
+  });
+});
+
+describe("isAreaInputGrant (what is sent to ReciterAI: a superset of the ranking's rule)", () => {
+  const day = (d: string) => new Date(`${d}T00:00:00Z`);
+  const input = (over: Partial<AreaGrantInputCandidate> = {}): AreaGrantInputCandidate => ({
+    ...grant(),
+    endDate: new Date("2027-06-30T00:00:00Z"),
+    intakeType: "Grant",
+    ...over,
+  });
+
+  it("sends every row the ranking counts", () => {
+    expect(isAreaInputGrant(input())).toBe(true);
+    // Not a report 26 program type, but the ranking counts it, so it keeps its key.
+    expect(isAreaInputGrant(input({ programType: "Cooperative Agreement" }))).toBe(true);
+  });
+
+  it("sends a RePORTER row", () => {
+    const g = input({ source: "RePORTER" });
+    expect(isEligibleAreaGrant(g)).toBe(false);
+    expect(isAreaInputGrant(g)).toBe(true);
+  });
+
+  it("sends a grant that started before 2020 and was active in 2020 or later", () => {
+    const g = input({ startDate: day("2017-09-01"), endDate: day("2020-01-01") });
+    expect(isEligibleAreaGrant(g)).toBe(false);
+    expect(isAreaInputGrant(g)).toBe(true);
+    expect(
+      isAreaInputGrant(input({ startDate: day("2015-09-01"), endDate: day("2019-12-31") })),
+    ).toBe(false);
+  });
+
+  it("sends report 26 funding awards the pilot filters drop (contract with funding, training mechanism)", () => {
+    expect(isAreaInputGrant(input({ mechanism: null, programType: "Contract with funding" }))).toBe(true);
+    expect(isAreaInputGrant(input({ mechanism: "T32", programType: "Grant" }))).toBe(true);
+  });
+
+  it("still excludes Co-I and Key Personnel, on any source", () => {
+    for (const role of ["Co-I", "Key Personnel"]) {
+      expect(isAreaInputGrant(input({ role }))).toBe(false);
+      expect(isAreaInputGrant(input({ role, source: "RePORTER" }))).toBe(false);
+    }
+  });
+
+  it("excludes agreements and non-funding program types outside the ranking's rule", () => {
+    const old = { startDate: new Date("2018-01-01T00:00:00Z") };
+    expect(isAreaInputGrant(input({ ...old, intakeType: "Material Transfer Agreement" }))).toBe(false);
+    expect(isAreaInputGrant(input({ ...old, intakeType: "Outgoing Data Use Agreement" }))).toBe(false);
+    expect(isAreaInputGrant(input({ ...old, intakeType: "Consulting Agreement" }))).toBe(false);
+    expect(isAreaInputGrant(input({ ...old, programType: "BioPharma Alliance Agreement" }))).toBe(false);
+    expect(isAreaInputGrant(input({ ...old, programType: "Training" }))).toBe(false);
+  });
+
+  it("a RePORTER row gets a text key and an item", () => {
+    const row: GrantInputRow = {
+      id: "REPORTER-example-1",
+      title: "Mechanisms of synthetic protein folding in model tissue",
+      abstract: null,
+      startDate: new Date("2016-04-01T00:00:00Z"),
+      primeSponsor: "NIH",
+      directSponsor: null,
+      nihIc: "NCI",
+      mechanism: "R01",
+    };
+    const plan = buildInputPlan([row], [], new Date("2026-11-28T00:00:00Z"));
+    expect(plan.grantKeys.get(row.id)).toBe(grantTextKey(row));
+    expect(plan.items.get(`grant#${grantTextKey(row)}`)).toMatchObject({
+      kind: "grant",
+      mode: "title",
+      start_year: 2016,
+    });
   });
 });
 
