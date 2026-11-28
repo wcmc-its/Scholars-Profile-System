@@ -306,8 +306,8 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     redirectTo: portfolioCwidRedirect,
     render: renderTranslationalPortfolioReport,
   },
-  // Downstream reach (clinical studies, trials, guidelines and policy, patents
-  // citing a paper). Report 24's access rule; 404s while
+  // Downstream reach (clinical studies, trials, guidelines and policy,
+  // systematic reviews, patents citing a paper). Report 24's access rule; 404s while
   // DOWNSTREAM_REACH_REPORT is off (`canView` checks, before any read).
   "27": {
     n: "27",

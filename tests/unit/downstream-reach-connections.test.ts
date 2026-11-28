@@ -101,6 +101,7 @@ import {
   describeReachCriteria,
   loadReach,
   parseReachParams,
+  REACH_TYPES,
   reachChips,
   reachLinks,
   reachQueryString,
@@ -906,7 +907,7 @@ describe("the Bibliometrics tab's request", () => {
 
   it("part=reach carries the Connections line beside the block's own lines", async () => {
     const body = await get(`cwid=${S}&part=reach`);
-    expect(body.reach.lines).toHaveLength(4);
+    expect(body.reach.lines.map((l: { type: string }) => l.type)).toEqual([...REACH_TYPES]);
     expect(body.reach.connections.colleagues).toBe(4);
     expect(body.reach.connections.href).toBe(`${REACH_REPORT_PATH}?person=${S}&stage=any&basis=cy&view=connections`);
   });
@@ -916,7 +917,7 @@ describe("the Bibliometrics tab's request", () => {
     expect({ ...withLine, connections: undefined }).toEqual({ ...(await loadScholarReach(S, SUPER)), connections: undefined });
     // An inactive scholar: the block, no line.
     const inactive = (await get("cwid=eee0005&part=reach")).reach;
-    expect(inactive.lines).toHaveLength(4);
+    expect(inactive.lines.map((l: { type: string }) => l.type)).toEqual([...REACH_TYPES]);
     expect(inactive).not.toHaveProperty("connections");
   });
 

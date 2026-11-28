@@ -94,6 +94,7 @@ import {
   REACH_DOCS_PAPER_CEILING,
   REACH_LIST_CAP,
   REACH_PAGE_SIZE,
+  REACH_REVIEW_RULE,
   REACH_SORT_LABEL,
   REACH_SOURCES,
   REACH_TYPE_CITED,
@@ -131,6 +132,7 @@ const TYPE_NOUN: Record<ReachType, [string, string]> = {
   clinical: ["clinical study", "clinical studies"],
   trial: ["registered trial", "registered trials"],
   policy: ["guideline or policy document", "guideline and policy documents"],
+  review: ["systematic review", "systematic reviews"],
   patent: ["invention", "inventions"],
 };
 const noun = (n: number, [one, many]: [string, string]) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -713,7 +715,8 @@ export async function renderDownstreamReachReport({
                   { docSort: "papers" },
                   <>
                     <span className="text-muted-foreground flex-[1_1_220px] text-[13px]">
-                      One row per clinical study, registered trial, guideline or policy document, or invention
+                      One row per clinical study, registered trial, guideline or policy document, systematic
+                      review, or invention
                       (related patents are one row).
                     </span>
                     <SortSelect<ReachDocSort> name="dsort" value={params.docSort} options={REACH_DOC_SORT_LABEL} />
@@ -768,7 +771,7 @@ export async function renderDownstreamReachReport({
             )}
           </ReportCard>
           <p className="text-muted-foreground max-w-[760px] text-[13px]" role="note">
-            {REACH_COUNTING_RULE} Every number opens the list of what it counts: a count on a paper opens its
+            {REACH_COUNTING_RULE} {REACH_REVIEW_RULE} Every number opens the list of what it counts: a count on a paper opens its
             citing documents, a count on a citing document or a person opens the papers. People are listed
             only as first or senior author, with at least {MIN_REACH_PAPERS} such papers, by count. Stages are
             assigned by a model and not reviewed; a later stage is not a better one. {REACH_SOURCES}
