@@ -823,18 +823,6 @@ export function sortReachPublications<T extends ReachPubCounts>(
   });
 }
 
-/** Every publication in scope, cited or not: the "of M" in the first tile.
- *  The same scope as `loadScopePage`, which lists them.
- *
- *  `STRAIGHT_JOIN` pins the order as written, as in `okSql`: the publications
- *  under their own filters, then each one's authorships by index. It changes
- *  the plan and not the result. Left to itself MySQL drove this from a full
- *  scan of `publication_author` (measured on staging: `pa` type ALL, 299,227
- *  rows; 3.0 to 5.2 s for T0 and T1 with no year filter, 4.3 to 6.9 s for
- *  every stage), while the counts query beside it, driven from `publication`,
- *  answered the default view in under a second. Do not rewrite the authorship
- *  test as `EXISTS` or `IN (subquery)`: the optimizer turns either into a
- *  semi-join that scans `publication_author` first again (6 to 13 s). */
 // ---------------------------------------------------------------------------
 // Baseline (spec D3)
 // ---------------------------------------------------------------------------
@@ -866,6 +854,18 @@ export const reachShare = (cited: number, scope: number): string =>
 export const reachBaselineLabel = (p: Pick<ReachParams, "scope">): string =>
   p.scope === null ? "WCM overall" : "All your units";
 
+/** Every publication in scope, cited or not: the "of M" in the first tile.
+ *  The same scope as `loadScopePage`, which lists them.
+ *
+ *  `STRAIGHT_JOIN` pins the order as written, as in `okSql`: the publications
+ *  under their own filters, then each one's authorships by index. It changes
+ *  the plan and not the result. Left to itself MySQL drove this from a full
+ *  scan of `publication_author` (measured on staging: `pa` type ALL, 299,227
+ *  rows; 3.0 to 5.2 s for T0 and T1 with no year filter, 4.3 to 6.9 s for
+ *  every stage), while the counts query beside it, driven from `publication`,
+ *  answered the default view in under a second. Do not rewrite the authorship
+ *  test as `EXISTS` or `IN (subquery)`: the optimizer turns either into a
+ *  semi-join that scans `publication_author` first again (6 to 13 s). */
 export async function loadScopeTotal(p: ReachParams): Promise<number> {
   const raw = await db.read.$queryRaw<{ n: Num }[]>`
     SELECT STRAIGHT_JOIN COUNT(DISTINCT p.pmid) AS n
