@@ -426,6 +426,7 @@ describe("BibliometricsTool", () => {
     lines: [
       { type: "clinical", label: "Clinical studies", papers: 1204, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=clinical&basis=cy" },
       { type: "trial", label: "Registered trials", papers: 0, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=trial&basis=cy" },
+      { type: "review", label: "Systematic reviews", papers: 38, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=review&basis=cy" },
       { type: "patent", label: "Patents", papers: 1, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=patent&basis=cy" },
     ],
   };
@@ -462,6 +463,7 @@ describe("BibliometricsTool", () => {
     expect([...block.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("th")?.textContent)).toEqual([
       "Clinical studies",
       "Registered trials",
+      "Systematic reviews",
       "Patents",
     ]);
     // A zero is a line like any other, and still a link to its (empty) list.
@@ -476,6 +478,9 @@ describe("BibliometricsTool", () => {
     // No number in the block outside a link.
     expect([...block.querySelectorAll("td")].every((td) => td.textContent === td.querySelector("a")?.textContent)).toBe(true);
     expect(screen.getByRole("link", { name: "1 publication cited by patents, in the Downstream reach report" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "38 publications cited by systematic reviews, in the Downstream reach report" }).getAttribute("href")).toBe(
+      "/edit/reports/27?person=zzz9001&stage=any&ctype=review&basis=cy",
+    );
     expect(block.textContent).toContain(REACH.note);
   });
 

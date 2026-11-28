@@ -67,7 +67,9 @@ import {
   parseReachParams,
   peoplePositions,
   REACH_LEVELS,
+  REACH_REVIEW_RULE,
   REACH_SOURCES,
+  REACH_TYPE_LABEL,
   REACH_TYPES,
   reachChips,
   reachLinks,
@@ -98,6 +100,7 @@ import {
   SCHOLAR_REACH_NOTE,
   scholarReachParams,
 } from "@/lib/edit/downstream-reach-entry";
+import { POLICY_LEVELS, POLICY_REVIEWS_CAP } from "@/lib/citations/policy-rollup";
 import { PATENT_SOURCES } from "@/lib/edit/patent-citations-report";
 import { POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import { REPORT_META_DEFAULTS } from "@/lib/edit/report-meta";
@@ -197,8 +200,8 @@ const isOwn = (l: Pub["links"][number]) => l.own === true && ["clinical", "trial
 const counted = (pub: Pub, p: ReachParams) => pub.links.filter((l) => p.includeOwn || !isOwn(l));
 function countsOf(pub: Pub, p: ReachParams): ReachCounts {
   const keys = (t: ReachType) =>
-    new Set(counted(pub, p).map((l) => doc(l.doc)).filter((d) => REACH_LEVELS[t].includes(d.level)).map(unitKey)).size;
-  return { clinical: keys("clinical"), trial: keys("trial"), policy: keys("policy"), patent: keys("patent") };
+    new Set(counted(pub, p).map((l) => doc(l.doc)).filter((d) => (REACH_LEVELS[t] as readonly string[]).includes(d.level)).map(unitKey)).size;
+  return Object.fromEntries(REACH_TYPES.map((t) => [t, keys(t)])) as ReachCounts;
 }
 const inUnits = (s: Scholar, values: readonly string[]) => values.some((v) => v === `dept:${s.dept}`);
 function matchingAuthors(pub: Pub, p: ReachParams, positions = p.positions, people = p.people) {
@@ -229,7 +232,8 @@ function pubLevel(pub: Pub, p: ReachParams): boolean {
 const inScope = (p: ReachParams, positions = p.positions) =>
   fx.pubs.filter((pub) => pubLevel(pub, p) && matchingAuthors(pub, p, positions).length > 0);
 const citedBy = (c: ReachCounts, types: readonly ReachType[]) => types.some((t) => c[t] > 0);
-const countCols = (c: ReachCounts) => ({ n_clinical: c.clinical, n_trial: c.trial, n_policy: c.policy, n_patent: c.patent });
+const countCols = (c: ReachCounts) => Object.fromEntries(REACH_TYPES.map((t) => [`n_${t}`, c[t]]));
+const zeros = (): ReachCounts => Object.fromEntries(REACH_TYPES.map((t) => [t, 0])) as ReachCounts;
 
 /** The Citing documents listing, as `docGroupsSql` defines it. */
 function docGroups(p: ReachParams) {
@@ -269,7 +273,7 @@ function answer(text: string, values: unknown[]): unknown[] {
       .filter((d) => values.includes(d.id))
       .map((d) => ({ id: d.id, title: d.title, url: `https://example.org/doc/${d.id}`, level: d.level, external_id: `x${d.id}`, journal: "Journal of Examples", journal_abbrev: null, issuing_body: null }));
   }
-  if (text.includes("AS reviews")) {
+  if (text.includes("AS ranked")) {
     return inScope({ ...p, people: [], positions: [] })
       .filter((pub) => values.includes(pub.pmid))
       .map((pub) => {
@@ -280,8 +284,9 @@ function answer(text: string, values: unknown[]): unknown[] {
           clinical: distinct(docs.filter((d) => d.level === "clinical").map((d) => d.id)),
           trial: distinct(docs.filter((d) => d.level === "trial").map((d) => d.id)),
           patent: distinct(docs.filter((d) => d.level === "patent").map((d) => d.dedupKey)),
-          policy: distinct(docs.filter((d) => REACH_LEVELS.policy.includes(d.level)).map((d) => d.dedupKey)),
-          reviews: distinct(docs.filter((d) => d.level === "review").map((d) => d.dedupKey)),
+          policy: distinct(docs.filter((d) => (REACH_LEVELS.policy as readonly string[]).includes(d.level)).map((d) => d.dedupKey)),
+          review: distinct(docs.filter((d) => (REACH_LEVELS.review as readonly string[]).includes(d.level)).map((d) => d.dedupKey)),
+          ranked: distinct(docs.filter((d) => POLICY_LEVELS.includes(d.level as never)).map((d) => d.dedupKey)),
         };
       });
   }
@@ -320,7 +325,7 @@ function answer(text: string, values: unknown[]): unknown[] {
       const c = countsOf(pub, p);
       if (!citedBy(c, tickedTypes(p))) continue;
       for (const a of matchingAuthors(pub, p, positions)) {
-        const r = rows.get(a.cwid) ?? { papers: 0, clinical: 0, trial: 0, policy: 0, patent: 0 };
+        const r = rows.get(a.cwid) ?? { papers: 0, ...zeros() };
         rows.set(a.cwid, r);
         r.papers += 1;
         for (const t of REACH_TYPES) if (c[t] > 0) r[t] += 1;
@@ -407,7 +412,7 @@ afterEach(() => vi.unstubAllEnvs());
 // ---------------------------------------------------------------------------
 
 describe("parseReachParams", () => {
-  it("a bare URL: T0 and T1 papers since 2020, all four citing types, own work left out", () => {
+  it("a bare URL: T0 and T1 papers since 2020, all five citing types, own work left out", () => {
     expect(parse()).toEqual({
       types: [],
       units: [],
@@ -469,7 +474,7 @@ describe("parseReachParams", () => {
   it("reads each filter, drops what it does not know, and keeps ranges in order", () => {
     const p = parse(
       "type=full_time_faculty&unit=dept:N1&person=aaa1001&person=bad%20one&pos=last&pos=nope&basis=fy&from=2012&to=2001" +
-        "&stage=T0&ctype=patent&ctype=clinical&ctype=review&own=in&area=area_a&pmid=101&doc=7&doc=7&doc=abc&doc=0" +
+        "&stage=T0&ctype=patent&ctype=clinical&ctype=reviews&own=in&area=area_a&pmid=101&doc=7&doc=7&doc=abc&doc=0" +
         "&show=all&view=documents&sort=year&dsort=recent&q=%20kinase%20&page=4",
     );
     expect(p).toMatchObject({
@@ -592,6 +597,14 @@ describe("the flag", () => {
     ]) {
       expect(about).toContain(said);
     }
+    // Guidelines and policy no longer takes in systematic reviews; they have a line of their own.
+    const policyLine = about.match(/<li><strong>Guidelines and policy<\/strong>[^]*?<\/li>/)![0];
+    expect(policyLine).not.toMatch(/review/i);
+    expect(about).toMatch(/<li><strong>Systematic reviews<\/strong>: PubMed articles typed Systematic Review or Meta-Analysis \(by publication type\), as the policy import classifies them/);
+    expect(REACH_REVIEW_RULE).toContain("Systematic reviews are counted on their own");
+    const criteria = new Map(describeReachCriteria({ ...parse(), scope: null }, new Date(0)));
+    expect(criteria.get("Citing types")).toBe(REACH_REVIEW_RULE);
+    expect(criteria.get("Sources")).toContain("PubMed (systematic reviews)");
   });
 });
 
@@ -626,10 +639,11 @@ describe("where the counts come from", () => {
     const counts = texts.find((t) => t.includes("AS n_clinical"))!;
     expect(counts).toContain("MAX(p.clinical_cite_count) AS n_clinical");
     expect(counts).toContain("MAX(p.trial_count) AS n_trial");
-    expect(counts).toContain("MAX((p.authority_count + p.guideline_count + p.consensus_count + p.review_count)) AS n_policy");
+    expect(counts).toContain("MAX((p.authority_count + p.guideline_count + p.consensus_count)) AS n_policy");
+    expect(counts).toContain("MAX(p.review_count) AS n_review");
     expect(counts).toContain("MAX(p.patent_family_count) AS n_patent");
     expect(counts).toContain(
-      "WHERE (p.clinical_cite_count > 0 OR p.trial_count > 0 OR (p.authority_count + p.guideline_count + p.consensus_count + p.review_count) > 0 OR p.patent_family_count > 0)",
+      "WHERE (p.clinical_cite_count > 0 OR p.trial_count > 0 OR (p.authority_count + p.guideline_count + p.consensus_count) > 0 OR p.review_count > 0 OR p.patent_family_count > 0)",
     );
     expect(counts).toContain("GROUP BY p.pmid");
   });
@@ -670,7 +684,8 @@ describe("where the counts come from", () => {
     expect(counts.text).toContain("COUNT(DISTINCT CASE WHEN d.level = 'clinical' THEN d.id END) AS n_clinical");
     expect(counts.text).toContain("COUNT(DISTINCT CASE WHEN d.level = 'trial' THEN d.dedup_key END) AS n_trial");
     expect(counts.text).toContain("COUNT(DISTINCT CASE WHEN d.level = 'patent' THEN d.dedup_key END) AS n_patent");
-    expect(counts.text).toContain("THEN CONCAT(d.level, '|', d.dedup_key) END) AS n_policy");
+    expect(counts.text).toContain("COUNT(DISTINCT CASE WHEN d.level IN (?,?,?) THEN CONCAT(d.level, '|', d.dedup_key) END) AS n_policy");
+    expect(counts.text).toContain("COUNT(DISTINCT CASE WHEN d.level IN (?) THEN CONCAT(d.level, '|', d.dedup_key) END) AS n_review");
     // The publications lead: `ok` is one row per publication in scope, with the authorship test and
     // the publication filters inside it, so neither is evaluated per link.
     expect(counts.text).toMatch(
@@ -769,10 +784,7 @@ describe("where the counts come from", () => {
       pmid,
       year,
       stage: "T0" as const,
-      clinical: 0,
-      trial: 0,
-      policy: 0,
-      patent: 0,
+      ...zeros(),
       ...c,
     });
     const rows = [row("1", 2021, { clinical: 2, patent: 9 }), row("2", 2023, { clinical: 5 }), row("3", 2022, { clinical: 5 })];
@@ -790,12 +802,14 @@ describe("the fixture, read through the loaders", () => {
     expect(data.pubs.map((r) => r.pmid).sort()).toEqual(["101", "102", "104", "109", "111", "113", "114"]);
     const byPmid = new Map(data.pubs.map((r) => [r.pmid, r]));
     // One clinical study (the other is the authors' own), one trial, one invention in two documents.
-    expect(byPmid.get("101")).toMatchObject({ stage: "T0", clinical: 1, trial: 1, policy: 0, patent: 1 });
-    // A guideline printed twice counts once; with the review that is two.
-    expect(byPmid.get("102")).toMatchObject({ stage: "T1", clinical: 1, policy: 2 });
+    expect(byPmid.get("101")).toMatchObject({ stage: "T0", clinical: 1, trial: 1, policy: 0, review: 0, patent: 1 });
+    // A guideline printed twice counts once; the review is a type of its own.
+    expect(byPmid.get("102")).toMatchObject({ stage: "T1", clinical: 1, policy: 1, review: 1 });
+    // Cited by a systematic review and no guideline: under Systematic reviews only.
+    expect(byPmid.get("111")).toMatchObject({ policy: 0, review: 1, patent: 1 });
     // The authors' own trial is not counted.
     expect(byPmid.get("104")).toMatchObject({ trial: 0, patent: 1 });
-    expect(data.typePapers).toEqual({ clinical: 5, trial: 2, policy: 2, patent: 3 });
+    expect(data.typePapers).toEqual({ clinical: 5, trial: 2, policy: 1, review: 2, patent: 3 });
   });
 
   it("own work included: the own article and the own trial count", async () => {
@@ -810,7 +824,7 @@ describe("the fixture, read through the loaders", () => {
     const { data } = await open("view=people");
     // Ada: 101, 102, 104, 111 (109 is a middle authorship). Ben has two cited first/senior papers.
     expect(data.people!.map((r) => [r.cwid, r.papers])).toEqual([["aaa1001", 4]]);
-    expect(data.people![0]).toMatchObject({ name: "Ada Example", clinical: 2, trial: 1, policy: 2, patent: 3 });
+    expect(data.people![0]).toMatchObject({ name: "Ada Example", clinical: 2, trial: 1, policy: 1, review: 2, patent: 3 });
     expect(peoplePositions(parse())).toEqual(["first", "last"]);
     expect(peoplePositions(parse("pos=last&pos=middle"))).toEqual(["last"]);
     // Middle authors only: nobody qualifies, and no query is needed to say so.
@@ -942,20 +956,20 @@ describe("the rule's edges", () => {
 
   it("the tiles are folded from the rows the list is cut from", () => {
     const rows: ReachCounts[] = [
-      { clinical: 3, trial: 0, policy: 0, patent: 0 },
-      { clinical: 0, trial: 0, policy: 1, patent: 2 },
-      { clinical: 1, trial: 1, policy: 0, patent: 0 },
+      { ...zeros(), clinical: 3 },
+      { ...zeros(), policy: 1, patent: 2 },
+      { ...zeros(), clinical: 1, trial: 1, review: 4 },
     ];
     const tiles = papersByType(rows);
     for (const t of REACH_TYPES) expect(tiles[t]).toBe(listedFor(rows, [t]).length);
-    expect(tiles).toEqual({ clinical: 2, trial: 1, policy: 1, patent: 1 });
+    expect(tiles).toEqual({ clinical: 2, trial: 1, policy: 1, review: 1, patent: 1 });
     expect(listedFor(rows, ["trial", "patent"])).toHaveLength(2);
   });
 
   it("the every-publication listing pages in SQL and takes its counts from the cited rows", async () => {
     const { data } = await open("show=all");
     expect(data.pubs).toHaveLength(data.scopeTotal);
-    expect(data.pubs.find((r) => r.pmid === "108")).toMatchObject({ clinical: 0, trial: 0, policy: 0, patent: 0 });
+    expect(data.pubs.find((r) => r.pmid === "108")).toMatchObject(zeros());
     expect(data.pubs.find((r) => r.pmid === "101")).toMatchObject({ clinical: 1, patent: 1 });
     const page = calls().find((c) => c.text.includes("ORDER BY year DESC, p.pmid DESC"))!;
     expect(page.text).toContain("LIMIT ? OFFSET ?");
@@ -1031,14 +1045,27 @@ describe("the rule's edges", () => {
 });
 
 describe("does the publication modal list exactly what a cell counts?", () => {
-  const on = { clinical: true, trial: true, policy: true, patent: true };
-  const modal = (over: Partial<ModalCounts> = {}): ModalCounts => ({ clinical: 0, trial: 0, patent: 0, policy: 0, reviews: 0, ...over });
+  const on = { clinical: true, trial: true, policy: true, review: true, patent: true };
+  /** `ranked` defaults to no document at both a policy level and the review level. */
+  const modal = (over: Partial<ModalCounts> = {}): ModalCounts => {
+    const m = { clinical: 0, trial: 0, patent: 0, policy: 0, review: 0, ...over };
+    return { ranked: m.policy + m.review, ...m };
+  };
 
   it("yes when the modal's list is the counted documents, whole", () => {
     expect(modalListsExactly("clinical", 5200, modal({ clinical: 5200 }), on)).toBe(true);
     expect(modalListsExactly("trial", 3, modal({ trial: 3 }), on)).toBe(true);
     expect(modalListsExactly("patent", 50, modal({ patent: 50 }), on)).toBe(true);
-    expect(modalListsExactly("policy", 4, modal({ policy: 4, reviews: 2 }), on)).toBe(true);
+    // The "Guidelines and policy" tab counts no review, so the reviews beside it do not matter.
+    expect(modalListsExactly("policy", 4, modal({ policy: 4, review: 2 }), on)).toBe(true);
+    expect(modalListsExactly("policy", 4, modal({ policy: 4, review: 900 }), on)).toBe(true);
+    expect(modalListsExactly("review", 3, modal({ policy: 2, review: 3 }), on)).toBe(true);
+    expect(modalListsExactly("review", POLICY_REVIEWS_CAP, modal({ review: POLICY_REVIEWS_CAP }), on)).toBe(true);
+  });
+
+  it("no when one document stands at a policy level and as a review: the modal lists it once, in one group", () => {
+    expect(modalListsExactly("policy", 2, modal({ policy: 2, review: 1, ranked: 2 }), on)).toBe(false);
+    expect(modalListsExactly("review", 1, modal({ policy: 2, review: 1, ranked: 2 }), on)).toBe(false);
   });
 
   it("no when the modal would also list the authors' own work, which the count left out", () => {
@@ -1049,11 +1076,14 @@ describe("does the publication modal list exactly what a cell counts?", () => {
   it("no when the modal cuts its list at a cap", () => {
     expect(modalListsExactly("trial", 51, modal({ trial: 51 }), on)).toBe(false);
     expect(modalListsExactly("patent", 1600, modal({ patent: 1600 }), on)).toBe(false);
-    expect(modalListsExactly("policy", 150, modal({ policy: 150, reviews: 101 }), on)).toBe(false);
+    expect(modalListsExactly("review", POLICY_REVIEWS_CAP + 1, modal({ review: POLICY_REVIEWS_CAP + 1 }), on)).toBe(false);
   });
 
   it("no when the modal's group is switched off, the paper was not checked, or there is nothing to list", () => {
     expect(modalListsExactly("clinical", 2, modal({ clinical: 2 }), { ...on, clinical: false })).toBe(false);
+    expect(modalListsExactly("review", 2, modal({ review: 2 }), { ...on, review: false })).toBe(false);
+    // A count that is not the modal's (a guideline in two journals at two levels counts twice).
+    expect(modalListsExactly("policy", 2, modal({ policy: 1 }), on)).toBe(false);
     expect(modalListsExactly("clinical", 2, undefined, on)).toBe(false);
     expect(modalListsExactly("clinical", 0, modal(), on)).toBe(false);
   });
@@ -1073,7 +1103,7 @@ describe("does the publication modal list exactly what a cell counts?", () => {
     // 106 belongs to another department.
     expect([...got.keys()].sort()).toEqual(["101", "104"]);
     // Both clinical articles and both patent documents (one invention) are in the modal's list.
-    expect(got.get("101")).toEqual({ clinical: 2, trial: 1, patent: 1, policy: 0, reviews: 0 });
+    expect(got.get("101")).toEqual({ clinical: 2, trial: 1, patent: 1, policy: 0, review: 0, ranked: 0 });
     expect(got.get("104")).toMatchObject({ trial: 1 });
     const { text, values } = calls().at(-1)!;
     expect(text).toContain("WHERE p.pmid IN (?,?,?)");
@@ -1082,6 +1112,131 @@ describe("does the publication modal list exactly what a cell counts?", () => {
     h.queryRaw.mockClear();
     expect((await loadModalCounts(cur, [])).size).toBe(0);
     expect(h.queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("systematic reviews are a citing type of their own (plan decision 10)", () => {
+  it("the two ranked types split report 24's four levels between them, with nothing in both", () => {
+    expect(REACH_LEVELS.policy).toEqual(["authority", "guideline", "consensus"]);
+    expect(REACH_LEVELS.review).toEqual(["review"]);
+    expect([...REACH_LEVELS.policy, ...REACH_LEVELS.review].sort()).toEqual([...POLICY_LEVELS].sort());
+    expect(REACH_TYPES).toEqual(["clinical", "trial", "policy", "review", "patent"]);
+    expect(REACH_TYPE_LABEL.review).toBe("Systematic reviews");
+    expect(reachTypeOfLevel("review")).toBe("review");
+    for (const l of REACH_LEVELS.policy) expect(reachTypeOfLevel(l)).toBe("policy");
+  });
+
+  it("Guidelines and policy counts no systematic review, and Systematic reviews counts nothing else", async () => {
+    for (const own of ["", "&own=in"]) {
+      for (const [t, levels] of [["policy", REACH_LEVELS.policy], ["review", REACH_LEVELS.review]] as const) {
+        const { data } = await open(`view=documents&stage=any&ctype=${t}${own}`);
+        expect(data.docs.length, t).toBeGreaterThan(0);
+        for (const d of data.docs) {
+          expect(levels as readonly string[], `${t} ${d.level}`).toContain(d.level);
+          expect(d.type).toBe(t);
+        }
+      }
+    }
+    // The per-paper counts, against the fixture: 102 has one guideline (in two journals) and one review.
+    const { data } = await open("stage=any");
+    const r102 = data.pubs.find((r) => r.pmid === "102")!;
+    expect([r102.policy, r102.review]).toEqual([1, 1]);
+  });
+
+  it("a paper cited only by a systematic review is under Systematic reviews and not under Guidelines and policy", async () => {
+    const reviews = await open("ctype=review");
+    const policy = await open("ctype=policy");
+    expect(reviews.data.pubs.map((r) => r.pmid)).toContain("111");
+    expect(policy.data.pubs.map((r) => r.pmid)).not.toContain("111");
+    expect(reviews.data.typePapers).toEqual(policy.data.typePapers);
+    expect(reviews.data.typePapers).toMatchObject({ policy: 1, review: 2 });
+    // Its Systematic reviews cell opens a list of one review; no Guidelines and policy cell has a count.
+    const row = reviews.data.pubs.find((r) => r.pmid === "111")!;
+    expect(row).toMatchObject({ policy: 0, review: 1 });
+    expect(await listLength(reachLinks(reviews.p).paperDocs("111", "review"))).toBe(1);
+    expect(await listLength(reachLinks(reviews.p).paperDocs("111", "policy"))).toBe(0);
+  });
+
+  it("an old link's ctype=policy still opens, and now means guidelines and policy without reviews", async () => {
+    const old = parse("ctype=policy&stage=T0&stage=T1&from=2020");
+    expect(old.ctypes).toEqual(["policy"]);
+    expect(tickedTypes(old)).toEqual(["policy"]);
+    expect(reachQueryString(old)).toBe("stage=T0&stage=T1&ctype=policy&basis=cy&from=2020");
+    const { data } = await open("ctype=policy&stage=T0&stage=T1&from=2020");
+    expect(data.pubs.map((r) => r.pmid)).toEqual(["102"]);
+    // `review` is a value of its own and round-trips; no ctype is all five.
+    const both = parse("ctype=review&ctype=policy");
+    expect(both.ctypes).toEqual(["policy", "review"]);
+    expect(parse(reachQueryString(both))).toEqual(both);
+    expect(tickedTypes(parse())).toEqual(REACH_TYPES);
+    expect(reachChips({ ...parse("ctype=review"), scope: null }).find((c) => c.group === "Citing type")).toMatchObject({
+      value: "Systematic reviews",
+    });
+  });
+
+  it("every Systematic reviews link round-trips, and its count is the length of its list", async () => {
+    for (const qs of ["", "stage=any", "stage=any&own=in", "ctype=review&stage=any", "view=people&stage=any&own=in"]) {
+      const { p, data } = await open(qs);
+      const links = reachLinks(p);
+      const roundTrips = (link: string) => expect(reachQueryString(parse(link))).toBe(link);
+      roundTrips(links.type("review"));
+      expect(parse(links.type("review")).ctypes).toEqual(["review"]);
+      expect(await listLength(links.type("review")), `${qs} tile`).toBe(data.typePapers.review);
+      if (p.view === "publications") {
+        for (const r of data.pubs.filter((x) => x.review > 0)) {
+          roundTrips(links.paperDocs(r.pmid, "review"));
+          expect(await listLength(links.paperDocs(r.pmid, "review")), `${qs} ${r.pmid}`).toBe(r.review);
+        }
+      } else {
+        for (const r of data.people!) {
+          roundTrips(links.person(r.cwid, "review"));
+          expect(await listLength(links.person(r.cwid, "review")), `${qs} ${r.cwid}`).toBe(r.review);
+        }
+      }
+    }
+    // A systematic review's Citing documents row, and the papers it opens.
+    const { p, data } = await open("view=documents&stage=any&ctype=review");
+    const review = data.docs.find((d) => d.level === "review")!;
+    expect(review.papers).toBe(2);
+    expect((await withReachDocDetails([review]))[0].kind).toBe("Systematic review");
+    const link = reachLinks(p).docPapers(review.docId)!;
+    expect(reachQueryString(parse(link))).toBe(link);
+    expect(await listLength(link)).toBe(review.papers);
+  });
+
+  it("reads the review rollup on its own, and the review level alone, in SQL", async () => {
+    await open("view=documents&ctype=review");
+    const docs = calls().find((c) => c.text.includes("GROUP BY d.level, unit"))!;
+    expect(docs.text).toContain("WHERE (p.review_count > 0) AND");
+    expect(docs.text).toContain("WHERE d.level IN (?)");
+    expect(docs.values).toContain("review");
+    expect(docs.values).not.toContain("guideline");
+    h.queryRaw.mockClear();
+    await open("view=documents&ctype=policy");
+    const policy = calls().find((c) => c.text.includes("GROUP BY d.level, unit"))!;
+    expect(policy.text).toContain("WHERE ((p.authority_count + p.guideline_count + p.consensus_count) > 0) AND");
+    expect(policy.text).not.toContain("review_count");
+    expect(policy.values).not.toContain("review");
+  });
+
+  it("the modal: each cell opens it only where its group lists exactly the counted documents", async () => {
+    cur = { ...parse("stage=any"), scope: null };
+    const got = await loadModalCounts(cur, ["102", "111"]);
+    // 102: one guideline (two journals, one dedup_key) and one review; 111: one review.
+    expect(got.get("102")).toMatchObject({ policy: 1, review: 1, ranked: 2 });
+    expect(got.get("111")).toMatchObject({ policy: 0, review: 1, ranked: 1 });
+    const on = { ...modalGroupsOn(), policy: true, review: true };
+    expect(modalListsExactly("policy", 1, got.get("102"), on)).toBe(true);
+    expect(modalListsExactly("review", 1, got.get("102"), on)).toBe(true);
+    expect(modalListsExactly("review", 1, got.get("111"), on)).toBe(true);
+    expect(modalListsExactly("policy", 0, got.get("111"), on)).toBe(false);
+    // The modal's switch for both is the guideline badges' flag.
+    const offOn = modalGroupsOn();
+    expect(offOn.review).toBe(offOn.policy);
+    const sql = calls().at(-1)!;
+    expect(sql.text).toContain("THEN d.dedup_key END) AS policy");
+    expect(sql.text).toContain("THEN d.dedup_key END) AS review");
+    expect(sql.text).toContain("THEN d.dedup_key END) AS ranked");
   });
 });
 
@@ -1218,6 +1373,7 @@ describe("the workbook", () => {
     clinical: 4,
     trial: 1,
     policy: 0,
+    review: 3,
     patent: 2,
     title: "A <i>paper</i> about examples",
     journal: "Journal of Examples",
@@ -1235,6 +1391,7 @@ describe("the workbook", () => {
     clinical: 2,
     trial: 0,
     policy: 1,
+    review: 2,
     patent: 1,
   });
   const read = async (buffer: Buffer) => {
@@ -1275,6 +1432,41 @@ describe("the workbook", () => {
       "Papers cited by clinical studies",
       "Papers cited in patents",
     ]);
+  });
+
+  it("all five types: a Systematic reviews column after Guidelines and policy on every sheet with per-type counts", async () => {
+    const p = { ...parse(), scope: null };
+    const wb = await read(await buildReachWorkbook(p, { pubs: [pub()], pubTotal: 1, docs: [], docTotal: 0, people: [person(1)] }, AT));
+    const pubs = wb.getWorksheet("Publications")!;
+    expect((pubs.getRow(1).values as unknown[]).slice(7)).toEqual([
+      "Clinical studies",
+      "Registered trials",
+      "Guidelines and policy",
+      "Systematic reviews",
+      "Patents",
+      "DOI",
+    ]);
+    expect((pubs.getRow(2).values as unknown[]).slice(7)).toEqual([4, 1, 0, 3, 2, "10.1000/example.101"]);
+    const people = wb.getWorksheet("People")!;
+    expect((people.getRow(1).values as unknown[]).slice(7)).toEqual([
+      "Papers cited by clinical studies",
+      "Papers cited by registered trials",
+      "Papers cited in guidelines or policy",
+      "Papers cited in systematic reviews",
+      "Papers cited in patents",
+    ]);
+    expect((people.getRow(2).values as unknown[]).slice(7)).toEqual([2, 0, 1, 2, 1]);
+    // Only the ticked type, when one is ticked.
+    const only = await read(
+      await buildReachWorkbook({ ...parse("ctype=review"), scope: null }, { pubs: [pub()], pubTotal: 1, docs: [], docTotal: 0, people: [person(1)] }, AT),
+    );
+    expect((only.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Systematic reviews", "DOI"]);
+    expect((only.getWorksheet("People")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Papers cited in systematic reviews"]);
+    const criteria = new Map(
+      (only.getWorksheet("Criteria")!.getSheetValues() as unknown[][]).filter(Boolean).map((r) => [String(r[1]), String(r[2])]),
+    );
+    expect(criteria.get("Citing type")).toBe("Systematic reviews");
+    expect(criteria.get("Citing types")).toBe(REACH_REVIEW_RULE);
   });
 
   it("the People sheet lists everyone past the 50-scholar cap: the named exception, and no contact column", async () => {
@@ -1360,7 +1552,10 @@ describe("the Bibliometrics tab's Downstream reach block", () => {
       ["clinical", 5],
       // 101; 104's trial is the authors' own.
       ["trial", 1],
-      ["policy", 2],
+      // 102's guideline; 106's is another scholar's.
+      ["policy", 1],
+      // 102 and 111: 111 is cited by a systematic review and no guideline.
+      ["review", 2],
       ["patent", 3],
     ]);
     for (const l of reach.lines) expect(await listLength(qsOf(l.href)), l.type).toBe(l.papers);
@@ -1399,7 +1594,7 @@ describe("the Bibliometrics tab's Downstream reach block", () => {
     expect(reach.lines.find((l) => l.type === "patent")!.papers).toBe(0);
     for (const l of reach.lines) expect(await listLength(qsOf(l.href)), l.type).toBe(l.papers);
     // Their only authorship is unconfirmed: nothing cites their work, and the
-    // block says so in four zeros instead of going missing.
+    // block says so in a zero per type instead of going missing.
     const none = (await block("ddd1004"))!;
     expect(none.lines.map((l) => [l.type, l.papers])).toEqual(REACH_TYPES.map((t) => [t, 0]));
     for (const l of none.lines) expect(await listLength(qsOf(l.href)), l.type).toBe(0);
