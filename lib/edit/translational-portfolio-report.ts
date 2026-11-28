@@ -56,9 +56,9 @@ import {
   canViewArticleCountReport,
   NO_STAGE_LABEL,
   scopeSql,
-  STAGE_NOT_LOW,
   type ArticleCountParams,
 } from "@/lib/edit/article-count-report";
+import { PORTFOLIO_ARTICLE_TYPES, stageCase } from "@/lib/edit/translational-stage-sql";
 import {
   currentCenterMembershipSql,
   MANUAL_DIVISION_SOURCE,
@@ -175,11 +175,7 @@ export type PortfolioParams = {
  *  window starting before it reads as a shift that is only missing data. */
 export const FIRST_STAGED_YEAR = 2020;
 
-/** Research articles only (report 8's `atype`; ReCiter's "Academic Article",
- *  shown as Research Article). Reviews, editorials, letters, book chapters and
- *  errata almost never get a stage (165 of them staged across 2020-2025), so
- *  counting them only inflated No stage (#3610). */
-export const PORTFOLIO_ARTICLE_TYPES: readonly string[] = ["Academic Article"];
+export { PORTFOLIO_ARTICLE_TYPES, stageCase };
 
 /** The default window: `FIRST_STAGED_YEAR` through the current year. The
  *  current year is partial, but shares are within each year and its staging
@@ -331,8 +327,6 @@ export function rankScholars(
 // Queries.
 // ---------------------------------------------------------------------------
 
-/** The SQL form of `displayStage`: the stage, else NULL (= No stage). */
-const stageCase = () => Prisma.sql`CASE WHEN p.translational_stage IN (${Prisma.join([...TRANSLATIONAL_STAGES])}) AND ${STAGE_NOT_LOW} THEN p.translational_stage END`;
 
 /** Report 8's params for this view. A scholar scope is that scholar's first-
  *  or senior-author papers (`pos: "either"` plus the cwid clause). */

@@ -5637,3 +5637,24 @@ model InfoedFinAccount {
   @@index([accountNumber])
   @@map("infoed_fin_account")
 }
+
+/// Report 26's scoped row set, one row per confirmed authorship of a research
+/// article (`PORTFOLIO_ARTICLE_TYPES`), every scholar, every year. Rebuilt
+/// nightly in one transaction by etl:translational-portfolio from
+/// `publication_author` and `publication`, whose columns used here only the
+/// nightly ETL writes. `stage` is the displayed stage (`stageCase()`: the stage
+/// unless its confidence is low), NULL for none. Who the scholar is (status,
+/// unit, role, institution) is not copied: readers join `scholar`, as the live
+/// query does. Nothing reads it yet.
+model TranslationalPortfolioAuthorPub {
+  cwid    String  @db.VarChar(32)
+  pmid    String  @db.VarChar(32)
+  year    Int
+  stage   String? @db.VarChar(8)
+  isFirst Boolean @map("is_first")
+  isLast  Boolean @map("is_last")
+
+  @@id([cwid, pmid])
+  @@index([year, stage, isFirst, isLast], map: "translational_portfolio_author_pub_year_idx")
+  @@map("translational_portfolio_author_pub")
+}

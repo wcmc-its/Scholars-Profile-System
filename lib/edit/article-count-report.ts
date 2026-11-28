@@ -65,6 +65,7 @@ import { ARTICLE_COUNT_REPORT, loadReportScopesForCwid } from "@/lib/edit/report
 import { addCriteriaSheet, boldRow, overListCapNote, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { canViewUsage } from "@/lib/edit/usage-access";
 import { mentoredPubCitation } from "@/lib/edit/mentored-publications-citation";
+import { STAGE_NOT_LOW } from "@/lib/edit/translational-stage-sql";
 import { Prisma } from "@/lib/generated/prisma/client";
 import {
   parsePersonFilter,
@@ -398,9 +399,7 @@ export type ArticleCountRow = {
   byStage?: StageSplit;
 };
 
-/** The SQL form of `displayStage` (`lib/api/topic-activity.ts`): low confidence
- *  hidden, NULL confidence shown. */
-export const STAGE_NOT_LOW = Prisma.sql`(p.translational_stage_confidence IS NULL OR p.translational_stage_confidence <> 'low')`;
+export { STAGE_NOT_LOW };
 
 /** The year each counted article falls in: the calendar year of publication,
  *  the fiscal year of its PubMed add date, or (date-added window) the

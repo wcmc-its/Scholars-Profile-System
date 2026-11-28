@@ -358,6 +358,18 @@ export const TRACKED: Readonly<Record<string, TrackedSpec>> = {
   // /edit/etl-status (TRACKED x etl_run) never showed them. All continue-tier
   // (or, for FeedbackDigest, their own machine), so freshness is their net.
   CenterPubRelevance: { cadence: "nightly" }, // CenterPubRelevanceNightly
+  // TranslationalPortfolioNightly. Acked because the registration ships in the
+  // image before the step's first run: until a hand run or the first nightly in
+  // an env (each needs its `cdk deploy Sps-Etl-<env>`), there is no row and this
+  // would read never-ran. Remove the ack once both envs have a successful run.
+  TranslationalPortfolio: {
+    cadence: "nightly",
+    ack: {
+      until: "2026-12-12",
+      reason:
+        "etl:translational-portfolio is new: no run on record until its step is deployed and has run in each env; remove once both envs have a successful run",
+    },
+  },
   HeadshotMissing: { cadence: "nightly" }, // HeadshotMissingNightly
   CancerCenterDiseaseAssignment: { cadence: "weekly" }, // CancerCenterDiseaseAssignmentsWeekly
   JournalImpactFactor: { cadence: "weekly" }, // JournalImpactFactorWeekly

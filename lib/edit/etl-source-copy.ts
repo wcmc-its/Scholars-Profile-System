@@ -344,6 +344,11 @@ export const SOURCE_COPY: Readonly<Record<string, EtlSourceCopy>> = {
       "Checks public honor lists (academies, fellowships) for Weill Cornell scholars and queues each new match for curator approval.",
     origin: "external", // public roster pages of the conferring bodies
   },
+  TranslationalPortfolio: {
+    label: "Translational Portfolio Publications",
+    description: "Copies the publications report 26 counts into one table each night, so the report loads quickly.",
+    origin: "internal", // SPS-DB publication_author + publication only
+  },
   CenterPubRelevance: {
     label: "Cancer Relevance of Center Publications",
     description: "Scores center members' new papers for cancer relevance in center reports.",
