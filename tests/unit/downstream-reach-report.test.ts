@@ -71,6 +71,7 @@ import {
   REACH_SOURCES,
   REACH_TYPE_LABEL,
   REACH_TYPES,
+  STAGE_KEYS,
   reachChips,
   reachLinks,
   reachPubSql,
@@ -446,6 +447,7 @@ describe("parseReachParams", () => {
       showAll: false,
       view: "publications",
       sort: "cited",
+      asc: false,
       docSort: "papers",
       q: "",
       page: 1,
@@ -478,6 +480,14 @@ describe("parseReachParams", () => {
     expect(parse("stage=any").stages).toEqual([]);
     expect(parse("stage=any&stage=T3-4").stages).toEqual(["T3-4"]);
     expect(parse("stage=nope").stages).toEqual(["T0", "T1"]);
+  });
+
+  it("every option ticked is no filter: the same URL and no chips as the bare filter (spec E2)", () => {
+    const every = (k: string, xs: readonly string[]) => xs.map((x) => `${k}=${x}`).join("&");
+    expect(parse(every("stage", STAGE_KEYS)).stages).toEqual([]);
+    expect(parse(`stage=any&${every("stage", STAGE_KEYS)}`).stages).toEqual([]);
+    expect(parse(every("ctype", REACH_TYPES)).ctypes).toEqual([]);
+    expect(parse("ctype=clinical&ctype=trial").ctypes).toEqual(["clinical", "trial"]);
   });
 
   it("own work: the hidden `in` alone includes it; the ticked box adds `out`, which wins", () => {
@@ -828,6 +838,19 @@ describe("where the counts come from", () => {
     expect(sortReachPublications(rows, "cited", REACH_TYPES).map((r) => r.pmid)).toEqual(["1", "2", "3"]);
     expect(sortReachPublications(rows, "cited", ["clinical"]).map((r) => r.pmid)).toEqual(["2", "3", "1"]);
     expect(sortReachPublications(rows, "year", REACH_TYPES).map((r) => r.pmid)).toEqual(["2", "3", "1"]);
+    // A type's column: by that count, ties by the Total, then the newest; asc reverses the count only.
+    expect(sortReachPublications(rows, "clinical", REACH_TYPES).map((r) => r.pmid)).toEqual(["2", "3", "1"]);
+    expect(sortReachPublications(rows, "patent", REACH_TYPES).map((r) => r.pmid)).toEqual(["1", "2", "3"]);
+    expect(sortReachPublications(rows, "clinical", REACH_TYPES, true).map((r) => r.pmid)).toEqual(["1", "2", "3"]);
+    expect(sortReachPublications(rows, "cited", REACH_TYPES, true).map((r) => r.pmid)).toEqual(["2", "3", "1"]);
+    expect(sortReachPublications(rows, "oldest", REACH_TYPES).map((r) => r.pmid)).toEqual(["1", "3", "2"]);
+  });
+
+  it("order=asc rides only with a count sort; a type not ticked sorts by the Total", () => {
+    expect(reachQueryString(parse("sort=trial&order=asc"))).toContain("order=asc");
+    expect(reachQueryString(parse("sort=oldest&order=asc"))).not.toContain("order");
+    expect(parse("sort=trial&order=asc&ctype=patent")).toMatchObject({ sort: "cited", asc: false });
+    expect(parse("sort=trial&ctype=trial&ctype=patent")).toMatchObject({ sort: "trial" });
   });
 });
 
@@ -932,6 +955,18 @@ describe.each<[string, string, typeof SUPER, Record<string, { code: string }[]>]
         expect(await listLength(reachLinks(p).paperDocs(r.pmid, t), session), `${r.pmid} ${t}`).toBe(r[t]);
         checked += 1;
       }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("a Publications Total: the paper's citing documents of every ticked type", async () => {
+    const { p, data } = await open(qs, session);
+    const types = tickedTypes(p);
+    let checked = 0;
+    for (const r of data.pubs) {
+      const total = types.reduce((n, t) => n + r[t], 0);
+      expect(await listLength(reachLinks(p).paperDocs(r.pmid, null), session), r.pmid).toBe(total);
+      checked += 1;
     }
     expect(checked).toBeGreaterThan(0);
   });
@@ -1461,8 +1496,8 @@ describe("the workbook", () => {
     );
     expect(wb.worksheets.map((w) => w.name)).toEqual(["Publications", "Citing documents", "People", "Criteria"]);
     const pubs = wb.getWorksheet("Publications")!;
-    expect(pubs.getRow(1).values).toEqual([undefined, "PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Clinical studies", "Patents", "Top citing document", "DOI"]);
-    expect(pubs.getRow(2).values).toEqual([undefined, "101", "A paper about examples", "Journal of Examples", 2021, "T0 · Basic research", "Ada Example (first author)", 4, 2, undefined, "10.1000/example.101"]);
+    expect(pubs.getRow(1).values).toEqual([undefined, "PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Total", "Clinical studies", "Patents", "Top citing document", "DOI"]);
+    expect(pubs.getRow(2).values).toEqual([undefined, "101", "A paper about examples", "Journal of Examples", 2021, "T0 · Basic research", "Ada Example (first author)", 6, 4, 2, undefined, "10.1000/example.101"]);
     expect(wb.getWorksheet("Citing documents")!.getRow(2).values).toEqual([undefined, "Example method", "Patent", "US90000001B2", 2024, 2, "https://example.org/doc/7"]);
     expect(wb.getWorksheet("People")!.getRow(1).values).toEqual([
       undefined,
@@ -1482,6 +1517,7 @@ describe("the workbook", () => {
     const wb = await read(await buildReachWorkbook(p, { pubs: [pub()], pubTotal: 1, docs: [], docTotal: 0, people: [person(1)] }, AT));
     const pubs = wb.getWorksheet("Publications")!;
     expect((pubs.getRow(1).values as unknown[]).slice(7)).toEqual([
+      "Total",
       "Clinical studies",
       "Registered trials",
       "Guidelines and policy",
@@ -1490,7 +1526,7 @@ describe("the workbook", () => {
       "Top citing document",
       "DOI",
     ]);
-    expect((pubs.getRow(2).values as unknown[]).slice(7)).toEqual([4, 1, 0, 3, 2, undefined, "10.1000/example.101"]);
+    expect((pubs.getRow(2).values as unknown[]).slice(7)).toEqual([10, 4, 1, 0, 3, 2, undefined, "10.1000/example.101"]);
     const people = wb.getWorksheet("People")!;
     expect((people.getRow(1).values as unknown[]).slice(7)).toEqual([
       "Papers cited by clinical studies",
@@ -1504,7 +1540,7 @@ describe("the workbook", () => {
     const only = await read(
       await buildReachWorkbook({ ...parse("ctype=review"), scope: null }, { pubs: [pub()], pubTotal: 1, docs: [], docTotal: 0, people: [person(1)] }, AT),
     );
-    expect((only.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Systematic reviews", "Top citing document", "DOI"]);
+    expect((only.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Total", "Systematic reviews", "Top citing document", "DOI"]);
     expect((only.getWorksheet("People")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Papers cited in systematic reviews"]);
     const criteria = new Map(
       (only.getWorksheet("Criteria")!.getSheetValues() as unknown[][]).filter(Boolean).map((r) => [String(r[1]), String(r[2])]),
