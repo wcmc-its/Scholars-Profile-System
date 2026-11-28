@@ -1,7 +1,8 @@
 /**
  * Report 26's grants and clinical trials (plan
- * 2026-11-27-translational-portfolio-redesign-plan.md, PR 4): counts and
- * lists, no stages yet. Shared by the report (`translational-portfolio-report.ts`)
+ * 2026-11-27-translational-portfolio-redesign-plan.md, PRs 4–5): counts and
+ * lists. Trials carry a stage from their phase (`trialStageFromPhaseKey`);
+ * grants have none yet (PR 6). Shared by the report (`translational-portfolio-report.ts`)
  * and the one-scholar page (`translational-portfolio-scholar.ts`), so the two
  * count the same awards and trials. Rules decided with Paul on 2026-11-28:
  *
@@ -48,6 +49,7 @@ import { currentCenterMembershipSql, MANUAL_DIVISION_SOURCE, personFilterSql, ut
 import { groupGrantsByProject } from "@/lib/funding-projection";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { trialDates } from "@/lib/search-trial-evidence";
+import { emptyCounts, trialStageFromPhaseKey, type StageCounts, type TranslationalStage } from "@/lib/translational-stage";
 
 export const GRANT_PROGRAM_TYPES: readonly string[] = ["Grant", "Career", "Contract with funding"];
 /** InfoEd intake types that are agreements, not funding. Substrings, so a new
@@ -57,7 +59,7 @@ const NON_FUNDING_INTAKE = /material transfer|data use|confidential|consulting|s
 export const GRANT_RULE =
   "Grants: awards where the scholar is PI, Co-PI or subaward PI; program type Grant, Career or Contract with funding, not agreements (material transfer, data use, confidentiality, consulting, service). An award counts once however many WCM investigators hold it (renewal years are one award) and counts in every year it was active.";
 export const TRIAL_RULE =
-  "Clinical trials: studies where the scholar is the principal investigator, not withdrawn or suspended. A trial counts once and counts in every year from its start to its primary completion (still running: to this year).";
+  "Clinical trials: studies where the scholar is the principal investigator, not withdrawn or suspended. A trial counts once and counts in every year from its start to its primary completion (still running: to this year). Its stage comes from its phase.";
 export const ACTIVITY_AREA_RULE =
   "Under a research area filter, only grants and trials with a research area count: leadership-role grants and registered trials started 2020 or later.";
 
@@ -97,6 +99,8 @@ export type PortfolioTrial = {
   title: string;
   /** "Phase 2", "Phase 1/2", "Not applicable"; null when none is recorded. */
   trialPhase: string | null;
+  /** From the trial phase; null = no stage. */
+  stage: TranslationalStage | null;
   status: string | null;
   startYear: number;
   /** Null while still running. */
@@ -307,6 +311,7 @@ export async function loadPortfolioTrials(s: ActivityScope, now = new Date()): P
       nct: t.nct_number?.trim() || null,
       title: t.title,
       trialPhase: trialPhaseLabel(t.phase),
+      stage: trialStageFromPhaseKey(phaseKey(t.phase)),
       status: t.status,
       startYear: span.startYear,
       endYear: span.endYear,
@@ -331,6 +336,25 @@ export function tally<T>(items: readonly T[], keysOf: (item: T) => Iterable<stri
   for (const it of items) for (const k of new Set(keysOf(it))) out.set(String(k), (out.get(String(k)) ?? 0) + 1);
   return out;
 }
+
+/** Stage counts per key, each item once per key it has. */
+export function stageTally<T extends { stage: TranslationalStage | null }>(
+  items: readonly T[],
+  keysOf: (item: T) => Iterable<string | number>,
+): Map<string, StageCounts> {
+  const out = new Map<string, StageCounts>();
+  for (const it of items)
+    for (const k of new Set([...keysOf(it)].map(String))) {
+      const c = out.get(k) ?? emptyCounts();
+      c[it.stage ?? "none"] += 1;
+      out.set(k, c);
+    }
+  return out;
+}
+
+/** One stage count over all the items. */
+export const stageCountsOfItems = <T extends { stage: TranslationalStage | null }>(items: readonly T[]): StageCounts =>
+  stageTally(items, () => ["all"]).get("all") ?? emptyCounts();
 
 export type UnitGrouping = "dept" | "div" | "center" | "area";
 

@@ -80,6 +80,7 @@ import { profilePath } from "@/lib/profile-url";
 import {
   countsTotal,
   STAGE_BUCKETS,
+  TRIAL_STAGE_RULE,
   TRANSLATIONAL_STAGE_LABELS,
   type StageBucket,
   type StageCounts,
@@ -644,7 +645,7 @@ export async function ScholarPortfolioBody({
           <ActivitySection
             id="trials"
             title="Clinical trials"
-            note={`Trials active ${yearsLabel} with them as principal investigator.${p.areas.length > 0 ? " Under an area filter, only trials with a research area are listed." : ""}`}
+            note={`Trials active ${yearsLabel} with them as principal investigator, staged by trial phase.${p.areas.length > 0 ? " Under an area filter, only trials with a research area are listed." : ""}`}
             count={data.trials.length}
             noun={["trial", "trials"]}
             empty="No clinical trials in these years."
@@ -653,6 +654,7 @@ export async function ScholarPortfolioBody({
             {data.trials.map((x) => (
               <TrialRow key={x.key} t={x} />
             ))}
+            {/* ponytail: the stage counts stay in the rows; a per-stage summary if a scholar's trial list grows long. */}
           </ActivitySection>
 
           {/* Publications and stages. */}
@@ -776,7 +778,7 @@ export async function ScholarPortfolioBody({
               {p.middle ? AUTHORSHIP_RULE_ALL : AUTHORSHIP_RULE_DEFAULT} {COUNTING_RULE}
             </p>
             <p className="text-muted-foreground text-xs">
-              {GRANT_RULE} {TRIAL_RULE} {ACTIVITY_AREA_RULE} Grants and trials have no translational stage yet.
+              {GRANT_RULE} {TRIAL_RULE} {TRIAL_STAGE_RULE} {ACTIVITY_AREA_RULE} Grants have no translational stage yet.
             </p>
             <a
               href={methodologyHref("translationalStage")}
@@ -990,7 +992,15 @@ function TrialRow({ t }: { t: PortfolioTrial }) {
           <>Protocol {t.protocolNumber}</>
         )}
       </span>
-      {NOT_YET_STAGED}
+      <span>
+        {t.stage ? (
+          <StageTag stage={t.stage} />
+        ) : (
+          <span className="text-apollo-ink-2 inline-flex rounded-full border bg-white px-2 py-px text-xs leading-normal" style={{ borderColor: NO_STAGE_EDGE }}>
+            {NO_STAGE_LABEL}
+          </span>
+        )}
+      </span>
     </li>
   );
 }

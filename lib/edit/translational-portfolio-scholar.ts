@@ -22,7 +22,8 @@
  *
  * Grants and clinical trials: the report's rules
  * (`lib/edit/translational-portfolio-activities.ts`) for this scholar, under
- * the page's years and research areas; listed, no stage yet.
+ * the page's years and research areas, listed. Trials carry their trial phase's
+ * stage; grants have none yet.
  *
  * Counts only: one person's few dozen papers make a percentage swing on one
  * misassigned stage, and the page compares this scholar with nobody.
@@ -72,6 +73,7 @@ import {
   emptyCounts,
   isTranslationalStage,
   STAGE_RULE,
+  TRIAL_STAGE_RULE,
   TRANSLATIONAL_STAGES,
   translationalStageDisplay,
   type StageCounts,
@@ -506,6 +508,7 @@ export function describeScholarPortfolioCriteria(
     ["Stage rule", STAGE_RULE],
     ["Grant rule", GRANT_RULE],
     ["Trial rule", TRIAL_RULE],
+    ["Trial stage rule", TRIAL_STAGE_RULE],
     ...(p.areas.length > 0 ? ([["Grants and trials under an area", ACTIVITY_AREA_RULE]] as [string, string][]) : []),
   ];
 }
@@ -541,7 +544,7 @@ export async function buildScholarPortfolioWorkbook(
   ts.addRow(["Title", "NCT number", "Protocol number", "Trial phase", "Status", "Start year", "End year", "Translational stage"]);
   boldRow(ts, 1);
   for (const x of data.trials)
-    ts.addRow([x.title, x.nct ?? "", x.protocolNumber, x.trialPhase ?? "", x.status ?? "", x.startYear, x.endYear ?? "", "Not yet assigned"]);
+    ts.addRow([x.title, x.nct ?? "", x.protocolNumber, x.trialPhase ?? "", x.status ?? "", x.startYear, x.endYear ?? "", x.stage ? translationalStageDisplay(x.stage) : NO_STAGE_LABEL]);
   ts.getColumn(1).width = 80;
   const areaLabel = new Map(data.areaChoices.map((a) => [a.id, a.label]));
   addCriteriaSheet(wb, describeScholarPortfolioCriteria(p, scholar, areaLabel, generatedAt));

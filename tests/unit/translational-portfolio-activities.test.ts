@@ -222,3 +222,34 @@ describe("tallies", () => {
     expect(tally(items, (i) => unitKeys(i, "div", m))).toEqual(new Map([["D1", 2], ["D2", 1]]));
   });
 });
+
+describe("trial stages from the trial phase", () => {
+  it("maps every phase value prod holds by the strict rule, and nothing else", async () => {
+    const { phaseKey } = await import("@/lib/edit/clinical-trials-report");
+    const { trialStageFromPhaseKey } = await import("@/lib/translational-stage");
+    const stage = (v: string | null) => trialStageFromPhaseKey(phaseKey(v));
+    expect(stage("EARLY_PHASE1")).toBe("T1");
+    expect(stage("PHASE1")).toBe("T1");
+    expect(stage("PHASE1; PHASE2")).toBe("T2");
+    expect(stage("PHASE2")).toBe("T2");
+    expect(stage("PHASE2; PHASE3")).toBe("T2");
+    expect(stage("PHASE3")).toBe("T2");
+    expect(stage("PHASE4")).toBe("T3-4");
+    expect(stage("NA")).toBeNull();
+    expect(stage(null)).toBeNull();
+    expect(stage("PHASE1; PHASE3")).toBeNull();
+  });
+
+  it("puts the stage on each trial and tallies trials by stage", async () => {
+    h.queryRaw.mockResolvedValue([
+      trial({ protocol_number: "P-1", nct_number: "NCT1", phase: "PHASE1" }),
+      trial({ protocol_number: "P-2", nct_number: "NCT2", phase: "PHASE3" }),
+      trial({ protocol_number: "P-3", nct_number: "NCT3", phase: "NA" }),
+    ]);
+    const out = await loadPortfolioTrials(SCOPE, new Date("2026-11-28T00:00:00Z"));
+    expect(Object.fromEntries(out.map((t) => [t.key, t.stage]))).toEqual({ NCT1: "T1", NCT2: "T2", NCT3: null });
+    const { stageCountsOfItems, stageTally } = await import("@/lib/edit/translational-portfolio-activities");
+    expect(stageCountsOfItems(out)).toEqual({ T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 1 });
+    expect(stageTally(out, (t) => t.deptCodes).get("N1")).toEqual({ T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 1 });
+  });
+});

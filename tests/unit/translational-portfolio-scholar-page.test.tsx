@@ -128,6 +128,7 @@ const DATA: ScholarPortfolio = {
       nct: "NCT00000001",
       title: "An example trial",
       trialPhase: "Phase 2",
+      stage: "T2",
       status: "OPEN TO ACCRUAL",
       startYear: 2022,
       endYear: null,
@@ -437,5 +438,16 @@ describe("funding and clinical trials", () => {
     const c = await open();
     expect(within(c).getByTestId("scholar-portfolio-grants").textContent).toContain("No awards in these years.");
     expect(within(c).getByTestId("scholar-portfolio-trials").textContent).toContain("No clinical trials in these years.");
+  });
+});
+
+describe("trial stages on the scholar page", () => {
+  it("tags a trial with the stage from its trial phase, and an unphased one with No stage", async () => {
+    const t = within(await open()).getByTestId("scholar-portfolio-trial");
+    expect(t.textContent).toContain("T2");
+    expect(t.textContent).not.toContain("Stage not yet assigned");
+    cleanup();
+    h.data.mockResolvedValue({ ...DATA, trials: [{ ...DATA.trials[0], stage: null, trialPhase: "Not applicable" }] });
+    expect(within(await open()).getByTestId("scholar-portfolio-trial").textContent).toContain("No stage");
   });
 });
