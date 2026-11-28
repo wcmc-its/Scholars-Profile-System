@@ -214,8 +214,9 @@ export type BibliometricsReport = {
   filters: BibliometricsFilters;
   /** Publication years of every research article (unfiltered), for the selects. */
   yearRange: { min: number; max: number } | null;
-  /** Sentences that follow the scholar's name; empty below the minimum. */
-  summary: string[];
+  /** Sentences that follow the scholar's name, each as text and counts that
+   *  open their lists; empty below the minimum. `summaryText` gives the words. */
+  summary: SummaryPart[][];
   metrics: {
     hIndex: number;
     h5Index: number;
@@ -247,11 +248,51 @@ export type BibliometricsReport = {
   /** The research articles in scope behind each "Articles cited" count of
    *  Downstream impact, newest first. */
   cited: Record<ImpactKey, BibliometricsStagePaper[]>;
+  /** Every paper the other counts list, once, by PMID. */
+  articles: Record<string, BibliometricsListPaper>;
+  /** The PMIDs behind each count of the summary, the tiles and the author
+   *  positions. The h-index lists are ranked by citations; the rest newest first. */
+  lists: Record<ListKey, string[]>;
   definitions: Array<{ term: string | null; text: string }>;
 };
 
 /** The rows of Downstream impact, each an "Articles cited" list. */
 export type ImpactKey = PolicyCitingDoc["level"] | "clinical" | "trial" | "patent";
+
+/** The Downstream impact levels whose Citing documents count lists its
+ *  documents (on request: `part=citing`). Patents list as inventions instead. */
+export const CITING_LEVELS = ["authority", "guideline", "consensus", "review", "clinical", "trial"] as const;
+export type CitingLevel = (typeof CITING_LEVELS)[number];
+export const isCitingLevel = (v: string | null): v is CitingLevel => (CITING_LEVELS as readonly string[]).includes(v ?? "");
+
+/** One citing document behind a Citing documents count. `source` is the
+ *  issuing body, journal or publisher. */
+export type BibliometricsCitingDoc = { id: number; title: string; url: string | null; year: number | null; source: string | null };
+
+/** The other lists a count opens: every article in scope, the lead ones, each
+ *  author position, the rated and top-decile ones, and the papers forming the
+ *  h-index and h5-index (all publications, no filters, as the figures). */
+export type ListKey = "all" | "lead" | "first" | "senior" | "co" | "rated" | "topDecile" | "hCore" | "h5Core";
+/** Anything a count on the tab can open: a list, or a Downstream impact row. */
+export type CountKey = ListKey | ImpactKey;
+/** A summary count, shown as its number. */
+export type SummaryPart = string | { n: number; list: CountKey };
+
+/** A listed paper; the h-index lists show its NIH iCite citations. */
+export type BibliometricsListPaper = BibliometricsStagePaper & { nihCitations: number | null };
+
+/** The summary as plain sentences, for the Word document. */
+export function summaryText(r: Pick<BibliometricsReport, "summary">): string[] {
+  return r.summary.map((parts) =>
+    parts.map((p) => (typeof p === "string" ? p : p.n.toLocaleString("en-US"))).join(""),
+  );
+}
+
+/** The papers a count opens, in the list's order. */
+export function papersFor(r: Pick<BibliometricsReport, "articles" | "lists" | "cited">, key: CountKey): BibliometricsListPaper[] {
+  if (key in r.lists) return r.lists[key as ListKey].flatMap((pmid) => r.articles[pmid] ?? []);
+  return r.cited[key as ImpactKey].map((p) => ({ ...p, nihCitations: null }));
+}
 
 export const POLICY_LEVEL_LABELS: ReadonlyArray<[PolicyCitingDoc["level"], string]> = [
   ["authority", "Health authorities and national academies"],
@@ -279,16 +320,27 @@ export function h5IndexOf(
   pubs: ReadonlyArray<Pick<BibliometricsPubRow, "citedByCount" | "dateAddedToEntrez" | "year">>,
   now: Date,
 ): number {
+  return hIndexOf(lastFiveYears(pubs, now).map((p) => p.citedByCount ?? 0));
+}
+
+/** The papers the h5-index counts: added to PubMed in the five years before `now`. */
+function lastFiveYears<T extends Pick<BibliometricsPubRow, "dateAddedToEntrez" | "year">>(
+  pubs: readonly T[],
+  now: Date,
+): T[] {
   const cutoff = new Date(now);
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 5);
-  return hIndexOf(
-    pubs
-      .filter((p) => {
-        const added = p.dateAddedToEntrez ?? (p.year ? new Date(Date.UTC(p.year, 0, 1)) : null);
-        return added !== null && added > cutoff;
-      })
-      .map((p) => p.citedByCount ?? 0),
-  );
+  return pubs.filter((p) => {
+    const added = p.dateAddedToEntrez ?? (p.year ? new Date(Date.UTC(p.year, 0, 1)) : null);
+    return added !== null && added > cutoff;
+  });
+}
+
+/** The h papers forming an h-index: the most cited first, on NIH iCite counts. */
+function coreOf(pubs: readonly BibliometricsPubRow[], h: number): BibliometricsPubRow[] {
+  return [...pubs]
+    .sort((a, b) => (b.citedByCount ?? 0) - (a.citedByCount ?? 0) || a.pmid.localeCompare(b.pmid))
+    .slice(0, h);
 }
 
 export function positionOf(p: Pick<BibliometricsPubRow, "isFirst" | "isLast">): BibliometricsPosition {
@@ -373,20 +425,32 @@ function summarySentences(args: {
   authorityPapers: number;
   patentPapers: number;
   bodies: string[];
-}): string[] {
+}): SummaryPart[][] {
   // The minimum-paper rule: too few rated articles to say anything about them.
   if (args.rated < BIBLIOMETRICS_MIN_RATED_ARTICLES) return [];
   const span = args.span ? ` ${args.span}` : "";
-  const out = [
+  const c = (n: number, list: CountKey): SummaryPart => ({ n, list });
+  const s = (n: number, one: string, many = `${one}s`) => ` ${n === 1 ? one : many}`;
+  const out: SummaryPart[][] = [
     args.leadOnly
-      ? `has published ${count(args.total, "research article")} as first or senior author${span}.`
-      : `has published ${count(args.total, "research article")}${span}, ` +
-        `${args.lead.toLocaleString("en-US")} as first or senior author.`,
+      ? ["has published ", c(args.total, "all"), `${s(args.total, "research article")} as first or senior author${span}.`]
+      : [
+          "has published ",
+          c(args.total, "all"),
+          `${s(args.total, "research article")}${span}, `,
+          c(args.lead, "lead"),
+          " as first or senior author.",
+        ],
     // The count and the baseline: "11%" alone reads as average to anyone who
     // does not know 10% is expected.
-    `Of the ${count(args.rated, "article")} with an NIH percentile, ${args.topDecile.toLocaleString("en-US")} ` +
-      `(${args.topDecilePct}%) ${args.topDecile === 1 ? "is" : "are"} in the top 10% of NIH-funded papers ` +
-      "for their field and year, where 10% is expected.",
+    [
+      "Of the ",
+      c(args.rated, "rated"),
+      `${s(args.rated, "article")} with an NIH percentile, `,
+      c(args.topDecile, "topDecile"),
+      ` (${args.topDecilePct}%) ${args.topDecile === 1 ? "is" : "are"} in the top 10% of NIH-funded papers ` +
+        "for their field and year, where 10% is expected.",
+    ],
   ];
   const from = args.bodies.map((b) => BODY_PHRASE[b] ?? b);
   const authorities =
@@ -395,18 +459,19 @@ function summarySentences(args: {
   // from …, and 8 in patents." Each clause only when its count is above zero.
   const clauses = (
     [
-      [args.guidelinePapers, "in clinical practice guidelines"],
-      [args.authorityPapers, `in documents from ${authorities}`],
-      [args.patentPapers, "in patents"],
+      [args.guidelinePapers, "guideline", "in clinical practice guidelines"],
+      [args.authorityPapers, "authority", `in documents from ${authorities}`],
+      [args.patentPapers, "patent", "in patents"],
     ] as const
   ).filter(([n]) => n > 0);
   if (clauses.length > 0) {
-    const parts = clauses.map(([n, where], i) =>
-      i === 0 ? `${count(n, "article is", "articles are")} cited ${where}` : `${n.toLocaleString("en-US")} ${where}`,
-    );
-    out.push(
-      `${parts.length > 1 ? `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}` : parts[0]}.`,
-    );
+    const sentence: SummaryPart[] = [];
+    clauses.forEach(([n, list, where], i) => {
+      if (i > 0) sentence.push(i === clauses.length - 1 ? ", and " : ", ");
+      sentence.push(c(n, list), i === 0 ? `${s(n, "article is", "articles are")} cited ${where}` : ` ${where}`);
+    });
+    sentence.push(".");
+    out.push(sentence);
   }
   return out;
 }
@@ -521,6 +586,28 @@ export function buildBibliometricsReport(input: {
     patent: citedBy((p) => p.patentFamilyCount),
   };
 
+  // The lists the other counts open; each paper sits once in `articles`.
+  const hIndex = scholar.hIndex ?? hIndexOf(input.all.map((p) => p.citedByCount ?? 0));
+  const h5Index = h5IndexOf(input.all, now);
+  const hCore = coreOf(input.all, hIndex);
+  const h5Core = coreOf(lastFiveYears(input.all, now), h5Index);
+  const articleMap: Record<string, BibliometricsListPaper> = {};
+  for (const p of [...newestFirst, ...hCore, ...h5Core]) {
+    articleMap[p.pmid] ??= { ...paperRef(p), nihCitations: p.citedByCount };
+  }
+  const pmids = (pubs: readonly BibliometricsPubRow[]) => pubs.map((p) => p.pmid);
+  const lists: Record<ListKey, string[]> = {
+    all: pmids(newestFirst),
+    lead: pmids(newestFirst.filter((p) => positionOf(p) !== "co")),
+    first: pmids(newestFirst.filter((p) => positionOf(p) === "first")),
+    senior: pmids(newestFirst.filter((p) => positionOf(p) === "senior")),
+    co: pmids(newestFirst.filter((p) => positionOf(p) === "co")),
+    rated: pmids(newestFirst.filter((p) => p.nihPercentile !== null)),
+    topDecile: pmids(newestFirst.filter((p) => p.nihPercentile !== null && p.nihPercentile >= TOP_DECILE)),
+    hCore: pmids(hCore),
+    h5Core: pmids(h5Core),
+  };
+
   const matching = rankPapers(articles);
   const surname = (scholar.name.split(",")[0] ?? "").trim().split(/\s+/).pop()?.toLowerCase() ?? "";
 
@@ -544,8 +631,8 @@ export function buildBibliometricsReport(input: {
     }),
     metrics: {
       // ReCiter's figure when Scholars has one (faculty); the same sum otherwise.
-      hIndex: scholar.hIndex ?? hIndexOf(input.all.map((p) => p.citedByCount ?? 0)),
-      h5Index: h5IndexOf(input.all, now),
+      hIndex,
+      h5Index,
       ratedArticles: rated.length,
       unratedArticles: articles.length - rated.length,
       topDecileArticles,
@@ -569,6 +656,8 @@ export function buildBibliometricsReport(input: {
       trial: { papers: cited.trial.length, documents: 0 },
     },
     cited,
+    articles: articleMap,
+    lists,
     patents: {
       papers: patentPapers,
       inventions: 0,

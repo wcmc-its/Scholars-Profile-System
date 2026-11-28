@@ -6,7 +6,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn(), reach: vi.fn(), connections: vi.fn() }));
+const h = vi.hoisted(() => ({ identity: vi.fn(), authz: vi.fn(), load: vi.fn(), docx: vi.fn(), patentHref: vi.fn(), reach: vi.fn(), connections: vi.fn(), citing: vi.fn() }));
 vi.mock("@/lib/edit/request", async () => {
   const { NextResponse } = await import("next/server");
   return {
@@ -18,7 +18,7 @@ vi.mock("@/lib/edit/request", async () => {
 });
 vi.mock("@/lib/edit/overview-authz", () => ({ authorizeCvExport: h.authz }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: vi.fn() }));
-vi.mock("@/lib/edit/bibliometrics-loader", () => ({ loadBibliometricsReport: h.load }));
+vi.mock("@/lib/edit/bibliometrics-loader", () => ({ loadBibliometricsReport: h.load, loadCitingDocuments: h.citing }));
 vi.mock("@/lib/edit/bibliometrics-docx", () => ({ buildBibliometricsDocx: h.docx }));
 vi.mock("@/lib/edit/bibliometrics-patents", () => ({ patentReportHref: h.patentHref }));
 vi.mock("@/lib/edit/downstream-reach-entry", () => ({ loadScholarReach: h.reach, loadScholarConnections: h.connections }));
@@ -34,7 +34,9 @@ import {
   hIndexOf,
   parseBibliometricsFilters,
   patentsLine,
+  papersFor,
   rankPapers,
+  summaryText,
   unratedNote,
   type BibliometricsFilters,
   type BibliometricsPubRow,
@@ -140,7 +142,7 @@ describe("buildBibliometricsReport — the minimum-paper rule", () => {
       pub({ nihPercentile: 20, year: 2011, guidelineCount: 2 }),
       pub({ nihPercentile: 99, publicationType: "Review" }), // not a research article
     ]);
-    expect(r.summary).toEqual([
+    expect(summaryText(r)).toEqual([
       "has published 10 research articles since 2011, 9 as first or senior author.",
       "Of the 10 articles with an NIH percentile, 9 (90%) are in the top 10% of NIH-funded papers for their field and year, where 10% is expected.",
       "1 article is cited in clinical practice guidelines.",
@@ -156,7 +158,7 @@ describe("buildBibliometricsReport — the minimum-paper rule", () => {
         { body: "National Academies", count: 1 },
       ],
     });
-    expect(build([...rated(9), cited, pub({ guidelineCount: 1 })]).summary[2]).toBe(
+    expect(summaryText(build([...rated(9), cited, pub({ guidelineCount: 1 })]))[2]).toBe(
       "1 article is cited in clinical practice guidelines, and 1 in documents from the National Academies or the WHO.",
     );
     expect(build(rated(10)).summary).toHaveLength(2);
@@ -280,10 +282,10 @@ describe("most impactful papers", () => {
     const rated = (o: Partial<BibliometricsPubRow>) =>
       Array.from({ length: 12 }, (_, i) => pub({ nihPercentile: 50, year: 2010 + i, ...o }));
     const pubs = [...rated({ isLast: true }), pub({ year: 2015, guidelineCount: 1, patentFamilyCount: 3, nihPercentile: 95 })];
-    const all = build(pubs).summary.join(" ");
+    const all = summaryText(build(pubs)).join(" ");
     expect(all).toMatch(/^has published 13 research articles since 2010, 12 as first or senior author\./);
     expect(all).toMatch(/1 article is cited in clinical practice guidelines, and 1 in patents\.$/);
-    const lead = build(pubs, { authorship: "lead", yearFrom: 2010, yearTo: 2021 }).summary.join(" ");
+    const lead = summaryText(build(pubs, { authorship: "lead", yearFrom: 2010, yearTo: 2021 })).join(" ");
     expect(lead).toMatch(/^has published 12 research articles as first or senior author from 2010 to 2021\./);
     expect(lead).not.toContain("patents");
   });
@@ -316,6 +318,54 @@ describe("most impactful papers", () => {
       { name: "Vale J", bold: true },
       { name: "Marsh T", bold: false },
     ]);
+  });
+});
+
+describe("every count opens its list", () => {
+  it("lists the papers behind the summary counts, the tiles and the author positions", () => {
+    const first = pub({ isFirst: true, year: 2021, nihPercentile: 95, guidelineCount: 1 });
+    const senior = pub({ isLast: true, year: 2019, nihPercentile: 40, patentFamilyCount: 2 });
+    const co = pub({ year: 2022, nihPercentile: null });
+    const r = build([first, senior, co]);
+    expect(r.lists.all).toEqual([co.pmid, first.pmid, senior.pmid]);
+    expect(r.lists.lead).toEqual([first.pmid, senior.pmid]);
+    expect([r.lists.first, r.lists.senior, r.lists.co]).toEqual([[first.pmid], [senior.pmid], [co.pmid]]);
+    expect(r.lists.rated).toEqual([first.pmid, senior.pmid]);
+    expect(r.lists.topDecile).toEqual([first.pmid]);
+    expect(papersFor(r, "topDecile").map((p) => p.title)).toEqual([first.title]);
+    // A Downstream impact key reads its Articles cited list.
+    expect(papersFor(r, "patent").map((p) => p.pmid)).toEqual([senior.pmid]);
+    // Each paper is sent once, whatever the number of lists it is on.
+    expect(Object.keys(r.articles).sort()).toEqual([first.pmid, senior.pmid, co.pmid].sort());
+  });
+
+  it("lists the h papers forming the h-index and h5-index, most cited first, from all publications and no filters", () => {
+    const cited = (n: number, over: Partial<BibliometricsPubRow> = {}) => pub({ citedByCount: n, ...over });
+    const old = cited(9, { year: 2012, dateAddedToEntrez: new Date("2012-03-01T00:00:00Z") });
+    const review = cited(7, { publicationType: "Review", year: 2023, dateAddedToEntrez: new Date("2023-03-01T00:00:00Z") });
+    const recent = [5, 3, 1].map((n) => cited(n, { year: 2024, dateAddedToEntrez: new Date("2024-03-01T00:00:00Z") }));
+    const hidden = cited(4, { year: 2024, dateAddedToEntrez: new Date("2024-05-01T00:00:00Z") });
+    const visible = [old, review, ...recent];
+    const r = build(visible, { authorship: "lead", yearFrom: 2020, yearTo: null }, [...visible, hidden]);
+    expect(r.metrics.hIndex).toBe(4);
+    expect(r.lists.hCore).toEqual([old.pmid, review.pmid, recent[0]!.pmid, hidden.pmid]);
+    expect(r.metrics.h5Index).toBe(3);
+    expect(r.lists.h5Core).toEqual([review.pmid, recent[0]!.pmid, hidden.pmid]);
+    expect(papersFor(r, "hCore").map((p) => p.nihCitations)).toEqual([9, 7, 5, 4]);
+  });
+
+  it("marks each summary count with the list it opens; summaryText gives the Word document's words", () => {
+    const rated = Array.from({ length: 10 }, (_, i) => pub({ nihPercentile: 95, isLast: i < 4, guidelineCount: i === 0 ? 1 : 0 }));
+    const r = build(rated);
+    const counts = r.summary.flat().filter((p) => typeof p !== "string");
+    expect(counts).toEqual([
+      { n: 10, list: "all" },
+      { n: 4, list: "lead" },
+      { n: 10, list: "rated" },
+      { n: 10, list: "topDecile" },
+      { n: 1, list: "guideline" },
+    ]);
+    expect(summaryText(r)[0]).toBe("has published 10 research articles since 2020, 4 as first or senior author.");
   });
 });
 
@@ -368,6 +418,32 @@ describe("GET /api/edit/bibliometrics", () => {
     h.docx.mockResolvedValue(Buffer.from("docx"));
     h.reach.mockResolvedValue(null);
     h.connections.mockResolvedValue(null);
+    h.citing.mockResolvedValue({ docs: [{ id: 7, title: "An invented guideline", url: null, year: 2023, source: "WHO" }], total: 1 });
+  });
+
+  it("part=citing answers one level's citing documents, inside the filters, and never loads the report", async () => {
+    const res = await get("cwid=zzz9002&part=citing&level=authority&body=WHO&authorship=lead&from=2018");
+    expect(await res.json()).toEqual({ ok: true, docs: [{ id: 7, title: "An invented guideline", url: null, year: 2023, source: "WHO" }], total: 1 });
+    expect(h.citing).toHaveBeenCalledWith("zzz9002", { authorship: "lead", yearFrom: 2018, yearTo: null }, "authority", "WHO");
+    expect(h.load).not.toHaveBeenCalled();
+    await get("part=citing&level=trial");
+    expect(h.citing).toHaveBeenLastCalledWith("zzz9001", { authorship: "all", yearFrom: null, yearTo: null }, "trial", null);
+  });
+
+  it("part=citing refuses an unknown level, and sits behind the same target check", async () => {
+    for (const qs of ["part=citing", "part=citing&level=patent", "part=citing&level=bogus"]) {
+      expect((await get(qs)).status).toBe(400);
+    }
+    h.authz.mockResolvedValue({ ok: false, reason: "not_self" });
+    expect((await get("cwid=zzz9002&part=citing&level=guideline")).status).toBe(403);
+    expect(h.citing).not.toHaveBeenCalled();
+  });
+
+  it("part=citing 404s for a cwid with no scholar and 500s when the read fails", async () => {
+    h.citing.mockResolvedValueOnce(null);
+    expect((await get("part=citing&level=review")).status).toBe(404);
+    h.citing.mockRejectedValueOnce(new Error("boom"));
+    expect((await get("part=citing&level=review")).status).toBe(500);
   });
 
   it("404s before any session or database work unless the flag is exactly on", async () => {

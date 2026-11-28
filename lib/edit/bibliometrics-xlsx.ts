@@ -21,6 +21,7 @@ import {
   UNSTAGED_REASONS,
   filtersNote,
   positionOf,
+  summaryText,
   type BibliometricsPubRow,
   type BibliometricsReport,
 } from "@/lib/edit/bibliometrics";
@@ -119,7 +120,7 @@ export async function buildBibliometricsWorkbook(
     ["Scholar", r.scholar.name],
     ["Calculated", r.asOf],
     ["Filters", filters ?? "None: every research article"],
-    ["Summary", r.summary.length > 0 ? `${r.scholar.name} ${r.summary.join(" ")}` : NO_SUMMARY_NOTE],
+    ["Summary", r.summary.length > 0 ? `${r.scholar.name} ${summaryText(r).join(" ")}` : NO_SUMMARY_NOTE],
     ["h-index (all publications)", String(r.metrics.hIndex)],
     ["h5-index (last 5 years, all publications)", String(r.metrics.h5Index)],
     ["Rated research articles", String(r.metrics.ratedArticles)],

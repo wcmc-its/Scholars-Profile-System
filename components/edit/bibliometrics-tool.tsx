@@ -31,14 +31,18 @@ import {
   bibliometricsQuery,
   filtersNote,
   isEarlyPercentile,
+  papersFor,
   percentileText,
   unratedNote,
+  type BibliometricsCitingDoc,
   type BibliometricsFilters,
   type BibliometricsPaper,
   type BibliometricsPolicyLevel,
   type ImpactKey,
   type BibliometricsReport,
   type BibliometricsStages,
+  type CitingLevel,
+  type CountKey,
   type UnstagedReason,
 } from "@/lib/edit/bibliometrics";
 import type { ScholarReach } from "@/lib/edit/downstream-reach-entry";
@@ -332,76 +336,18 @@ function Report({
   /** The "Downstream reach" block; null when the viewer gets none. */
   reach: ScholarReach | null;
 }) {
-  const unrated = unratedNote(r);
   const peak = Math.max(1, ...r.output.byYear.map((y) => y.count));
   // An even top, so the middle gridline is a whole number.
   const axisMax = Math.ceil(peak / 2) * 2;
   const thisYear = Number(r.asOf.slice(0, 4));
   return (
     <div className="flex flex-col pb-2" data-testid="bibliometrics-report">
-      <section className={`${SECTION} pt-6`}>
-        <SectionHead title="Summary" filtered />
-        {r.summary.length > 0 ? (
-          <p className="max-w-[900px] text-base leading-[1.6]" data-testid="bibliometrics-summary">
-            <ScholarHoverCard cwid={r.scholar.cwid}>
-              <span>{r.scholar.name}</span>
-            </ScholarHoverCard>{" "}
-            {r.summary.join(" ")}
-          </p>
-        ) : (
-          <p className="text-apollo-ink-2 text-sm" data-testid="bibliometrics-no-summary">
-            {NO_SUMMARY_NOTE}
-          </p>
-        )}
-        <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3" data-testid="bibliometrics-tiles">
-          {/* The h-index and h5-index never follow the filters; their labels say so. */}
-          <Tile value={String(r.metrics.hIndex)} label="h-index, all publications" help={METRIC_HELP.hIndex} />
-          <Tile value={String(r.metrics.h5Index)} label="h5-index, last 5 years" help={METRIC_HELP.h5Index} />
-          <Tile
-            value={r.metrics.topDecilePct === null ? "n/a" : r.metrics.topDecileArticles.toLocaleString()}
-            share={r.metrics.topDecilePct === null ? undefined : `${r.metrics.topDecilePct}%`}
-            label={
-              r.metrics.topDecilePct === null
-                ? "in NIH top 10%: no article rated yet"
-                : `in NIH top 10%, of ${r.metrics.ratedArticles.toLocaleString()} rated (10% expected)`
-            }
-            help={METRIC_HELP.topDecile}
-          />
-          <Tile value={r.policy[1]!.papers.toLocaleString()} label="articles cited in clinical guidelines" />
-          <Tile value={r.policy[0]!.papers.toLocaleString()} label="articles cited in health-authority reports" />
-        </div>
-        {unrated ? <p className="text-apollo-ink-2 text-[13px]">{unrated}</p> : null}
-      </section>
+      <SummarySection report={r} />
 
       <section className={SECTION}>
         <SectionHead title="Output" filtered />
         <div className="flex flex-wrap gap-7">
-          <table className="min-w-0 flex-[1_1_260px] text-sm">
-            <caption className="pb-1.5 text-left font-semibold">By author position, all years in range</caption>
-            <tbody>
-              {OUTPUT_ROWS.map(([label, key]) => (
-                <tr key={label} className="border-apollo-border border-b">
-                  <th scope="row" className="py-2 text-left font-normal">
-                    <span
-                      aria-hidden
-                      className="mr-2 inline-block size-2.5 rounded-[2px] align-[-1px]"
-                      style={{ backgroundColor: POSITION_FILL[key] }}
-                    />
-                    {label}
-                  </th>
-                  <td className="py-2 text-right">
-                    {(key === "co" ? r.output.coAuthor : r.output[key]).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-              <tr>
-                <th scope="row" className="py-2 text-left font-semibold">
-                  All research articles
-                </th>
-                <td className="py-2 text-right font-semibold">{r.output.total.toLocaleString()}</td>
-              </tr>
-            </tbody>
-          </table>
+          <PositionTable report={r} />
           <div className="flex min-w-0 flex-[2_1_360px] flex-col gap-1.5">
             <div className="text-sm font-semibold">
               {r.filters.yearFrom === null && r.filters.yearTo === null
@@ -505,6 +451,186 @@ function Report({
   );
 }
 
+/** What each list a summary count, tile or author position opens is headed. */
+const LIST_TITLE: Partial<Record<CountKey, string>> = {
+  all: "Research articles in scope, newest first",
+  lead: "Articles as first or senior author, newest first",
+  first: "Articles as first author, newest first",
+  senior: "Articles as senior author, newest first",
+  co: "Articles as co-author, newest first",
+  rated: "Articles with an NIH percentile, newest first",
+  topDecile: "Articles in the NIH top 10%, newest first",
+  hCore: "The publications forming the h-index, most cited first (NIH iCite)",
+  h5Core: "The publications forming the h5-index, most cited first (NIH iCite)",
+  guideline: "Articles cited in clinical practice guidelines, newest first",
+  authority: "Articles cited in health-authority documents, newest first",
+  patent: "Articles cited in patents, newest first",
+};
+
+/** A count that opens its list; zero stays plain text. */
+function CountButton({
+  n,
+  open,
+  onToggle,
+  controls,
+  testId,
+  className = "font-medium",
+}: {
+  n: number;
+  open: boolean;
+  onToggle: () => void;
+  controls: string;
+  testId?: string;
+  className?: string;
+}) {
+  if (n === 0) return <>0</>;
+  return (
+    <button
+      type="button"
+      className={`${LINK} tabular-nums ${className}`}
+      aria-expanded={open}
+      aria-controls={controls}
+      onClick={onToggle}
+      data-testid={testId}
+    >
+      {n.toLocaleString("en-US")}
+    </button>
+  );
+}
+
+/** The papers behind one count, under its title. */
+function CountList({ id, report: r, list }: { id: string; report: BibliometricsReport; list: CountKey }) {
+  return (
+    <div className={`${LIGHT_BOX} px-3.5 py-2.5`} data-testid={`bibliometrics-list-${list}`}>
+      {LIST_TITLE[list] ? <p className="mb-2 text-[13px] font-semibold">{LIST_TITLE[list]}</p> : null}
+      <CitedArticles id={id} papers={papersFor(r, list)} citations={list === "hCore" || list === "h5Core"} />
+    </div>
+  );
+}
+
+/** The summary sentence and the five tiles; each count opens its list, one
+ *  at a time, under the sentence or under the tiles. */
+function SummarySection({ report: r }: { report: BibliometricsReport }) {
+  const [open, setOpen] = React.useState<{ key: CountKey; from: "summary" | "tiles" } | null>(null);
+  const unrated = unratedNote(r);
+  const toggle = (key: CountKey, from: "summary" | "tiles") =>
+    setOpen(open?.key === key && open.from === from ? null : { key, from });
+  const countOf = (key: CountKey, n: number, from: "summary" | "tiles", className?: string) => (
+    <CountButton
+      n={n}
+      open={open?.key === key && open.from === from}
+      onToggle={() => toggle(key, from)}
+      controls={`bibliometrics-${from}-list`}
+      testId={`bibliometrics-${from}-count-${key}`}
+      className={className}
+    />
+  );
+  const list = (from: "summary" | "tiles") =>
+    open?.from === from ? <CountList id={`bibliometrics-${from}-list`} report={r} list={open.key} /> : null;
+  const tile = (key: CountKey, n: number) => countOf(key, n, "tiles", "font-semibold");
+  return (
+    <section className={`${SECTION} pt-6`}>
+      <SectionHead title="Summary" filtered />
+      {r.summary.length > 0 ? (
+        <p className="max-w-[900px] text-base leading-[1.6]" data-testid="bibliometrics-summary">
+          <ScholarHoverCard cwid={r.scholar.cwid}>
+            <span>{r.scholar.name}</span>
+          </ScholarHoverCard>
+          {r.summary.map((parts, i) => (
+            <React.Fragment key={i}>
+              {" "}
+              {parts.map((part, j) =>
+                typeof part === "string" ? (
+                  <React.Fragment key={j}>{part}</React.Fragment>
+                ) : (
+                  <React.Fragment key={j}>{countOf(part.list, part.n, "summary")}</React.Fragment>
+                ),
+              )}
+            </React.Fragment>
+          ))}
+        </p>
+      ) : (
+        <p className="text-apollo-ink-2 text-sm" data-testid="bibliometrics-no-summary">
+          {NO_SUMMARY_NOTE}
+        </p>
+      )}
+      {list("summary")}
+      <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3" data-testid="bibliometrics-tiles">
+        {/* The h-index and h5-index never follow the filters; their labels say so. */}
+        <Tile value={tile("hCore", r.metrics.hIndex)} label="h-index, all publications" help={METRIC_HELP.hIndex} />
+        <Tile value={tile("h5Core", r.metrics.h5Index)} label="h5-index, last 5 years" help={METRIC_HELP.h5Index} />
+        <Tile
+          value={r.metrics.topDecilePct === null ? "n/a" : tile("topDecile", r.metrics.topDecileArticles)}
+          share={r.metrics.topDecilePct === null ? undefined : `${r.metrics.topDecilePct}%`}
+          label={
+            r.metrics.topDecilePct === null
+              ? "in NIH top 10%: no article rated yet"
+              : `in NIH top 10%, of ${r.metrics.ratedArticles.toLocaleString()} rated (10% expected)`
+          }
+          help={METRIC_HELP.topDecile}
+        />
+        <Tile value={tile("guideline", r.policy[1]!.papers)} label="articles cited in clinical guidelines" />
+        <Tile value={tile("authority", r.policy[0]!.papers)} label="articles cited in health-authority reports" />
+      </div>
+      {list("tiles")}
+      {unrated ? <p className="text-apollo-ink-2 text-[13px]">{unrated}</p> : null}
+    </section>
+  );
+}
+
+/** Output by author position: each count lists its articles under its row. */
+function PositionTable({ report: r }: { report: BibliometricsReport }) {
+  const [open, setOpen] = React.useState<CountKey | null>(null);
+  const row = (key: CountKey, label: React.ReactNode, n: number, strong = false) => (
+    <React.Fragment key={key}>
+      <tr className={strong ? undefined : "border-apollo-border border-b"}>
+        <th scope="row" className={`py-2 text-left ${strong ? "font-semibold" : "font-normal"}`}>
+          {label}
+        </th>
+        <td className={`py-2 text-right ${strong ? "font-semibold" : ""}`}>
+          <CountButton
+            n={n}
+            open={open === key}
+            onToggle={() => setOpen(open === key ? null : key)}
+            controls={`bibliometrics-output-${key}`}
+            testId={`bibliometrics-output-count-${key}`}
+            className={strong ? "font-semibold" : "font-medium"}
+          />
+        </td>
+      </tr>
+      {open === key ? (
+        <tr className="border-apollo-border border-b">
+          <td colSpan={2} className="py-2">
+            <CountList id={`bibliometrics-output-${key}`} report={r} list={key} />
+          </td>
+        </tr>
+      ) : null}
+    </React.Fragment>
+  );
+  return (
+    <table className="min-w-0 flex-[1_1_260px] text-sm">
+      <caption className="pb-1.5 text-left font-semibold">By author position, all years in range</caption>
+      <tbody>
+        {OUTPUT_ROWS.map(([label, key]) =>
+          row(
+            key,
+            <>
+              <span
+                aria-hidden
+                className="mr-2 inline-block size-2.5 rounded-[2px] align-[-1px]"
+                style={{ backgroundColor: POSITION_FILL[key] }}
+              />
+              {label}
+            </>,
+            key === "co" ? r.output.coAuthor : r.output[key],
+          ),
+        )}
+        {row("all", "All research articles", r.output.total, true)}
+      </tbody>
+    </table>
+  );
+}
+
 /** An ⓘ that opens its text on click, tap or keyboard (a hover tooltip never
  *  opens on a phone). */
 function InfoMark({ label, text }: { label: string; text: string }) {
@@ -524,7 +650,7 @@ function InfoMark({ label, text }: { label: string; text: string }) {
   );
 }
 
-function Tile({ value, share, label, help }: { value: string; share?: string; label: string; help?: string }) {
+function Tile({ value, share, label, help }: { value: React.ReactNode; share?: string; label: string; help?: string }) {
   return (
     <div className={`${LIGHT_BOX} px-4 py-3.5`}>
       <div className="text-[30px] leading-[1.1] font-semibold tabular-nums">
@@ -940,14 +1066,25 @@ function PaperRow({
 }
 
 /** The documents behind one count: the first three, then all of them. */
-function CitingPanel({ id, signal: s, onClose }: { id: string; signal: Signal; onClose: () => void }) {
+function CitingPanel({
+  id,
+  signal: s,
+  onClose,
+  subject = "this paper",
+}: {
+  id: string;
+  signal: Pick<Signal, "n" | "noun" | "docs">;
+  onClose: () => void;
+  /** What the documents cite: "this paper", or "these articles" for a Downstream impact count. */
+  subject?: string;
+}) {
   const [all, setAll] = React.useState(false);
   const docs = all ? s.docs : s.docs.slice(0, DOCS_SHOWN);
   return (
     <div id={id} className={`${LIGHT_BOX} mt-2 px-3.5 py-2.5 text-[13px]`}>
       <div className="flex items-center justify-between gap-3">
         <span className="font-semibold">
-          {plural(s.n, s.noun[0], s.noun[1])} citing this paper
+          {plural(s.n, s.noun[0], s.noun[1])} citing {subject}
         </span>
         <button
           type="button"
@@ -1021,10 +1158,24 @@ function CoAuthors({ authors }: { authors: BibliometricsPaper["wcmAuthors"] }) {
 /** Where the work is cited outside ordinary journal citations: one table,
  *  one scope (the research articles in the filters). */
 function DownstreamImpact({ report: r, reach }: { report: BibliometricsReport; reach: ScholarReach | null }) {
-  const [open, setOpen] = React.useState<ImpactKey | null>(null);
+  // One list open at a time: an Articles cited key, or "docs:<level>[:<body>]".
+  const [open, setOpen] = React.useState<string | null>(null);
   const [inventionsOpen, setInventionsOpen] = React.useState(false);
   const level = (k: BibliometricsPolicyLevel["level"]) => r.policy.find((l) => l.level === k)!;
   const authority = level("authority");
+  const query = bibliometricsQuery(r.scholar.cwid, r.filters);
+  const docsKey = (lv: CitingLevel, body?: string) => (body ? `docs:${lv}:${body}` : `docs:${lv}`);
+  /** A Citing documents count, opening its documents (fetched on click). */
+  const docs = (lv: CitingLevel, n: number, body?: string, className?: string) => (
+    <CountButton
+      n={n}
+      open={open === docsKey(lv, body)}
+      onToggle={() => setOpen(open === docsKey(lv, body) ? null : docsKey(lv, body))}
+      controls={`bibliometrics-docs-${lv}`}
+      testId={`bibliometrics-docs-count-${body ? `${lv}-${body}` : lv}`}
+      className={className}
+    />
+  );
   const row = (
     key: ImpactKey,
     label: React.ReactNode,
@@ -1063,6 +1214,20 @@ function DownstreamImpact({ report: r, reach }: { report: BibliometricsReport; r
           </td>
         </tr>
       ) : null}
+      {open?.startsWith(`docs:${key}`) && key !== "patent" ? (
+        <tr className="border-apollo-border border-b">
+          <td colSpan={3} className="px-3 py-2">
+            <CitingDocs
+              key={open}
+              id={`bibliometrics-docs-${key}`}
+              query={query}
+              level={key}
+              body={open.split(":")[2]}
+              onClose={() => setOpen(null)}
+            />
+          </td>
+        </tr>
+      ) : null}
     </React.Fragment>
   );
   const group = (title: string) => (
@@ -1083,7 +1248,7 @@ function DownstreamImpact({ report: r, reach }: { report: BibliometricsReport; r
       <SectionHead title="Downstream impact" filtered />
       <p className="text-apollo-ink-2">
         Where the research articles in scope are cited outside ordinary journal citations. Each Articles cited count lists
-        its articles.
+        its articles; each Citing documents count lists its documents.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm tabular-nums">
@@ -1106,19 +1271,24 @@ function DownstreamImpact({ report: r, reach }: { report: BibliometricsReport; r
               "authority",
               authority.label,
               authority.papers,
-              authority.documents.toLocaleString(),
+              docs("authority", authority.documents),
               authority.bodies.length > 0 ? (
                 <div className="text-apollo-ink-2 mt-0.5 text-[13px]">
-                  {authority.bodies.map((b) => `${b.body} ${b.count.toLocaleString()}`).join(" \u00b7 ")}
+                  {authority.bodies.map((b, i) => (
+                    <React.Fragment key={b.body}>
+                      {i > 0 ? " \u00b7 " : ""}
+                      {b.body} {docs("authority", b.count, b.body, "font-normal")}
+                    </React.Fragment>
+                  ))}
                 </div>
               ) : null,
             )}
-            {row("guideline", level("guideline").label, level("guideline").papers, level("guideline").documents.toLocaleString())}
-            {row("consensus", level("consensus").label, level("consensus").papers, level("consensus").documents.toLocaleString())}
+            {row("guideline", level("guideline").label, level("guideline").papers, docs("guideline", level("guideline").documents))}
+            {row("consensus", level("consensus").label, level("consensus").papers, docs("consensus", level("consensus").documents))}
             {group("Research by others")}
-            {row("review", level("review").label, level("review").papers, level("review").documents.toLocaleString())}
-            {row("clinical", <>Clinical studies{own}</>, r.research.clinical.papers, r.research.clinical.documents.toLocaleString())}
-            {row("trial", <>Registered trials{own}</>, r.research.trial.papers, r.research.trial.documents.toLocaleString())}
+            {row("review", level("review").label, level("review").papers, docs("review", level("review").documents))}
+            {row("clinical", <>Clinical studies{own}</>, r.research.clinical.papers, docs("clinical", r.research.clinical.documents))}
+            {row("trial", <>Registered trials{own}</>, r.research.trial.papers, docs("trial", r.research.trial.documents))}
             {group("Invention")}
             {row(
               "patent",
@@ -1172,6 +1342,75 @@ function DownstreamImpact({ report: r, reach }: { report: BibliometricsReport; r
         </p>
       ) : null}
     </section>
+  );
+}
+
+/** What one Citing documents list counts: [one, many]. */
+const DOC_NOUN: Record<CitingLevel, readonly [string, string]> = {
+  authority: ["health-authority document", "health-authority documents"],
+  guideline: ["clinical practice guideline", "clinical practice guidelines"],
+  consensus: ["consensus statement", "consensus statements"],
+  review: ["systematic review or meta-analysis", "systematic reviews and meta-analyses"],
+  clinical: ["clinical study", "clinical studies"],
+  trial: ["registered trial", "registered trials"],
+};
+
+/** The citing documents behind one Citing documents count, asked for when
+ *  the count is opened (`part=citing`), inside the same filters. */
+function CitingDocs({
+  id,
+  query,
+  level,
+  body,
+  onClose,
+}: {
+  id: string;
+  query: string;
+  level: CitingLevel;
+  /** One health authority's documents, for its per-body count. */
+  body?: string;
+  onClose: () => void;
+}) {
+  const [state, setState] = React.useState<{ docs: BibliometricsCitingDoc[]; total: number } | "failed" | null>(null);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    const part = new URLSearchParams({ part: "citing", level, ...(body ? { body } : {}) });
+    fetch(`${PATH}?${query}&${part}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { docs: BibliometricsCitingDoc[]; total: number }) => setState({ docs: d.docs, total: d.total }))
+      .catch((err: unknown) => {
+        if (!ctrl.signal.aborted) {
+          console.error("[bibliometrics] citing documents load failed", err);
+          setState("failed");
+        }
+      });
+    return () => ctrl.abort();
+  }, [query, level, body]);
+  if (state === null) return <p id={id} className="text-apollo-ink-2 text-[13px]">Loading…</p>;
+  if (state === "failed") {
+    return (
+      <p id={id} className="text-apollo-ink-2 text-[13px]" data-testid="bibliometrics-docs-failed">
+        We couldn&rsquo;t load these documents just now. Please try again.
+      </p>
+    );
+  }
+  const noun = body ? ([`${body} document`, `${body} documents`] as const) : DOC_NOUN[level];
+  return (
+    <CitingPanel
+      id={id}
+      subject="these articles"
+      onClose={onClose}
+      signal={{
+        n: state.total,
+        noun,
+        docs: state.docs.map((d) => ({
+          id: `c${d.id}`,
+          title: d.title,
+          url: d.url,
+          meta: [d.source, d.year].filter(Boolean).join(" \u00b7 "),
+        })),
+      }}
+    />
   );
 }
 
@@ -1248,7 +1487,16 @@ function Inventions({ report: r }: { report: BibliometricsReport }) {
 }
 
 /** The research articles behind one "Articles cited" count, newest first. */
-function CitedArticles({ id, papers }: { id: string; papers: BibliometricsReport["cited"][ImpactKey] }) {
+function CitedArticles({
+  id,
+  papers,
+  citations = false,
+}: {
+  id: string;
+  papers: Array<BibliometricsReport["cited"][ImpactKey][number] & { nihCitations?: number | null }>;
+  /** Show each paper's NIH iCite citations (the h-index lists). */
+  citations?: boolean;
+}) {
   return (
     <ul id={id} className="flex flex-col gap-2" aria-label={`${papers.length} articles`}>
       {papers.map((p) => (
@@ -1266,6 +1514,7 @@ function CitedArticles({ id, papers }: { id: string; papers: BibliometricsReport
             {" · PMID "}
             {p.pmid}
             <CopyPmid pmid={p.pmid} />
+            {citations && p.nihCitations != null ? ` · ${plural(p.nihCitations, "citation", "citations")}` : null}
           </div>
         </li>
       ))}
