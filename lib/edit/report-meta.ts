@@ -313,7 +313,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "translational-portfolio",
     name: "Translational portfolio",
     summary:
-      "Where publications sit between basic research and population health (translational stages T0 to T3–4), by year, unit and research area, with the scholars doing the work at each stage.",
+      "Where research articles sit between basic research and population health (translational stages T0 to T3–4), by year, unit and research area, with the scholars doing the work at each stage.",
     descriptionHtml: null,
   },
   "27": {

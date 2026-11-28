@@ -61,6 +61,7 @@ import {
   COUNTING_RULE,
   isTranslationalPortfolioReportEnabled,
   parsePortfolioParams,
+  PORTFOLIO_ARTICLE_TYPES,
   PORTFOLIO_PAGE_SIZE,
   portfolioQueryString,
   type PortfolioParams,
@@ -313,7 +314,7 @@ export function scholarScope(
   return {
     types: [],
     units: [],
-    atypes: [],
+    atypes: [...PORTFOLIO_ARTICLE_TYPES],
     stages: [],
     jif: 0,
     pos: p.middle ? "any" : "either",

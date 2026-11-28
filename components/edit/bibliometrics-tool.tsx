@@ -8,29 +8,29 @@
 "use client";
 
 import * as React from "react";
-import { Download, FileText, Landmark, Lock } from "lucide-react";
+import { Download, FileText, Info, Lock } from "lucide-react";
 
 import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
-import { AuthorPills } from "@/components/edit/reports/author-pills";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
 import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
-import { InventionRow, PolicyCitationGroups, TrialPatentGroup } from "@/components/publication/publication-modal";
+import { InventionRow, TrialPatentGroup } from "@/components/publication/publication-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { citationIdentifier } from "@/lib/citation";
 import { authorityBadgeLabel, plural } from "@/lib/citations/policy-rollup";
 import {
   NO_SUMMARY_NOTE,
+  METRIC_HELP,
   OWN_PATENTS_NOTE,
   PATENTS_DOWNLOAD_LABEL,
   PATENTS_DOWNLOAD_PATH,
-  POSITION_LABEL,
   STAGE_FOLD_BELOW_PCT,
   UNSTAGED_LABEL,
   UNSTAGED_REASONS,
   bibliometricsQuery,
-  papersNote,
+  isEarlyPercentile,
   patentsLine,
   percentileText,
   unratedNote,
@@ -42,7 +42,7 @@ import {
 } from "@/lib/edit/bibliometrics";
 import type { ScholarReach } from "@/lib/edit/downstream-reach-entry";
 import { TRANSLATIONAL_STAGES, TRANSLATIONAL_STAGE_LABELS, type StageBucket } from "@/lib/translational-stage";
-import { sanitizePubTitle } from "@/lib/utils";
+import { htmlToPlainText, sanitizePubTitle } from "@/lib/utils";
 
 const PATH = "/api/edit/bibliometrics";
 const FAILED = "We couldn't load the bibliometrics report just now. Please try again.";
@@ -56,7 +56,6 @@ const LINK = "text-apollo-slate hover:underline";
 const BADGE = "inline-flex items-center gap-1 rounded-full border px-2.5 text-xs leading-[18px] font-medium";
 // Health authority: the guideline tint with a slate outline and bolder text.
 const BADGE_AUTHORITY = `${BADGE} border-apollo-slate bg-apollo-slate-tint py-px font-semibold text-[#274158]`;
-const BADGE_TINT = `${BADGE} border-apollo-slate-tint-border bg-apollo-slate-tint py-px text-[#274158]`;
 const TH = "px-2.5 py-2 text-left text-xs font-medium";
 /** Author position in byline order, light to dark: one slate hue (an ordinal
  *  ramp, validated: monotone lightness, light end 2.48:1 on the white card;
@@ -267,8 +266,8 @@ function Report({
         )}
         <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3" data-testid="bibliometrics-tiles">
           {/* The h-index and h5-index never follow the filters; their labels say so. */}
-          <Tile value={String(r.metrics.hIndex)} label="h-index, all publications" />
-          <Tile value={String(r.metrics.h5Index)} label="h5-index, last 5 years" />
+          <Tile value={String(r.metrics.hIndex)} label="h-index, all publications" help={METRIC_HELP.hIndex} />
+          <Tile value={String(r.metrics.h5Index)} label="h5-index, last 5 years" help={METRIC_HELP.h5Index} />
           <Tile
             value={r.metrics.topDecilePct === null ? "n/a" : r.metrics.topDecileArticles.toLocaleString()}
             share={r.metrics.topDecilePct === null ? undefined : `${r.metrics.topDecilePct}%`}
@@ -277,6 +276,7 @@ function Report({
                 ? "in NIH top 10%: no article rated yet"
                 : `in NIH top 10%, of ${r.metrics.ratedArticles.toLocaleString()} rated (10% expected)`
             }
+            help={METRIC_HELP.topDecile}
           />
           <Tile value={r.policy[1]!.papers.toLocaleString()} label="articles cited in clinical guidelines" />
           <Tile value={r.policy[0]!.papers.toLocaleString()} label="articles cited in health-authority reports" />
@@ -494,38 +494,9 @@ function Report({
 
       <section className={SECTION}>
         <SectionHead title="Most impactful papers" filtered />
+        <p className="text-apollo-ink-2">Ranked by NIH percentile, then author position, citation ratio and citation count.</p>
         {r.papers.rows.length > 0 ? (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="bg-apollo-surface-2 text-apollo-ink-2">
-                    <th scope="col" className={TH}>
-                      Paper
-                    </th>
-                    <th scope="col" className={TH}>
-                      Position
-                    </th>
-                    <th scope="col" className={`${TH} text-right`}>
-                      NIH percentile
-                    </th>
-                    <th scope="col" className={`${TH} text-right`}>
-                      Citation ratio
-                    </th>
-                    <th scope="col" className={`${TH} text-right`}>
-                      Cited by
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.papers.rows.map((p) => (
-                    <PaperRows key={p.pmid} paper={p} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-apollo-ink-2 text-[13px]">{papersNote(r)}</p>
-          </>
+          <PapersList report={r} />
         ) : (
           <p className="text-apollo-ink-2 text-sm">No research articles match.</p>
         )}
@@ -553,14 +524,36 @@ function Report({
   );
 }
 
-function Tile({ value, share, label }: { value: string; share?: string; label: string }) {
+/** An ⓘ that opens its text on click, tap or keyboard (a hover tooltip never
+ *  opens on a phone). */
+function InfoMark({ label, text }: { label: string; text: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          className="text-apollo-ink-2 hover:text-apollo-slate inline-flex size-6 items-center justify-center rounded align-middle"
+        >
+          <Info aria-hidden className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 text-[13px] leading-normal font-normal">{text}</PopoverContent>
+    </Popover>
+  );
+}
+
+function Tile({ value, share, label, help }: { value: string; share?: string; label: string; help?: string }) {
   return (
     <div className={`${LIGHT_BOX} px-4 py-3.5`}>
       <div className="text-[30px] leading-[1.1] font-semibold tabular-nums">
         {value}
         {share ? <span className="text-apollo-ink-2 text-base font-medium"> · {share}</span> : null}
       </div>
-      <div className="text-apollo-ink-2 mt-1 text-sm">{label}</div>
+      <div className="text-apollo-ink-2 mt-1 text-sm">
+        {label}
+        {help ? <InfoMark label={label} text={help} /> : null}
+      </div>
     </div>
   );
 }
@@ -703,111 +696,343 @@ function StagePapers({ id, papers }: { id: string; papers: BibliometricsStages["
 const yearTip = (y: BibliometricsReport["output"]["byYear"][number]) =>
   `${y.year}: ${y.count}${y.count > 0 ? ` (first ${y.first}, senior ${y.senior}, co-author ${y.co})` : ""}`;
 
-function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
-  const [open, setOpen] = React.useState(false);
-  const id = citationIdentifier(p.pmid);
-  const title = pubTitleProps(sanitizePubTitle(p.title), id.href ? LINK : undefined);
-  const hasCitations = p.authority.length + p.guidelines + p.consensus + p.reviews + p.patents > 0;
-  const plain = [
-    p.consensus > 0 ? plural(p.consensus, "consensus statement", "consensus statements") : null,
-    p.reviews > 0 ? plural(p.reviews, "systematic review", "systematic reviews") : null,
-    p.patents > 0 ? plural(p.patents, "patent", "patents") : null,
-  ].filter(Boolean);
-  const citingId = `bibliometrics-citing-${p.pmid}`;
+/** Papers shown before "Show all". */
+const PAPERS_SHOWN = 5;
+/** Citing documents an open count lists before "See all". */
+const DOCS_SHOWN = 3;
+/** Position column: short, so "Co-author" never wraps. */
+const POSITION_SHORT: Record<BibliometricsPaper["position"], string> = { first: "First", senior: "Senior", co: "Co" };
+/** Health authorities in the impact line's fixed order. */
+const AUTHORITY_ORDER = ["AHRQ", "CDC", "National Academies", "NICE", "WHO"];
+const AUTHORITY_SHORT: Readonly<Record<string, string>> = { "National Academies": "Nat\u2019l Academies" };
+/** Cell padding: 20px top and bottom, 16px at the row's ends, 16px between columns. */
+const CELL = "px-2 py-5 align-top first:pl-4 last:pr-4";
+const HEAD = "px-2 py-2.5 text-left text-[13px] font-medium first:pl-4 last:pr-4";
+
+/** One count in a paper's impact line, and what it lists when opened. */
+type Signal = {
+  key: string;
+  label: string;
+  n: number;
+  /** Policy sources are bold; research sources are not. */
+  policy: boolean;
+  noun: readonly [string, string];
+  docs: Array<{ id: string; title: string; url: string | null; meta: string }>;
+};
+
+const policyDoc = (d: BibliometricsPaper["citing"][number], kind: string) => ({
+  id: `d${d.id}`,
+  title: d.title,
+  url: d.url,
+  meta: [d.issuingBody ?? (d.journal ? htmlToPlainText(d.journal, Number.POSITIVE_INFINITY) : d.publisher), d.year, kind]
+    .filter(Boolean)
+    .join(" \u00b7 "),
+});
+
+/** Guidelines, the health authorities, consensus, systematic reviews, patents:
+ *  always that order; a zero leaves its count out. */
+function signalsOf(p: BibliometricsPaper): Signal[] {
+  const docs = (level: string, body?: string) =>
+    p.citing.filter((d) => d.level === level && (body === undefined || d.issuingBody === body));
+  const authority = [...p.authority].sort(
+    (a, b) => AUTHORITY_ORDER.indexOf(a.body) - AUTHORITY_ORDER.indexOf(b.body) || a.body.localeCompare(b.body),
+  );
+  const all: Signal[] = [
+    {
+      key: "guideline",
+      label: "Guidelines",
+      n: p.guidelines,
+      policy: true,
+      noun: ["clinical practice guideline", "clinical practice guidelines"],
+      docs: docs("guideline").map((d) => policyDoc(d, "guideline")),
+    },
+    ...authority.map((a) => {
+      // "AHRQ report", "WHO guideline": the badge wording, made plural.
+      const one = authorityBadgeLabel(a.body, 1);
+      return {
+        key: `authority:${a.body}`,
+        label: AUTHORITY_SHORT[a.body] ?? a.body,
+        n: a.count,
+        policy: true,
+        noun: [one, `${one}s`] as const,
+        docs: docs("authority", a.body).map((d) => policyDoc(d, one.slice(a.body.length + 1))),
+      };
+    }),
+    {
+      key: "consensus",
+      label: "Consensus",
+      n: p.consensus,
+      policy: false,
+      noun: ["consensus statement", "consensus statements"],
+      docs: docs("consensus").map((d) => policyDoc(d, "consensus statement")),
+    },
+    {
+      key: "review",
+      label: "Syst. reviews",
+      n: p.reviews,
+      policy: false,
+      noun: ["systematic review or meta-analysis", "systematic reviews and meta-analyses"],
+      docs: docs("review").map((d) => policyDoc(d, "systematic review")),
+    },
+    {
+      key: "patent",
+      label: "Patents",
+      n: p.patents,
+      policy: false,
+      noun: ["patented invention", "patented inventions"],
+      docs: (p.citingPatents?.items ?? []).map((inv) => ({
+        id: `p${inv.id}`,
+        title: inv.title,
+        url: inv.url,
+        meta: [inv.holder, inv.year ? `${inv.granted ? "granted" : "published"} ${inv.year}` : null, inv.number]
+          .filter(Boolean)
+          .join(" \u00b7 "),
+      })),
+    },
+  ];
+  return all.filter((x) => x.n > 0);
+}
+
+/** Most impactful papers: five, then all ten; one count's list open at a time. */
+function PapersList({ report: r }: { report: BibliometricsReport }) {
+  const [showAll, setShowAll] = React.useState(false);
+  const [open, setOpen] = React.useState<{ pmid: string; key: string } | null>(null);
+  const rows = showAll ? r.papers.rows : r.papers.rows.slice(0, PAPERS_SHOWN);
   return (
     <>
-      <tr className="border-apollo-border border-b" data-testid={`bibliometrics-paper-${p.pmid}`}>
-        <td className="p-2.5">
-          {id.href ? (
-            <a href={id.href} target="_blank" rel="noopener noreferrer" {...title} />
-          ) : (
-            <span {...title} />
-          )}
-          <div className="text-apollo-ink-2 text-[13px] leading-normal">
-            {p.authors.map((a, i) => (
-              <React.Fragment key={i}>
-                {i > 0 ? ", " : ""}
-                {a.bold ? <strong className="text-apollo-ink font-semibold">{a.name}</strong> : a.name}
-              </React.Fragment>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm tabular-nums">
+          <thead>
+            <tr className="bg-apollo-surface-2 text-apollo-ink-2">
+              <th scope="col" className={HEAD}>
+                Paper
+              </th>
+              <th scope="col" className={`${HEAD} w-[88px]`}>
+                Position
+              </th>
+              <th scope="col" className={`${HEAD} w-[96px] text-right`}>
+                NIH pctl
+                <InfoMark label="NIH percentile" text={METRIC_HELP.percentile} />
+              </th>
+              <th scope="col" className={`${HEAD} w-[96px] text-right`}>
+                Citation ratio
+                <InfoMark label="citation ratio" text={METRIC_HELP.citationRatio} />
+              </th>
+              <th scope="col" className={`${HEAD} w-[112px] text-right`}>
+                Cited by (Scopus)
+                <InfoMark label="Cited by" text={METRIC_HELP.citedBy} />
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => (
+              <PaperRow
+                key={p.pmid}
+                paper={p}
+                scholarCwid={r.scholar.cwid}
+                early={isEarlyPercentile(p, r.asOf)}
+                openKey={open?.pmid === p.pmid ? open.key : null}
+                setOpenKey={(key) => setOpen(key ? { pmid: p.pmid, key } : null)}
+              />
             ))}
-            {p.etAl ? ", et al. " : p.authors.length > 0 ? ". " : ""}
-            {p.journal ? <PubJournal value={p.journal} /> : null}
-            {p.journal ? ". " : ""}
-            {p.dated ? `${p.dated}.` : ""}
-            <br />
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-apollo-ink-2 text-[13px]">
+          Showing {rows.length} of the top {r.papers.rows.length} · {r.papers.matching.toLocaleString()}{" "}
+          {r.papers.matching === 1 ? "article" : "articles"} in scope
+        </span>
+        {r.papers.rows.length > PAPERS_SHOWN ? (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="border-apollo-border-strong bg-apollo-surface min-h-10 rounded-lg border px-3.5 text-sm font-medium"
+          >
+            {showAll ? `Show top ${PAPERS_SHOWN}` : `Show all ${r.papers.rows.length}`}
+          </button>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function PaperRow({
+  paper: p,
+  scholarCwid,
+  early,
+  openKey,
+  setOpenKey,
+}: {
+  paper: BibliometricsPaper;
+  scholarCwid: string;
+  /** The percentile is an early figure (this year or last). */
+  early: boolean;
+  /** The count whose list is open under this paper, if any. */
+  openKey: string | null;
+  setOpenKey: (key: string | null) => void;
+}) {
+  const id = citationIdentifier(p.pmid);
+  const title = pubTitleProps(sanitizePubTitle(p.title), id.href ? LINK : undefined);
+  const signals = signalsOf(p);
+  const opened = signals.find((s) => s.key === openKey) ?? null;
+  const panelId = `bibliometrics-citing-${p.pmid}`;
+  // The scholar's own name would repeat on every row and say nothing.
+  const coauthors = p.wcmAuthors.filter((a) => a.cwid !== scholarCwid);
+  return (
+    <tr className="border-apollo-border border-b" data-testid={`bibliometrics-paper-${p.pmid}`}>
+      <td className={CELL}>
+        {id.href ? (
+          <a href={id.href} target="_blank" rel="noopener noreferrer" {...title} className={`${LINK} font-medium`} />
+        ) : (
+          <span {...title} className="font-medium" />
+        )}
+        <div className="text-apollo-ink-2 mt-1 text-[13px] leading-normal">
+          {p.authors.map((a, i) => (
+            <React.Fragment key={i}>
+              {i > 0 ? ", " : ""}
+              {a.bold ? <strong className="text-apollo-ink font-semibold">{a.name}</strong> : a.name}
+            </React.Fragment>
+          ))}
+          {p.etAl ? ", et al. " : p.authors.length > 0 ? ". " : ""}
+          {p.journal ? <PubJournal value={p.journal} /> : null}
+          {p.journal ? ". " : ""}
+          {p.dated ? `${p.dated}.` : ""}
+        </div>
+        <div className="text-apollo-ink-2 mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[13px]">
+          <span>
             {id.label} {id.value}
-            {id.label === "PMID" ? <CopyPmid pmid={p.pmid} /> : null}
-            {p.doi ? (
-              <>
-                {" · "}
-                <a
-                  href={`https://doi.org/${p.doi}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-apollo-slate underline decoration-dotted underline-offset-2"
-                >
-                  DOI {p.doi}
-                </a>
-              </>
-            ) : null}
-          </div>
-          {p.wcmAuthors.length > 0 ? <AuthorPills authors={p.wcmAuthors} /> : null}
-          {hasCitations ? (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {p.authority.map((a) => (
-                <span key={a.body} className={BADGE_AUTHORITY}>
-                  <Landmark className="size-3" strokeWidth={2} aria-hidden />
-                  {authorityBadgeLabel(a.body, a.count)}
-                </span>
-              ))}
-              {p.guidelines > 0 ? (
-                <span className={BADGE_TINT}>
-                  {plural(p.guidelines, "clinical guideline", "clinical guidelines")}
-                </span>
-              ) : null}
-              {plain.length > 0 ? (
-                <span className="text-apollo-ink-2 text-[13px]">{plain.join(" · ")}</span>
-              ) : null}
-              {p.citing.length > 0 || p.citingPatents ? (
+          </span>
+          {id.label === "PMID" ? <CopyPmid pmid={p.pmid} label /> : null}
+          {p.doi ? (
+            <>
+              <span aria-hidden>·</span>
+              <a
+                href={`https://doi.org/${p.doi}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-apollo-slate underline decoration-dotted underline-offset-2"
+              >
+                DOI {p.doi}
+              </a>
+            </>
+          ) : null}
+        </div>
+        <div className="mt-2 text-[13px] leading-[1.9]" data-testid={`bibliometrics-signals-${p.pmid}`}>
+          {signals.length > 0 ? (
+            signals.map((s, i) => (
+              <span key={s.key} className="whitespace-nowrap">
+                {i > 0 ? (
+                  <span aria-hidden className="text-apollo-ink-2 px-1">
+                    ·
+                  </span>
+                ) : null}
                 <button
                   type="button"
-                  aria-expanded={open}
-                  aria-controls={citingId}
-                  onClick={() => setOpen((o) => !o)}
-                  className="text-apollo-slate min-h-11 px-1.5 text-[13px] font-medium underline"
+                  aria-expanded={opened?.key === s.key}
+                  aria-controls={panelId}
+                  onClick={() => setOpenKey(opened?.key === s.key ? null : s.key)}
+                  className={`text-apollo-slate min-h-7 rounded px-1 ${s.policy ? "font-semibold" : "font-normal"} ${
+                    opened?.key === s.key ? "bg-apollo-slate-tint" : ""
+                  }`}
                 >
-                  {open ? "Less" : "More"}
+                  {s.label} {s.n.toLocaleString()}
                 </button>
-              ) : null}
-            </div>
-          ) : null}
-        </td>
-        <td className="p-2.5 align-top">{POSITION_LABEL[p.position]}</td>
-        <td className="p-2.5 text-right align-top">{percentileText(p)}</td>
-        <td className="p-2.5 text-right align-top">{p.relativeCitationRatio?.toFixed(1) ?? "n/a"}</td>
-        <td className="p-2.5 text-right align-top">{p.citationCount.toLocaleString()}</td>
-      </tr>
-      {open ? (
-        <tr id={citingId} className="border-apollo-border border-b">
-          <td colSpan={5} className="px-2.5 pb-4">
-            <div className="flex flex-col gap-3">
-              <PolicyCitationGroups docs={p.citing} reviewTotal={p.reviewTotal} />
-              {p.citingPatents ? (
-                <TrialPatentGroup
-                  icon={<FileText className="size-[15px]" strokeWidth={2} aria-hidden="true" />}
-                  heading="Patents that cite this paper"
-                  count={plural(p.citingPatents.total, "invention", "inventions")}
-                  blurb="US patents whose text or references cite this paper. Citing a paper does not mean its authors hold the patent. Related patents for one invention are grouped."
-                  items={p.citingPatents.items}
-                  total={p.citingPatents.total}
-                  nouns={["invention", "inventions"]}
-                  row={(inv) => <InventionRow invention={inv} />}
-                />
-              ) : null}
-            </div>
-          </td>
-        </tr>
+              </span>
+            ))
+          ) : (
+            <span className="text-apollo-ink-2">No guideline, policy or review citations yet</span>
+          )}
+        </div>
+        {opened ? <CitingPanel key={opened.key} id={panelId} signal={opened} onClose={() => setOpenKey(null)} /> : null}
+        {coauthors.length > 0 ? <CoAuthors authors={coauthors} /> : null}
+      </td>
+      <td className={CELL}>{POSITION_SHORT[p.position]}</td>
+      <td className={`${CELL} text-right font-medium`}>
+        {percentileText(p)}
+        {early ? <div className="text-apollo-ink-2 text-xs font-normal">early</div> : null}
+      </td>
+      <td className={`${CELL} text-right`}>{p.relativeCitationRatio?.toFixed(1) ?? "n/a"}</td>
+      <td className={`${CELL} text-right`}>{p.citationCount.toLocaleString()}</td>
+    </tr>
+  );
+}
+
+/** The documents behind one count: the first three, then all of them. */
+function CitingPanel({ id, signal: s, onClose }: { id: string; signal: Signal; onClose: () => void }) {
+  const [all, setAll] = React.useState(false);
+  const docs = all ? s.docs : s.docs.slice(0, DOCS_SHOWN);
+  return (
+    <div id={id} className={`${LIGHT_BOX} mt-2 px-3.5 py-2.5 text-[13px]`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-semibold">
+          {plural(s.n, s.noun[0], s.noun[1])} citing this paper
+        </span>
+        <button
+          type="button"
+          aria-label="Close list"
+          onClick={onClose}
+          className="text-apollo-ink-2 min-h-8 min-w-8 text-lg leading-none"
+        >
+          ×
+        </button>
+      </div>
+      <ul>
+        {docs.map((d) => (
+          <li key={d.id} className="border-apollo-border border-b py-1.5 last:border-b-0">
+            {d.url ? (
+              <a
+                href={d.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                {...pubTitleProps(sanitizePubTitle(d.title), LINK)}
+              />
+            ) : (
+              <span {...pubTitleProps(sanitizePubTitle(d.title))} />
+            )}
+            <div className="text-apollo-ink-2">{d.meta}</div>
+          </li>
+        ))}
+      </ul>
+      {!all && s.n > DOCS_SHOWN ? (
+        <button type="button" onClick={() => setAll(true)} className={`${LINK} mt-1.5 min-h-7`}>
+          See all {s.n.toLocaleString()}
+        </button>
       ) : null}
-    </>
+      {all && s.docs.length < s.n ? (
+        <p className="text-apollo-ink-2 mt-1.5">
+          Listing the {s.docs.length.toLocaleString()} most recent of {s.n.toLocaleString()}.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "WCM co-authors: A, B, C +4 more"; the "+4 more" lists the rest. */
+function CoAuthors({ authors }: { authors: BibliometricsPaper["wcmAuthors"] }) {
+  const [all, setAll] = React.useState(false);
+  const shown = all ? authors : authors.slice(0, 3);
+  return (
+    <div className="text-apollo-ink-2 mt-1 text-[13px]">
+      WCM co-authors:{" "}
+      <span className="text-apollo-ink">
+        {shown.map((a, i) => (
+          <React.Fragment key={a.cwid}>
+            {i > 0 ? ", " : ""}
+            <ScholarHoverCard cwid={a.cwid}>
+              <span>{a.name}</span>
+            </ScholarHoverCard>
+          </React.Fragment>
+        ))}
+      </span>
+      {!all && authors.length > 3 ? (
+        <>
+          {" "}
+          <button type="button" onClick={() => setAll(true)} className={`${LINK} min-h-7`}>
+            +{authors.length - 3} more
+          </button>
+        </>
+      ) : null}
+    </div>
   );
 }
