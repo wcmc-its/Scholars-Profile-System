@@ -135,13 +135,15 @@ export async function buildBibliometricsDocx(r: BibliometricsReport): Promise<Bu
   const children: Array<Paragraph | Table> = [
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [text(`Bibliometrics: ${r.scholar.name}`)] }),
     para(`Calculated from publications in Scholars on ${asOf}.`),
+    // Every figure but the h-index and h5-index follows these.
+    ...(filters ? [para(`Filters: ${filters}.`)] : []),
 
     heading("Summary"),
     para(r.summary.length > 0 ? `${r.scholar.name} ${r.summary.join(" ")}` : NO_SUMMARY_NOTE),
 
     heading("Citation metrics"),
-    para(`h-index: ${r.metrics.hIndex}`),
-    para(`h5-index (last 5 years): ${r.metrics.h5Index}`),
+    para(`h-index (all publications): ${r.metrics.hIndex}`),
+    para(`h5-index (last 5 years, all publications): ${r.metrics.h5Index}`),
     ...(r.metrics.topDecilePct !== null ? [para(`${r.metrics.topDecilePct}% ${TOP_DECILE_LABEL}`)] : []),
     ...(unrated ? [para(unrated)] : []),
 
@@ -155,14 +157,17 @@ export async function buildBibliometricsDocx(r: BibliometricsReport): Promise<Bu
         ["All research articles", String(r.output.total)],
       ],
     ),
-    para(""),
-    table(
-      r.output.byYear.map((y) => String(y.year)),
-      [r.output.byYear.map((y) => String(y.count))],
-    ),
+    ...(r.output.byYear.length > 0
+      ? [
+          para(""),
+          table(
+            r.output.byYear.map((y) => String(y.year)),
+            [r.output.byYear.map((y) => String(y.count))],
+          ),
+        ]
+      : []),
 
     heading("Most impactful papers"),
-    ...(filters ? [para(`Filters: ${filters}.`)] : []),
     ...r.papers.rows.flatMap(paperParagraphs),
     para(r.papers.rows.length > 0 ? papersNote(r) : "No research articles match."),
 

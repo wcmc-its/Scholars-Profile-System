@@ -27,7 +27,6 @@ import {
   PATENTS_DOWNLOAD_PATH,
   POSITION_LABEL,
   STAGES_NOTE,
-  TOP_DECILE_LABEL,
   bibliometricsQuery,
   papersNote,
   patentsLine,
@@ -255,9 +254,9 @@ function Report({
   return (
     <div className="flex flex-col pb-2" data-testid="bibliometrics-report">
       <section className={`${SECTION} pt-6`}>
-        <SectionHead title="Summary" />
+        <SectionHead title="Summary" filtered />
         {r.summary.length > 0 ? (
-          <p className="text-[15px] leading-[1.6]" data-testid="bibliometrics-summary">
+          <p className="max-w-[900px] text-base leading-[1.6]" data-testid="bibliometrics-summary">
             <ScholarHoverCard cwid={r.scholar.cwid}>
               <span>{r.scholar.name}</span>
             </ScholarHoverCard>{" "}
@@ -268,26 +267,30 @@ function Report({
             {NO_SUMMARY_NOTE}
           </p>
         )}
-      </section>
-
-      <section className={SECTION}>
-        <SectionHead title="Citation metrics" />
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
-          <Tile value={String(r.metrics.hIndex)} label="h-index" />
-          <Tile value={String(r.metrics.h5Index)} label="h5-index (last 5 years)" />
+        <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3" data-testid="bibliometrics-tiles">
+          {/* The h-index and h5-index never follow the filters; their labels say so. */}
+          <Tile value={String(r.metrics.hIndex)} label="h-index, all publications" />
+          <Tile value={String(r.metrics.h5Index)} label="h5-index, last 5 years" />
           <Tile
-            value={r.metrics.topDecilePct === null ? "n/a" : `${r.metrics.topDecilePct}%`}
-            label={TOP_DECILE_LABEL}
+            value={r.metrics.topDecilePct === null ? "n/a" : r.metrics.topDecileArticles.toLocaleString()}
+            share={r.metrics.topDecilePct === null ? undefined : `${r.metrics.topDecilePct}%`}
+            label={
+              r.metrics.topDecilePct === null
+                ? "in NIH top 10%: no article rated yet"
+                : `in NIH top 10%, of ${r.metrics.ratedArticles.toLocaleString()} rated (10% expected)`
+            }
           />
+          <Tile value={r.policy[1]!.papers.toLocaleString()} label="articles cited in clinical guidelines" />
+          <Tile value={r.policy[0]!.papers.toLocaleString()} label="articles cited in health-authority reports" />
         </div>
         {unrated ? <p className="text-apollo-ink-2 text-[13px]">{unrated}</p> : null}
       </section>
 
       <section className={SECTION}>
-        <SectionHead title="Output" />
+        <SectionHead title="Output" filtered />
         <div className="flex flex-wrap gap-7">
           <table className="min-w-0 flex-[1_1_260px] text-sm">
-            <caption className="pb-1.5 text-left font-semibold">By author position</caption>
+            <caption className="pb-1.5 text-left font-semibold">By author position, all years in range</caption>
             <tbody>
               {OUTPUT_ROWS.map(([label, key]) => (
                 <tr key={label} className="border-apollo-border border-b">
@@ -313,7 +316,13 @@ function Report({
             </tbody>
           </table>
           <div className="flex min-w-0 flex-[2_1_360px] flex-col gap-1.5">
-            <div className="text-sm font-semibold">By year, last 10 years</div>
+            <div className="text-sm font-semibold">
+              {r.filters.yearFrom === null && r.filters.yearTo === null
+                ? "By year, last 10 years"
+                : r.output.byYear.length > 0
+                  ? `By year, ${r.output.byYear[0]!.year} to ${r.output.byYear.at(-1)!.year}`
+                  : "By year"}
+            </div>
             <div
               role="img"
               aria-label={`Research articles per year, by author position: ${r.output.byYear.map((y) => `${yearTip(y)}`).join("; ")}`}
@@ -351,7 +360,7 @@ function Report({
       </section>
 
       <section className={SECTION}>
-        <SectionHead title="Guideline and policy citations" />
+        <SectionHead title="Guideline and policy citations" filtered />
         <div className="overflow-x-auto">
           <table className="w-full min-w-[520px] text-sm">
             <thead>
@@ -395,7 +404,7 @@ function Report({
 
       {patents ? (
         <section className={SECTION} data-testid="bibliometrics-patents">
-          <SectionHead title="Patents citing this work" />
+          <SectionHead title="Patents citing this work" filtered />
           <p className="text-[15px] leading-[1.6]" data-testid="bibliometrics-patents-line">
             {patents}
             {r.patents.dataEnd ? `, in patent data through ${r.patents.dataEnd}.` : "."}
@@ -546,11 +555,14 @@ function Report({
   );
 }
 
-function Tile({ value, label }: { value: string; label: string }) {
+function Tile({ value, share, label }: { value: string; share?: string; label: string }) {
   return (
     <div className={`${LIGHT_BOX} px-4 py-3.5`}>
-      <div className="text-[28px] leading-[1.2] font-semibold">{value}</div>
-      <div className="text-apollo-ink-2 text-[13px]">{label}</div>
+      <div className="text-[30px] leading-[1.1] font-semibold tabular-nums">
+        {value}
+        {share ? <span className="text-apollo-ink-2 text-base font-medium"> · {share}</span> : null}
+      </div>
+      <div className="text-apollo-ink-2 mt-1 text-sm">{label}</div>
     </div>
   );
 }

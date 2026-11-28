@@ -142,7 +142,7 @@ describe("buildBibliometricsReport — the minimum-paper rule", () => {
     ]);
     expect(r.summary).toEqual([
       "has published 10 research articles since 2011, 9 as first or senior author.",
-      "Of the 10 articles with an NIH percentile, 90% rank in the top 10% of NIH-funded papers in their field and year.",
+      "Of the 10 articles with an NIH percentile, 9 (90%) are in the top 10% of NIH-funded papers for their field and year, where 10% is expected.",
       "1 article is cited in clinical practice guidelines.",
     ]);
   });
@@ -221,13 +221,14 @@ describe("buildBibliometricsReport — figures", () => {
 });
 
 describe("patents citing the work", () => {
-  it("counts every visible paper a patent cites, of any type, and carries each paper's count", () => {
+  it("counts the research articles in scope a patent cites, and carries each paper's count", () => {
     const article = pub({ patentFamilyCount: 14, nihPercentile: 99 });
     const review = pub({ patentFamilyCount: 1, publicationType: "Review" });
     const hidden = pub({ patentFamilyCount: 7 });
     const r = build([article, review, pub()], NO_FILTERS, [article, review, hidden]);
     // The loader fills the inventions, the cut-off and the link.
-    expect(r.patents).toEqual({ papers: 2, inventions: 0, list: [], dataEnd: null, reportHref: null });
+    // The review is not a research article: the summary and the card leave it out.
+    expect(r.patents).toEqual({ papers: 1, inventions: 0, list: [], dataEnd: null, reportHref: null });
     expect(r.papers.rows.map((p) => p.patents)).toEqual([14, 0]);
   });
 
@@ -265,8 +266,26 @@ describe("most impactful papers", () => {
     expect(lead.papers.matching).toBe(2);
     const window = build(pubs, { authorship: "all", yearFrom: 2015, yearTo: 2020 });
     expect(window.papers.rows.map((p) => p.dated.slice(0, 4))).toEqual(["2018", "2018"]);
-    // The filters narrow the list only; the rest of the report is unchanged.
-    expect(window.output.total).toBe(4);
+    // Every section follows the filters but the h-index and h5-index.
+    expect(window.output.total).toBe(2);
+    expect(lead.output).toMatchObject({ first: 1, senior: 1, coAuthor: 0, total: 2 });
+    const all = build(pubs);
+    expect([window.metrics.hIndex, window.metrics.h5Index]).toEqual([all.metrics.hIndex, all.metrics.h5Index]);
+    // The selects still offer every year, and the chart stops at the "to" year.
+    expect(window.yearRange).toEqual({ min: 2012, max: 2024 });
+    expect(window.output.byYear.map((y) => y.year)).toEqual([2015, 2016, 2017, 2018, 2019, 2020]);
+  });
+
+  it("says the years and the authorship the summary covers, and ends with patents when any cite the work", () => {
+    const rated = (o: Partial<BibliometricsPubRow>) =>
+      Array.from({ length: 12 }, (_, i) => pub({ nihPercentile: 50, year: 2010 + i, ...o }));
+    const pubs = [...rated({ isLast: true }), pub({ year: 2015, guidelineCount: 1, patentFamilyCount: 3, nihPercentile: 95 })];
+    const all = build(pubs).summary.join(" ");
+    expect(all).toMatch(/^has published 13 research articles since 2010, 12 as first or senior author\./);
+    expect(all).toMatch(/1 article is cited in clinical practice guidelines, and 1 in patents\.$/);
+    const lead = build(pubs, { authorship: "lead", yearFrom: 2010, yearTo: 2021 }).summary.join(" ");
+    expect(lead).toMatch(/^has published 12 research articles as first or senior author from 2010 to 2021\./);
+    expect(lead).not.toContain("patents");
   });
 
   it("lists the first three authors and bolds the scholar only in their own slot", () => {
