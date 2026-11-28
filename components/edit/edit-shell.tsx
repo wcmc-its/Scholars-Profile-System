@@ -341,7 +341,7 @@ export function EditShell({
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
       <a
         href="#edit-detail"
-        className="bg-apollo-maroon text-apollo-maroon-foreground sr-only z-50 rounded-md px-3 py-2 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2"
+        className="bg-apollo-maroon text-apollo-maroon-foreground sr-only z-50 rounded-md px-3 py-2 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2 print:hidden"
       >
         Skip to editor
       </a>
@@ -349,15 +349,19 @@ export function EditShell({
       {/* Top bar (black) — the shared Apollo chrome with a real account/exit
           menu. `variant="console"` so the brand is NOT an <h1>: the page header
           below owns the page's one <h1>. */}
-      <ConsoleTopBar variant="console" showAccountMenu>
-        {isSelf ? consoleNav : null}
-      </ConsoleTopBar>
+      {/* Chrome never prints (the Bibliometrics PDF is the page printed).
+          `contents`: the wrapper adds no box, so the bar's `sticky` still sticks. */}
+      <div className="contents print:hidden">
+        <ConsoleTopBar variant="console" showAccountMenu>
+          {isSelf ? consoleNav : null}
+        </ConsoleTopBar>
+      </div>
 
       {/* Self mode's minimal tab strip ("My Profile" / "All profiles") —
           navigation, not a breadcrumb, so it stays as it was. Superseded by
           `consoleNav` (rendered in the top bar) when supplied. */}
       {isSelf && !consoleNav && (
-        <div className="border-border border-b">
+        <div className="border-border border-b print:hidden">
           <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-4 sm:px-6">
             <span
               className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
@@ -409,7 +413,7 @@ export function EditShell({
             )}
           </div>
           {(reportsHref || previewHref) && (
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2 print:hidden">
               {reportsHref && (
                 <Button asChild variant="ghost" size="sm">
                   <Link href={reportsHref} data-testid="edit-reports-link">
@@ -445,12 +449,12 @@ export function EditShell({
           `hideRail` drops that first track altogether (both the desktop rail
           and the phone <select>) so the detail panel is the only column. */}
       <div
-        className={`mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-4 pt-5 pb-8 sm:px-6 ${
+        className={`mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-4 pt-5 pb-8 sm:px-6 print:block print:max-w-none ${
           hideRail ? "" : "md:grid-cols-[auto_1fr]"
         }`}
       >
         {!hideRail && (
-          <div className="hidden w-64 flex-col gap-3 md:flex">
+          <div className="hidden w-64 flex-col gap-3 md:flex print:hidden">
             <AttributeRail
               items={railItems}
               active={activeAttr}
@@ -469,12 +473,14 @@ export function EditShell({
             // instead of silently disappearing with the rest of the rail.
             subRail && <div className="mb-4">{subRail}</div>
           ) : (
-            <RailSheet
-              items={railItems}
-              active={activeAttr}
-              basePath={basePath}
-              subRail={subRail}
-            />
+            <div className="print:hidden">
+              <RailSheet
+                items={railItems}
+                active={activeAttr}
+                basePath={basePath}
+                subRail={subRail}
+              />
+            </div>
           )}
 
           {/* Read-only mode (an observer): native `inert` makes every control below

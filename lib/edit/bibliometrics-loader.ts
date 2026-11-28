@@ -18,6 +18,7 @@ import { htmlToPlainText } from "@/lib/utils";
 import {
   buildBibliometricsReport,
   inScope,
+  rankPapers,
   type BibliometricsCitingDoc,
   type CitingLevel,
   type BibliometricsFilters,
@@ -179,6 +180,16 @@ export async function loadBibliometricsReport(
   filters: BibliometricsFilters,
   now: Date = new Date(),
 ): Promise<BibliometricsReport | null> {
+  return (await loadBibliometrics(cwid, filters, now))?.report ?? null;
+}
+
+/** The report, and the research articles in scope it counts (ranked as Most
+ *  impactful papers ranks them) for the spreadsheet download. */
+export async function loadBibliometrics(
+  cwid: string,
+  filters: BibliometricsFilters,
+  now: Date = new Date(),
+): Promise<{ report: BibliometricsReport; articles: BibliometricsPubRow[] } | null> {
   const pubs = await loadScholarPublications(cwid);
   if (!pubs) return null;
   const { scholar, all, visible } = pubs;
@@ -294,5 +305,5 @@ export async function loadBibliometricsReport(
         }
       }),
   );
-  return report;
+  return { report, articles: rankPapers(scoped) };
 }

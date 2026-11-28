@@ -1,14 +1,15 @@
 /**
  * `BibliometricsTool` — the client island for the "Bibliometrics" Tools panel
  * (`EDIT_BIBLIOMETRICS`). Fetches the section model from
- * `GET /api/edit/bibliometrics` and renders it; the Word download is the same
- * URL with `format=docx`, so the document carries the filters set on screen.
+ * `GET /api/edit/bibliometrics` and renders it. The Download menu's Word and
+ * spreadsheet files are the same URL with `format=docx` / `format=xlsx`, so
+ * they carry the filters set on screen; its PDF is the page printed.
  * Read-only: nothing here writes.
  */
 "use client";
 
 import * as React from "react";
-import { Download, Info, Lock } from "lucide-react";
+import { ChevronDown, Download, Info, Lock } from "lucide-react";
 
 import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
@@ -28,6 +29,7 @@ import {
   UNSTAGED_LABEL,
   UNSTAGED_REASONS,
   bibliometricsQuery,
+  filtersNote,
   isEarlyPercentile,
   papersFor,
   percentileText,
@@ -112,6 +114,26 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
     return () => ctrl.abort();
   }, [entityId]);
 
+  // The PDF is the page printed: every folded part prints open, and folds
+  // back after.
+  React.useEffect(() => {
+    let opened: HTMLDetailsElement[] = [];
+    const before = () => {
+      opened = [...document.querySelectorAll<HTMLDetailsElement>('[data-slot="bibliometrics-tool"] details:not([open])')];
+      for (const d of opened) d.open = true;
+    };
+    const after = () => {
+      for (const d of opened) d.open = false;
+      opened = [];
+    };
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", after);
+    return () => {
+      window.removeEventListener("beforeprint", before);
+      window.removeEventListener("afterprint", after);
+    };
+  }, []);
+
   const updated = report
     ? new Date(`${report.asOf}T00:00:00Z`).toLocaleDateString("en-US", {
         year: "numeric",
@@ -128,7 +150,7 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
     >
       {/* The sticky bar: heading, Download and the filters. Phones scroll it
           away (sticky from md up) so it does not eat a small screen. */}
-      <header className="bg-apollo-surface border-apollo-border z-20 rounded-t-[var(--apollo-radius-card)] border-b px-5 pt-5 pb-4 sm:px-7 md:sticky md:top-14">
+      <header className="bg-apollo-surface border-apollo-border z-20 rounded-t-[var(--apollo-radius-card)] border-b px-5 pt-5 pb-4 sm:px-7 md:sticky md:top-14 print:static">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 id={EDIT_PANEL_HEADING_ID} className="text-2xl font-semibold tracking-[-0.01em]">
@@ -139,14 +161,12 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
               Locked: calculated from the publications in Scholars.{updated ? ` Updated ${updated}.` : ""}
             </p>
           </div>
-          <Button asChild variant="apollo" className="min-h-10">
-            <a href={`${PATH}?${query}&format=docx`} download data-testid="bibliometrics-download">
-              <Download className="size-4" />
-              Download Word document
-            </a>
-          </Button>
+          <DownloadMenu query={query} />
         </div>
         {report ? <FilterBar filters={filters} setFilters={setFilters} yearRange={report.yearRange} /> : null}
+        {report ? (
+          <p className="mt-2 hidden text-[13px] print:block">Filters: {filtersNote(report.filters) ?? "none"}.</p>
+        ) : null}
       </header>
       {failed ? (
         <Alert variant="destructive" data-testid="bibliometrics-error" className="mx-5 mt-5 w-auto sm:mx-7">
@@ -159,6 +179,76 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
         <p className="text-muted-foreground px-5 py-6 text-sm sm:px-7">Loading…</p>
       )}
     </section>
+  );
+}
+
+const DOWNLOADS = [
+  ["docx", "Word report", ".docx", "Summary and tables, ready to edit for a dossier or annual review"],
+  ["xlsx", "Spreadsheet", ".xlsx", "One tab per section, one row per paper with PMID, DOI and impact counts, plus the citing documents"],
+  ["pdf", "PDF", ".pdf", "The page as shown, charts included. Opens the print dialog; choose Save as PDF."],
+] as const;
+const MENU_ITEM = "hover:bg-apollo-surface-2 focus-visible:bg-apollo-surface-2 block w-full rounded-lg px-3 py-2.5 text-left outline-none";
+
+/** "Download ▾": the Word and spreadsheet files carry the on-screen filters;
+ *  the PDF is the page through the print dialog. */
+function DownloadMenu({ query }: { query: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="apollo" className="min-h-10 print:hidden" data-testid="bibliometrics-download">
+          <Download className="size-4" aria-hidden />
+          Download
+          <ChevronDown className="size-4" aria-hidden />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-[360px] max-w-[calc(100vw-2rem)] rounded-xl p-1.5">
+        <ul className="m-0 list-none p-0">
+          {DOWNLOADS.map(([format, label, ext, blurb]) => {
+            const body = (
+              <>
+                <span className="flex justify-between gap-3">
+                  <span className="font-medium">{label}</span>
+                  <span className="text-apollo-ink-2">{ext}</span>
+                </span>
+                <span className="text-apollo-ink-2 mt-0.5 block text-[13px]">{blurb}</span>
+              </>
+            );
+            return (
+              <li key={format}>
+                {format === "pdf" ? (
+                  <button
+                    type="button"
+                    className={MENU_ITEM}
+                    data-testid="bibliometrics-download-pdf"
+                    onClick={() => {
+                      setOpen(false);
+                      // After the menu has closed, so it is not in the PDF.
+                      setTimeout(() => window.print(), 0);
+                    }}
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <a
+                    href={`${PATH}?${query}&format=${format}`}
+                    download
+                    className={MENU_ITEM}
+                    data-testid={`bibliometrics-download-${format}`}
+                    onClick={() => setOpen(false)}
+                  >
+                    {body}
+                  </a>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <p className="border-apollo-border text-apollo-ink-2 mx-1.5 mt-1.5 border-t px-1.5 pt-2.5 pb-1.5 text-[13px]">
+          Every file uses the current filters and notes the date.
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -176,7 +266,7 @@ function FilterBar({
     ? Array.from({ length: yearRange.max - yearRange.min + 1 }, (_, i) => yearRange.min + i)
     : [];
   return (
-    <div className="bg-apollo-surface-2 border-apollo-border-strong mt-4 flex flex-wrap items-center gap-x-7 gap-y-3 rounded-[10px] border px-4 py-2.5 text-sm">
+    <div className="bg-apollo-surface-2 border-apollo-border-strong mt-4 flex flex-wrap items-center gap-x-7 gap-y-3 rounded-[10px] border px-4 py-2.5 text-sm print:hidden">
       <fieldset className="flex flex-wrap items-center gap-x-3.5">
         <legend className="float-left mr-3.5 font-medium">Authorship</legend>
         {(
@@ -550,7 +640,7 @@ function InfoMark({ label, text }: { label: string; text: string }) {
         <button
           type="button"
           aria-label={`About ${label}`}
-          className="text-apollo-ink-2 hover:text-apollo-slate inline-flex size-6 items-center justify-center rounded align-middle"
+          className="text-apollo-ink-2 hover:text-apollo-slate inline-flex size-6 items-center justify-center rounded align-middle print:hidden"
         >
           <Info aria-hidden className="size-3.5" />
         </button>
