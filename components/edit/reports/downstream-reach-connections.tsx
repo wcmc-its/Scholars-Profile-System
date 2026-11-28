@@ -2,7 +2,7 @@
  * Report 27's Connections view (`lib/edit/downstream-reach-connections.ts`):
  * its two lists, and the pairs list one row's count opens. Report 27's own
  * parts, nothing new drawn: `PersonCell` (the scholar hover card, the CWID in
- * monospace), `TH` / `TD`, `Pager`, the neutral `StageBadge` and the public
+ * monospace), `TH` / `TD`, `Pager`, report 26's coloured `StageTag` and the public
  * publication modal.
  *
  * THE RULE: every number opens its list.
@@ -27,7 +27,7 @@ import {
 import { PaperTitle } from "@/components/edit/reports/downstream-reach-client";
 import { PubTitle } from "@/components/publication/pub-html";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
-import { StageBadge } from "@/components/publication/stage-badge";
+import { StageTag } from "@/components/edit/reports/translational-portfolio-body";
 import {
   connectionLinks,
   connectionsListLabel,
@@ -277,7 +277,9 @@ function Paper({
       </div>
       <div>
         {paper.stage ? (
-          <StageBadge stage={paper.stage} />
+          <span data-testid="pub-row-stage">
+                    <StageTag stage={paper.stage} />
+                  </span>
         ) : (
           <span className="text-muted-foreground text-xs">{NO_STAGE_LABEL}</span>
         )}

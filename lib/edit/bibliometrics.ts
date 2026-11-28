@@ -14,7 +14,6 @@ import {
   displayStage,
   emptyCounts,
   STAGE_BUCKETS,
-  STAGE_RULE,
   stagedShares,
   type StageBucket,
   type StageCounts,
@@ -125,6 +124,8 @@ export type BibliometricsPaper = {
   journal: string | null;
   /** "2014;59(6):765-73" */
   dated: string;
+  /** Publication year; the tab marks a percentile early for the last two. */
+  year: number | null;
   doi: string | null;
   position: BibliometricsPosition;
   nihPercentile: number | null;
@@ -172,8 +173,24 @@ export type BibliometricsPatents = {
   reportHref: string | null;
 };
 
-/** One paper in a stage's list. */
-export type BibliometricsStagePaper = { pmid: string; title: string; journal: string | null; year: number | null };
+/** ReCiterAI stages Academic Articles from this publication year on
+ *  (`articleYear >= 2020` in both its daily job and its wide backfill). */
+export const STAGE_FIRST_YEAR = 2020;
+
+/** Why a research article has no stage: published before ReCiterAI's years,
+ *  a low-confidence call, outside the T0–T4 spectrum ("NA"), or from those
+ *  years but not staged (no usable abstract, or not processed yet). */
+export type UnstagedReason = "before" | "low" | "outside" | "pending";
+export const UNSTAGED_REASONS: readonly UnstagedReason[] = ["before", "low", "outside", "pending"];
+
+/** One paper in a stage's list; an unstaged one carries its reason. */
+export type BibliometricsStagePaper = {
+  pmid: string;
+  title: string;
+  journal: string | null;
+  year: number | null;
+  reason?: UnstagedReason;
+};
 
 /** The research articles matching the filters, by translational stage
  *  (report 26's rule). Each bucket lists the papers it counts, newest first. */
@@ -183,6 +200,8 @@ export type BibliometricsStages = {
    *  to 100 (`stagedShares`, report 26's rule). No stage has no share. */
   shares: StageShares;
   papers: Record<StageBucket, BibliometricsStagePaper[]>;
+  /** The unstaged ("none") papers by reason; adds up to `counts.none`. */
+  unstaged: Record<UnstagedReason, number>;
   /** Report 26 for this scholar, filled by the route; null when the viewer may
    *  not open that report. */
   portfolioHref: string | null;
@@ -323,6 +342,7 @@ function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
     wcmAuthors: [],
     journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
     dated: [p.year, locator].filter(Boolean).join(";"),
+    year: p.year,
     doi: p.doi,
     position: positionOf(p),
     nihPercentile: p.nihPercentile,
@@ -407,7 +427,7 @@ const DEFINITIONS: BibliometricsReport["definitions"] = [
   },
   {
     term: "NIH percentile and citation ratio",
-    text: "NIH iCite. Recent papers are rated too, but for their first two years or so the figures rest on few citations and can still move.",
+    text: "NIH iCite. Recent papers are rated too, but for their first two years or so the figures rest on few citations and can still move; the papers list marks those percentiles early.",
   },
   {
     term: "h-index and h5-index",
@@ -567,24 +587,50 @@ const paperRef = (p: BibliometricsPubRow): BibliometricsStagePaper => ({
   year: p.year,
 });
 
-const STAGE_DEFINITION = { term: "Translational stage", text: STAGE_RULE };
+const STAGE_DEFINITION = {
+  term: "Translational stage",
+  text: `Assigned by ReCiterAI from the abstract or summary, for research articles published ${STAGE_FIRST_YEAR} onward. Earlier articles, low-confidence calls and articles outside the T0\u2013T4 spectrum are left unstaged. Shares are among articles with a stage, so the four stages add up to 100%.`,
+};
+
+function unstagedReason(p: BibliometricsPubRow): UnstagedReason {
+  if (p.translationalStageConfidence === "low") return "low";
+  if (p.translationalStage === "NA") return "outside";
+  if (p.year !== null && p.year < STAGE_FIRST_YEAR) return "before";
+  return "pending";
+}
 
 function stagesOf(pubs: readonly BibliometricsPubRow[]): BibliometricsStages {
   const counts = emptyCounts();
+  const unstaged: Record<UnstagedReason, number> = { before: 0, low: 0, outside: 0, pending: 0 };
   const papers = Object.fromEntries(STAGE_BUCKETS.map((k) => [k, []])) as unknown as BibliometricsStages["papers"];
   const newest = [...pubs].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.pmid.localeCompare(a.pmid));
   for (const p of newest) {
     const k = displayStage(p.translationalStage, p.translationalStageConfidence) ?? "none";
     counts[k]++;
+    const reason = k === "none" ? unstagedReason(p) : undefined;
+    if (reason) unstaged[reason]++;
     papers[k].push({
       pmid: p.pmid,
       title: p.title,
       journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
       year: p.year,
+      ...(reason ? { reason } : {}),
     });
   }
-  return { counts, shares: stagedShares(counts), papers, portfolioHref: null };
+  return { counts, shares: stagedShares(counts), papers, unstaged, portfolioHref: null };
 }
+
+/** Below this share of articles with a stage, the stage breakdown starts
+ *  folded: the shares would claim more than the coverage supports. */
+export const STAGE_FOLD_BELOW_PCT = 25;
+
+/** "published before 2020", "low-confidence", … for the coverage line. */
+export const UNSTAGED_LABEL: Record<UnstagedReason, string> = {
+  before: `published before ${STAGE_FIRST_YEAR}, outside the years ReCiterAI stages`,
+  low: "low-confidence",
+  outside: "outside the T0\u2013T4 spectrum, which is common for health services and informatics research",
+  pending: `from ${STAGE_FIRST_YEAR} on that ReCiterAI has not staged (no usable abstract, or not yet processed)`,
+};
 
 /** What the stage section counts, under its heading. */
 export const STAGES_NOTE =
@@ -659,6 +705,26 @@ export const OWN_PATENTS_NOTE =
 /** The Excel download of every patent citing the scholar's work. */
 export const PATENTS_DOWNLOAD_PATH = "/api/edit/bibliometrics/patents";
 export const PATENTS_DOWNLOAD_LABEL = "Download patents citing this work (Excel)";
+
+/** Help text behind the tab's info marks, beside each metric's label. */
+export const METRIC_HELP = {
+  hIndex:
+    "The largest h such that h of the scholar's publications each have at least h citations, on NIH iCite counts, across all publications. Does not follow the filters.",
+  h5Index:
+    "The h-index of the publications added to PubMed in the last five years, on NIH iCite counts. Does not follow the filters.",
+  topDecile:
+    "Rated research articles at or above the 90th NIH percentile for their field and year. By definition 10% of NIH-funded papers are, so 10% is the baseline.",
+  percentile:
+    "NIH iCite percentile among NIH-funded papers of the same field and year. Marked early for papers from this year and last: they rest on few citations and can still move.",
+  citationRatio:
+    "NIH iCite relative citation ratio: citations per year against NIH-funded papers in the same field. 1.0 matches the median NIH-funded paper.",
+  citedBy: "Scopus citation count, the one the public profile shows. The h-index uses NIH iCite counts instead.",
+} as const;
+
+/** True for a paper from this year or last: its percentile is an early figure. */
+export function isEarlyPercentile(p: Pick<BibliometricsPaper, "year" | "nihPercentile">, asOf: string): boolean {
+  return p.nihPercentile !== null && p.year !== null && p.year >= Number(asOf.slice(0, 4)) - 1;
+}
 
 /** "98.4", or the label for a paper iCite has not rated. */
 export function percentileText(p: Pick<BibliometricsPaper, "nihPercentile">): string {

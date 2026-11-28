@@ -6,7 +6,7 @@
  * on-screen filters to the Word download. All people and papers invented.
  */
 import * as React from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/edit/scholar-hover-card", () => ({
@@ -105,37 +105,65 @@ afterEach(() => {
 });
 
 describe("BibliometricsTool", () => {
-  it("lists a stage's papers when its count is selected, and links report 26 only when allowed", async () => {
-    const pubs = [
-      pub(1, { translationalStage: "T2", translationalStageConfidence: "high", title: "A staged paper" }),
-      pub(2, { translationalStage: null }),
-    ];
-    const r = buildBibliometricsReport({
-      scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
-      visible: pubs,
-      all: pubs,
-      filters: { authorship: "all", yearFrom: null, yearTo: null },
-      now: new Date("2026-11-25T12:00:00Z"),
-      stagesEnabled: true,
-    });
+  it("states coverage first, splits the unstaged by reason, and every count opens its papers", async () => {
+    const stagesReport = (pubs: BibliometricsPubRow[]) =>
+      buildBibliometricsReport({
+        scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
+        visible: pubs,
+        all: pubs,
+        filters: { authorship: "all", yearFrom: null, yearTo: null },
+        now: new Date("2026-11-25T12:00:00Z"),
+        stagesEnabled: true,
+      });
+    const r = stagesReport([
+      pub(1, { year: 2021, translationalStage: "T2", translationalStageConfidence: "high", title: "A staged paper" }),
+      pub(2, { year: 2018, translationalStage: null, title: "An older paper" }),
+      pub(3, { year: 2022, translationalStage: "T1", translationalStageConfidence: "low", title: "An unsure paper" }),
+      pub(4, { year: 2022, translationalStage: "NA", translationalStageConfidence: "high" }),
+      pub(5, { year: 2023, translationalStage: null }),
+    ]);
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
     render(<BibliometricsTool entityId="zzz9001" />);
     const section = await screen.findByTestId("bibliometrics-stages");
-    // One staged paper of two: T2 is 100% of the papers WITH a stage; No stage has no share.
-    expect(section.textContent).toContain("100%");
-    expect(section.textContent).not.toContain("50%");
+    expect(screen.getByTestId("bibliometrics-stage-coverage").textContent).toBe(
+      "Stage assigned for 1 of 5 articles (20%). The other 4 are unstaged: " +
+        "1 published before 2020, outside the years ReCiterAI stages; 1 low-confidence; " +
+        "1 outside the T0\u2013T4 spectrum, which is common for health services and informatics research; " +
+        "1 from 2020 on that ReCiterAI has not staged (no usable abstract, or not yet processed). Shares below are of the 1.",
+    );
+    // Each reason opens its own papers; "4" opens all of them.
+    const open = (k: string) => fireEvent.click(screen.getByTestId(`bibliometrics-stage-count-${k}`));
+    open("before");
+    expect(within(section).getByRole("link", { name: "An older paper" })).toBeTruthy();
+    expect(within(section).queryByRole("link", { name: "An unsure paper" })).toBeNull();
+    open("none");
+    expect(within(section).getAllByRole("listitem")).toHaveLength(4);
+    // Under 25% coverage the breakdown starts folded; bars are as long as shares.
+    const fold = screen.getByTestId("bibliometrics-stage-fold") as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    open("T2");
+    expect(within(section).getByRole("link", { name: "A staged paper" })).toBeTruthy();
+    const bars = [...section.querySelectorAll<HTMLElement>(".bg-apollo-slate.h-2")].map((b) => b.style.width);
+    expect(bars).toEqual(["0%", "0%", "100%", "0%"]);
     expect(screen.queryByText("Full translational profile", { exact: false })).toBeNull();
-    const counts = section.querySelectorAll("button[aria-expanded]");
-    expect(counts).toHaveLength(2); // T2 and No stage; zero rows are not buttons
-    const listed = () => within(section).queryByRole("link", { name: "A staged paper" });
-    expect(listed()).toBeNull();
-    fireEvent.click(counts[0]!);
-    expect(counts[0]!.getAttribute("aria-expanded")).toBe("true");
-    expect(listed()).toBeTruthy();
+
     cleanup();
-    r.stages!.portfolioHref = "/edit/scholar/zzz9001/translational-portfolio";
+    const wide = stagesReport([
+      pub(1, { year: 2021, translationalStage: "T2", translationalStageConfidence: "high" }),
+      pub(2, { year: 2021, translationalStage: "T0", translationalStageConfidence: "high" }),
+      pub(3, { year: 2021, translationalStage: "NA" }),
+    ]);
+    wide.stages!.portfolioHref = "/edit/scholar/zzz9001/translational-portfolio";
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: wide }) });
     render(<BibliometricsTool entityId="zzz9001" />);
-    expect((await screen.findByText("Full translational profile", { exact: false })).getAttribute("href")).toBe(
+    expect((await screen.findByTestId("bibliometrics-stage-coverage")).textContent).toBe(
+      "Stage assigned for 2 of 3 articles (67%). The other 1 is unstaged: " +
+        "1 outside the T0\u2013T4 spectrum, which is common for health services and informatics research. Shares below are of the 2.",
+    );
+    expect(screen.queryByTestId("bibliometrics-stage-fold")).toBeNull();
+    // A zero stays plain text, never a button.
+    expect(screen.queryByTestId("bibliometrics-stage-count-T1")).toBeNull();
+    expect(screen.getByText("Full translational profile", { exact: false }).getAttribute("href")).toBe(
       "/edit/scholar/zzz9001/translational-portfolio",
     );
   });
@@ -157,7 +185,7 @@ describe("BibliometricsTool", () => {
     expect(screen.getByText("h-index, all publications").previousSibling?.textContent).toBe("12");
     // Five tiles, in the Summary section: no separate Citation metrics card.
     expect(screen.getByTestId("bibliometrics-tiles").children).toHaveLength(5);
-    expect(screen.getByText(/Showing 10 of 12\./)).toBeTruthy();
+    expect(screen.getByText("Showing 5 of the top 10 · 12 articles in scope")).toBeTruthy();
     expect(screen.getByText("Updated November 25, 2026.", { exact: false })).toBeTruthy();
     // The scholar is bold in the author list; the other author is not.
     expect(document.querySelectorAll("strong")[0]?.textContent).toBe("Vale J");
@@ -171,15 +199,108 @@ describe("BibliometricsTool", () => {
     expect(screen.getByText("h5-index, last 5 years")).toBeTruthy();
   });
 
-  it("opens a paper's citing documents behind More", async () => {
-    respond(12);
+  it("opens one count's citing documents at a time, counts in a fixed order", async () => {
+    const r = report(12);
+    const row0 = r.papers.rows[0]!;
+    const doc = row0.citing[0]!;
+    row0.guidelines = 4;
+    row0.citing = [1, 2, 3, 4].map((i) => ({ ...doc, id: i, title: `An invented guideline ${i}` }));
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
     render(<BibliometricsTool entityId="zzz9001" />);
-    const more = await screen.findByRole("button", { name: "More" });
-    expect(screen.getByText("WHO guideline")).toBeTruthy();
-    expect(screen.queryByText("Clinical practice guidelines", { exact: false, selector: "div" })).toBeNull();
-    fireEvent.click(more);
-    expect(screen.getByRole("link", { name: "An invented guideline" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Less" }).getAttribute("aria-expanded")).toBe("true");
+    const row = await screen.findByTestId("bibliometrics-paper-90000100");
+    const counts = within(screen.getByTestId("bibliometrics-signals-90000100")).getAllByRole("button");
+    // Guidelines before the health authorities; policy sources bold.
+    expect(counts.map((b) => b.textContent)).toEqual(["Guidelines 4", "WHO 1"]);
+    expect(counts[0]!.className).toContain("font-semibold");
+    // A paper with no citing documents says so; a zero count never shows.
+    expect(screen.getByTestId("bibliometrics-signals-90000101").textContent).toBe(
+      "No guideline, policy or review citations yet",
+    );
+
+    fireEvent.click(counts[0]!);
+    expect(counts[0]!.getAttribute("aria-expanded")).toBe("true");
+    expect(within(row).getByText("4 clinical practice guidelines citing this paper")).toBeTruthy();
+    expect(within(row).getAllByRole("link", { name: /An invented guideline/ })).toHaveLength(3);
+    expect(within(row).getAllByText("Guideline J · 2022 · guideline")).toHaveLength(3);
+    fireEvent.click(within(row).getByRole("button", { name: "See all 4" }));
+    expect(within(row).getAllByRole("link", { name: /An invented guideline/ })).toHaveLength(4);
+
+    // Another count replaces the open list; the same count, or ×, closes it.
+    fireEvent.click(counts[1]!);
+    expect(within(row).queryByRole("link", { name: /An invented guideline/ })).toBeNull();
+    expect(within(row).getByText("1 WHO guideline citing this paper")).toBeTruthy();
+    fireEvent.click(counts[1]!);
+    expect(within(row).queryByText("1 WHO guideline citing this paper")).toBeNull();
+    fireEvent.click(counts[0]!);
+    fireEvent.click(within(row).getByRole("button", { name: "Close list" }));
+    expect(within(row).queryByText(/citing this paper/)).toBeNull();
+  });
+
+  it("shows five papers, then all ten; PMID and DOI on their own line; co-authors as text without the scholar", async () => {
+    const r = report(12);
+    r.papers.rows[0]!.wcmAuthors = [
+      { cwid: "zzz9001", name: "Jordan Vale" },
+      ...["Avery Marsh", "Blake Okafor", "Casey Quill", "Devon Reyes", "Emery Stone"].map((name, i) => ({
+        cwid: `zzz900${i + 2}`,
+        name,
+      })),
+    ];
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    await screen.findByTestId("bibliometrics-paper-90000100");
+    const rows = () => document.querySelectorAll('[data-testid^="bibliometrics-paper-"]');
+    expect(rows()).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 10" }));
+    expect(rows()).toHaveLength(10);
+    expect(screen.getByRole("button", { name: "Show top 5" })).toBeTruthy();
+
+    const row = screen.getByTestId("bibliometrics-paper-90000100");
+    expect(within(row).getByRole("button", { name: "Copy PMID" })).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "DOI 10.5555/example.0" })).toBeTruthy();
+    const co = within(row).getByText(/WCM co-authors:/);
+    expect(co.textContent).toBe("WCM co-authors: Avery Marsh, Blake Okafor, Casey Quill +2 more");
+    fireEvent.click(within(co).getByRole("button", { name: "+2 more" }));
+    expect(co.textContent).toBe("WCM co-authors: Avery Marsh, Blake Okafor, Casey Quill, Devon Reyes, Emery Stone");
+    expect(within(row).getAllByRole("cell")[1]!.textContent).toBe("First");
+    expect(screen.getByRole("columnheader", { name: "Cited by (Scopus)" })).toBeTruthy();
+  });
+
+  it("marks a percentile early for papers from this year and last, and explains each metric behind an info mark", async () => {
+    const r = report(12);
+    r.papers.rows[0]!.year = 2025; // asOf is 2026-11-25
+    r.papers.rows[1]!.year = 2024;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const pctl = async (pmid: string) => within(await screen.findByTestId(`bibliometrics-paper-${pmid}`)).getAllByRole("cell")[2]!;
+    expect((await pctl("90000100")).textContent).toBe("95.0early");
+    expect((await pctl("90000101")).textContent).toBe("94.0");
+
+    expect(screen.queryByText(/relative citation ratio/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "About citation ratio" }));
+    expect(await screen.findByText(/relative citation ratio/)).toBeTruthy();
+    for (const name of ["About h-index, all publications", "About h5-index, last 5 years", "About NIH percentile", "About Cited by"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
+  });
+
+  it("copies a PMID and says Copied for 1.5 s", async () => {
+    respond(12);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const row = await screen.findByTestId("bibliometrics-paper-90000100");
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(within(row).getByRole("button", { name: "Copy PMID" }));
+      });
+      expect(writeText).toHaveBeenCalledWith("90000100");
+      expect(within(row).getByText("Copied")).toBeTruthy();
+      act(() => vi.advanceTimersByTime(1500));
+      expect(within(row).queryByText("Copied")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refetches on a filter change and points the Word download at the same filters", async () => {
@@ -319,10 +440,13 @@ describe("BibliometricsTool", () => {
       "/api/edit/bibliometrics/patents?cwid=zzz9001",
     );
     expect(within(panel).queryByTestId("bibliometrics-patents-report")).toBeNull();
-    // Under the paper, behind "More", as the publication modal lists them.
+    // Under the paper, behind its Patents count.
     const row = screen.getByTestId("bibliometrics-paper-90000101");
-    fireEvent.click(within(row).getByRole("button", { name: "More" }));
-    expect(within(document.getElementById("bibliometrics-citing-90000101")!).getByText("Compound and uses")).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Patents 1" }));
+    const below = document.getElementById("bibliometrics-citing-90000101")!;
+    expect(within(below).getByText("1 patented invention citing this paper")).toBeTruthy();
+    expect(within(below).getByText("Compound and uses")).toBeTruthy();
+    expect(within(below).getByText("Example Biotech, Inc. · granted 2022 · US 90000002 B2")).toBeTruthy();
   });
 
   it("links report 25 from the inventions for a viewer who may open it", async () => {
@@ -332,6 +456,11 @@ describe("BibliometricsTool", () => {
     expect(screen.getByTestId("bibliometrics-patents-report").getAttribute("href")).toBe(
       "/edit/reports/patent-citations?person=zzz9001",
     );
+    // Each paper's count is in its impact line, absent for none.
+    const signals = (i: number) => screen.getByTestId(`bibliometrics-signals-${90000100 + i}`).textContent ?? "";
+    expect(signals(0)).toContain("Patents 14");
+    expect(signals(1)).toBe("Patents 1");
+    expect(signals(2)).not.toContain("Patents");
   });
 
   it("shows zero inventions and no toggle or download when no patent cites the work", async () => {

@@ -14,8 +14,9 @@
  * ReCiter-confirmed authorships of active scholars, the unit rule
  * (`personFilterSql`: department / division incl. a manual division's
  * hand-added members / current center members), calendar year of
- * publication. So a year's stage split here equals report 8's for the same
- * unit and years. On top: a research area (`publication_topic`, the topic
+ * publication, research articles only (`PORTFOLIO_ARTICLE_TYPES`). So a year's
+ * stage split here equals report 8's for the same unit and years with
+ * `atype=Academic Article`. On top: a research area (`publication_topic`, the topic
  * pages' 0.3 score floor) and a scholar (that person's first- or
  * senior-author papers).
  *
@@ -170,6 +171,12 @@ export type PortfolioParams = {
  *  earlier (49 publications across 2016–2019, staging 2026-11-27), so a
  *  window starting before it reads as a shift that is only missing data. */
 export const FIRST_STAGED_YEAR = 2020;
+
+/** Research articles only (report 8's `atype`; ReCiter's "Academic Article",
+ *  shown as Research Article). Reviews, editorials, letters, book chapters and
+ *  errata almost never get a stage (165 of them staged across 2020-2025), so
+ *  counting them only inflated No stage (#3610). */
+export const PORTFOLIO_ARTICLE_TYPES: readonly string[] = ["Academic Article"];
 
 /** The default window: `FIRST_STAGED_YEAR` through the current year. The
  *  current year is partial, but shares are within each year and its staging
@@ -328,7 +335,7 @@ function articleScope(p: PortfolioParams, opts: { stages?: TranslationalStage[];
   return {
     types: [],
     units: opts.units ?? p.units,
-    atypes: [],
+    atypes: [...PORTFOLIO_ARTICLE_TYPES],
     stages: opts.stages ?? [],
     jif: 0,
     pos: p.cwid ? "either" : "any",
@@ -834,7 +841,7 @@ export function activityListScope(
 // ---------------------------------------------------------------------------
 
 export const COUNTING_RULE =
-  "Each publication counts once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; department, division (including hand-added division members) and center membership are the scholar's current values, the rule report 8 uses. A research area is a publication's ReciterAI area score of 0.3 or more, as on the research area pages.";
+  "Research articles only: reviews, editorials, letters, book chapters and errata are left out. Each publication counts once, however many matching authors it has. Only ReCiter-confirmed authorships of active scholars count; department, division (including hand-added division members) and center membership are the scholar's current values, the rule report 8 uses. A research area is a publication's ReciterAI area score of 0.3 or more, as on the research area pages.";
 
 
 export const GAP_RULE = `A research area has a gap at a stage that holds under ${GAP_SHARE}% of its publications with a stage. Only areas with at least ${MIN_AREA_SIZE} publications with a stage are checked.`;
@@ -858,7 +865,7 @@ export function describePortfolioCriteria(
     ["Gap rule", GAP_RULE],
     ["Translational stage", p.stages.length > 0 ? p.stages.map(translationalStageDisplay).join("; ") : "All"],
     ["Scholar", p.cwid ?? "All (first or senior author when one scholar is chosen)"],
-    ["Record type", "Publications, grants and clinical trials. Grants have no stage yet, so the stage filter does not apply to them."],
+    ["Record type", "Research articles, grants and clinical trials. Grants have no stage yet, so the stage filter does not apply to them."],
     ["Stages shown on the page", p.act === "trials" ? "Clinical trials" : "Publications"],
     ["Counting rule", COUNTING_RULE],
     ["Stage rule", `${STAGE_RULE} How many have a stage is shown separately, as Stage assigned.`],
