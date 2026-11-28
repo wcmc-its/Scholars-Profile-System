@@ -480,3 +480,14 @@ describe("loadPortfolio's trial stages", () => {
     expect(portfolioQueryString(parsePortfolioParams(new URLSearchParams("act=bogus")))).not.toContain("act=");
   });
 });
+
+describe("research articles only (#3610)", () => {
+  it("the report, its Publications list and the scholar page all scope to Academic Article", async () => {
+    const { activityListScope, PORTFOLIO_ARTICLE_TYPES } = await import("@/lib/edit/translational-portfolio-report");
+    const { scholarScope } = await import("@/lib/edit/translational-portfolio-scholar");
+    expect(PORTFOLIO_ARTICLE_TYPES).toEqual(["Academic Article"]);
+    const p = parsePortfolioParams(new URLSearchParams(""));
+    expect(activityListScope(p, ["1"]).params.atypes).toEqual(["Academic Article"]);
+    expect(scholarScope({ from: 2020, to: 2026, middle: false }).atypes).toEqual(["Academic Article"]);
+  });
+});

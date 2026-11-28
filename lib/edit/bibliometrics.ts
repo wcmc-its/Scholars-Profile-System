@@ -121,6 +121,8 @@ export type BibliometricsPaper = {
   journal: string | null;
   /** "2014;59(6):765-73" */
   dated: string;
+  /** Publication year; the tab marks a percentile early for the last two. */
+  year: number | null;
   doi: string | null;
   position: BibliometricsPosition;
   nihPercentile: number | null;
@@ -310,6 +312,7 @@ function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
     wcmAuthors: [],
     journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
     dated: [p.year, locator].filter(Boolean).join(";"),
+    year: p.year,
     doi: p.doi,
     position: positionOf(p),
     nihPercentile: p.nihPercentile,
@@ -394,7 +397,7 @@ const DEFINITIONS: BibliometricsReport["definitions"] = [
   },
   {
     term: "NIH percentile and citation ratio",
-    text: "NIH iCite. Recent papers are rated too, but for their first two years or so the figures rest on few citations and can still move.",
+    text: "NIH iCite. Recent papers are rated too, but for their first two years or so the figures rest on few citations and can still move; the papers list marks those percentiles early.",
   },
   {
     term: "h-index and h5-index",
@@ -623,6 +626,26 @@ export const OWN_PATENTS_NOTE =
 /** The Excel download of every patent citing the scholar's work. */
 export const PATENTS_DOWNLOAD_PATH = "/api/edit/bibliometrics/patents";
 export const PATENTS_DOWNLOAD_LABEL = "Download patents citing this work (Excel)";
+
+/** Help text behind the tab's info marks, beside each metric's label. */
+export const METRIC_HELP = {
+  hIndex:
+    "The largest h such that h of the scholar's publications each have at least h citations, on NIH iCite counts, across all publications. Does not follow the filters.",
+  h5Index:
+    "The h-index of the publications added to PubMed in the last five years, on NIH iCite counts. Does not follow the filters.",
+  topDecile:
+    "Rated research articles at or above the 90th NIH percentile for their field and year. By definition 10% of NIH-funded papers are, so 10% is the baseline.",
+  percentile:
+    "NIH iCite percentile among NIH-funded papers of the same field and year. Marked early for papers from this year and last: they rest on few citations and can still move.",
+  citationRatio:
+    "NIH iCite relative citation ratio: citations per year against NIH-funded papers in the same field. 1.0 matches the median NIH-funded paper.",
+  citedBy: "Scopus citation count, the one the public profile shows. The h-index uses NIH iCite counts instead.",
+} as const;
+
+/** True for a paper from this year or last: its percentile is an early figure. */
+export function isEarlyPercentile(p: Pick<BibliometricsPaper, "year" | "nihPercentile">, asOf: string): boolean {
+  return p.nihPercentile !== null && p.year !== null && p.year >= Number(asOf.slice(0, 4)) - 1;
+}
 
 /** "98.4", or the label for a paper iCite has not rated. */
 export function percentileText(p: Pick<BibliometricsPaper, "nihPercentile">): string {

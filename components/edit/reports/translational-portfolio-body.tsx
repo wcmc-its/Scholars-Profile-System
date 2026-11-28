@@ -579,7 +579,7 @@ export async function renderTranslationalPortfolioReport({
   return {
     subtitle: (
       <p className="text-muted-foreground max-w-[720px] text-sm">
-        Where WCM publications sit between basic research and population health, and who does the work.
+        Where WCM research articles sit between basic research and population health, and who does the work.
       </p>
     ),
     aside: (
