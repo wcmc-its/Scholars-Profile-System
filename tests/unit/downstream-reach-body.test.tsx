@@ -75,6 +75,7 @@ import { renderDownstreamReachReport } from "@/components/edit/reports/downstrea
 import type { ScholarCardFooter } from "@/components/edit/scholar-hover-card";
 import {
   parseReachParams,
+  REACH_DEFINITION,
   reachLinks,
   type ModalCounts,
   type ReachData,
@@ -220,15 +221,11 @@ describe("report 27 page", () => {
     expect(h.reach.mock.calls[0][1]).toEqual({ views: ["people"], limit: 50, offset: 100 });
   });
 
-  it("the header says what is in scope without counting anything", async () => {
-    const view = await page();
+  it("the header is a fixed definition: no filter values, which the chips carry", async () => {
+    const view = await page({ unit: "dept:N1", area: "area_a", type: "full_time_faculty", own: "in", stage: "T2" });
     const subtitle = view.getByTestId("downstream-reach-subtitle").textContent!;
-    expect(subtitle).toContain("Publications at T0 · Basic research, T1 · Early translation");
-    expect(subtitle).toContain("published 2020 or later");
-    expect(subtitle).toContain("all units");
-    expect(subtitle).toContain("the authors' own work left out");
-    // The only digits are the stage codes and the year.
-    expect(subtitle.replace(/T[01]|2020/g, "")).not.toMatch(/\d/);
+    expect(subtitle).toBe(REACH_DEFINITION);
+    expect(subtitle).not.toMatch(/\d|units|Department|Example area|own work/);
   });
 
   it("the tiles: N of M cited downstream and one per citing type, each a link to the list it counts", async () => {
@@ -564,15 +561,18 @@ describe("report 27 page", () => {
     const rail = within(view.getAllByTestId("downstream-reach-rail")[0]);
     const boxes = (testId: string) =>
       [...rail.getByTestId(testId).querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].map((i) => [i.name, i.value, i.checked]);
+    // Every option the filter includes is ticked: no "none = all" state (spec E2).
     expect(boxes("downstream-reach-ctype")).toEqual([
-      ["ctype", "clinical", false],
-      ["ctype", "trial", false],
-      ["ctype", "policy", false],
-      ["ctype", "review", false],
-      ["ctype", "patent", false],
+      ["", "on", true],
+      ["ctype", "clinical", true],
+      ["ctype", "trial", true],
+      ["ctype", "policy", true],
+      ["ctype", "review", true],
+      ["ctype", "patent", true],
       ["own", "out", true],
     ]);
     expect(boxes("downstream-reach-stage")).toEqual([
+      ["", "on", false],
       ["stage", "T0", true],
       ["stage", "T1", true],
       ["stage", "T2", false],
@@ -603,15 +603,16 @@ describe("report 27 page", () => {
     const rail = within(view.getAllByTestId("downstream-reach-rail")[0]);
     expect(rail.getByTestId<HTMLInputElement>("downstream-reach-own").checked).toBe(false);
     expect(view.getByTestId("downstream-reach-chips").textContent).toContain("Authors' own work:Included");
-    expect(view.getByTestId("downstream-reach-subtitle").textContent).toContain("at every stage");
-    expect(view.getByTestId("downstream-reach-subtitle").textContent).toContain("the authors' own work counted");
+    // Every stage: the stage group is all ticked, and no Stage chip.
+    const stage = rail.getByTestId("downstream-reach-stage");
+    expect([...stage.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every((i) => i.checked)).toBe(true);
+    expect(view.getByTestId("downstream-reach-chips").textContent).not.toContain("Stage:");
   });
 
   it("a unit administrator's units are named, and offered alone", async () => {
     h.scope.value = ["dept:N1"];
     const view = await page();
     expect(view.getAllByTestId("downstream-reach-scope")[0].textContent).toContain("Department of Examples");
-    expect(view.getByTestId("downstream-reach-subtitle").textContent).toContain("Department of Examples");
     expect(view.getByTestId("downstream-reach-chips").textContent).toContain("Unit:Department of Examples");
   });
 
@@ -642,5 +643,39 @@ describe("report 27 page", () => {
     ]) {
       expect(note).toContain(said);
     }
+  });
+});
+
+describe("the rail's checkbox groups (spec E2)", () => {
+  it('"All" ticks every option; the last option, or "All" with everything ticked, cannot be cleared', async () => {
+    const { AtLeastOneChecklist } = await import("@/components/edit/reports/downstream-reach-client");
+    const submits = vi.fn();
+    const view = render(
+      <form onChange={submits}>
+        <AtLeastOneChecklist
+          name="g"
+          options={[
+            { value: "a", label: "A" },
+            { value: "b", label: "B" },
+          ]}
+          selected={["a"]}
+        />
+      </form>,
+    );
+    const [all, a, b] = view.getAllByRole("checkbox") as HTMLInputElement[];
+    expect([all.checked, a.checked, b.checked]).toEqual([false, true, false]);
+    // The last ticked option: the click is cancelled, nothing submits, and the note says why.
+    fireEvent.click(a);
+    expect(a.checked).toBe(true);
+    expect(submits).not.toHaveBeenCalled();
+    expect(view.getByRole("status").textContent).toBe("Choose at least one.");
+    // "All" ticks the rest before the form hears the change.
+    fireEvent.click(all);
+    expect([all.checked, a.checked, b.checked]).toEqual([true, true, true]);
+    expect(submits).toHaveBeenCalledTimes(1);
+    // "All" again would clear everything: refused.
+    fireEvent.click(all);
+    expect([all.checked, a.checked, b.checked]).toEqual([true, true, true]);
+    expect(submits).toHaveBeenCalledTimes(1);
   });
 });

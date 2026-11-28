@@ -352,7 +352,9 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
   const bare = ![...sp.keys()].some((k) => !VIEW_KEYS.has(k));
   const { among, one, range, types, units, people, positions, basis, q, page } = citationParamReader(sp);
   const [from, to] = range("from", "to");
-  const stages = among("stage", STAGE_KEYS);
+  // Every option ticked is the same as no filter (spec E2): one URL, no chips.
+  const full = <T>(xs: T[], all: readonly T[]): T[] => (xs.length === all.length ? [] : xs);
+  const stages = full(among("stage", STAGE_KEYS), STAGE_KEYS);
   const own = sp.getAll("own");
   const area = sp.get("area")?.trim() ?? "";
   const pmid = sp.get("pmid")?.trim() ?? "";
@@ -366,7 +368,7 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
   // tab click from another view drops them, and no chip or Criteria row names
   // a filter the lists were not taken under.
   const connections = view === "connections";
-  const ctypes = among("ctype", REACH_TYPES);
+  const ctypes = full(among("ctype", REACH_TYPES), REACH_TYPES);
   // A type's sort needs its column: a type not ticked sorts by the Total.
   const sortGiven = one("sort", Object.keys(REACH_SORT_LABEL) as ReachSort[], "cited");
   const sort =
@@ -381,7 +383,10 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
     basis,
     from: bare ? DEFAULT_FROM : from,
     to,
-    stages: stages.length > 0 ? stages : sp.getAll("stage").includes(STAGE_ANY) ? [] : [...DEFAULT_STAGES],
+    stages:
+      stages.length > 0 || sp.getAll("stage").some((v) => v === STAGE_ANY || (STAGE_KEYS as readonly string[]).includes(v))
+        ? stages
+        : [...DEFAULT_STAGES],
     ctypes,
     includeOwn: own.includes("in") && !own.includes("out"),
     area: /^[A-Za-z0-9_-]{1,128}$/.test(area) ? area : null,
@@ -1367,6 +1372,10 @@ export function reachChips(
   }
   return chips;
 }
+
+/** The report's subtitle: what it is, with no filter values (spec E1). */
+export const REACH_DEFINITION =
+  "WCM publications and the clinical studies, registered trials, guidelines, systematic reviews and patents that cite them.";
 
 export const REACH_COUNTING_RULE =
   "A publication is cited downstream when at least one citing document of a checked type cites it. A clinical study counts once per article; a registered trial, a guideline or policy document, a systematic review and a patent count once however many records or journals carry them, and related patents (one patent family) are one invention. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.";

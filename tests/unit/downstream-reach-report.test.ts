@@ -71,6 +71,7 @@ import {
   REACH_SOURCES,
   REACH_TYPE_LABEL,
   REACH_TYPES,
+  STAGE_KEYS,
   reachChips,
   reachLinks,
   reachPubSql,
@@ -463,6 +464,14 @@ describe("parseReachParams", () => {
     expect(parse("stage=any").stages).toEqual([]);
     expect(parse("stage=any&stage=T3-4").stages).toEqual(["T3-4"]);
     expect(parse("stage=nope").stages).toEqual(["T0", "T1"]);
+  });
+
+  it("every option ticked is no filter: the same URL and no chips as the bare filter (spec E2)", () => {
+    const every = (k: string, xs: readonly string[]) => xs.map((x) => `${k}=${x}`).join("&");
+    expect(parse(every("stage", STAGE_KEYS)).stages).toEqual([]);
+    expect(parse(`stage=any&${every("stage", STAGE_KEYS)}`).stages).toEqual([]);
+    expect(parse(every("ctype", REACH_TYPES)).ctypes).toEqual([]);
+    expect(parse("ctype=clinical&ctype=trial").ctypes).toEqual(["clinical", "trial"]);
   });
 
   it("own work: the hidden `in` alone includes it; the ticked box adds `out`, which wins", () => {
