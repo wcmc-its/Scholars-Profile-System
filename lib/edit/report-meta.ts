@@ -123,7 +123,8 @@ const DOWNSTREAM_REACH_DESCRIPTION_HTML = [
   "<ul>",
   "<li><strong>Clinical studies</strong>: articles that cite the paper and that NIH iCite flags as clinical, meaning a clinical trial, clinical study or guideline by PubMed publication type. Titles, journals and years come from PubMed.</li>",
   "<li><strong>Registered trials</strong>: studies on ClinicalTrials.gov that list the paper as a background reference.</li>",
-  "<li><strong>Guidelines and policy</strong>: health authority documents on NCBI Bookshelf (WHO, NICE, CDC, AHRQ, the National Academies), and clinical guidelines, consensus statements and systematic reviews in PubMed. Report 24 lists the same documents.</li>",
+  "<li><strong>Guidelines and policy</strong>: health authority documents on NCBI Bookshelf (WHO, NICE, CDC, AHRQ, the National Academies), and clinical guidelines and consensus statements in PubMed. Report 24 lists the same documents.</li>",
+  "<li><strong>Systematic reviews</strong>: PubMed articles typed Systematic Review or Meta-Analysis (by publication type), as the policy import classifies them; one also typed as a guideline or consensus statement counts under Guidelines and policy. Report 24 lists the same reviews.</li>",
   "<li><strong>Patents</strong>: US patents that cite the paper, from Reliance on Science (Marx and Fuegi), CC BY-NC 4.0, with patent details from USPTO PatentsView. Related patents (one patent family) count as one invention. A patent citing a paper does not mean the paper's authors hold the patent. Report 25 lists the same inventions.</li>",
   "</ul>",
   "<p>The authors' own work is left out unless you uncheck that filter: a clinical article that shares a confirmed WCM author with the paper it cites, or a registered trial one of the paper's authors is an investigator on.</p>",
@@ -320,7 +321,7 @@ export const REPORT_META_DEFAULTS: Record<
     slug: "downstream-reach",
     name: "Downstream reach",
     summary:
-      "How publications, especially basic and early-translation ones, were later cited by clinical studies, registered trials, guidelines and policy documents, and patents, by publication, by citing document or by person. Open to every unit administrator, for the units they administer.",
+      "How publications, especially basic and early-translation ones, were later cited by clinical studies, registered trials, guidelines and policy documents, systematic reviews and patents, by publication, by citing document or by person. Open to every unit administrator, for the units they administer.",
     descriptionHtml: DOWNSTREAM_REACH_DESCRIPTION_HTML,
   },
 };

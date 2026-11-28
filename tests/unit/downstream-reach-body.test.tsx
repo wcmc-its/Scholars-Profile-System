@@ -97,6 +97,7 @@ const pub = (pmid: string, over: Partial<ReachPubRow> = {}): ReachPubRow => ({
   clinical: 0,
   trial: 0,
   policy: 0,
+  review: 0,
   patent: 0,
   title: `An example study ${pmid}`,
   journal: "Journal of Examples",
@@ -106,13 +107,14 @@ const pub = (pmid: string, over: Partial<ReachPubRow> = {}): ReachPubRow => ({
 });
 /** 10000001: everything the modal can list. 10000002: what it cannot. */
 const PUBS: ReachPubRow[] = [
-  pub("10000001", { clinical: 12, trial: 2, policy: 3, patent: 1 }),
-  pub("10000002", { stage: "none", clinical: 7, trial: 60, policy: 140, patent: 0 }),
+  pub("10000001", { clinical: 12, trial: 2, policy: 3, review: 2, patent: 1 }),
+  pub("10000002", { stage: "none", clinical: 7, trial: 60, policy: 140, review: 120, patent: 0 }),
 ];
 const MODAL = new Map<string, ModalCounts>([
-  ["10000001", { clinical: 12, trial: 2, policy: 3, reviews: 1, patent: 1 }],
-  // One more clinical article than counted (the authors' own), trials past the cap, reviews past theirs.
-  ["10000002", { clinical: 8, trial: 60, policy: 140, reviews: 120, patent: 0 }],
+  ["10000001", { clinical: 12, trial: 2, policy: 3, review: 2, ranked: 5, patent: 1 }],
+  // One more clinical article than counted (the authors' own), trials past the cap, one guideline
+  // document at two policy levels (the modal lists it once), and reviews past their cap.
+  ["10000002", { clinical: 8, trial: 60, policy: 139, review: 120, ranked: 259, patent: 0 }],
 ]);
 const DOC: ReachDocRow = {
   docId: 4,
@@ -136,11 +138,12 @@ const PERSON: ReachPersonRow = {
   clinical: 6,
   trial: 0,
   policy: 4,
+  review: 3,
   patent: 2,
 };
 const data = (over: Partial<ReachData> = {}): ReachData => ({
   scopeTotal: 4210,
-  typePapers: { clinical: 1300, trial: 210, policy: 640, patent: 95 },
+  typePapers: { clinical: 1300, trial: 210, policy: 640, review: 2222, patent: 95 },
   pubTotal: 1875,
   pubMatched: 1875,
   pubs: PUBS,
@@ -238,7 +241,7 @@ describe("report 27 page", () => {
     expect(tile("scope").textContent).toBe("4,210");
     expect(tile("scope").getAttribute("href")).toBe(`${BASE}?${links.scope()}`);
     expect(queryOf(tile("scope").getAttribute("href")).get("show")).toBe("all");
-    for (const [t, n] of [["clinical", "1,300"], ["trial", "210"], ["policy", "640"], ["patent", "95"]] as const) {
+    for (const [t, n] of [["clinical", "1,300"], ["trial", "210"], ["policy", "640"], ["review", "2,222"], ["patent", "95"]] as const) {
       expect(tile(t).textContent).toBe(n);
       expect(tile(t).getAttribute("href")).toBe(`${BASE}?${links.type(t)}`);
       expect(queryOf(tile(t).getAttribute("href")).getAll("ctype")).toEqual([t]);
@@ -246,14 +249,16 @@ describe("report 27 page", () => {
     expect(tiles.textContent).toContain("publications in scope were cited downstream");
     expect(tiles.textContent).toContain("cited by clinical studies");
     expect(tiles.textContent).toContain("cited in patents");
-    expect(expectEveryNumberLinked(tiles)).toBe(6);
+    expect(tiles.textContent).toContain("cited in systematic reviews");
+    expect(expectEveryNumberLinked(tiles)).toBe(7);
     // Each tile's link is named for the list it opens, so two numbers side by side can be told apart.
-    expect(["cited", "scope", "clinical", "trial", "policy", "patent"].map((id) => tile(id).getAttribute("aria-label"))).toEqual([
+    expect(["cited", "scope", "clinical", "trial", "policy", "review", "patent"].map((id) => tile(id).getAttribute("aria-label"))).toEqual([
       "1,875 publications cited downstream",
       "4,210 publications in scope, cited or not",
       "1,300 publications cited by clinical studies",
       "210 publications cited by registered trials",
       "640 publications cited in guidelines or policy",
+      "2,222 publications cited in systematic reviews",
       "95 publications cited in patents",
     ]);
   });
@@ -288,6 +293,7 @@ describe("report 27 page", () => {
       "Clinical studies",
       "Registered trials",
       "Guidelines and policy",
+      "Systematic reviews",
       "Patents",
     ]);
     const first = within(rows[0]);
@@ -310,6 +316,7 @@ describe("report 27 page", () => {
       ["clinical", "12", "trials", "12 clinical studies citing this paper"],
       ["trial", "2", "trials", "2 registered trials citing this paper"],
       ["policy", "3", "policy", "3 guideline and policy documents citing this paper"],
+      ["review", "2", "policy", "2 systematic reviews citing this paper"],
       ["patent", "1", "trials", "1 invention citing this paper"],
     ] as const) {
       const button = cell(t).getByRole("button", { name: label });
@@ -324,7 +331,7 @@ describe("report 27 page", () => {
     const view = await page();
     const row = within(view.getAllByTestId("downstream-reach-pub-row")[1]);
     const links = reachLinks(paramsOf(""));
-    for (const [t, n] of [["clinical", "7"], ["trial", "60"], ["policy", "140"]] as const) {
+    for (const [t, n] of [["clinical", "7"], ["trial", "60"], ["policy", "140"], ["review", "120"]] as const) {
       const cell = within(row.getByTestId(`downstream-reach-cell-${t}`));
       expect(cell.queryByRole("button")).toBeNull();
       const link = cell.getByRole("link");
@@ -363,6 +370,15 @@ describe("report 27 page", () => {
     const view = await page({ ctype: ["patent"], basis: "cy" });
     const heads = [...view.getByTestId("downstream-reach-publications").querySelectorAll("th")].map((th) => th.textContent);
     expect(heads).toEqual(["Publication", "Stage", "Patents"]);
+    cleanup();
+    const reviews = await page({ ctype: ["review"], basis: "cy" });
+    expect([...reviews.getByTestId("downstream-reach-publications").querySelectorAll("th")].map((th) => th.textContent)).toEqual([
+      "Publication",
+      "Stage",
+      "Systematic reviews",
+    ]);
+    // The headline keeps a figure for every type, on one wrapping row.
+    expect(reviews.getByTestId("downstream-reach-tile-review").textContent).toBe("2,222");
   });
 
   it("every number in the Publications table is a link or a button", async () => {
@@ -370,7 +386,7 @@ describe("report 27 page", () => {
     for (const cell of view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")) {
       expectEveryNumberLinked(cell as HTMLElement);
     }
-    expect(view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")).toHaveLength(8);
+    expect(view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")).toHaveLength(10);
   });
 
   it("the every-publication listing says what it is and how to leave it", async () => {
@@ -433,6 +449,7 @@ describe("report 27 page", () => {
       "Papers cited by clinical studies",
       "Papers cited by registered trials",
       "Papers cited in guidelines or policy",
+      "Papers cited in systematic reviews",
       "Papers cited in patents",
     ]);
     // Counts only: no percentages anywhere in the table.
@@ -443,6 +460,7 @@ describe("report 27 page", () => {
       ["9", `${BASE}?${links.person("abc1001", null)}`],
       ["6", `${BASE}?${links.person("abc1001", "clinical")}`],
       ["4", `${BASE}?${links.person("abc1001", "policy")}`],
+      ["3", `${BASE}?${links.person("abc1001", "review")}`],
       ["2", `${BASE}?${links.person("abc1001", "patent")}`],
     ]);
     // The link is the person as first or senior author, which is what was counted.
@@ -454,6 +472,7 @@ describe("report 27 page", () => {
       "9 papers by Example Person cited downstream",
       "6 papers by Example Person cited by clinical studies",
       "4 papers by Example Person cited in guidelines or policy",
+      "3 papers by Example Person cited in systematic reviews",
       "2 papers by Example Person cited in patents",
     ]);
   });
@@ -503,6 +522,7 @@ describe("report 27 page", () => {
       ["ctype", "clinical", false],
       ["ctype", "trial", false],
       ["ctype", "policy", false],
+      ["ctype", "review", false],
       ["ctype", "patent", false],
       ["own", "out", true],
     ]);
@@ -571,6 +591,8 @@ describe("report 27 page", () => {
       "NIH iCite",
       "ClinicalTrials.gov",
       "Reliance on Science",
+      "Guidelines and policy counts health-authority documents, clinical guidelines and consensus statements.",
+      "Systematic reviews are counted on their own",
     ]) {
       expect(note).toContain(said);
     }

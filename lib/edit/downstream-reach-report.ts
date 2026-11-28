@@ -1,10 +1,12 @@
 /**
  * Report 27 — "Downstream reach": how publications, especially basic (T0) and
- * early-translation (T1) ones, were taken up downstream. "Downstream" is four
+ * early-translation (T1) ones, were taken up downstream. "Downstream" is five
  * citing types, all stored in `citing_document`: clinical studies (level
- * `clinical`), registered trials (`trial`), guidelines and policy (the four
- * ranked `POLICY_LEVELS`) and patents (`patent`). Reads what the citation
- * imports maintain; writes nothing. Behind `DOWNSTREAM_REACH_REPORT`.
+ * `clinical`), registered trials (`trial`), guidelines and policy (levels
+ * `authority`, `guideline`, `consensus`), systematic reviews (`review`) and
+ * patents (`patent`); `REACH_LEVELS` is the one place that says so. Reads what
+ * the citation imports maintain; writes nothing. Behind
+ * `DOWNSTREAM_REACH_REPORT`.
  *
  * Built on report 24 (`policy-citations-report.ts`): the same who-filter, the
  * same access rule and the same scope handling. `scope` is never read from the
@@ -28,16 +30,18 @@
  *   - clinical: one per article (`citing_document.id`), as
  *     `publication.clinical_cite_count` has it;
  *   - trial, patent: one per `dedup_key` (a patent family is one invention);
- *   - policy: one per level and `dedup_key`, the sum of report 24's four counts.
+ *   - policy: one per level and `dedup_key`, the sum of report 24's counts at
+ *     its three levels;
+ *   - review: one per `dedup_key`, report 24's review count.
  *
  * Own work is what the rollups leave out and nothing else: a `clinical` link
  * flagged `ownWork`, or a `trial` link flagged `ownTrial` (`ownLinkSql`). A
- * flag on a link at any other level is not own work: the policy and patent
- * rollups count every link.
+ * flag on a link at any other level is not own work: the policy, review and
+ * patent rollups count every link.
  *
  * Where the counts come from. With the authors' own work left out (the
  * default) every per-paper count is a rollup column on `publication`
- * (`clinical_cite_count`, `trial_count`, the four policy counts,
+ * (`clinical_cite_count`, `trial_count`, the four ranked-level counts,
  * `patent_family_count`), so no query for the Publications or People view
  * reads the link table. Two things cannot use the rollups and say so here:
  *   - "Include the authors' own work" (`own=in`): the rollups do not count own
@@ -68,7 +72,7 @@ import { parsePatentId } from "@/etl/patent-citations/shape";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import { TOPIC_ACTIVITY_SCORE_FLOOR } from "@/lib/api/topic-activity";
 import type { EditSession } from "@/lib/auth/superuser";
-import { POLICY_LEVELS, POLICY_REVIEWS_CAP, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { POLICY_REVIEWS_CAP, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
 import {
   clinicalCitationsModalOn,
   patentCitationsModalOn,
@@ -122,7 +126,10 @@ export function isDownstreamReachReportEnabled(): boolean {
 // Citing types and stages
 // ---------------------------------------------------------------------------
 
-export const REACH_TYPES = ["clinical", "trial", "policy", "patent"] as const;
+/** Decision 10 of the plan (2026-11-28): systematic reviews are a type of
+ *  their own, so "Guidelines and policy" counts what the publication modal's
+ *  tab of that name counts, which leaves reviews out. */
+export const REACH_TYPES = ["clinical", "trial", "policy", "review", "patent"] as const;
 export type ReachType = (typeof REACH_TYPES)[number];
 export type ReachCounts = Record<ReachType, number>;
 
@@ -130,12 +137,14 @@ export const REACH_TYPE_LABEL: Record<ReachType, string> = {
   clinical: "Clinical studies",
   trial: "Registered trials",
   policy: "Guidelines and policy",
+  review: "Systematic reviews",
   patent: "Patents",
 };
 export const REACH_TYPE_ONE: Record<ReachType, string> = {
   clinical: "Clinical study",
   trial: "Registered trial",
   policy: "Guideline or policy document",
+  review: "Systematic review",
   patent: "Patent",
 };
 /** A tile's and a People column's wording: "papers …". */
@@ -143,20 +152,27 @@ export const REACH_TYPE_CITED: Record<ReachType, string> = {
   clinical: "cited by clinical studies",
   trial: "cited by registered trials",
   policy: "cited in guidelines or policy",
+  review: "cited in systematic reviews",
   patent: "cited in patents",
 };
 
-/** The `citing_document.level` values behind each type. */
-export const REACH_LEVELS: Record<ReachType, readonly string[]> = {
+/** The `citing_document.level` values behind each type: the one list every
+ *  reader takes them from (tiles, columns, the rollup and live counts, own
+ *  work, the Citing documents view, the modal test, the download, and the two
+ *  doors in `downstream-reach-entry.ts`). Between them `policy` and `review`
+ *  cover report 24's four ranked levels (`POLICY_LEVELS`). */
+export const REACH_LEVELS = {
   clinical: ["clinical"],
   trial: ["trial"],
-  policy: POLICY_LEVELS,
+  policy: ["authority", "guideline", "consensus"],
+  review: ["review"],
   patent: ["patent"],
-};
-const ALL_LEVELS = REACH_TYPES.flatMap((t) => REACH_LEVELS[t]);
+} as const satisfies Record<ReachType, readonly string[]>;
+const levelsOf = (t: ReachType): readonly string[] => REACH_LEVELS[t];
+const ALL_LEVELS = REACH_TYPES.flatMap(levelsOf);
 
 export function reachTypeOfLevel(level: string): ReachType | null {
-  return REACH_TYPES.find((t) => REACH_LEVELS[t].includes(level)) ?? null;
+  return REACH_TYPES.find((t) => levelsOf(t).includes(level)) ?? null;
 }
 
 /** Which section of the publication modal lists a type. */
@@ -164,6 +180,8 @@ export const MODAL_SECTION: Record<ReachType, "trials" | "policy"> = {
   clinical: "trials",
   trial: "trials",
   policy: "policy",
+  // The modal lists reviews in the same section, under their own heading.
+  review: "policy",
   patent: "trials",
 };
 
@@ -187,7 +205,7 @@ export function stageKeyOf(stage: string | null | undefined, confidence: string 
   return displayStage(stage, confidence) ?? "none";
 }
 
-/** The ticked types; none ticked = all four. */
+/** The ticked types; none ticked = all five. */
 export function tickedTypes(p: Pick<ReachParams, "ctypes">): readonly ReachType[] {
   return p.ctypes.length > 0 ? p.ctypes : REACH_TYPES;
 }
@@ -271,7 +289,8 @@ export type ReachDocRef = { id: number; level: string; type: ReachType; dedupKey
 export type ReachParams = WhoParams & {
   /** `stage`; empty = every stage. */
   stages: StageKey[];
-  /** `ctype`; empty = all four. */
+  /** `ctype`; empty = all five. An old link's `ctype=policy` alone now means
+   *  guidelines and policy without systematic reviews (decision 10). */
   ctypes: ReachType[];
   /** `own=in`: count the authors' own work too. Off by default. */
   includeOwn: boolean;
@@ -310,7 +329,7 @@ const VIEW_KEYS = new Set(["view", "sort", "dsort", "q", "page", "show", "with",
  * Every param is optional; a stray value is dropped. Defaults that do not
  * depend on the rest of the URL, so a link that carries only a person or a
  * unit still gets them: stages T0 and T1 unless a `stage` is given (`any` for
- * every stage), all four citing types, own work left out unless `own=in`.
+ * every stage), all five citing types, own work left out unless `own=in`.
  * The publication years start at `DEFAULT_FROM` on a bare URL only, as on
  * report 24.
  *
@@ -599,19 +618,37 @@ export function reachPubSql(p: ReachParams): Prisma.Sql {
  *  work is left out, since that is what the rollups count. */
 export const usesRollups = (p: Pick<ReachParams, "includeOwn">): boolean => !p.includeOwn;
 
+/** The rollup column on `publication` for each ranked level (report 24's). */
+const RANKED_ROLLUP: Record<"authority" | "guideline" | "consensus" | "review", string> = {
+  authority: "p.authority_count",
+  guideline: "p.guideline_count",
+  consensus: "p.consensus_count",
+  review: "p.review_count",
+};
+/** The sum of the ranked-level rollups behind a type, from `REACH_LEVELS`. */
+const rankedRollup = (levels: readonly (keyof typeof RANKED_ROLLUP)[]): Prisma.Sql =>
+  Prisma.raw(levels.length === 1 ? RANKED_ROLLUP[levels[0]] : `(${levels.map((l) => RANKED_ROLLUP[l]).join(" + ")})`);
+
 const ROLLUP_COL: Record<ReachType, Prisma.Sql> = {
   clinical: Prisma.sql`p.clinical_cite_count`,
   trial: Prisma.sql`p.trial_count`,
-  policy: Prisma.sql`(p.authority_count + p.guideline_count + p.consensus_count + p.review_count)`,
+  policy: rankedRollup(REACH_LEVELS.policy),
+  review: rankedRollup(REACH_LEVELS.review),
   patent: Prisma.sql`p.patent_family_count`,
 };
+
+/** One per level and `dedup_key` among a type's ranked levels: the sum of
+ *  their rollups. */
+const rankedLive = (levels: readonly string[]): Prisma.Sql =>
+  Prisma.sql`COUNT(DISTINCT CASE WHEN d.level IN (${Prisma.join([...levels])}) THEN CONCAT(d.level, '|', d.dedup_key) END)`;
 
 /** Citing documents of one type among the joined links, as the rollups count
  *  them (see the module comment). */
 const LIVE_COUNT: Record<ReachType, Prisma.Sql> = {
   clinical: Prisma.sql`COUNT(DISTINCT CASE WHEN d.level = 'clinical' THEN d.id END)`,
   trial: Prisma.sql`COUNT(DISTINCT CASE WHEN d.level = 'trial' THEN d.dedup_key END)`,
-  policy: Prisma.sql`COUNT(DISTINCT CASE WHEN d.level IN (${Prisma.join([...POLICY_LEVELS])}) THEN CONCAT(d.level, '|', d.dedup_key) END)`,
+  policy: rankedLive(REACH_LEVELS.policy),
+  review: rankedLive(REACH_LEVELS.review),
   patent: Prisma.sql`COUNT(DISTINCT CASE WHEN d.level = 'patent' THEN d.dedup_key END)`,
 };
 
@@ -639,14 +676,11 @@ const citedSql = (col: Record<ReachType, Prisma.Sql>, types: readonly ReachType[
 
 type Num = bigint | number;
 const num = (v: Num | null): number | null => (v === null ? null : Number(v));
-type CountCols = { n_clinical: Num; n_trial: Num; n_policy: Num; n_patent: Num };
-const toCounts = (r: CountCols): ReachCounts => ({
-  clinical: Number(r.n_clinical),
-  trial: Number(r.n_trial),
-  policy: Number(r.n_policy),
-  patent: Number(r.n_patent),
-});
-const NO_COUNTS: ReachCounts = { clinical: 0, trial: 0, policy: 0, patent: 0 };
+type CountCols = Record<`n_${ReachType}`, Num>;
+const toCounts = (r: CountCols): ReachCounts =>
+  Object.fromEntries(REACH_TYPES.map((t) => [t, Number(r[`n_${t}`])])) as ReachCounts;
+const NO_COUNTS: ReachCounts = Object.fromEntries(REACH_TYPES.map((t) => [t, 0])) as ReachCounts;
+const NO_COUNT_COLS: CountCols = Object.fromEntries(REACH_TYPES.map((t) => [`n_${t}`, 0])) as CountCols;
 
 // ---------------------------------------------------------------------------
 // Publications
@@ -661,7 +695,7 @@ export type ReachPubCounts = ReachCounts & {
 
 /**
  * One row per publication in scope cited by at least one document of ANY of
- * the four types, with its four counts, unsorted: fetched once, and the tiles,
+ * the five types, with its five counts, unsorted: fetched once, and the tiles,
  * the tab count and the listed rows are all folded from it in Node (as report
  * 24 does), so a tile and the list it opens cannot disagree.
  *
@@ -715,7 +749,7 @@ export function listedFor<T extends ReachCounts>(rows: readonly T[], types: read
   return rows.filter((r) => types.some((t) => r[t] > 0));
 }
 
-/** Papers cited by each type, whatever is ticked: the four type tiles. Each
+/** Papers cited by each type, whatever is ticked: the five type tiles. Each
  *  equals `listedFor(rows, [type]).length`, the list its link opens. */
 export function papersByType(rows: readonly ReachCounts[]): ReachCounts {
   return Object.fromEntries(REACH_TYPES.map((t) => [t, listedFor(rows, [t]).length])) as ReachCounts;
@@ -810,10 +844,17 @@ export type ModalCounts = {
   trial: number;
   /** Inventions (the same cap). */
   patent: number;
-  /** Ranked documents, one per `dedup_key` across the four levels. */
+  /** Guideline and policy documents, one per `dedup_key` at the policy
+   *  levels: what the modal's "Guidelines and policy" tab counts. */
   policy: number;
-  /** The systematic reviews among them (the modal lists `POLICY_REVIEWS_CAP`). */
-  reviews: number;
+  /** Systematic reviews, one per `dedup_key` (the modal lists the first
+   *  `POLICY_REVIEWS_CAP`, under "Systematic reviews" in the same section). */
+  review: number;
+  /** One per `dedup_key` across every ranked level. The modal lists a
+   *  `dedup_key` once, under whichever level it meets first, so when this is
+   *  less than `policy + review` a document stands at both and neither group
+   *  is known to list exactly its count. */
+  ranked: number;
 };
 
 /** Which of the modal's groups are switched on, per type. */
@@ -822,6 +863,7 @@ export function modalGroupsOn(): Record<ReachType, boolean> {
     clinical: clinicalCitationsModalOn(),
     trial: trialCitationsModalOn(),
     policy: policyCitationBadgesOn(),
+    review: policyCitationBadgesOn(),
     patent: patentCitationsModalOn(),
   };
 }
@@ -841,7 +883,10 @@ export function modalListsExactly(
 ): boolean {
   if (!modal || !on[type] || shown <= 0 || modal[type] !== shown) return false;
   if (type === "trial" || type === "patent") return modal[type] <= TRIAL_PATENT_CAP;
-  if (type === "policy") return modal.reviews <= POLICY_REVIEWS_CAP;
+  if (type === "policy" || type === "review") {
+    if (modal.ranked !== modal.policy + modal.review) return false;
+    return type === "policy" || modal.review <= POLICY_REVIEWS_CAP;
+  }
   return true;
 }
 
@@ -852,14 +897,15 @@ export async function loadModalCounts(p: ReachParams, pmids: readonly string[]):
   const out = new Map<string, ModalCounts>();
   if (pmids.length === 0) return out;
   const raw = await db.read.$queryRaw<
-    { pmid: string; clinical: Num; trial: Num; patent: Num; policy: Num; reviews: Num }[]
+    { pmid: string; clinical: Num; trial: Num; patent: Num; policy: Num; review: Num; ranked: Num }[]
   >`
     SELECT ok.pmid,
            COUNT(DISTINCT CASE WHEN d.level = 'clinical' THEN d.id END) AS clinical,
            COUNT(DISTINCT CASE WHEN d.level = 'trial' THEN d.id END) AS trial,
            COUNT(DISTINCT CASE WHEN d.level = 'patent' THEN d.dedup_key END) AS patent,
-           COUNT(DISTINCT CASE WHEN d.level IN (${Prisma.join([...POLICY_LEVELS])}) THEN d.dedup_key END) AS policy,
-           COUNT(DISTINCT CASE WHEN d.level = 'review' THEN d.dedup_key END) AS reviews
+           COUNT(DISTINCT CASE WHEN d.level IN (${Prisma.join([...REACH_LEVELS.policy])}) THEN d.dedup_key END) AS policy,
+           COUNT(DISTINCT CASE WHEN d.level IN (${Prisma.join([...REACH_LEVELS.review])}) THEN d.dedup_key END) AS review,
+           COUNT(DISTINCT CASE WHEN d.level IN (${Prisma.join([...REACH_LEVELS.policy, ...REACH_LEVELS.review])}) THEN d.dedup_key END) AS ranked
       FROM ${scopedPubsSql(p, pmids)}
       JOIN publication_citing_document l ON l.pmid = ok.pmid
       JOIN citing_document d ON d.id = l.citing_document_id
@@ -871,7 +917,8 @@ export async function loadModalCounts(p: ReachParams, pmids: readonly string[]):
       trial: Number(r.trial),
       patent: Number(r.patent),
       policy: Number(r.policy),
-      reviews: Number(r.reviews),
+      review: Number(r.review),
+      ranked: Number(r.ranked),
     });
   }
   return out;
@@ -970,7 +1017,7 @@ export async function loadReachPeople(
     for (const a of authorships) {
       const c = byPmid.get(a.pmid);
       if (!c) continue;
-      const r = rows.get(a.cwid) ?? { ...a, papers: 0, n_clinical: 0, n_trial: 0, n_policy: 0, n_patent: 0 };
+      const r = rows.get(a.cwid) ?? { ...a, papers: 0, ...NO_COUNT_COLS };
       rows.set(a.cwid, r);
       r.papers += 1;
       for (const t of REACH_TYPES) if (c[t] > 0) r[`n_${t}`] = Number(r[`n_${t}`]) + 1;
@@ -1019,7 +1066,7 @@ export type ReachDocCounts = {
  *  below is the whole "cited" test. Neither case evaluates the live counts. */
 function docGroupsSql(p: ReachParams): Prisma.Sql {
   const types = tickedTypes(p);
-  const levels = types.flatMap((t) => REACH_LEVELS[t]);
+  const levels = types.flatMap(levelsOf);
   return Prisma.sql`SELECT STRAIGHT_JOIN d.level AS level, ${UNIT_SQL} AS unit, COUNT(DISTINCT l.pmid) AS papers,
            MIN(${DOC_REP_SQL}) AS rep
       FROM ${okSql(p, usesRollups(p) ? { cited: citedSql(ROLLUP_COL, types) } : {})}
@@ -1083,7 +1130,7 @@ export type ReachDocRow = ReachDocCounts & {
 
 /** What a row's type line says. */
 export function docKind(d: Pick<ReachDocCounts, "type" | "level" | "application">): string {
-  if (d.type === "policy") return LEVEL_ONE[d.level as Level] ?? REACH_TYPE_ONE.policy;
+  if (d.type === "policy" || d.type === "review") return LEVEL_ONE[d.level as Level] ?? REACH_TYPE_ONE[d.type];
   if (d.type === "patent" && d.application) return "Patent application";
   return REACH_TYPE_ONE[d.type];
 }
@@ -1274,7 +1321,12 @@ export function reachChips(
 }
 
 export const REACH_COUNTING_RULE =
-  "A publication is cited downstream when at least one citing document of a checked type cites it. A clinical study counts once per article; a registered trial, a guideline or policy document and a patent count once however many records or journals carry them, and related patents (one patent family) are one invention. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.";
+  "A publication is cited downstream when at least one citing document of a checked type cites it. A clinical study counts once per article; a registered trial, a guideline or policy document, a systematic review and a patent count once however many records or journals carry them, and related patents (one patent family) are one invention. Only ReCiter-confirmed authorships of active scholars count; person type, department, division, institution and center membership are the scholar's current values.";
+
+/** What the two ranked types hold (decision 10): the sentence the About text
+ *  and the Criteria sheet share. */
+export const REACH_REVIEW_RULE =
+  "Guidelines and policy counts health-authority documents, clinical guidelines and consensus statements. Systematic reviews are counted on their own: PubMed articles typed Systematic Review or Meta-Analysis (by publication type), as the policy import classifies them; one PubMed also types as a guideline or consensus statement counts under Guidelines and policy instead.";
 
 export const REACH_OWN_WORK_RULE =
   "The authors' own work is a clinical article that shares a confirmed WCM author with the paper it cites, or a registered trial one of the paper's authors is an investigator on.";
@@ -1285,7 +1337,7 @@ export const REACH_STAGE_RULE =
 export const REACH_PEOPLE_RULE = `The People view counts publications where the scholar is first or senior author and lists only scholars with at least ${MIN_REACH_PAPERS}, ordered by count.`;
 
 export const REACH_SOURCES =
-  "Sources: NIH iCite's clinical flag with article details from PubMed (clinical studies), ClinicalTrials.gov (registered trials), NCBI Bookshelf and PubMed (guidelines and policy), and Reliance on Science (Marx and Fuegi), CC BY-NC 4.0, with patent details from USPTO PatentsView (patents, US only). A patent citing a paper does not mean the paper's authors hold the patent.";
+  "Sources: NIH iCite's clinical flag with article details from PubMed (clinical studies), ClinicalTrials.gov (registered trials), NCBI Bookshelf and PubMed (guidelines and policy), PubMed (systematic reviews), and Reliance on Science (Marx and Fuegi), CC BY-NC 4.0, with patent details from USPTO PatentsView (patents, US only). A patent citing a paper does not mean the paper's authors hold the patent.";
 
 const list = (xs: string[]) => (xs.length > 0 ? xs.join("; ") : "All");
 
@@ -1316,6 +1368,7 @@ export function describeReachCriteria(
     ],
     ...(p.q ? ([[p.view === "people" ? "Search (people)" : "Search (publications)", p.q]] as [string, string][]) : []),
     ["Counting rule", REACH_COUNTING_RULE],
+    ["Citing types", REACH_REVIEW_RULE],
     ["Own work", REACH_OWN_WORK_RULE],
     ["Stage rule", REACH_STAGE_RULE],
     ["People rule", REACH_PEOPLE_RULE],

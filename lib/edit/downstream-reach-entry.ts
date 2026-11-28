@@ -96,8 +96,8 @@ export function scholarReachParams(cwid: string): ReachParams | null {
 }
 
 /**
- * The block for one scholar as this viewer may see it: all four lines, so
- * "nothing cites this work" (four zeros, each still a link to its empty list,
+ * The block for one scholar as this viewer may see it: a line per citing type
+ * (`REACH_TYPES`, five), so "nothing cites this work" (all zeros, each still a link to its empty list,
  * as the report's own tiles are) reads differently from "not shown to you".
  * null only when the flag is off, the viewer cannot open report 27, or the
  * report would list no publication of this scholar for a viewer limited to
