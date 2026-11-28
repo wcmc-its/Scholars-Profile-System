@@ -873,25 +873,27 @@ export async function renderTranslationalPortfolioReport({
                 )}
               </div>
               <div className="border-apollo-border overflow-x-auto rounded-lg border">
-                <table className="w-full min-w-[960px] border-collapse text-[13px]" data-testid="portfolio-table">
+                {/* Fixed layout: the label column is capped (long names wrap) and the stage columns share
+                    what is left, so the table fills the card instead of overflowing it (#3635 clipped T3–4 by 54 px at a 906 px card). */}
+                <table className="w-full min-w-[860px] table-fixed border-collapse text-[13px]" data-testid="portfolio-table">
                   <caption className="sr-only">
                     Share of {actNoun} with a stage, by translational stage, by {tab.head.toLowerCase()}. {COUNTING_RULE}
                   </caption>
                   <thead>
                     <tr className="bg-apollo-surface-2 text-muted-foreground text-left text-xs">
-                      <th scope="col" className="px-3 py-2.5 font-medium tracking-[0.05em] uppercase">
+                      <th scope="col" className="w-[200px] px-3 py-2.5 font-medium tracking-[0.05em] uppercase">
                         {tab.head}
                       </th>
-                      <th scope="col" className="px-2.5 py-2.5 text-right font-medium tracking-[0.03em] whitespace-nowrap uppercase">
+                      <th scope="col" className="w-[124px] px-2.5 py-2.5 text-right font-medium tracking-[0.03em] whitespace-nowrap uppercase">
                         Publications
                       </th>
-                      <th scope="col" className="px-2.5 py-2.5 text-right font-medium tracking-[0.03em] whitespace-nowrap uppercase">
+                      <th scope="col" className="w-[84px] px-2.5 py-2.5 text-right font-medium tracking-[0.03em] whitespace-nowrap uppercase">
                         Grants
                       </th>
-                      <th scope="col" className="px-2.5 py-2.5 text-right font-medium tracking-[0.03em] whitespace-nowrap uppercase">
+                      <th scope="col" className="w-[76px] px-2.5 py-2.5 text-right font-medium tracking-[0.03em] whitespace-nowrap uppercase">
                         Trials
                       </th>
-                      <th scope="col" className="px-2.5 py-2.5 font-medium tracking-[0.05em] uppercase">
+                      <th scope="col" className="w-[104px] px-2.5 py-2.5 font-medium tracking-[0.05em] uppercase">
                         <StageTerm k="none">Stage assigned</StageTerm>
                       </th>
                       {TRANSLATIONAL_STAGES.map((k) => (
@@ -910,7 +912,7 @@ export async function renderTranslationalPortfolioReport({
                       const cov = stageAssignedShare(rc);
                       return (
                         <tr key={r.key} className="border-apollo-border border-t">
-                          <th scope="row" className="px-3 py-2.5 text-left font-normal">
+                          <th scope="row" className="px-3 py-2.5 text-left font-normal break-words">
                             <Link href={`${basePath}?${r.href}`} className={cn(LINK, "block")}>
                               {r.label}
                             </Link>
