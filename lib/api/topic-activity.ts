@@ -41,7 +41,7 @@
  */
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { isPubliclyDisplayed, publicRoleWhere } from "@/lib/eligibility";
+import { isPubliclyDisplayed, publicRoleWhere, TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   AREA_GRANT_ROLES,
@@ -348,7 +348,10 @@ async function loadGrantCandidates(
   if (keys.length === 0 || AREA_SIGNAL_GRANT_EXCLUDED_TOPICS.has(topicSlug)) return [];
   const rows = (await prisma.grant.findMany({
     where: {
-      ...GRANT_INDEX_WHERE,
+      // Full-time faculty only: since the grant stage plan (2026-11-28) every
+      // active scholar's grants carry a text key, but the feed keeps the
+      // population it was tuned on (the top-scholars carve).
+      scholar: { ...GRANT_INDEX_WHERE.scholar, roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] } },
       areaTextKey: { in: keys },
       source: AREA_GRANT_SOURCE,
       role: { in: [...AREA_GRANT_ROLES] },

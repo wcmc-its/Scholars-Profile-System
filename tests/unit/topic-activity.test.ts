@@ -152,6 +152,7 @@ vi.mock("@/lib/db", () => {
             source?: string;
             role?: { in: string[] };
             startDate?: { gte: Date };
+            scholar?: { roleCategory?: { in: string[] } };
             AND?: [unknown, { source: string }, { OR: Arm[] }];
           };
         }) => {
@@ -160,6 +161,8 @@ vi.mock("@/lib/db", () => {
               .filter(
                 (g) =>
                   active(g.cwid) &&
+                  (!where.scholar?.roleCategory ||
+                    where.scholar.roleCategory.in.includes(state.scholars[g.cwid].roleCategory ?? "")) &&
                   g.areaTextKey !== null &&
                   where.areaTextKey!.in.includes(g.areaTextKey) &&
                   g.source === where.source &&
@@ -571,6 +574,17 @@ describe("getTopicActivity", () => {
     trial("tst001", "k", { title: "recruiting", ctgovStatus: "RECRUITING", startDate: "2021-01" } as Partial<Trial>);
     const titles = ((await trials({ sort: "status" })).hits as TopicTrialActivityHit[]).map((h) => h.title);
     expect(titles).toEqual(["recruiting", "active", "done"]);
+  });
+
+  it("keeps a non-faculty scholar's grant off the feed even when its text is scored (grant stage plan)", async () => {
+    scholar("tstpd1", { roleCategory: "postdoc" });
+    score("pd", 0.9);
+    score("ft", 0.9);
+    grant("tstpd1", "pd", { title: "postdoc grant" });
+    grant("tst001", "ft", { title: "faculty grant" });
+    const r = await grants();
+    expect((r.hits as TopicGrantActivityHit[]).map((h) => h.title)).toEqual(["faculty grant"]);
+    expect(r.counts.grant).toEqual({ strongly: 1, also: 0 });
   });
 
   it("pages in memory and counts the whole scope", async () => {

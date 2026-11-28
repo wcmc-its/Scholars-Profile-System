@@ -16,9 +16,11 @@
  * `isEligibleAreaGrant`: every leadership-role funding award active in 2020 or
  * later, InfoEd or RePORTER, so report 26 can stage and area-filter each grant
  * it counts. The ranking and topic feeds re-apply the narrower predicate at
- * read time, so the extra texts never move a card. Only scholars the ranking
- * can reach are read (the top-scholars carve: active, not deleted, full-time
- * faculty).
+ * read time, so the extra texts never move a card. Trials are read only for
+ * scholars the ranking can reach (the top-scholars carve: active, not deleted,
+ * full-time faculty); grants for every active scholar, since report 26 counts
+ * every active scholar's grants. The topic feed re-applies the faculty carve
+ * (`loadGrantCandidates`), so a non-faculty grant's text never reaches a topic page.
  * Suppressed grants are not sent; `hideFunding` / `hideClinicalTrials` are
  * applied at read time instead, since a scholar can flip them back any day.
  * A grant whose abstract fails the title check (lib/grant-abstract-match.ts,
@@ -65,6 +67,9 @@ const scholarCarve: Prisma.ScholarWhereInput = {
   roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
 };
 
+/** Grants: every active scholar (report 26's population), not just the ranking's. */
+const grantScholarCarve: Prisma.ScholarWhereInput = { deletedAt: null, status: "active" };
+
 function chunks<T>(xs: readonly T[], n: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
@@ -92,7 +97,7 @@ async function main(): Promise<number> {
       where: {
         role: { in: [...AREA_GRANT_ROLES] },
         OR: [{ startDate: { gte: areaSince } }, { endDate: { gte: areaSince } }],
-        scholar: scholarCarve,
+        scholar: grantScholarCarve,
       },
       select: {
         id: true,
