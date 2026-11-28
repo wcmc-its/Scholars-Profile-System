@@ -190,7 +190,8 @@ export type BibliometricsReport = {
     senior: number;
     coAuthor: number;
     total: number;
-    byYear: Array<{ year: number; count: number }>;
+    /** Research articles per year, and the same split by author position. */
+    byYear: Array<{ year: number; count: number; first: number; senior: number; co: number }>;
   };
   papers: { rows: BibliometricsPaper[]; matching: number };
   /** Null while stage data is off (`SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`). */
@@ -388,13 +389,18 @@ export function buildBibliometricsReport(input: {
   for (const p of articles) byPosition[positionOf(p)]++;
 
   const years = articles.flatMap((p) => (p.year ? [p.year] : []));
+  const positionsIn = (year: number) => {
+    const n = { first: 0, senior: 0, co: 0 };
+    for (const p of articles) if (p.year === year) n[positionOf(p)]++;
+    return n;
+  };
   const yearRange = years.length > 0 ? { min: Math.min(...years), max: Math.max(...years) } : null;
   // The campus calendar date: a late-evening load must not read as tomorrow.
   const asOf = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const thisYear = Number(asOf.slice(0, 4));
   const byYear = Array.from({ length: YEARS_CHARTED }, (_, i) => {
     const year = thisYear - YEARS_CHARTED + 1 + i;
-    return { year, count: years.filter((y) => y === year).length };
+    return { year, count: years.filter((y) => y === year).length, ...positionsIn(year) };
   });
 
   const rated = articles.filter((p) => p.nihPercentile !== null);

@@ -193,6 +193,21 @@ describe("BibliometricsTool", () => {
     );
   });
 
+  it("stacks each year's bar by author position, senior at the base, with each part named on hover", async () => {
+    const r = report(3);
+    r.output.byYear = r.output.byYear.map((y, i) => (i === 9 ? { ...y, count: 6, first: 1, senior: 3, co: 2 } : { ...y, count: 0, first: 0, senior: 0, co: 0 }));
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const bar = await screen.findByTestId(`bibliometrics-year-${r.output.byYear[9]!.year}`);
+    const y = r.output.byYear[9]!.year;
+    expect(bar.getAttribute("title")).toBe(`${y}: 6 (first 1, senior 3, co-author 2)`);
+    // DOM order is base first (column-reverse): senior, co-author, first.
+    expect([...bar.children].map((c) => c.getAttribute("title"))).toEqual([`${y}, senior author: 3`, `${y}, co-author: 2`, `${y}, first author: 1`]);
+    expect([...bar.children].map((c) => (c as HTMLElement).style.flexGrow)).toEqual(["3", "2", "1"]);
+    // An empty year draws no segment.
+    expect(screen.getByTestId(`bibliometrics-year-${r.output.byYear[0]!.year}`).children).toHaveLength(0);
+  });
+
   it("lists the citing inventions on the card and under a paper, for a viewer with no report access", async () => {
     const r = report(12, [14, 1]);
     const inv = (id: number, title: string, papers: number) => ({
