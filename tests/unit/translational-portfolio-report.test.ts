@@ -17,6 +17,7 @@ vi.mock("@/lib/db", () => ({ db: { read: {} }, prisma: {} }));
 import { db } from "@/lib/db";
 import {
   buildPortfolioWorkbook,
+  describePortfolioCriteria,
   loadPortfolio,
   countsTotal,
   emptyCounts,
@@ -489,5 +490,47 @@ describe("research articles only (#3610)", () => {
     const p = parsePortfolioParams(new URLSearchParams(""));
     expect(activityListScope(p, ["1"]).params.atypes).toEqual(["Academic Article"]);
     expect(scholarScope({ from: 2020, to: 2026, middle: false }).atypes).toEqual(["Academic Article"]);
+  });
+});
+
+describe("person type (type)", () => {
+  it("parses repeated type through parsePersonFilter and round-trips it; none is everyone", () => {
+    const p = parsePortfolioParams(new URLSearchParams("unit=dept:N1&type=full_time_faculty&type=postdoc&type=full_time_faculty&type=<x>"));
+    expect(p.types).toEqual(["full_time_faculty", "postdoc"]);
+    expect(parsePortfolioParams(new URLSearchParams(portfolioQueryString(p)))).toEqual(p);
+    expect(parsePortfolioParams(new URLSearchParams("from=2020&to=2024")).types).toEqual([]);
+  });
+
+  it("narrows every who-filtered query to the types, the all-of-WCM baseline, grants and trials included", async () => {
+    const reads = db.read as unknown as Record<string, unknown>;
+    reads.suppression = { findMany: vi.fn(async () => []) };
+    reads.areaSignalTopic = { findMany: vi.fn(async () => []) };
+    reads.scholar = { findMany: vi.fn(async () => []) };
+    const calls: { sql: string; values: unknown[] }[] = [];
+    reads.$queryRaw = vi.fn(async (q: { sql?: string; values?: unknown[] }) => {
+      calls.push({ sql: String(q.sql), values: q.values ?? [] });
+      return [];
+    });
+    const choices: PortfolioChoices = { facets: { roleCategories: [], departments: [], centers: [], institutions: [] }, labels: new Map(), areas: [] };
+    // A window no other test uses: the grouped counts are cached by their SQL (`cachedRead`).
+    await loadPortfolio(parsePortfolioParams(new URLSearchParams("unit=dept:N1&type=postdoc&from=2012&to=2013")), choices, { forExport: true });
+    const typed = (q: { sql: string; values: unknown[] }) => /s\.role_category IN/.test(q.sql) && q.values.includes("postdoc");
+    const grants = calls.filter((q) => q.sql.includes("FROM `grant` g"));
+    const trials = calls.filter((q) => q.sql.includes("person_clinical_trial"));
+    const pubs = calls.filter((q) => q.sql.includes("publication_author"));
+    // The scope and the baseline, each for publications, grants and trials.
+    expect(grants).toHaveLength(2);
+    expect(trials).toHaveLength(2);
+    expect(pubs.length).toBeGreaterThanOrEqual(2);
+    for (const q of [...grants, ...trials, ...pubs]) expect(typed(q)).toBe(true);
+    // The baseline drops the unit, never the type.
+    expect([...grants, ...trials, ...pubs].filter((q) => !q.values.includes("N1")).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("states the types in the download's criteria", () => {
+    const choices: PortfolioChoices = { facets: { roleCategories: [], departments: [], centers: [], institutions: [] }, labels: new Map(), areas: [] };
+    const rows = new Map(describePortfolioCriteria(parsePortfolioParams(new URLSearchParams("type=full_time_faculty")), choices, new Date(0)));
+    expect(rows.get("Person type")).toMatch(/faculty/i);
+    expect(new Map(describePortfolioCriteria(parsePortfolioParams(new URLSearchParams("")), choices, new Date(0))).get("Person type")).toBe("All");
   });
 });

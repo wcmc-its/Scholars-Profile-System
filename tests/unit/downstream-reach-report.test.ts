@@ -1545,6 +1545,10 @@ describe("the portfolio report's Downstream reach tile", () => {
     expect(h.queryRaw).not.toHaveBeenCalled();
   });
 
+  it("carries a person type to report 27, which takes the same type filter", () => {
+    expect(portfolioReachParams(portfolio("unit=dept:N1&type=full_time_faculty&from=2020&to=2024"))?.types).toEqual(["full_time_faculty"]);
+  });
+
   it("is absent under a primary institution filter (report 27 would OR it with the unit)", async () => {
     const inst = "unit=dept:N1&inst=HSS&from=2020&to=2024";
     expect(portfolioReachParams(portfolio(inst))).toBeNull();

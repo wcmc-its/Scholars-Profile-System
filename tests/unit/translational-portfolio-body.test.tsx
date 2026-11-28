@@ -23,7 +23,7 @@ vi.mock("@/lib/edit/translational-portfolio-report", async (actual) => ({
   loadPortfolio: h.portfolio,
   loadPortfolioChoices: async () => ({
     facets: {
-      roleCategories: [],
+      roleCategories: [{ value: "full_time_faculty", label: "Full-time faculty", count: 30 }],
       departments: [{ value: "dept:N1", label: "Department of Examples", count: 40, divisions: [] }],
       centers: [],
       institutions: [],
@@ -323,6 +323,28 @@ describe("report 26's primary institution filter", () => {
     expect(chips.textContent).toContain("Hospital for Special Surgery");
     expect(chips.textContent).toContain("Weill Cornell Medicine");
     expect(h.tile.mock.calls[0][0].insts).toEqual(["HSS", "WCMC"]);
+  });
+});
+
+describe("report 26's person type filter", () => {
+  it("offers the types in the rail, shows each picked one as a removable chip, and passes it to the reach tile loader", async () => {
+    h.tile.mockResolvedValue(TILE);
+    const { container } = await page({ ...SP, type: "full_time_faculty" });
+    const rail = within(container).getByTestId("portfolio-rail-type");
+    const box = rail.querySelector<HTMLInputElement>('input[name="type"][value="full_time_faculty"]');
+    expect(box?.checked).toBe(true);
+    const chips = within(container).getByTestId("portfolio-chips");
+    expect(chips.textContent).toContain("Full-time faculty");
+    const remove = [...chips.querySelectorAll("a")].map((a) => a.getAttribute("href") ?? "").filter((x) => x.includes("unit=dept"));
+    expect(remove.some((x) => !x.includes("type="))).toBe(true);
+    expect(h.tile.mock.calls[0][0].types).toEqual(["full_time_faculty"]);
+  });
+  it("is everyone, and unticked, without a type", async () => {
+    const { container } = await page();
+    const rail = within(container).getByTestId("portfolio-rail-type");
+    expect(rail.textContent).toContain("Everyone");
+    expect(rail.querySelector<HTMLInputElement>('input[name="type"]')?.checked).toBe(false);
+    expect(within(container).getByTestId("portfolio-chips").textContent).not.toContain("Person type");
   });
 });
 

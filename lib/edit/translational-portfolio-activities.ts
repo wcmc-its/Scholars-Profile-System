@@ -67,6 +67,8 @@ export const ACTIVITY_AREA_RULE =
 export type ActivityScope = {
   from: number;
   to: number;
+  /** Person types (`role_category`); none or absent = everyone. */
+  types?: string[];
   units: string[];
   insts: string[];
   areas: string[];
@@ -170,7 +172,7 @@ async function loadTextAreas(keys: string[]): Promise<Map<string, string[]>> {
 
 /** The who-filter on the investigator's `scholar s` row. */
 function whoSql(s: ActivityScope): Prisma.Sql {
-  return Prisma.sql`${personFilterSql({ types: [], unitValues: s.units }, { scholar: "s" })} ${
+  return Prisma.sql`${personFilterSql({ types: s.types ?? [], unitValues: s.units }, { scholar: "s" })} ${
     s.insts.length > 0 ? personFilterSql({ types: [], unitValues: s.insts.map((c) => `inst:${c}`) }, { scholar: "s" }) : Prisma.empty
   }`;
 }
