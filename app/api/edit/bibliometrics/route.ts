@@ -15,6 +15,11 @@
  * filter change does not run it again. It is scoped to the viewer, so it is
  * not part of the report model or the Word document.
  *
+ * `part=citing&level=<level>[&body=<health authority>]` answers `{ docs, total }`:
+ * the citing documents behind one Citing documents count of the tab, inside
+ * the same filters (`loadCitingDocuments`). Asked for when a count is opened,
+ * so the report does not ship every document.
+ *
  * Auth + targeting mirror `GET /api/edit/cv/outline` exactly: `?cwid=` defaults
  * to the session cwid, and a foreign target is gated by the SAME
  * `authorizeCvExport` predicate (the scholar, a superuser or comms steward, a
@@ -24,9 +29,9 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
-import { isBibliometricsEnabled, parseBibliometricsFilters } from "@/lib/edit/bibliometrics";
+import { isBibliometricsEnabled, isCitingLevel, parseBibliometricsFilters } from "@/lib/edit/bibliometrics";
 import { buildBibliometricsDocx } from "@/lib/edit/bibliometrics-docx";
-import { loadBibliometricsReport } from "@/lib/edit/bibliometrics-loader";
+import { loadBibliometricsReport, loadCitingDocuments } from "@/lib/edit/bibliometrics-loader";
 import { patentReportHref } from "@/lib/edit/bibliometrics-patents";
 import { isTranslationalPortfolioReportEnabled } from "@/lib/edit/translational-portfolio-report";
 import { scholarPortfolioPath } from "@/lib/edit/translational-portfolio-scholar";
@@ -75,6 +80,19 @@ export async function GET(request: NextRequest): Promise<Response> {
       loadScholarConnections(targetCwid, session).catch(failed),
     ]);
     return editOk({ reach: reach && connections ? { ...reach, connections } : reach });
+  }
+
+  if (params.get("part") === "citing") {
+    const level = params.get("level");
+    if (!isCitingLevel(level)) return editError(400, "invalid_level", "level");
+    try {
+      const out = await loadCitingDocuments(targetCwid, parseBibliometricsFilters(params), level, params.get("body"));
+      if (!out) return editError(404, "scholar_not_found", "cwid");
+      return editOk(out);
+    } catch (err) {
+      logEditFailure(PATH, err);
+      return editError(500, "read_failed");
+    }
   }
 
   try {

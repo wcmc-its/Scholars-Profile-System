@@ -417,6 +417,77 @@ describe("BibliometricsTool", () => {
     expect(screen.queryByText("Patents citing this work")).toBeNull();
   });
 
+  it("opens the papers behind a summary count, a tile and an author position, one list at a time", async () => {
+    respond(12);
+    render(<BibliometricsTool entityId="zzz9001" />);
+    fireEvent.click(await screen.findByTestId("bibliometrics-summary-count-all"));
+    const all = screen.getByTestId("bibliometrics-list-all");
+    expect(all.textContent).toContain("Research articles in scope, newest first");
+    expect(within(all).getAllByRole("link")).toHaveLength(12);
+
+    // A tile's list replaces the sentence's.
+    fireEvent.click(screen.getByTestId("bibliometrics-tiles-count-topDecile"));
+    expect(screen.queryByTestId("bibliometrics-list-all")).toBeNull();
+    expect(within(screen.getByTestId("bibliometrics-list-topDecile")).getAllByRole("link")).toHaveLength(6);
+
+    // The h-index list shows each paper's NIH iCite citations.
+    fireEvent.click(screen.getByTestId("bibliometrics-tiles-count-hCore"));
+    const core = screen.getByTestId("bibliometrics-list-hCore");
+    expect(core.textContent).toContain("most cited first");
+    expect(core.textContent).toContain("30 citations");
+    fireEvent.click(screen.getByTestId("bibliometrics-tiles-count-hCore"));
+    expect(screen.queryByTestId("bibliometrics-list-hCore")).toBeNull();
+
+    // Author positions: each count lists its articles; a zero stays plain.
+    fireEvent.click(screen.getByTestId("bibliometrics-output-count-first"));
+    expect(within(screen.getByTestId("bibliometrics-list-first")).getAllByRole("link")).toHaveLength(12);
+    expect(screen.queryByTestId("bibliometrics-output-count-senior")).toBeNull();
+  });
+
+  it("lists a Citing documents count's documents when opened, asked for inside the filters", async () => {
+    const r = report(12);
+    r.policy[0]!.documents = 4;
+    r.policy[0]!.bodies = [{ body: "WHO", count: 4 }];
+    const docs = [2024, 2023, 2022, 2021].map((year, i) => ({ id: i + 1, title: `Invented WHO report ${i + 1}`, url: `https://example.org/${i}`, year, source: "WHO" }));
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () =>
+        url.includes("part=citing") ? { ok: true, docs, total: 4 } : url.includes("part=reach") ? { ok: true, reach: null } : { ok: true, report: r },
+    }));
+    render(<BibliometricsTool entityId="zzz9001" />);
+    fireEvent.click(await screen.findByTestId("bibliometrics-docs-count-authority-WHO"));
+    const panel = await screen.findByText("4 WHO documents citing these articles");
+    expect(fetchMock.mock.calls.map((c) => c[0])).toContain(
+      "/api/edit/bibliometrics?cwid=zzz9001&part=citing&level=authority&body=WHO",
+    );
+    const box = panel.closest("div[id]") as HTMLElement;
+    expect(within(box).getAllByRole("link")).toHaveLength(3);
+    expect(box.textContent).toContain("WHO · 2024");
+    fireEvent.click(within(box).getByText("See all 4"));
+    expect(within(box).getAllByRole("link")).toHaveLength(4);
+
+    // The level's own count asks without a body; × closes.
+    fireEvent.click(screen.getByTestId("bibliometrics-docs-count-authority"));
+    expect(await screen.findByText("4 health-authority documents citing these articles")).toBeTruthy();
+    expect(fetchMock.mock.calls.map((c) => c[0])).toContain("/api/edit/bibliometrics?cwid=zzz9001&part=citing&level=authority");
+    fireEvent.click(screen.getByRole("button", { name: "Close list" }));
+    expect(screen.queryByText("4 health-authority documents citing these articles")).toBeNull();
+  });
+
+  it("says so when a Citing documents list cannot be loaded", async () => {
+    const r = report(12);
+    r.policy[1]!.documents = 2;
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("part=citing")
+        ? { ok: false, json: async () => ({}) }
+        : { ok: true, json: async () => (url.includes("part=reach") ? { ok: true, reach: null } : { ok: true, report: r }) },
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<BibliometricsTool entityId="zzz9001" />);
+    fireEvent.click(await screen.findByTestId("bibliometrics-docs-count-guideline"));
+    expect(await screen.findByTestId("bibliometrics-docs-failed")).toBeTruthy();
+  });
+
   it("lists the citing inventions newest first under the Patents row, each with the paper it cites", async () => {
     const r = report(12, [14, 1]);
     const inv = (id: number, title: string, papers: number, pmids: string[] = []) => ({
