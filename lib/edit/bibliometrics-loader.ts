@@ -11,6 +11,7 @@ import { readPolicyCitations } from "@/lib/api/publication-detail";
 import { resolveSearchPubsTranslationalStageFacet } from "@/lib/api/search-flags";
 import { POLICY_LEVELS } from "@/lib/citations/policy-rollup";
 import { shapeScholarInventions, shapeTrialPatentCitations } from "@/lib/citations/trials-patents";
+import { OWN_FLAG, ownFlagSql } from "@/lib/edit/downstream-reach-report";
 import { loadPatentDataEnd } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
@@ -68,6 +69,8 @@ export async function loadScholarPublications(cwid: string): Promise<{
           consensusCount: true,
           reviewCount: true,
           patentFamilyCount: true,
+          clinicalCiteCount: true,
+          trialCount: true,
           translationalStage: true,
           translationalStageConfidence: true,
         },
@@ -139,6 +142,23 @@ export async function loadBibliometricsReport(
           .sort((a, b) => b.count - a.count || a.body.localeCompare(b.body));
       }
     }
+  }
+
+  // Distinct clinical studies and registered trials citing the articles in
+  // scope, the authors' own left out exactly as the rollups (and report 27)
+  // test it.
+  const researchPmids = scoped.filter((p) => (p.clinicalCiteCount ?? 0) + (p.trialCount ?? 0) > 0).map((p) => p.pmid);
+  if (researchPmids.length > 0) {
+    const rows = await db.read.$queryRaw<{ level: string; n: bigint | number }[]>`
+      SELECT d.level AS level, COUNT(DISTINCT d.id) AS n
+        FROM publication_citing_document l
+        JOIN citing_document d ON d.id = l.citing_document_id
+       WHERE l.pmid IN (${Prisma.join(researchPmids)})
+         AND d.level IN ('clinical', 'trial')
+         AND NOT ((d.level = 'clinical' AND ${ownFlagSql("l", OWN_FLAG.clinical!)})
+               OR (d.level = 'trial' AND ${ownFlagSql("l", OWN_FLAG.trial!)}))
+       GROUP BY d.level`;
+    for (const r of rows) if (r.level === "clinical" || r.level === "trial") report.research[r.level].documents = Number(r.n);
   }
 
   // The inventions citing the scholar's papers, listed on the card and under

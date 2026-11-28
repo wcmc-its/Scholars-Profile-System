@@ -502,9 +502,9 @@ export async function resolveReachParams(p: ReachParams, session: SessionLike): 
  *  flag left on a link whose document was since retyped (a clinical article
  *  that PubMed now types as a guideline keeps `ownWork`) is not own work,
  *  because the rollup for its new level counts it. */
-const OWN_FLAG: Record<string, "ownWork" | "ownTrial"> = { clinical: "ownWork", trial: "ownTrial" };
+export const OWN_FLAG: Record<string, "ownWork" | "ownTrial"> = { clinical: "ownWork", trial: "ownTrial" };
 
-const ownFlagSql = (l: string, flag: "ownWork" | "ownTrial"): Prisma.Sql =>
+export const ownFlagSql = (l: string, flag: "ownWork" | "ownTrial"): Prisma.Sql =>
   Prisma.sql`COALESCE(JSON_CONTAINS(${Prisma.raw(l)}.evidence, 'true', ${Prisma.raw(`'$.${flag}'`)}), 0) = 1`;
 
 /** A link that is the authors' own work, exactly as the rollups test it

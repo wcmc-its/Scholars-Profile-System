@@ -22,18 +22,18 @@ import { citationIdentifier } from "@/lib/citation";
 import { authorityBadgeLabel, plural } from "@/lib/citations/policy-rollup";
 import {
   NO_SUMMARY_NOTE,
-  OWN_PATENTS_NOTE,
   PATENTS_DOWNLOAD_LABEL,
   PATENTS_DOWNLOAD_PATH,
   POSITION_LABEL,
   STAGES_NOTE,
   bibliometricsQuery,
   papersNote,
-  patentsLine,
   percentileText,
   unratedNote,
   type BibliometricsFilters,
   type BibliometricsPaper,
+  type BibliometricsPolicyLevel,
+  type ImpactKey,
   type BibliometricsReport,
   type BibliometricsStages,
 } from "@/lib/edit/bibliometrics";
@@ -249,7 +249,6 @@ function Report({
   reach: ScholarReach | null;
 }) {
   const unrated = unratedNote(r);
-  const patents = patentsLine(r.patents);
   const peak = Math.max(1, ...r.output.byYear.map((y) => y.count));
   return (
     <div className="flex flex-col pb-2" data-testid="bibliometrics-report">
@@ -359,138 +358,7 @@ function Report({
         </div>
       </section>
 
-      <section className={SECTION}>
-        <SectionHead title="Guideline and policy citations" filtered />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
-            <thead>
-              <tr className="bg-apollo-surface-2 text-apollo-ink-2">
-                <th scope="col" className={TH}>
-                  Cited in
-                </th>
-                <th scope="col" className={`${TH} text-right`}>
-                  Papers cited
-                </th>
-                <th scope="col" className={`${TH} text-right`}>
-                  Citing documents
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.policy.map((l) => (
-                <tr key={l.level} className="border-apollo-border border-b last:border-b-0">
-                  <th scope="row" className="p-2.5 text-left font-normal">
-                    <span className={l.level === "authority" ? "font-semibold" : undefined}>
-                      {l.label}
-                    </span>
-                    {l.bodies.length > 0 ? (
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {l.bodies.map((b) => (
-                          <span key={b.body} className={BADGE_AUTHORITY}>
-                            {b.body} · {b.count}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </th>
-                  <td className="p-2.5 text-right align-top">{l.papers.toLocaleString()}</td>
-                  <td className="p-2.5 text-right align-top">{l.documents.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {patents ? (
-        <section className={SECTION} data-testid="bibliometrics-patents">
-          <SectionHead title="Patents citing this work" filtered />
-          <p className="text-[15px] leading-[1.6]" data-testid="bibliometrics-patents-line">
-            {patents}
-            {r.patents.dataEnd ? `, in patent data through ${r.patents.dataEnd}.` : "."}
-          </p>
-          <p className="text-apollo-ink-2 text-[13px]">{OWN_PATENTS_NOTE}</p>
-          {r.patents.list.length > 0 ? (
-            <TrialPatentGroup
-              icon={<FileText className="size-[15px]" strokeWidth={2} aria-hidden="true" />}
-              heading="Citing inventions"
-              count={plural(r.patents.inventions, "invention", "inventions")}
-              blurb="Inventions citing the most papers come first. Related patents for one invention are grouped. The download lists every invention and the papers each one cites."
-              items={r.patents.list}
-              total={r.patents.inventions}
-              nouns={["invention", "inventions"]}
-              row={(inv) => <InventionRow invention={inv} note={`cites ${plural(inv.papers, "paper", "papers")}`} />}
-            />
-          ) : null}
-          <div className="flex flex-wrap items-center gap-4">
-            <Button asChild variant="outline" className="min-h-11">
-              <a
-                href={`${PATENTS_DOWNLOAD_PATH}?cwid=${encodeURIComponent(r.scholar.cwid)}`}
-                download
-                data-testid="bibliometrics-patents-download"
-              >
-                <Download className="size-4" />
-                {PATENTS_DOWNLOAD_LABEL}
-              </a>
-            </Button>
-            {r.patents.reportHref ? (
-              <a href={r.patents.reportHref} className={`${LINK} text-sm`} data-testid="bibliometrics-patents-report">
-                Open the Patent citations report for this person
-              </a>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
-      {reach ? (
-        <section className={SECTION} data-testid="bibliometrics-reach">
-          <SectionHead title="Downstream reach" />
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-apollo-surface-2 text-apollo-ink-2">
-                <th scope="col" className={TH}>
-                  Cited by
-                </th>
-                <th scope="col" className={`${TH} text-right`}>
-                  Publications cited
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {reach.lines.map((l) => (
-                <tr key={l.type} className="border-apollo-border border-b last:border-b-0">
-                  <th scope="row" className="p-2.5 text-left font-normal">
-                    {l.label}
-                  </th>
-                  <td className="p-2.5 text-right align-top">
-                    <a
-                      href={l.href}
-                      className={LINK}
-                      aria-label={`${plural(l.papers, "publication", "publications")} cited by ${l.label.toLowerCase()}, in the Downstream reach report`}
-                      data-testid={`bibliometrics-reach-${l.type}`}
-                    >
-                      {l.papers.toLocaleString()}
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {reach.connections ? (
-            <p className="text-sm" data-testid="bibliometrics-reach-connections">
-              Colleagues citing this work who have never co-authored with this scholar:{" "}
-              <a
-                href={reach.connections.href}
-                className={LINK}
-                aria-label={`${plural(reach.connections.colleagues, "colleague", "colleagues")} citing this work who have never co-authored with this scholar, in the Downstream reach report`}
-              >
-                {reach.connections.colleagues.toLocaleString()}
-              </a>
-            </p>
-          ) : null}
-          <p className="text-apollo-ink-2 text-[13px]">{reach.note}</p>
-        </section>
-      ) : null}
+      <DownstreamImpact report={r} reach={reach} />
 
       {r.stages ? <StagesSection stages={r.stages} /> : null}
 
@@ -791,5 +659,260 @@ function PaperRows({ paper: p }: { paper: BibliometricsPaper }) {
         </tr>
       ) : null}
     </>
+  );
+}
+
+/** Where the work is cited outside ordinary journal citations: one table,
+ *  one scope (the research articles in the filters). */
+function DownstreamImpact({ report: r, reach }: { report: BibliometricsReport; reach: ScholarReach | null }) {
+  const [open, setOpen] = React.useState<ImpactKey | null>(null);
+  const [inventionsOpen, setInventionsOpen] = React.useState(false);
+  const level = (k: BibliometricsPolicyLevel["level"]) => r.policy.find((l) => l.level === k)!;
+  const authority = level("authority");
+  const row = (
+    key: ImpactKey,
+    label: React.ReactNode,
+    papers: number,
+    documents: React.ReactNode,
+    extra?: React.ReactNode,
+  ) => (
+    <React.Fragment key={key}>
+      <tr className="border-apollo-border border-b">
+        <th scope="row" className="px-3 py-2.5 text-left font-normal">
+          {label}
+          {extra}
+        </th>
+        <td className="px-3 py-2.5 text-right align-top">
+          {papers > 0 ? (
+            <button
+              type="button"
+              className={`${LINK} min-h-6 font-medium`}
+              aria-expanded={open === key}
+              aria-controls={`bibliometrics-cited-${key}`}
+              onClick={() => setOpen(open === key ? null : key)}
+              data-testid={`bibliometrics-cited-${key}`}
+            >
+              {papers.toLocaleString()}
+            </button>
+          ) : (
+            "0"
+          )}
+        </td>
+        <td className="px-3 py-2.5 text-right align-top">{documents}</td>
+      </tr>
+      {open === key ? (
+        <tr className="border-apollo-border border-b">
+          <td colSpan={3} className="px-3 py-2">
+            <CitedArticles id={`bibliometrics-cited-${key}`} papers={r.cited[key]} />
+          </td>
+        </tr>
+      ) : null}
+    </React.Fragment>
+  );
+  const group = (title: string) => (
+    <tr>
+      <th
+        colSpan={3}
+        scope="colgroup"
+        className="border-apollo-border-strong border-b-2 px-3 pt-5 pb-1.5 text-left text-[13px] font-semibold tracking-[0.06em] text-[#1f1d1b] uppercase"
+      >
+        {title}
+      </th>
+    </tr>
+  );
+  const own = <span className="text-apollo-ink-2"> (excluding the article&rsquo;s own authors)</span>;
+  const inventions = r.patents.inventions;
+  return (
+    <section className={SECTION} data-testid="bibliometrics-impact">
+      <SectionHead title="Downstream impact" filtered />
+      <p className="text-apollo-ink-2">
+        Where the research articles in scope are cited outside ordinary journal citations. Each Articles cited count lists
+        its articles.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm tabular-nums">
+          <thead>
+            <tr className="bg-apollo-surface-2 text-apollo-ink-2 text-[13px]">
+              <th scope="col" className="px-3 py-2 text-left font-medium">
+                Cited in
+              </th>
+              <th scope="col" className="w-[130px] px-3 py-2 text-right font-medium">
+                Articles cited
+              </th>
+              <th scope="col" className="w-[150px] px-3 py-2 text-right font-medium">
+                Citing documents
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {group("Policy and practice")}
+            {row(
+              "authority",
+              authority.label,
+              authority.papers,
+              authority.documents.toLocaleString(),
+              authority.bodies.length > 0 ? (
+                <div className="text-apollo-ink-2 mt-0.5 text-[13px]">
+                  {authority.bodies.map((b) => `${b.body} ${b.count.toLocaleString()}`).join(" \u00b7 ")}
+                </div>
+              ) : null,
+            )}
+            {row("guideline", level("guideline").label, level("guideline").papers, level("guideline").documents.toLocaleString())}
+            {row("consensus", level("consensus").label, level("consensus").papers, level("consensus").documents.toLocaleString())}
+            {group("Research by others")}
+            {row("review", level("review").label, level("review").papers, level("review").documents.toLocaleString())}
+            {row("clinical", <>Clinical studies{own}</>, r.research.clinical.papers, r.research.clinical.documents.toLocaleString())}
+            {row("trial", <>Registered trials{own}</>, r.research.trial.papers, r.research.trial.documents.toLocaleString())}
+            {group("Invention")}
+            {row(
+              "patent",
+              <>
+                Patents
+                {r.patents.dataEnd ? <span className="text-apollo-ink-2"> (patent data through {r.patents.dataEnd})</span> : null}
+              </>,
+              r.patents.papers,
+              inventions > 0 ? (
+                <button
+                  type="button"
+                  className={`${LINK} min-h-6`}
+                  aria-expanded={inventionsOpen}
+                  aria-controls="bibliometrics-inventions"
+                  onClick={() => setInventionsOpen((v) => !v)}
+                >
+                  <span className="font-medium">{inventions.toLocaleString()}</span> {inventions === 1 ? "invention" : "inventions"}
+                </button>
+              ) : (
+                "0 inventions"
+              ),
+              inventions > 0 ? (
+                <div>
+                  <button
+                    type="button"
+                    className={`${LINK} min-h-8 text-[13px]`}
+                    aria-expanded={inventionsOpen}
+                    aria-controls="bibliometrics-inventions"
+                    onClick={() => setInventionsOpen((v) => !v)}
+                    data-testid="bibliometrics-inventions-toggle"
+                  >
+                    {inventionsOpen ? "Hide inventions" : `Show the ${plural(inventions, "citing invention", "citing inventions")}`}
+                  </button>
+                </div>
+              ) : null,
+            )}
+          </tbody>
+        </table>
+      </div>
+      {inventionsOpen ? <Inventions report={r} /> : null}
+      {reach?.connections ? (
+        <p className="text-sm" data-testid="bibliometrics-reach-connections">
+          Colleagues citing this work who have never co-authored with this scholar:{" "}
+          <a
+            href={reach.connections.href}
+            className={LINK}
+            aria-label={`${plural(reach.connections.colleagues, "colleague", "colleagues")} citing this work who have never co-authored with this scholar, in the Downstream reach report`}
+          >
+            {reach.connections.colleagues.toLocaleString()}
+          </a>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** Inventions shown before "Show all". */
+const INVENTIONS_SHOWN = 3;
+
+/** The citing inventions, newest first: each with the paper it cites. */
+function Inventions({ report: r }: { report: BibliometricsReport }) {
+  const [all, setAll] = React.useState(false);
+  const titles = new Map(r.cited.patent.map((p) => [p.pmid, p.title]));
+  const list = all ? r.patents.list : r.patents.list.slice(0, INVENTIONS_SHOWN);
+  return (
+    <div id="bibliometrics-inventions" className={`${LIGHT_BOX} px-4 py-3.5`} data-testid="bibliometrics-inventions">
+      <p className="text-apollo-ink-2 mb-2 text-[13px]">Newest first. Related patents for one invention are grouped.</p>
+      <ul>
+        {list.map((inv) => {
+          const first = inv.pmids.map((pmid) => titles.get(pmid)).find(Boolean);
+          const more = inv.papers - 1;
+          return (
+            <li key={inv.id} className="py-1.5">
+              {inv.url ? (
+                <a href={inv.url} target="_blank" rel="noopener noreferrer" className={LINK}>
+                  {inv.title}
+                </a>
+              ) : (
+                <span>{inv.title}</span>
+              )}
+              <div className="text-apollo-ink-2 text-[13px]">
+                {[inv.holder, inv.year ? `${inv.granted ? "granted" : "published"} ${inv.year}` : null, inv.number]
+                  .filter(Boolean)
+                  .join(" \u00b7 ")}
+                {first ? (
+                  <>
+                    {" \u00b7 cites "}
+                    <i {...pubTitleProps(sanitizePubTitle(first))} />
+                    {more > 0 ? ` and ${plural(more, "more paper", "more papers")}` : ""}
+                  </>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {!all && r.patents.list.length > INVENTIONS_SHOWN ? (
+        <button type="button" onClick={() => setAll(true)} className={`${LINK} min-h-8 text-sm`}>
+          Show all {r.patents.list.length.toLocaleString()}
+        </button>
+      ) : null}
+      {all && r.patents.inventions > r.patents.list.length ? (
+        <p className="text-apollo-ink-2 text-[13px]">
+          Showing the newest {r.patents.list.length.toLocaleString()}; the download lists all{" "}
+          {r.patents.inventions.toLocaleString()}.
+        </p>
+      ) : null}
+      <div className="mt-2.5 flex flex-wrap items-center gap-4">
+        <Button asChild variant="outline" size="sm" className="min-h-10">
+          <a
+            href={`${PATENTS_DOWNLOAD_PATH}?cwid=${encodeURIComponent(r.scholar.cwid)}`}
+            download
+            data-testid="bibliometrics-patents-download"
+          >
+            <Download className="size-4" />
+            {PATENTS_DOWNLOAD_LABEL}
+          </a>
+        </Button>
+        {r.patents.reportHref ? (
+          <a href={r.patents.reportHref} className={`${LINK} text-sm`} data-testid="bibliometrics-patents-report">
+            Open the Patent citations report
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** The research articles behind one "Articles cited" count, newest first. */
+function CitedArticles({ id, papers }: { id: string; papers: BibliometricsReport["cited"][ImpactKey] }) {
+  return (
+    <ul id={id} className="flex flex-col gap-2" aria-label={`${papers.length} articles`}>
+      {papers.map((p) => (
+        <li key={p.pmid} className="text-[13px] leading-normal">
+          <a
+            href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            {...pubTitleProps(sanitizePubTitle(p.title), LINK)}
+          />
+          <div className="text-apollo-ink-2">
+            {p.journal ? <PubJournal value={p.journal} /> : null}
+            {p.journal && p.year ? ", " : ""}
+            {p.year ?? ""}
+            {" · PMID "}
+            {p.pmid}
+            <CopyPmid pmid={p.pmid} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

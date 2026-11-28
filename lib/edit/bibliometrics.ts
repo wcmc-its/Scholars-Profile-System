@@ -98,6 +98,10 @@ export type BibliometricsPubRow = {
   reviewCount: number;
   /** Distinct inventions (patent families) citing the paper: the stored rollup. */
   patentFamilyCount: number;
+  /** Clinical articles (iCite) citing the paper, the authors' own left out: the stored rollup. */
+  clinicalCiteCount?: number;
+  /** ClinicalTrials.gov studies citing the paper, the authors' own left out: the stored rollup. */
+  trialCount?: number;
   /** Raw ReCiterAI stage and confidence; `displayStage` decides what counts. */
   translationalStage?: string | null;
   translationalStageConfidence?: string | null;
@@ -158,8 +162,8 @@ export type BibliometricsPatents = {
   papers: number;
   /** Distinct inventions citing them, filled by the loader. */
   inventions: number;
-  /** The inventions, most of the scholar's papers cited first (the first
-   *  `TRIAL_PATENT_CAP`), filled by the loader. Shown to every viewer of the tab. */
+  /** The inventions, newest first (the first `TRIAL_PATENT_CAP`), filled by
+   *  the loader. Shown to every viewer of the tab. */
   list: ScholarInvention[];
   /** Where the patent data ends ("31 December 2025"), filled by the loader. */
   dataEnd: string | null;
@@ -217,9 +221,18 @@ export type BibliometricsReport = {
   /** Null while stage data is off (`SEARCH_PUBS_TRANSLATIONAL_STAGE_FACET`). */
   stages: BibliometricsStages | null;
   policy: BibliometricsPolicyLevel[];
+  /** Clinical studies and registered trials citing the research articles in
+   *  scope, the authors' own left out. `documents` is filled by the loader. */
+  research: Record<"clinical" | "trial", { papers: number; documents: number }>;
   patents: BibliometricsPatents;
+  /** The research articles in scope behind each "Articles cited" count of
+   *  Downstream impact, newest first. */
+  cited: Record<ImpactKey, BibliometricsStagePaper[]>;
   definitions: Array<{ term: string | null; text: string }>;
 };
+
+/** The rows of Downstream impact, each an "Articles cited" list. */
+export type ImpactKey = PolicyCitingDoc["level"] | "clinical" | "trial" | "patent";
 
 export const POLICY_LEVEL_LABELS: ReadonlyArray<[PolicyCitingDoc["level"], string]> = [
   ["authority", "Health authorities and national academies"],
@@ -402,8 +415,8 @@ const DEFINITIONS: BibliometricsReport["definitions"] = [
   },
   { term: "Cited by", text: "Scopus, the count shown on the public profile." },
   {
-    term: "Guideline and policy citations",
-    text: "PubMed, NIH iCite and NCBI Bookshelf. Covers documents those sources index, so some citing guidelines and reports are not listed.",
+    term: "Downstream impact",
+    text: "Guidelines, health-authority reports, consensus statements and systematic reviews from PubMed, NIH iCite and NCBI Bookshelf; clinical studies from NIH iCite; registered trials from ClinicalTrials.gov; patents from the USPTO. Documents those sources do not index are not counted. Clinical studies and trials by the article's own authors are left out; patents on which the scholar is an inventor are not separated out.",
   },
   {
     term: null,
@@ -476,6 +489,17 @@ export function buildBibliometricsReport(input: {
     ...new Set(articles.flatMap((p) => toPolicyRollup(p)?.authority.map((a) => a.body) ?? [])),
   ].sort();
   const patentPapers = articles.filter((p) => p.patentFamilyCount > 0).length;
+  const newestFirst = [...articles].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.pmid.localeCompare(a.pmid));
+  const citedBy = (n: (p: BibliometricsPubRow) => number) => newestFirst.filter((p) => n(p) > 0).map(paperRef);
+  const cited: Record<ImpactKey, BibliometricsStagePaper[]> = {
+    authority: citedBy((p) => p.authorityCount),
+    guideline: citedBy((p) => p.guidelineCount),
+    consensus: citedBy((p) => p.consensusCount),
+    review: citedBy((p) => p.reviewCount),
+    clinical: citedBy((p) => p.clinicalCiteCount ?? 0),
+    trial: citedBy((p) => p.trialCount ?? 0),
+    patent: citedBy((p) => p.patentFamilyCount),
+  };
 
   const matching = rankPapers(articles);
   const surname = (scholar.name.split(",")[0] ?? "").trim().split(/\s+/).pop()?.toLowerCase() ?? "";
@@ -520,6 +544,11 @@ export function buildBibliometricsReport(input: {
     },
     stages: input.stagesEnabled ? stagesOf(matching) : null,
     policy,
+    research: {
+      clinical: { papers: cited.clinical.length, documents: 0 },
+      trial: { papers: cited.trial.length, documents: 0 },
+    },
+    cited,
     patents: {
       papers: patentPapers,
       inventions: 0,
@@ -530,6 +559,13 @@ export function buildBibliometricsReport(input: {
     definitions: input.stagesEnabled ? [...DEFINITIONS.slice(0, -1), STAGE_DEFINITION, DEFINITIONS.at(-1)!] : DEFINITIONS,
   };
 }
+
+const paperRef = (p: BibliometricsPubRow): BibliometricsStagePaper => ({
+  pmid: p.pmid,
+  title: p.title,
+  journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
+  year: p.year,
+});
 
 const STAGE_DEFINITION = { term: "Translational stage", text: STAGE_RULE };
 
