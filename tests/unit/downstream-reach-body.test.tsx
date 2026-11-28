@@ -281,7 +281,7 @@ describe("report 27 page", () => {
     expect(queryOf(tab("documents").getAttribute("href")).get("view")).toBe("documents");
   });
 
-  it("a Publications row: the title opens the modal, the stage is the neutral badge, one column per ticked type", async () => {
+  it("a Publications row: the title opens the modal, the stage sits in the metadata line, a Total then one column per ticked type", async () => {
     const view = await page();
     expect(view.getByTestId("modal-provider")).toBeTruthy();
     const rows = view.getAllByTestId("downstream-reach-pub-row");
@@ -289,12 +289,12 @@ describe("report 27 page", () => {
     const table = view.getByTestId("downstream-reach-publications");
     expect([...table.querySelectorAll("th")].map((th) => th.textContent)).toEqual([
       "Publication",
-      "Stage",
-      "Clinical studies",
-      "Registered trials",
-      "Guidelines and policy",
-      "Systematic reviews",
-      "Patents",
+      "Total▼",
+      "Clinical studies▼",
+      "Registered trials▼",
+      "Guidelines and policy▼",
+      "Systematic reviews▼",
+      "Patents▼",
     ]);
     const first = within(rows[0]);
     fireEvent.click(first.getByTestId("downstream-reach-title"));
@@ -366,16 +366,59 @@ describe("report 27 page", () => {
     expect(queryOf(within(row.getByTestId("downstream-reach-cell-clinical")).getByRole("link").getAttribute("href")).get("view")).toBe("documents");
   });
 
+  it("the Total opens the paper's citing documents of every ticked type; each header sorts, then reverses", async () => {
+    const view = await page({ ctype: ["clinical", "trial"], basis: "cy" });
+    const row = within(view.getAllByTestId("downstream-reach-pub-row")[0]);
+    const total = within(row.getByTestId("downstream-reach-cell-total")).getByRole("link");
+    expect(total.textContent).toBe("14");
+    expect(total.getAttribute("href")).toBe(`${BASE}?${reachLinks(paramsOf("ctype=clinical&ctype=trial&basis=cy")).paperDocs("10000001", null)}`);
+    expect(queryOf(total.getAttribute("href")).getAll("ctype")).toEqual(["clinical", "trial"]);
+    const th = (sort: string) => view.getByTestId(`downstream-reach-sort-${sort}`).closest("th")!;
+    expect(th("cited").getAttribute("aria-sort")).toBe("descending");
+    expect(th("clinical").getAttribute("aria-sort")).toBe("none");
+    // The current column's link reverses it; another column's sorts by it, highest first.
+    expect(queryOf(view.getByTestId("downstream-reach-sort-cited").getAttribute("href")).get("order")).toBe("asc");
+    const byClinical = queryOf(view.getByTestId("downstream-reach-sort-clinical").getAttribute("href"));
+    expect([byClinical.get("sort"), byClinical.get("order")]).toEqual(["clinical", null]);
+    // Sort by offers the ticked types only.
+    const options = [...view.container.querySelectorAll<HTMLOptionElement>('select[name="sort"] option')].map((o) => o.value);
+    expect(options).toEqual(["cited", "clinical", "trial", "year", "oldest"]);
+    cleanup();
+    const asc = await page({ ctype: ["clinical", "trial"], basis: "cy", sort: "clinical", order: "asc" });
+    const clinical = asc.getByTestId("downstream-reach-sort-clinical");
+    expect(clinical.closest("th")!.getAttribute("aria-sort")).toBe("ascending");
+    expect(queryOf(clinical.getAttribute("href")).get("order")).toBeNull();
+  });
+
+  it("author chips: three, picked by the person-type filter, then first and senior author; the rest behind +N more", async () => {
+    const a = (cwid: string, position: "first" | "middle" | "last", roleCategory: string) => ({ cwid, name: `Person ${cwid}`, position, roleCategory });
+    h.pubs.mockResolvedValue([
+      pub("10000001", {
+        clinical: 1,
+        authors: [a("m1", "first", "postdoc"), a("m2", "middle", "postdoc"), a("m3", "middle", "full_time_faculty"), a("m4", "middle", "postdoc"), a("m5", "last", "postdoc")],
+      }),
+    ]);
+    const view = await page({ type: "full_time_faculty", basis: "cy" });
+    const row = within(view.getAllByTestId("downstream-reach-pub-row")[0]);
+    const shown = () => row.getAllByTestId("hover-card").map((c) => c.getAttribute("data-cwid"));
+    expect(shown()).toEqual(["m3", "m1", "m5"]);
+    const more = row.getByTestId("author-pills-more");
+    expect([more.textContent, more.getAttribute("aria-expanded")]).toEqual(["+2 more", "false"]);
+    fireEvent.click(more);
+    expect(shown()).toEqual(["m3", "m1", "m5", "m2", "m4"]);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("only the ticked types have columns", async () => {
     const view = await page({ ctype: ["patent"], basis: "cy" });
     const heads = [...view.getByTestId("downstream-reach-publications").querySelectorAll("th")].map((th) => th.textContent);
-    expect(heads).toEqual(["Publication", "Stage", "Patents"]);
+    expect(heads).toEqual(["Publication", "Total▼", "Patents▼"]);
     cleanup();
     const reviews = await page({ ctype: ["review"], basis: "cy" });
     expect([...reviews.getByTestId("downstream-reach-publications").querySelectorAll("th")].map((th) => th.textContent)).toEqual([
       "Publication",
-      "Stage",
-      "Systematic reviews",
+      "Total▼",
+      "Systematic reviews▼",
     ]);
     // The headline keeps a figure for every type, on one wrapping row.
     expect(reviews.getByTestId("downstream-reach-tile-review").textContent).toBe("2,222");
@@ -386,7 +429,7 @@ describe("report 27 page", () => {
     for (const cell of view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")) {
       expectEveryNumberLinked(cell as HTMLElement);
     }
-    expect(view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")).toHaveLength(10);
+    expect(view.getByTestId("downstream-reach-publications").querySelectorAll("td.text-right")).toHaveLength(12);
   });
 
   it("the every-publication listing says what it is and how to leave it", async () => {

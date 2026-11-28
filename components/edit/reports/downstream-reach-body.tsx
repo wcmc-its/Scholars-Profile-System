@@ -101,6 +101,7 @@ import {
   REACH_TYPE_LABEL,
   REACH_TYPES,
   reachChips,
+  reachTotal,
   reachLinks,
   reachQueryString,
   resolveReachParams,
@@ -253,6 +254,43 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
   );
 }
 
+/** A count column's header (spec B3): a link that sorts by it, highest first,
+ *  and lowest first on the next click; `aria-sort` says which. Plain text when
+ *  the list does not sort (every publication in scope, newest first). */
+function SortTH({
+  label,
+  sort,
+  current,
+  sortHref,
+  className,
+}: {
+  label: string;
+  sort: "cited" | ReachType;
+  current: { sort: ReachSort; asc: boolean } | null;
+  sortHref: (sort: ReachSort, asc: boolean) => string;
+  className?: string;
+}) {
+  const on = current?.sort === sort;
+  const asc = on && current!.asc;
+  return (
+    <th
+      className={cn(TH, "text-right whitespace-normal", className)}
+      aria-sort={current === null ? undefined : on ? (asc ? "ascending" : "descending") : "none"}
+    >
+      {current === null ? (
+        label
+      ) : (
+        <Link href={sortHref(sort, on && !asc)} className="hover:underline" data-testid={`${TEST}-sort-${sort}`}>
+          {label}
+          <span aria-hidden className={cn("ml-1", on ? "" : "invisible")}>
+            {asc ? "▲" : "▼"}
+          </span>
+        </Link>
+      )}
+    </th>
+  );
+}
+
 function PublicationTable({
   pubs,
   types,
@@ -261,6 +299,9 @@ function PublicationTable({
   on,
   docsHref,
   footer,
+  sorted,
+  sortHref,
+  match,
 }: {
   pubs: ReachPubRow[];
   types: readonly ReachType[];
@@ -269,9 +310,14 @@ function PublicationTable({
   /** Papers the modal will not open (`loadModalHidden`). */
   hidden: ReadonlySet<string>;
   on: Record<ReachType, boolean>;
-  /** The Citing documents view filtered to one paper and type. */
-  docsHref: (pmid: string, type: ReachType) => string;
+  /** The Citing documents view filtered to one paper and type (null: every ticked type). */
+  docsHref: (pmid: string, type: ReachType | null) => string;
   footer: PersonFooter;
+  /** The current order; null when the list does not sort. */
+  sorted: { sort: ReachSort; asc: boolean } | null;
+  sortHref: (sort: ReachSort, asc: boolean) => string;
+  /** Authors who put the paper in scope (the person-type filter), if one is set. */
+  match?: (a: ReachPubRow["authors"][number]) => boolean;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -279,11 +325,9 @@ function PublicationTable({
         <thead>
           <tr className="bg-apollo-surface-2 text-left">
             <th className={TH}>Publication</th>
-            <th className={TH}>Stage</th>
+            <SortTH label="Total" sort="cited" current={sorted} sortHref={sortHref} className="font-semibold" />
             {types.map((t) => (
-              <th key={t} className={cn(TH, "text-right whitespace-normal")}>
-                {REACH_TYPE_LABEL[t]}
-              </th>
+              <SortTH key={t} label={REACH_TYPE_LABEL[t]} sort={t} current={sorted} sortHref={sortHref} />
             ))}
           </tr>
         </thead>
@@ -299,17 +343,33 @@ function PublicationTable({
                   <PaperTitle pmid={r.pmid} title={r.title} />
                 )}
                 <div className="text-muted-foreground mt-0.5 leading-normal">
-                  <PubMeta pub={r} copy />
+                  <PubMeta
+                    pub={r}
+                    copy
+                    extra={
+                      r.stage === "none" ? (
+                        <span className="text-xs">{NO_STAGE_LABEL}</span>
+                      ) : (
+                        <span data-testid="pub-row-stage">
+                          <StageTag stage={r.stage} />
+                        </span>
+                      )
+                    }
+                  />
                 </div>
-                <AuthorPills authors={r.authors} footer={footer} />
+                <AuthorPills authors={r.authors} footer={footer} max={3} match={match} />
               </td>
-              <td className={TD}>
-                {r.stage === "none" ? (
-                  <span className="text-muted-foreground text-xs">{NO_STAGE_LABEL}</span>
+              <td className={cn(TD, "text-right text-[15px] font-semibold")} data-testid={`${TEST}-cell-total`}>
+                {reachTotal(r, types) > 0 ? (
+                  <Link
+                    href={docsHref(r.pmid, null)}
+                    aria-label={`${reachTotal(r, types).toLocaleString()} citing documents of this paper`}
+                    className={LINK}
+                  >
+                    {reachTotal(r, types).toLocaleString()}
+                  </Link>
                 ) : (
-                  <span data-testid="pub-row-stage">
-                    <StageTag stage={r.stage} />
-                  </span>
+                  <Dash />
                 )}
               </td>
               {types.map((t) => {
@@ -556,6 +616,12 @@ export async function renderDownstreamReachReport({
   const published = yearSpan(params.from, params.to, fiscalLabel(params));
   const stagesText =
     params.stages.length > 0 ? `at ${params.stages.map(stageKeyLabel).join(", ")}` : "at every stage";
+  // The Sort by options for the ticked types only, in step with the headers.
+  const sortOptions = Object.fromEntries(
+    (Object.keys(REACH_SORT_LABEL) as ReachSort[])
+      .filter((k) => !(REACH_TYPES as readonly string[]).includes(k) || types.includes(k as ReachType))
+      .map((k) => [k, REACH_SORT_LABEL[k]]),
+  ) as Record<ReachSort, string>;
   const allTypes = params.ctypes.length === 0 || params.ctypes.length === REACH_TYPES.length;
 
   return {
@@ -671,10 +737,10 @@ export async function renderDownstreamReachReport({
                   </p>
                 ) : (
                   toolbar(
-                    { q: "", sort: "cited" },
+                    { q: "", sort: "cited", asc: false },
                     <>
                       <SearchField label="Search title, PMID or author" placeholder="e.g. 12345678" value={params.q} />
-                      <SortSelect<ReachSort> name="sort" value={params.sort} options={REACH_SORT_LABEL} />
+                      <SortSelect<ReachSort> name="sort" value={params.sort} options={sortOptions} />
                     </>,
                   )
                 )}
@@ -686,6 +752,9 @@ export async function renderDownstreamReachReport({
                   on={modalGroupsOn()}
                   docsHref={(pmid, type) => href(links.paperDocs(pmid, type))}
                   footer={personFooter}
+                  sorted={params.showAll ? null : { sort: params.sort, asc: params.asc }}
+                  sortHref={(sort, asc) => href(reachQueryString(params, { sort, asc }))}
+                  match={params.types.length > 0 ? (a) => params.types.includes(a.roleCategory ?? "") : undefined}
                 />
                 {data.pubMatched === 0 && (
                   <p className="text-muted-foreground px-4 pt-3 text-[13px]">
