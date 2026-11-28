@@ -107,6 +107,36 @@ const DATA: ScholarPortfolio = {
       counts: { T0: 2, T1: 0, T2: 1, "T3-4": 0, none: 0 },
     },
   ],
+  grants: [
+    {
+      key: "R01CA000001",
+      title: "An example award",
+      funder: "NCI",
+      awardNumber: "5 R01 CA000001-03",
+      start: "2021-04-01",
+      end: "2026-03-31",
+      years: [2021, 2022],
+      people: [{ cwid: "abc1234", role: "PI" }],
+      deptCodes: [],
+      areas: [],
+    },
+  ],
+  trials: [
+    {
+      key: "NCT00000001",
+      protocolNumber: "P-1",
+      nct: "NCT00000001",
+      title: "An example trial",
+      trialPhase: "Phase 2",
+      status: "OPEN TO ACCRUAL",
+      startYear: 2022,
+      endYear: null,
+      years: [2022],
+      people: [{ cwid: "abc1234", role: "Principal Investigator" }],
+      deptCodes: [],
+      areas: [],
+    },
+  ],
 };
 
 async function open(query: Record<string, string | string[]> = { from: "2021", to: "2022" }) {
@@ -379,5 +409,33 @@ describe("the research area card", () => {
     expect(
       within(card).getByRole("link", { name: "Open the Example area page" }).getAttribute("href"),
     ).toBe("/topics/area_a");
+  });
+});
+
+describe("funding and clinical trials", () => {
+  it("lists this scholar's awards and trials with role, years and identifiers, stage not yet assigned", async () => {
+    const c = await open();
+    const grants = within(c).getByTestId("scholar-portfolio-grants");
+    expect(grants.querySelector("h2")!.textContent).toBe("Funding");
+    expect(grants.textContent).toContain("1 award");
+    const g = within(grants).getByTestId("scholar-portfolio-grant");
+    expect(g.textContent).toContain("PI·2021–2026");
+    expect(g.textContent).toContain("Award 5 R01 CA000001-03");
+    expect(g.textContent).toContain("Stage not yet assigned");
+
+    const trials = within(c).getByTestId("scholar-portfolio-trials");
+    const t = within(trials).getByTestId("scholar-portfolio-trial");
+    expect(t.textContent).toContain("Phase 2·Principal investigator·2022–·Open to accrual");
+    expect(within(t).getByRole("link", { name: "NCT00000001" }).getAttribute("href")).toBe("https://clinicaltrials.gov/study/NCT00000001");
+    // The scholar rows' counts on the report land here.
+    expect(grants.id).toBe("funding");
+    expect(trials.id).toBe("trials");
+  });
+
+  it("says when there are none", async () => {
+    h.data.mockResolvedValue({ ...DATA, grants: [], trials: [] });
+    const c = await open();
+    expect(within(c).getByTestId("scholar-portfolio-grants").textContent).toContain("No awards in these years.");
+    expect(within(c).getByTestId("scholar-portfolio-trials").textContent).toContain("No clinical trials in these years.");
   });
 });
