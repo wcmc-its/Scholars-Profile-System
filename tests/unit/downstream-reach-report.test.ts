@@ -79,6 +79,9 @@ import {
   reachTypeOfLevel,
   resolveReachParams,
   sortReachPublications,
+  hasReachBaseline,
+  loadReachBaseline,
+  reachBaselineParams,
   REACH_NOTABLE_ORDER,
   stageKeyOf,
   tickedTypes,
@@ -924,6 +927,17 @@ describe.each<[string, string, typeof SUPER, Record<string, { code: string }[]>]
 ])("every count equals the list its link opens: %s", (_name, qs, session, managed) => {
   beforeEach(() => h.manageable.mockResolvedValue(units(managed)));
 
+  it("the baseline: N and M without research area and unit, each its list", async () => {
+    const { p } = await open(qs, session);
+    // The model answers under `cur`: the params the baseline's own queries carry.
+    cur = reachBaselineParams(p);
+    const base = await loadReachBaseline(p);
+    if (!hasReachBaseline(p)) return expect(base).toBeNull();
+    const links = reachLinks(reachBaselineParams(p));
+    expect(await listLength(links.cited(), session)).toBe(base!.cited);
+    expect(await listLength(links.scope(), session)).toBe(base!.scope);
+  });
+
   it("the first tile: N cited downstream, of M in scope", async () => {
     const { p, data } = await open(qs, session);
     const links = reachLinks(p);
@@ -1510,6 +1524,19 @@ describe("the workbook", () => {
       "Papers cited by clinical studies",
       "Papers cited in patents",
     ]);
+  });
+
+  it("the Criteria sheet records the baseline and the filters it leaves out", async () => {
+    const p = { ...parse("area=area_a"), scope: null };
+    const wb = await read(
+      await buildReachWorkbook(p, { pubs: [], pubTotal: 0, docs: [], docTotal: 0, people: [], baseline: { cited: 31, scope: 100 } }, AT),
+    );
+    const criteria = new Map(
+      (wb.getWorksheet("Criteria")!.getSheetValues() as unknown[][]).filter(Boolean).map((r) => [String(r[1]), String(r[2])]),
+    );
+    expect(criteria.get("Baseline (WCM overall)")).toBe(
+      "31%: 31 of 100 publications cited downstream, under every filter above except research area and org unit.",
+    );
   });
 
   it("all five types: a Systematic reviews column after Guidelines and policy on every sheet with per-type counts", async () => {

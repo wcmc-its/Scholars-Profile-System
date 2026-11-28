@@ -39,6 +39,7 @@ import {
   isDownstreamReachReportEnabled,
   loadReach,
   loadReachAreas,
+  loadReachBaseline,
   parseReachParams,
   REACH_DOCS_CAP,
   REACH_LIST_CAP,
@@ -65,12 +66,13 @@ export async function GET(request: Request) {
     limit: REACH_LIST_CAP,
     docLimit: REACH_DOCS_CAP,
   });
-  const [pubs, docs, labels, areas, connections] = await Promise.all([
+  const [pubs, docs, labels, areas, connections, baseline] = await Promise.all([
     withReachPublicationDetails(params, data.pubs),
     withReachDocDetails(data.docs),
     params.units.length > 0 || params.scope !== null ? loadDataQualityFacets(db.read).then(unitLabels) : undefined,
     params.area ? loadReachAreas() : [],
     params.view === "connections" ? loadReachConnections(params) : null,
+    loadReachBaseline(params),
   ]);
   const buffer = await buildReachWorkbook(
     params,
@@ -81,6 +83,7 @@ export async function GET(request: Request) {
       docTotal: data.docTotal ?? 0,
       docsWithheld: data.docsWithheld,
       people: data.people ?? [],
+      baseline,
     },
     generatedAt,
     labels,

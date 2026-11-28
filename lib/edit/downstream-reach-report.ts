@@ -835,6 +835,37 @@ export function sortReachPublications<T extends ReachPubCounts>(
  *  answered the default view in under a second. Do not rewrite the authorship
  *  test as `EXISTS` or `IN (subquery)`: the optimizer turns either into a
  *  semi-join that scans `publication_author` first again (6 to 13 s). */
+// ---------------------------------------------------------------------------
+// Baseline (spec D3)
+// ---------------------------------------------------------------------------
+
+/** The baseline's params: every filter but research area and org unit, so it
+ *  answers "is this area or unit above or below the rest?" The viewer's own
+ *  scope stays: a unit administrator's baseline is their units, not WCM. */
+export const reachBaselineParams = (p: ReachParams): ReachParams => ({ ...p, area: null, units: [] });
+/** Shown only when it differs from the selection: a research area or unit is set. */
+export const hasReachBaseline = (p: Pick<ReachParams, "area" | "units">): boolean => p.area !== null || p.units.length > 0;
+
+export type ReachBaseline = { cited: number; scope: number };
+
+/** The baseline's N of M: a second counts query and scope total (about 1 s
+ *  at T0 and T1 on staging; 3 to 5 s at every stage with no year limit). Its
+ *  links are `reachLinks(reachBaselineParams(p))`. null when not shown. */
+export async function loadReachBaseline(p: ReachParams): Promise<ReachBaseline | null> {
+  if (!hasReachBaseline(p)) return null;
+  const b = reachBaselineParams(p);
+  const [counts, scope] = await Promise.all([loadReachCounts(b), loadScopeTotal(b)]);
+  return { cited: listedFor(counts, tickedTypes(b)).length, scope };
+}
+
+/** "39%": a share of a selection, rounded; "0%" of nothing. */
+export const reachShare = (cited: number, scope: number): string =>
+  `${scope > 0 ? Math.round((cited / scope) * 100) : 0}%`;
+
+/** Whose baseline it is: WCM for a viewer who sees everyone, their units otherwise. */
+export const reachBaselineLabel = (p: Pick<ReachParams, "scope">): string =>
+  p.scope === null ? "WCM overall" : "All your units";
+
 export async function loadScopeTotal(p: ReachParams): Promise<number> {
   const raw = await db.read.$queryRaw<{ n: Num }[]>`
     SELECT STRAIGHT_JOIN COUNT(DISTINCT p.pmid) AS n
@@ -1585,6 +1616,8 @@ export async function buildReachWorkbook(
     docTotal: number;
     /** `ReachData.docsWithheld`: the sheet then carries a note and no rows. */
     docsWithheld?: number | null;
+    /** `loadReachBaseline`: a Criteria row when a research area or unit is set. */
+    baseline?: ReachBaseline | null;
     people: ReachPersonRow[];
   },
   generatedAt: Date,
@@ -1665,6 +1698,14 @@ export async function buildReachWorkbook(
 
   addCriteriaSheet(wb, [
     ...describeReachCriteria(p, generatedAt, labels, areaLabel),
+    ...(data.baseline
+      ? ([
+          [
+            `Baseline (${reachBaselineLabel(p)})`,
+            `${reachShare(data.baseline.cited, data.baseline.scope)}: ${data.baseline.cited.toLocaleString()} of ${data.baseline.scope.toLocaleString()} publications cited downstream, under every filter above except research area and org unit.`,
+          ],
+        ] as [string, string][])
+      : []),
     ["Publications sheet", sheetNote(data.pubs.length, data.pubTotal, "publications", REACH_LIST_CAP)],
     [
       "Citing documents sheet",
