@@ -44,6 +44,22 @@ export type BibliometricsFilters = {
   yearTo: number | null;
 };
 
+/**
+ * Whether a research article falls inside the filters. Every section but the
+ * h-index and h5-index counts only these; the loader reads citing documents
+ * and patents for the same set.
+ */
+export function inScope(
+  p: Pick<BibliometricsPubRow, "year" | "isFirst" | "isLast">,
+  f: BibliometricsFilters,
+): boolean {
+  return (
+    (f.authorship === "all" || positionOf(p) !== "co") &&
+    (f.yearFrom === null || (p.year !== null && p.year >= f.yearFrom)) &&
+    (f.yearTo === null || (p.year !== null && p.year <= f.yearTo))
+  );
+}
+
 export function parseBibliometricsFilters(params: URLSearchParams): BibliometricsFilters {
   const year = (key: string) => {
     const n = Number(params.get(key));
@@ -135,8 +151,8 @@ export type BibliometricsPolicyLevel = {
   bodies: Array<{ body: string; count: number }>;
 };
 
-/** Patents citing the scholar's work. Every visible publication counts, of
- *  any type: the same papers the Excel download lists. */
+/** Patents citing the scholar's research articles inside the filters. The
+ *  Excel download still lists every visible publication of any type. */
 export type BibliometricsPatents = {
   /** The scholar's papers cited in a patent. */
   papers: number;
@@ -173,7 +189,7 @@ export type BibliometricsReport = {
   /** ISO date the figures were calculated. */
   asOf: string;
   filters: BibliometricsFilters;
-  /** Publication years of the research articles, for the filter selects. */
+  /** Publication years of every research article (unfiltered), for the selects. */
   yearRange: { min: number; max: number } | null;
   /** Sentences that follow the scholar's name; empty below the minimum. */
   summary: string[];
@@ -182,9 +198,13 @@ export type BibliometricsReport = {
     h5Index: number;
     ratedArticles: number;
     unratedArticles: number;
+    /** Rated articles at or above the 90th NIH percentile. */
+    topDecileArticles: number;
     /** Share of rated articles at or above the 90th NIH percentile. */
     topDecilePct: number | null;
   };
+  /** Research articles inside the filters: everything below except the
+   *  h-index and h5-index counts only these. */
   output: {
     first: number;
     senior: number;
@@ -308,37 +328,59 @@ function toPaper(p: BibliometricsPubRow, surname: string): BibliometricsPaper {
 
 function summarySentences(args: {
   total: number;
-  since: number | null;
+  /** "since 2016", "from 2016 to 2020", or "" with no years at all. */
+  span: string;
+  /** True under "First or senior author only": every article counted is lead. */
+  leadOnly: boolean;
   lead: number;
   rated: number;
   topDecilePct: number | null;
   guidelinePapers: number;
   authorityPapers: number;
+  patentPapers: number;
   bodies: string[];
 }): string[] {
   // The minimum-paper rule: too few rated articles to say anything about them.
   if (args.rated < BIBLIOMETRICS_MIN_RATED_ARTICLES) return [];
+  const span = args.span ? ` ${args.span}` : "";
   const out = [
-    `has published ${count(args.total, "research article")}${args.since ? ` since ${args.since}` : ""}, ` +
-      `${args.lead.toLocaleString("en-US")} as first or senior author.`,
+    args.leadOnly
+      ? `has published ${count(args.total, "research article")} as first or senior author${span}.`
+      : `has published ${count(args.total, "research article")}${span}, ` +
+        `${args.lead.toLocaleString("en-US")} as first or senior author.`,
     `Of the ${count(args.rated, "article")} with an NIH percentile, ${args.topDecilePct}% rank in the ` +
       "top 10% of NIH-funded papers in their field and year.",
   ];
   const from = args.bodies.map((b) => BODY_PHRASE[b] ?? b);
   const authorities =
     from.length > 1 ? `${from.slice(0, -1).join(", ")} or ${from[from.length - 1]}` : (from[0] ?? "");
-  const cited = (n: number) => `${count(n, "article is", "articles are")} cited`;
-  if (args.guidelinePapers > 0 && args.authorityPapers > 0) {
-    out.push(
-      `${cited(args.guidelinePapers)} in clinical practice guidelines, and ` +
-        `${args.authorityPapers.toLocaleString("en-US")} in documents from ${authorities}.`,
+  // "19 articles are cited in clinical practice guidelines, 84 in documents
+  // from …, and 8 in patents." Each clause only when its count is above zero.
+  const clauses = (
+    [
+      [args.guidelinePapers, "in clinical practice guidelines"],
+      [args.authorityPapers, `in documents from ${authorities}`],
+      [args.patentPapers, "in patents"],
+    ] as const
+  ).filter(([n]) => n > 0);
+  if (clauses.length > 0) {
+    const parts = clauses.map(([n, where], i) =>
+      i === 0 ? `${count(n, "article is", "articles are")} cited ${where}` : `${n.toLocaleString("en-US")} ${where}`,
     );
-  } else if (args.guidelinePapers > 0) {
-    out.push(`${cited(args.guidelinePapers)} in clinical practice guidelines.`);
-  } else if (args.authorityPapers > 0) {
-    out.push(`${cited(args.authorityPapers)} in documents from ${authorities}.`);
+    out.push(
+      `${parts.length > 1 ? `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}` : parts[0]}.`,
+    );
   }
   return out;
+}
+
+/** "since 2016" or "from 2016 to 2020": the years the summary covers. */
+function spanOf(filters: BibliometricsFilters, years: readonly number[], thisYear: number): string {
+  if (years.length === 0) return "";
+  const from = filters.yearFrom ?? Math.min(...years);
+  const to = filters.yearTo;
+  if (to !== null && to < thisYear) return from === to ? `in ${to}` : `from ${from} to ${to}`;
+  return `since ${from}`;
 }
 
 const DEFINITIONS: BibliometricsReport["definitions"] = [
@@ -352,7 +394,7 @@ const DEFINITIONS: BibliometricsReport["definitions"] = [
   },
   {
     term: "h-index and h5-index",
-    text: "Calculated from NIH iCite citation counts across all publications. The h5-index counts only papers added to PubMed in the last five years.",
+    text: "Calculated from NIH iCite citation counts across all publications. The h5-index counts only papers added to PubMed in the last five years. Neither follows the Authorship and year filters; every other figure does.",
   },
   { term: "Cited by", text: "Scopus, the count shown on the public profile." },
   {
@@ -383,7 +425,11 @@ export function buildBibliometricsReport(input: {
   stagesEnabled?: boolean;
 }): BibliometricsReport {
   const { scholar, filters, now } = input;
-  const articles = input.visible.filter((p) => p.publicationType === RESEARCH_ARTICLE);
+  const allArticles = input.visible.filter((p) => p.publicationType === RESEARCH_ARTICLE);
+  const allYears = allArticles.flatMap((p) => (p.year ? [p.year] : []));
+  const yearRange = allYears.length > 0 ? { min: Math.min(...allYears), max: Math.max(...allYears) } : null;
+  // Everything below but the h-index and h5-index counts these.
+  const articles = allArticles.filter((p) => inScope(p, filters));
 
   const byPosition = { first: 0, senior: 0, co: 0 };
   for (const p of articles) byPosition[positionOf(p)]++;
@@ -394,20 +440,21 @@ export function buildBibliometricsReport(input: {
     for (const p of articles) if (p.year === year) n[positionOf(p)]++;
     return n;
   };
-  const yearRange = years.length > 0 ? { min: Math.min(...years), max: Math.max(...years) } : null;
   // The campus calendar date: a late-evening load must not read as tomorrow.
   const asOf = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const thisYear = Number(asOf.slice(0, 4));
-  const byYear = Array.from({ length: YEARS_CHARTED }, (_, i) => {
-    const year = thisYear - YEARS_CHARTED + 1 + i;
+  // The ten years ending at the "to" year (this year by default), never
+  // reaching back before the "from" year.
+  const lastYear = Math.min(thisYear, filters.yearTo ?? thisYear);
+  const firstYear = Math.max(lastYear - YEARS_CHARTED + 1, filters.yearFrom ?? -Infinity);
+  const byYear = Array.from({ length: Math.max(0, lastYear - firstYear + 1) }, (_, i) => {
+    const year = firstYear + i;
     return { year, count: years.filter((y) => y === year).length, ...positionsIn(year) };
   });
 
   const rated = articles.filter((p) => p.nihPercentile !== null);
-  const topDecilePct =
-    rated.length > 0
-      ? Math.round((rated.filter((p) => p.nihPercentile! >= TOP_DECILE).length / rated.length) * 100)
-      : null;
+  const topDecileArticles = rated.filter((p) => p.nihPercentile! >= TOP_DECILE).length;
+  const topDecilePct = rated.length > 0 ? Math.round((topDecileArticles / rated.length) * 100) : null;
 
   const policy = POLICY_LEVEL_LABELS.map(([level, label]) => ({
     level,
@@ -424,15 +471,9 @@ export function buildBibliometricsReport(input: {
   const bodies = [
     ...new Set(articles.flatMap((p) => toPolicyRollup(p)?.authority.map((a) => a.body) ?? [])),
   ].sort();
+  const patentPapers = articles.filter((p) => p.patentFamilyCount > 0).length;
 
-  const matching = rankPapers(
-    articles.filter(
-      (p) =>
-        (filters.authorship === "all" || positionOf(p) !== "co") &&
-        (filters.yearFrom === null || (p.year !== null && p.year >= filters.yearFrom)) &&
-        (filters.yearTo === null || (p.year !== null && p.year <= filters.yearTo)),
-    ),
-  );
+  const matching = rankPapers(articles);
   const surname = (scholar.name.split(",")[0] ?? "").trim().split(/\s+/).pop()?.toLowerCase() ?? "";
 
   return {
@@ -442,12 +483,14 @@ export function buildBibliometricsReport(input: {
     yearRange,
     summary: summarySentences({
       total: articles.length,
-      since: yearRange?.min ?? null,
+      span: spanOf(filters, years, thisYear),
+      leadOnly: filters.authorship === "lead",
       lead: byPosition.first + byPosition.senior,
       rated: rated.length,
       topDecilePct,
       guidelinePapers: policy[1]!.papers,
       authorityPapers: policy[0]!.papers,
+      patentPapers,
       bodies,
     }),
     metrics: {
@@ -456,6 +499,7 @@ export function buildBibliometricsReport(input: {
       h5Index: h5IndexOf(input.all, now),
       ratedArticles: rated.length,
       unratedArticles: articles.length - rated.length,
+      topDecileArticles,
       topDecilePct,
     },
     output: {
@@ -472,7 +516,7 @@ export function buildBibliometricsReport(input: {
     stages: input.stagesEnabled ? stagesOf(matching) : null,
     policy,
     patents: {
-      papers: input.visible.filter((p) => p.patentFamilyCount > 0).length,
+      papers: patentPapers,
       inventions: 0,
       list: [],
       dataEnd: null,

@@ -154,7 +154,9 @@ describe("BibliometricsTool", () => {
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/edit/bibliometrics?cwid=zzz9001");
     expect(summary.textContent).toContain("Jordan Vale has published 12 research articles since 2019");
     expect(summary.querySelector('[data-hover-cwid="zzz9001"]')?.textContent).toBe("Jordan Vale");
-    expect(screen.getByText("h-index").previousSibling?.textContent).toBe("12");
+    expect(screen.getByText("h-index, all publications").previousSibling?.textContent).toBe("12");
+    // Five tiles, in the Summary section: no separate Citation metrics card.
+    expect(screen.getByTestId("bibliometrics-tiles").children).toHaveLength(5);
     expect(screen.getByText(/Showing 10 of 12\./)).toBeTruthy();
     expect(screen.getByText("Updated November 25, 2026.", { exact: false })).toBeTruthy();
     // The scholar is bold in the author list; the other author is not.
@@ -166,7 +168,7 @@ describe("BibliometricsTool", () => {
     render(<BibliometricsTool entityId="zzz9001" />);
     expect(await screen.findByTestId("bibliometrics-no-summary")).toBeTruthy();
     expect(screen.queryByTestId("bibliometrics-summary")).toBeNull();
-    expect(screen.getByText("h5-index (last 5 years)")).toBeTruthy();
+    expect(screen.getByText("h5-index, last 5 years")).toBeTruthy();
   });
 
   it("opens a paper's citing documents behind More", async () => {
@@ -193,14 +195,16 @@ describe("BibliometricsTool", () => {
     );
   });
 
-  it("marks only the sections that follow the filters as Filtered", async () => {
+  it("marks the sections that follow the filters as Filtered", async () => {
     respond(12);
     render(<BibliometricsTool entityId="zzz9001" />);
     await screen.findByTestId("bibliometrics-report");
     const marked = [...document.querySelectorAll("h3")]
       .filter((h) => h.nextElementSibling?.textContent === "Filtered")
       .map((h) => h.textContent);
-    expect(marked).toEqual(["Most impactful papers"]);
+    // Every section but Downstream reach (one scholar, unfiltered, until it
+    // joins Downstream impact); the h-index and h5 tiles say "all publications".
+    expect(marked).toEqual(["Summary", "Output", "Guideline and policy citations", "Most impactful papers"]);
     // The filters and Download share the bar above the sections.
     const bar = screen.getByRole("heading", { level: 2, name: "Bibliometrics" }).closest("header")!;
     expect(within(bar).getByLabelText("First or senior author only")).toBeTruthy();
@@ -292,7 +296,6 @@ describe("BibliometricsTool", () => {
   // In the mockup's order; Definitions and sources is the closing <details>, not an h3.
   const SECTIONS = [
     "Summary",
-    "Citation metrics",
     "Output",
     "Guideline and policy citations",
     "Most impactful papers",
@@ -334,7 +337,7 @@ describe("BibliometricsTool", () => {
     respondWithReach(REACH);
     render(<BibliometricsTool entityId="zzz9001" />);
     const block = await screen.findByTestId("bibliometrics-reach");
-    expect(headings()).toEqual([...SECTIONS.slice(0, 4), "Downstream reach", "Most impactful papers"]);
+    expect(headings()).toEqual([...SECTIONS.slice(0, 3), "Downstream reach", "Most impactful papers"]);
     expect([...block.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("th")?.textContent)).toEqual([
       "Clinical studies",
       "Registered trials",

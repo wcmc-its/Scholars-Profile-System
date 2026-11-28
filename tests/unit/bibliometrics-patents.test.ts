@@ -184,18 +184,24 @@ const LINKS = [
 beforeEach(() => h.links.mockResolvedValue(LINKS));
 
 describe("the tab load", () => {
-  it("adds one count of citing inventions, over the scholar's visible cited papers only", async () => {
+  it("adds one count of citing inventions, over the research articles in scope only", async () => {
     const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
     expect(report!.patents).toMatchObject({
-      papers: 2,
+      papers: 1, // the review is left out on the tab; the Excel download still lists it
       inventions: 2,
       dataEnd: "31 December 2025", // nothing stored: the fallback
       reportHref: null,
     });
     expect(h.links).toHaveBeenCalledTimes(1);
-    expect(h.links.mock.calls[0]![0].where).toEqual({ pmid: { in: VISIBLE_CITED }, citingDocument: { level: "patent" } });
+    expect(h.links.mock.calls[0]![0].where).toEqual({ pmid: { in: ["90000101"] }, citingDocument: { level: "patent" } });
     expect(calls().filter((c) => c.text.includes("'patent'"))).toHaveLength(0);
     expect(report!.papers.rows.find((p) => p.pmid === "90000101")!.patents).toBe(2);
+  });
+
+  it("reads no patents for the tab when the filters leave no cited article", async () => {
+    const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: 2013, yearTo: null });
+    expect(report!.patents.papers).toBe(0);
+    expect(h.links).not.toHaveBeenCalled();
   });
 
   it("lists the inventions on the card, most of the scholar's papers cited first, for every viewer", async () => {

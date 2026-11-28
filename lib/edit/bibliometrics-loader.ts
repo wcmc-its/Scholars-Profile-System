@@ -15,6 +15,7 @@ import { loadPatentDataEnd } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   buildBibliometricsReport,
+  inScope,
   type BibliometricsFilters,
   type BibliometricsPubRow,
   type BibliometricsReport,
@@ -116,12 +117,10 @@ export async function loadBibliometricsReport(
 
   // Distinct citing documents per level: a guideline citing two of the
   // scholar's papers counts once, which per-paper rollups cannot say.
-  const citedPmids = visible
-    .filter(
-      (p) =>
-        p.publicationType === "Academic Article" &&
-        p.authorityCount + p.guidelineCount + p.consensusCount + p.reviewCount > 0,
-    )
+  // Only the research articles inside the filters, as the report counts them.
+  const scoped = visible.filter((p) => p.publicationType === "Academic Article" && inScope(p, filters));
+  const citedPmids = scoped
+    .filter((p) => p.authorityCount + p.guidelineCount + p.consensusCount + p.reviewCount > 0)
     .map((p) => p.pmid);
   if (citedPmids.length > 0) {
     const rows = await db.read.$queryRaw<{ level: string; body: string | null; n: bigint | number }[]>`
@@ -148,7 +147,7 @@ export async function loadBibliometricsReport(
   // ponytail: every patent link of the scholar's cited papers is read (the
   // modal reads one paper's, about 2,700 rows at most). Group in SQL if a
   // heavily cited scholar's tab ever shows it in latency.
-  const patentPmids = visible.filter((p) => p.patentFamilyCount > 0).map((p) => p.pmid);
+  const patentPmids = scoped.filter((p) => p.patentFamilyCount > 0).map((p) => p.pmid);
   if (patentPmids.length > 0) {
     const links = await db.read.publicationCitingDocument.findMany({
       where: { pmid: { in: patentPmids }, citingDocument: { level: "patent" } },
