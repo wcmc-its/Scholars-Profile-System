@@ -2,9 +2,9 @@
  * Report 26 — "Translational portfolio": where WCM publications sit on the
  * translational spectrum (T0 → T3–4), how that changed over the years, by
  * department / division / center / research area, and who does the work.
- * Step 1 of the build spec (Projects/Scholars-Profile-System/translational-portfolio-spec.md):
- * PUBLICATIONS ONLY. Grants and trials carry no stage yet, so no record-type
- * control, no by-record-type card and no funding-to-publications grid.
+ * Stages are publications' only. Grants and clinical trials are counted beside
+ * them (tiles, unit table, scholar rows, their own lists; rules in
+ * `translational-portfolio-activities.ts`) with no stage until they carry one.
  *
  * Scope: report 8's own (`scopeSql`, `lib/edit/article-count-report.ts`) —
  * ReCiter-confirmed authorships of active scholars, the unit rule
@@ -64,6 +64,20 @@ import {
 } from "@/lib/edit/person-filter";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
 import { institutionDisplayName } from "@/lib/institutions";
+import {
+  ACTIVITY_AREA_RULE,
+  GRANT_RULE,
+  loadPortfolioGrants,
+  loadPortfolioTrials,
+  loadUnitMemberships,
+  peopleOf,
+  tally,
+  TRIAL_RULE,
+  unitKeys,
+  type ActivityScope,
+  type PortfolioGrant,
+  type PortfolioTrial,
+} from "@/lib/edit/translational-portfolio-activities";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { formatRoleCategory } from "@/lib/role-display";
 import {
@@ -111,7 +125,10 @@ export const UNIT_TABS = {
 } as const;
 export type UnitTab = keyof typeof UNIT_TABS;
 
-export type PortfolioView = "activities" | "scholars";
+/** The list under the table: scholars (the default), publications
+ *  (`activities`), grants or clinical trials. */
+export const PORTFOLIO_VIEWS = ["scholars", "activities", "grants", "trials"] as const;
+export type PortfolioView = (typeof PORTFOLIO_VIEWS)[number];
 
 export type PortfolioParams = {
   /** Encoded unit values (`dept:` / `div:` / `center:` + CODE). The rail sends
@@ -178,7 +195,7 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
     q: (sp.get("q") ?? "").trim().slice(0, 100),
     by: by && by in UNIT_TABS ? (by as UnitTab) : "dept",
     // The Scholars list is the default; `view=activities` is the publication list.
-    view: sp.get("view") === "activities" ? "activities" : "scholars",
+    view: (PORTFOLIO_VIEWS as readonly string[]).includes(sp.get("view") ?? "") ? (sp.get("view") as PortfolioView) : "scholars",
     page: int("page", 1, 1, 10_000),
   };
 }
@@ -493,14 +510,25 @@ export type UnitTableRow = TableRow & {
    *  filtered to the area; this is that list's query string. */
   noteHref: string | null;
   gaps: TranslationalStage[];
+  /** Grant projects and clinical trials with an investigator in this row. */
+  grants: number;
+  trials: number;
 };
+
+/** One page of the Grants or Clinical trials list, with its investigators' names. */
+export type ActivityListPage<T> = { total: number; rows: (T & { names: Map<string, string> })[] };
 
 export type PortfolioData = {
   /** Every stage bucket in scope (the stage pick does not narrow it). */
   all: StageCounts;
-  byYear: { year: number; counts: StageCounts }[];
+  /** Grant projects and trials active in the window (no stage, so no pick). */
+  grants: number;
+  trials: number;
+  byYear: { year: number; counts: StageCounts; grants: number; trials: number }[];
   /** All of WCM for the same years / area / scholar (the table's baseline). */
   baseline: StageCounts;
+  /** The same for grants and trials; only filled for the download (the page shows no baseline counts). */
+  baselineActivities: { grants: number; trials: number } | null;
   /** Every row, sorted (the page shows the first `TABLE_PREVIEW_ROWS` until
    *  "View all"; the Download has them all). With `gaps`, only gapped areas. */
   table: UnitTableRow[];
@@ -508,11 +536,16 @@ export type PortfolioData = {
   areaCoverage: { sized: number; spanning: number };
   /** Research area ids in scope, most publications first (the rail's order). */
   areaOrder: string[];
-  scholars: { total: number; rows: (PortfolioScholar & { n: number; counts: StageCounts; works: RecentWork[] })[] };
+  scholars: {
+    total: number;
+    rows: (PortfolioScholar & { n: number; counts: StageCounts; works: RecentWork[]; grants: number; trials: number })[];
+  };
   /** The scoped scholar (`cwid`), with their recent staged papers. */
   person: (PortfolioScholar & { works: RecentWork[] }) | null;
   /** The Activities list's page of pmids, newest first, and its total. */
   activities: { total: number; pmids: string[] };
+  grantList: ActivityListPage<PortfolioGrant>;
+  trialList: ActivityListPage<PortfolioTrial>;
 };
 
 export type PortfolioChoices = {
@@ -570,7 +603,9 @@ export async function loadPortfolio(
   const byYear = !p.cwid && p.areas.length === 0;
   // The Scholars list's groupings share one query over its first / senior scope.
   const scholarGroups = [...(showScholars ? (["cwid"] as const) : []), ...(p.by === "area" ? (["areaPeople"] as const) : [])];
-  const [counts, baselineMap, centers, scholarCounts, person] = await Promise.all([
+  const activityScope: ActivityScope = { from: p.from, to: p.to, units: p.units, insts: p.insts, areas: p.areas };
+  const wcmScope: ActivityScope = { ...activityScope, units: [], insts: [] };
+  const [counts, baselineMap, centers, scholarCounts, person, grants, trials, baselineActivities] = await Promise.all([
     stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? [] : [p.by])], byYear),
     p.units.length > 0
       ? stageCounts(articleScope(p, { units: [] }), extraSql(p, { insts: false }), ["all"], byYear).then((m) => m.get("all")!)
@@ -580,6 +615,12 @@ export async function loadPortfolio(
       ? stageCounts(acScholars, extra, scholarGroups, byYear, p.stages.length > 0 ? p.stages : TRANSLATIONAL_STAGES)
       : Promise.resolve(new Map<"cwid" | "areaPeople", Map<string, StageCounts>>()),
     p.cwid && !opts.forExport ? loadScholars([p.cwid]) : Promise.resolve(new Map<string, PortfolioScholar>()),
+    loadPortfolioGrants(activityScope),
+    loadPortfolioTrials(activityScope),
+    // The download's all-of-WCM row; the page draws no baseline count.
+    opts.forExport && p.units.length > 0
+      ? Promise.all([loadPortfolioGrants(wcmScope), loadPortfolioTrials(wcmScope)]).then(([g, t]) => ({ grants: g.length, trials: t.length }))
+      : Promise.resolve(null),
   ]);
   const all = counts.get("all")!;
   const byYearMap = counts.get("year")!;
@@ -590,14 +631,31 @@ export async function loadPortfolio(
   const areaPeople = scholarCounts.get("areaPeople") ?? new Map<string, StageCounts>();
 
   const allCounts = all.get("all") ?? emptyCounts();
+  const grantsByYear = tally(grants, (g) => g.years);
+  const trialsByYear = tally(trials, (t) => t.years);
   const years = [];
-  for (let y = p.from; y <= p.to; y++) years.push({ year: y, counts: byYearMap.get(String(y)) ?? emptyCounts() });
+  for (let y = p.from; y <= p.to; y++)
+    years.push({
+      year: y,
+      counts: byYearMap.get(String(y)) ?? emptyCounts(),
+      grants: grantsByYear.get(String(y)) ?? 0,
+      trials: trialsByYear.get(String(y)) ?? 0,
+    });
+  const memberships =
+    p.by === "div" || p.by === "center"
+      ? await loadUnitMemberships(p.by, [...grants, ...trials].flatMap(peopleOf))
+      : new Map<string, string[]>();
+  const grantsByUnit = tally(grants, (g) => unitKeys(g, p.by, memberships));
+  const trialsByUnit = tally(trials, (t) => unitKeys(t, p.by, memberships));
+  const grantsByCwid = tally(grants, peopleOf);
+  const trialsByCwid = tally(trials, peopleOf);
 
   // The unit table.
   const { facets, labels } = choices;
   const parentOf = new Map(facets.departments.flatMap((d) => d.divisions.map((v) => [v.value, d.label] as const)));
   const divCount = new Map(facets.departments.map((d) => [d.value, d.divisions.length]));
   const areaLabel = new Map(choices.areas.map((a) => [a.id, a.label]));
+  // ponytail: rows are the units with publications in scope; a unit with only grants or trials is left out (rare).
   const source = p.by === "area" ? areaMap : (tableMap ?? new Map());
   const base = new URLSearchParams(portfolioQueryString({ ...p, page: 1 }));
   const table: UnitTableRow[] = [...source].map(([code, counts]) => {
@@ -634,7 +692,17 @@ export async function loadPortfolio(
     }
     // Gaps are marked in the stage cells, not in the note.
     const gaps = p.by === "area" ? gapStages(counts) : [];
-    return { key: code, counts, label, href: href.toString(), note, noteHref, gaps };
+    return {
+      key: code,
+      counts,
+      label,
+      href: href.toString(),
+      note,
+      noteHref,
+      gaps,
+      grants: grantsByUnit.get(code) ?? 0,
+      trials: trialsByUnit.get(code) ?? 0,
+    };
   });
   const shownTable = p.by === "area" && p.gaps ? table.filter((r) => r.gaps.length > 0) : table;
 
@@ -650,19 +718,29 @@ export async function loadPortfolio(
       ? ranked.map((r) => r.cwid)
       : []
     : ranked.slice((p.page - 1) * PORTFOLIO_PAGE_SIZE, p.page * PORTFOLIO_PAGE_SIZE).map((r) => r.cwid);
-  const [people, works, personWorks, activities] = await Promise.all([
+  const listPage = <T>(items: T[]) =>
+    opts.forExport ? [] : items.slice((p.page - 1) * PORTFOLIO_PAGE_SIZE, p.page * PORTFOLIO_PAGE_SIZE);
+  const grantPage = p.view === "grants" ? listPage(grants) : [];
+  const trialPage = p.view === "trials" ? listPage(trials) : [];
+  const [people, works, personWorks, activities, listPeople] = await Promise.all([
     loadScholars(pageCwids),
     opts.forExport ? Promise.resolve(new Map<string, RecentWork[]>()) : recentWorks(p, pageCwids, 3),
     p.cwid && !opts.forExport ? recentWorks(p, [p.cwid], 3) : Promise.resolve(new Map<string, RecentWork[]>()),
     opts.forExport || p.view !== "activities" || p.cwid ? Promise.resolve([]) : activityPage(p, acPicked, extra),
+    loadScholars([...new Set([...grantPage, ...trialPage].flatMap(peopleOf))]),
   ]);
+  const withNames = <T extends { people: { cwid: string }[] }>(rows: T[]) =>
+    rows.map((r) => ({ ...r, names: new Map(r.people.map((x) => [x.cwid, listPeople.get(x.cwid)?.name ?? x.cwid])) }));
   const rankedPage = ranked.filter((r) => pageCwids.includes(r.cwid));
   const personRow = p.cwid ? person.get(p.cwid) : undefined;
 
   return {
     all: allCounts,
+    grants: grants.length,
+    trials: trials.length,
     byYear: years,
     baseline: baselineMap ? (baselineMap.get("all") ?? emptyCounts()) : allCounts,
+    baselineActivities: baselineActivities ?? (opts.forExport ? { grants: grants.length, trials: trials.length } : null),
     table: sortTableRows(shownTable, p.by, p.stages),
     areaCoverage: { sized: sized.length, spanning: sized.filter((c) => gapStages(c).length === 0).length },
     areaOrder,
@@ -670,7 +748,18 @@ export async function loadPortfolio(
       total: ranked.length,
       rows: rankedPage.flatMap((r) => {
         const s = people.get(r.cwid);
-        return s ? [{ ...s, n: r.n, counts: r.counts, works: works.get(r.cwid) ?? [] }] : [];
+        return s
+          ? [
+              {
+                ...s,
+                n: r.n,
+                counts: r.counts,
+                works: works.get(r.cwid) ?? [],
+                grants: grantsByCwid.get(r.cwid) ?? 0,
+                trials: trialsByCwid.get(r.cwid) ?? 0,
+              },
+            ]
+          : [];
       }),
     },
     person: personRow ? { ...personRow, works: personWorks.get(personRow.cwid) ?? [] } : null,
@@ -678,6 +767,8 @@ export async function loadPortfolio(
       total: p.stages.length > 0 ? countsIn(allCounts, p.stages) : countsTotal(allCounts),
       pmids: activities,
     },
+    grantList: { total: grants.length, rows: withNames(grantPage) },
+    trialList: { total: trials.length, rows: withNames(trialPage) },
   };
 }
 
@@ -737,10 +828,13 @@ export function describePortfolioCriteria(
     ["Gap rule", GAP_RULE],
     ["Translational stage", p.stages.length > 0 ? p.stages.map(translationalStageDisplay).join("; ") : "All"],
     ["Scholar", p.cwid ?? "All (first or senior author when one scholar is chosen)"],
-    ["Record type", "Publications"],
+    ["Record type", "Publications, grants and clinical trials. Grants and trials have no stage yet, so the stage filter does not apply to them."],
     ["Counting rule", COUNTING_RULE],
     ["Stage rule", `${STAGE_RULE} How many have a stage is shown separately, as Stage assigned.`],
     ["Scholars rule", SCHOLAR_RULE],
+    ["Grant rule", GRANT_RULE],
+    ["Trial rule", TRIAL_RULE],
+    ...(p.areas.length > 0 ? ([["Grants and trials under an area", ACTIVITY_AREA_RULE]] as [string, string][]) : []),
   ];
 }
 
@@ -763,16 +857,27 @@ export async function buildPortfolioWorkbook(
   const counts = (c: StageCounts) => STAGE_BUCKETS.map((k) => c[k]);
 
   const years = wb.addWorksheet("By year");
-  years.addRow(["Year", "Publications", ...bucketHeads(), ...shareHeads()]);
+  years.addRow(["Year", "Publications", ...bucketHeads(), ...shareHeads(), "Grants", "Clinical trials"]);
   boldRow(years, 1);
-  for (const r of data.byYear) years.addRow([r.year, countsTotal(r.counts), ...counts(r.counts), ...shareCells(r.counts)]);
-  years.addRow(["Total", countsTotal(data.all), ...counts(data.all), ...shareCells(data.all)]);
+  for (const r of data.byYear)
+    years.addRow([r.year, countsTotal(r.counts), ...counts(r.counts), ...shareCells(r.counts), r.grants, r.trials]);
+  // A grant active in several years counts once in the total.
+  years.addRow(["Total", countsTotal(data.all), ...counts(data.all), ...shareCells(data.all), data.grants, data.trials]);
   boldRow(years, years.rowCount);
 
   const table = wb.addWorksheet(UNIT_TABS[p.by].label);
-  table.addRow([UNIT_TABS[p.by].head, "Note", "Gaps", "Publications", ...bucketHeads(), ...shareHeads()]);
+  table.addRow([UNIT_TABS[p.by].head, "Note", "Gaps", "Publications", ...bucketHeads(), ...shareHeads(), "Grants", "Clinical trials"]);
   boldRow(table, 1);
-  table.addRow(["All of Weill Cornell Medicine", "Baseline", "", countsTotal(data.baseline), ...counts(data.baseline), ...shareCells(data.baseline)]);
+  table.addRow([
+    "All of Weill Cornell Medicine",
+    "Baseline",
+    "",
+    countsTotal(data.baseline),
+    ...counts(data.baseline),
+    ...shareCells(data.baseline),
+    data.baselineActivities?.grants ?? "",
+    data.baselineActivities?.trials ?? "",
+  ]);
   for (const r of data.table)
     table.addRow([
       r.label,
@@ -781,6 +886,8 @@ export async function buildPortfolioWorkbook(
       countsTotal(r.counts),
       ...counts(r.counts),
       ...shareCells(r.counts),
+      r.grants,
+      r.trials,
     ]);
   table.getColumn(1).width = 44;
   table.getColumn(2).width = 40;
@@ -794,10 +901,10 @@ export async function buildPortfolioWorkbook(
       `Omitted: ${data.scholars.total.toLocaleString()} scholars is more than the ${SCHOLAR_EXPORT_CAP} a download may list. Narrow the filters to include them.`,
     ]);
   } else {
-    people.addRow(["Name", "CWID", "Title", "Department", "Count", ...TRANSLATIONAL_STAGES.map(translationalStageDisplay)]);
+    people.addRow(["Name", "CWID", "Title", "Department", "Count", ...TRANSLATIONAL_STAGES.map(translationalStageDisplay), "Grants", "Clinical trials"]);
     boldRow(people, 1);
     for (const r of data.scholars.rows)
-      people.addRow([r.name, r.cwid, r.title, r.department, r.n, ...TRANSLATIONAL_STAGES.map((s) => r.counts[s])]);
+      people.addRow([r.name, r.cwid, r.title, r.department, r.n, ...TRANSLATIONAL_STAGES.map((s) => r.counts[s]), r.grants, r.trials]);
   }
   people.getColumn(1).width = 34;
 

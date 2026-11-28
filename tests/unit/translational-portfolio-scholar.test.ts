@@ -178,7 +178,7 @@ describe("the download route", () => {
     expect((await get("cwid=zzz9999")).status).toBe(404);
   });
 
-  it("sends one sheet of this scholar's papers and the criteria", async () => {
+  it("sends this scholar's papers, grants and trials, and the criteria", async () => {
     h.queryRaw.mockImplementation(async (q: { sql: string }) =>
       sqlText(q).includes("publication_topic")
         ? []
@@ -199,7 +199,7 @@ describe("the download route", () => {
     expect(res.headers.get("content-type")).toContain("spreadsheetml");
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as unknown as ArrayBuffer);
-    expect(wb.worksheets.map((w) => w.name)).toEqual(["Publications", "Criteria"]);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Publications", "Grants", "Clinical trials", "Criteria"]);
     const rows = wb
       .getWorksheet("Publications")!
       .getSheetValues()
@@ -443,7 +443,7 @@ describe("the workbook", () => {
         department: null,
         slug: null,
       },
-      { papers: [mk("1", "T0"), mk("2", null)], areaChoices: [], areas: [] },
+      { papers: [mk("1", "T0"), mk("2", null)], areaChoices: [], areas: [], grants: [], trials: [] },
       new Date("2026-11-27T00:00:00Z"),
     );
     const wb = new ExcelJS.Workbook();

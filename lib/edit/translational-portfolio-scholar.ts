@@ -20,6 +20,10 @@
  * comes from `is_first` / `is_last`, never from `position` (0 there means
  * "rank unknown").
  *
+ * Grants and clinical trials: the report's rules
+ * (`lib/edit/translational-portfolio-activities.ts`) for this scholar, under
+ * the page's years and research areas; listed, no stage yet.
+ *
  * Counts only: one person's few dozen papers make a percentage swing on one
  * misassigned stage, and the page compares this scholar with nobody.
  *
@@ -42,6 +46,15 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeCvExport } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
+import {
+  ACTIVITY_AREA_RULE,
+  GRANT_RULE,
+  loadPortfolioGrants,
+  loadPortfolioTrials,
+  TRIAL_RULE,
+  type PortfolioGrant,
+  type PortfolioTrial,
+} from "@/lib/edit/translational-portfolio-activities";
 import { resolveEditIdentity } from "@/lib/edit/request";
 import {
   COUNTING_RULE,
@@ -280,7 +293,15 @@ export type ScholarPortfolio = {
    *  all in scope, while another area's count would be an overlap no link
    *  can open). */
   areas: ScholarArea[];
+  /** This scholar's grant projects and trials in the page's years and areas, newest first. */
+  grants: PortfolioGrant[];
+  trials: PortfolioTrial[];
 };
+
+/** This scholar's roles on a grant or trial, strongest first, each once. */
+export function rolesOf(item: { people: { cwid: string; role: string }[] }, cwid: string): string[] {
+  return [...new Set(item.people.filter((x) => x.cwid === cwid).map((x) => x.role))];
+}
 
 /** Report 8's params for this scholar: no unit (a scholar's papers are
  *  theirs, whatever unit the report was on), and the authorship rule. */
@@ -327,7 +348,9 @@ export async function loadScholarPortfolio(
   cwid: string,
   p: ScholarPortfolioParams,
 ): Promise<ScholarPortfolio> {
-  const raw = await db.read.$queryRaw<
+  const activityScope = { from: p.from, to: p.to, units: [], insts: [], areas: p.areas, cwid };
+  const [raw, grants, trials] = await Promise.all([
+    db.read.$queryRaw<
     {
       pmid: string;
       title: string;
@@ -337,7 +360,10 @@ export async function loadScholarPortfolio(
       l: unknown;
       st: string | null;
     }[]
-  >(scholarPapersSql(cwid, p));
+  >(scholarPapersSql(cwid, p)),
+    loadPortfolioGrants(activityScope),
+    loadPortfolioTrials(activityScope),
+  ]);
   const pmids = raw.map((r) => r.pmid);
   // publication_topic has a row per (pmid, author, area): the report's rule is
   // any row of the paper at or over the floor, so dedupe to (pmid, area).
@@ -397,6 +423,8 @@ export async function loadScholarPortfolio(
         counts: stageCountsOf(list),
       }))
       .sort(byCount),
+    grants,
+    trials,
   };
 }
 
@@ -476,6 +504,9 @@ export function describeScholarPortfolioCriteria(
     ],
     ["Counting rule", COUNTING_RULE],
     ["Stage rule", STAGE_RULE],
+    ["Grant rule", GRANT_RULE],
+    ["Trial rule", TRIAL_RULE],
+    ...(p.areas.length > 0 ? ([["Grants and trials under an area", ACTIVITY_AREA_RULE]] as [string, string][]) : []),
   ];
 }
 
@@ -500,6 +531,18 @@ export async function buildScholarPortfolioWorkbook(
     ]);
   ws.getColumn(2).width = 80;
   ws.getColumn(3).width = 36;
+  const gs = wb.addWorksheet("Grants");
+  gs.addRow(["Title", "Funder", "Award number", "Role", "Start", "End", "Translational stage"]);
+  boldRow(gs, 1);
+  for (const g of data.grants)
+    gs.addRow([g.title, g.funder, g.awardNumber ?? "", rolesOf(g, scholar.cwid).join(", "), g.start, g.end, "Not yet assigned"]);
+  gs.getColumn(1).width = 80;
+  const ts = wb.addWorksheet("Clinical trials");
+  ts.addRow(["Title", "NCT number", "Protocol number", "Trial phase", "Status", "Start year", "End year", "Translational stage"]);
+  boldRow(ts, 1);
+  for (const x of data.trials)
+    ts.addRow([x.title, x.nct ?? "", x.protocolNumber, x.trialPhase ?? "", x.status ?? "", x.startYear, x.endYear ?? "", "Not yet assigned"]);
+  ts.getColumn(1).width = 80;
   const areaLabel = new Map(data.areaChoices.map((a) => [a.id, a.label]));
   addCriteriaSheet(wb, describeScholarPortfolioCriteria(p, scholar, areaLabel, generatedAt));
   return workbookBuffer(wb);
