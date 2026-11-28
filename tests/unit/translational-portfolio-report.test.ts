@@ -348,6 +348,10 @@ describe("copy", () => {
     for (const f of [
       "lib/edit/translational-portfolio-report.ts",
       "components/edit/reports/translational-portfolio-body.tsx",
+      "lib/edit/translational-portfolio-scholar.ts",
+      "components/edit/reports/translational-portfolio-scholar-body.tsx",
+      "components/edit/reports/translational-portfolio-scholar-client.tsx",
+      "app/edit/scholar/[cwid]/translational-portfolio/page.tsx",
     ]) {
       const text = readFileSync(path.resolve(__dirname, "../..", f), "utf8");
       expect(text, f).not.toMatch(/\bphases?\b/i);

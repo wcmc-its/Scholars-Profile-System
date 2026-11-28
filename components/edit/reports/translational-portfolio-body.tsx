@@ -9,8 +9,9 @@
  * lookup, years, org unit, research areas, and "On this page"), then the
  * active-filter chips, the summary tiles, "Stage mix over time" (a stacked
  * bar per year of the STAGED shares, with Stage assigned beside it), the unit
- * table, the Scholars / Publications list (or one scholar), and "How to read
- * this".
+ * table, the Scholars / Publications list (each scholar linking to their own
+ * page, `/edit/scholar/[cwid]/translational-portfolio`, for a viewer who may
+ * open it), and "How to read this".
  *
  * Shares are among publications with a stage (`stagedShares`), so falling
  * coverage does not read as a shift between stages; Stage assigned shows the
@@ -43,7 +44,8 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Button } from "@/components/ui/button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
-import { loadArticleList, NO_STAGE_LABEL } from "@/lib/edit/article-count-report";
+import { loadArticleList } from "@/lib/edit/article-count-report";
+import { loadBibliometricsAccess } from "@/lib/edit/bibliometrics-access";
 import { loadPortfolioReachTile } from "@/lib/edit/downstream-reach-entry";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 import {
@@ -58,10 +60,9 @@ import {
   loadPortfolioChoices,
   MIN_AREA_SIZE,
   MIN_SCHOLAR_ACTIVITIES,
-  parsePortfolioParams,
+  parsePortfolioReportParams,
   PORTFOLIO_PAGE_SIZE,
   portfolioQueryString,
-  SCHOLAR_RULE,
   stageAssignedShare,
   stagedShares,
   stagedTotal,
@@ -74,6 +75,7 @@ import {
   type StageCounts,
   type UnitTab,
 } from "@/lib/edit/translational-portfolio-report";
+import { carriedFilters, scholarPortfolioHref } from "@/lib/edit/translational-portfolio-scholar";
 import { institutionDisplayName } from "@/lib/institutions";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { profilePath } from "@/lib/profile-url";
@@ -93,7 +95,7 @@ const LINK = "text-apollo-slate hover:underline";
 const COVERAGE = "#8a8178";
 
 /** The stage palette: one hue, light to dark, with the ink that reads on it. */
-const STAGE_FILL: Record<TranslationalStage, { bg: string; ink: string }> = {
+export const STAGE_FILL: Record<TranslationalStage, { bg: string; ink: string }> = {
   T0: { bg: "#c9d6e3", ink: "#1a1a1a" },
   T1: { bg: "#8fa8c2", ink: "#1a1a1a" },
   T2: { bg: "#4f6e8f", ink: "#ffffff" },
@@ -112,7 +114,7 @@ function toSearchParams(sp: AdminReportProps["searchParams"]): URLSearchParams {
 }
 
 /** A stage code with its definition on hover and keyboard focus. */
-function StageTerm({ k, children }: { k: TranslationalStage | "none"; children: React.ReactNode }) {
+export function StageTerm({ k, children }: { k: TranslationalStage | "none"; children: React.ReactNode }) {
   const text = k === "none" ? NO_STAGE_DEFINITION : `${TRANSLATIONAL_STAGE_LABELS[k]}: ${stageDefinition(k)}`;
   return (
     <HoverTooltip text={text} wide>
@@ -219,7 +221,7 @@ function MixBar({ counts, picked, height = 28, labels = true }: { counts: StageC
 }
 
 /** A paper's stage as a two-part tag in the stage's colour: code, then name. */
-function StageTag({ stage }: { stage: TranslationalStage }) {
+export function StageTag({ stage }: { stage: TranslationalStage }) {
   const f = STAGE_FILL[stage];
   return (
     <span className="inline-flex items-stretch overflow-hidden rounded-full border text-xs leading-normal" style={{ borderColor: f.bg }}>
@@ -289,7 +291,10 @@ export async function renderTranslationalPortfolioReport({
   searchParams,
   basePath,
 }: AdminReportProps): Promise<ReportRender> {
-  const p = parsePortfolioParams(toSearchParams(searchParams));
+  const sp = toSearchParams(searchParams);
+  // One scholar is a page of its own now: the registry redirects `?cwid=` to
+  // it before this body runs, so the report itself never scopes to a scholar.
+  const p = parsePortfolioReportParams(sp);
   const choices = await loadPortfolioChoices();
   const [data, reach] = await Promise.all([
     loadPortfolio(p, choices),
@@ -302,7 +307,7 @@ export async function renderTranslationalPortfolioReport({
     }),
   ]);
   const articles =
-    p.view === "activities" && !p.cwid && data.activities.pmids.length > 0
+    p.view === "activities" && data.activities.pmids.length > 0
       ? await (async () => {
           const { params, extra } = activityListScope(p, data.activities.pmids);
           const rows = await loadArticleList(params, { extra });
@@ -312,6 +317,11 @@ export async function renderTranslationalPortfolioReport({
       : [];
 
   const href = (q: Partial<PortfolioParams>, hash = "") => `${basePath}?${portfolioQueryString({ ...p, page: 1, ...q })}${hash}`;
+  // A scholar's own page, under this page's filters; offered only for the
+  // scholars this viewer may open it for (one batched check; the page re-checks).
+  const carried = carriedFilters(sp);
+  const personHref = (cwid: string) => scholarPortfolioHref(cwid, carried);
+  const canOpen = await loadBibliometricsAccess([...data.scholars.rows.map((s) => s.cwid), ...data.lookup.map((s) => s.cwid)]);
   const hasSel = p.stages.length > 0;
   const total = countsTotal(data.all);
   const first = data.byYear[0]?.counts;
@@ -329,9 +339,6 @@ export async function renderTranslationalPortfolioReport({
 
   // The active filters, each removable where it has a default to fall back to.
   const chips: FilterChip[] = [
-    ...(p.cwid
-      ? [{ group: "Scholar", value: data.person?.name ?? "Unknown scholar", mono: p.cwid, removeHref: href({ cwid: null }) }]
-      : []),
     { group: "Unit", value: unitName || "All of Weill Cornell Medicine", removeHref: p.units.length > 0 ? href({ units: [] }) : null },
     ...p.insts.map((i) => ({ group: "Institution", value: instLabel(i), removeHref: href({ insts: p.insts.filter((x) => x !== i) }) })),
     {
@@ -375,14 +382,13 @@ export async function renderTranslationalPortfolioReport({
         ))}
         {p.by !== "dept" && <input type="hidden" name="by" value={p.by} />}
         {p.view !== "scholars" && <input type="hidden" name="view" value={p.view} />}
-        {p.cwid && <input type="hidden" name="cwid" value={p.cwid} />}
         {p.allRows && <input type="hidden" name="rows" value="all" />}
         {/* A link with several units keeps them all through a rail change; the
             radio list shows the first (see the note under it). */}
         {p.units.slice(1).map((u) => (
           <input key={u} type="hidden" name="unit" value={u} />
         ))}
-        <RailSection label="Scholar" summary={data.person?.name ?? "Anyone"} defaultOpen testId="portfolio-rail-scholar">
+        <RailSection label="Scholar" summary="Open one scholar's portfolio" defaultOpen testId="portfolio-rail-scholar">
           <input
             type="search"
             name="q"
@@ -482,9 +488,8 @@ export async function renderTranslationalPortfolioReport({
   );
 
   // Stage mix over time: a row per year, then all of WCM for comparison on a
-  // unit view. The baseline keeps the scholar filter, so with a scholar picked
-  // it is that scholar outside the unit, not all of WCM: show all years instead.
-  const wcmBaseline = p.units.length > 0 && !p.cwid;
+  // unit view, else every year together.
+  const wcmBaseline = p.units.length > 0;
   const mixRows: { label: string; counts: StageCounts; base?: boolean }[] = [
     ...data.byYear.map((r) => ({ label: String(r.year), counts: r.counts })),
     wcmBaseline ? { label: "All of WCM", counts: data.baseline, base: true } : { label: "All years", counts: data.all, base: true },
@@ -554,25 +559,43 @@ export async function renderTranslationalPortfolioReport({
               <FilterChips chips={chips} testId="portfolio-chips" />
             </div>
 
-            {p.q && !p.cwid && (
+            {p.q && (
               <div className="bg-apollo-surface border-apollo-border max-w-[480px] rounded-xl border p-1 print:hidden" data-testid="portfolio-lookup">
                 {data.lookup.length === 0 ? (
                   <p className="text-muted-foreground px-3 py-2 text-sm">No active scholar matches &ldquo;{p.q}&rdquo;.</p>
                 ) : (
                   <ul className="m-0 list-none p-0">
-                    {data.lookup.map((s) => (
-                      <li key={s.cwid}>
-                        <Link href={href({ cwid: s.cwid, q: "" }, "#items")} className="hover:bg-apollo-surface-2 flex min-h-12 items-center gap-2.5 rounded-lg px-2 py-1">
+                    {data.lookup.map((s) => {
+                      const who = (
+                        <>
                           <HeadshotAvatar cwid={s.cwid} preferredName={s.name} size="sm" />
                           <span className="flex min-w-0 flex-col">
                             <span className="text-sm font-medium">{s.name}</span>
                             <span className="text-muted-foreground text-xs">
                               {[s.title, s.department].filter(Boolean).join(" · ")} · <span className="font-mono">{s.cwid}</span>
                             </span>
+                            {!canOpen.has(s.cwid) && (
+                              <span className="text-muted-foreground text-xs">You can&rsquo;t open this scholar&rsquo;s portfolio.</span>
+                            )}
                           </span>
-                        </Link>
-                      </li>
-                    ))}
+                        </>
+                      );
+                      return (
+                        <li key={s.cwid}>
+                          {canOpen.has(s.cwid) ? (
+                            <Link
+                              href={personHref(s.cwid)}
+                              className="hover:bg-apollo-surface-2 flex min-h-12 items-center gap-2.5 rounded-lg px-2 py-1"
+                              data-testid="portfolio-lookup-link"
+                            >
+                              {who}
+                            </Link>
+                          ) : (
+                            <div className="flex min-h-12 items-center gap-2.5 px-2 py-1">{who}</div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -862,70 +885,60 @@ export async function renderTranslationalPortfolioReport({
               <div id="items" className="mb-2 flex scroll-mt-24 flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-col gap-1">
                   <h2 className={H2}>
-                    {data.person
-                      ? `${data.person.name}: translational profile`
-                      : p.view === "scholars"
-                        ? `Scholars${unitName ? ` in ${unitName}` : ""}${hasSel ? ` with ${stagesLabel(p.stages)} work` : ""}`
-                        : `Publications${hasSel ? ` in ${stagesLabel(p.stages)}` : ""}${unitName ? `, ${unitName}` : ""}`}
+                    {p.view === "scholars"
+                      ? `Scholars${unitName ? ` in ${unitName}` : ""}${hasSel ? ` with ${stagesLabel(p.stages)} work` : ""}`
+                      : `Publications${hasSel ? ` in ${stagesLabel(p.stages)}` : ""}${unitName ? `, ${unitName}` : ""}`}
                   </h2>
                   <span className="text-muted-foreground text-[13px]">
-                    {data.person
-                      ? SCHOLAR_RULE
-                      : p.view === "scholars"
-                        ? `First or senior author, at least ${MIN_SCHOLAR_ACTIVITIES} staged publications, ordered by count. ${rangeLabel}.`
-                        : `Newest first. ${rangeLabel}.`}
+                    {p.view === "scholars"
+                      ? `First or senior author, at least ${MIN_SCHOLAR_ACTIVITIES} staged publications, ordered by count. ${rangeLabel}.`
+                      : `Newest first. ${rangeLabel}.`}
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
-                  {!data.person && (
-                    <Segmented
-                      label="List"
-                      items={[
-                        { key: "scholars", label: "Scholars", href: href({ view: "scholars" }, "#items"), on: p.view === "scholars" },
-                        { key: "activities", label: "Publications", href: href({ view: "activities" }, "#items"), on: p.view === "activities" },
-                      ]}
-                    />
-                  )}
+                  <Segmented
+                    label="List"
+                    items={[
+                      { key: "scholars", label: "Scholars", href: href({ view: "scholars" }, "#items"), on: p.view === "scholars" },
+                      { key: "activities", label: "Publications", href: href({ view: "activities" }, "#items"), on: p.view === "activities" },
+                    ]}
+                  />
                   <a href={searchHref} className={cn(LINK, "text-[13px] print:hidden")}>
                     Open in Scholars search
                   </a>
                 </div>
               </div>
 
-              {!data.person && (
-                <div className="bg-apollo-surface-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-3.5 py-3 print:hidden" data-testid="portfolio-list-stages">
-                  <span id="list-stage-label" className="text-[13px] font-medium">
-                    Stage
-                  </span>
-                  <div role="group" aria-labelledby="list-stage-label" className="flex flex-wrap gap-1.5">
-                    {TRANSLATIONAL_STAGES.map((k) => {
-                      const on = p.stages.includes(k);
-                      const next = on ? p.stages.filter((s) => s !== k) : TRANSLATIONAL_STAGES.filter((s) => s === k || p.stages.includes(s));
-                      return (
-                        <QueryButton
-                          key={k}
-                          action={`${basePath}#items`}
-                          qs={portfolioQueryString({ ...p, stages: next, page: 1 })}
-                          pressed={on}
-                          label={`${code(k)} ${TRANSLATIONAL_STAGE_LABELS[k]}`}
-                          className={cn(
-                            "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px]",
-                            on ? "bg-apollo-slate-tint border-apollo-slate" : "bg-apollo-surface border-apollo-border-strong hover:bg-apollo-page",
-                          )}
-                        >
-                          <span aria-hidden className="size-2 rounded-[2px]" style={{ background: STAGE_FILL[k].bg }} />
-                          {code(k)}
-                        </QueryButton>
-                      );
-                    })}
-                  </div>
-                  <span className="text-muted-foreground text-xs">Filters the lists; the charts above highlight it. None selected means every stage.</span>
+              <div className="bg-apollo-surface-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-3.5 py-3 print:hidden" data-testid="portfolio-list-stages">
+                <span id="list-stage-label" className="text-[13px] font-medium">
+                  Stage
+                </span>
+                <div role="group" aria-labelledby="list-stage-label" className="flex flex-wrap gap-1.5">
+                  {TRANSLATIONAL_STAGES.map((k) => {
+                    const on = p.stages.includes(k);
+                    const next = on ? p.stages.filter((s) => s !== k) : TRANSLATIONAL_STAGES.filter((s) => s === k || p.stages.includes(s));
+                    return (
+                      <QueryButton
+                        key={k}
+                        action={`${basePath}#items`}
+                        qs={portfolioQueryString({ ...p, stages: next, page: 1 })}
+                        pressed={on}
+                        label={`${code(k)} ${TRANSLATIONAL_STAGE_LABELS[k]}`}
+                        className={cn(
+                          "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px]",
+                          on ? "bg-apollo-slate-tint border-apollo-slate" : "bg-apollo-surface border-apollo-border-strong hover:bg-apollo-page",
+                        )}
+                      >
+                        <span aria-hidden className="size-2 rounded-[2px]" style={{ background: STAGE_FILL[k].bg }} />
+                        {code(k)}
+                      </QueryButton>
+                    );
+                  })}
                 </div>
-              )}
+                <span className="text-muted-foreground text-xs">Filters the lists; the charts above highlight it. None selected means every stage.</span>
+              </div>
 
-              {data.person ? (
-                <PersonView data={data} params={p} clearHref={href({ cwid: null }, "#items")} />
-              ) : p.view === "activities" ? (
+              {p.view === "activities" ? (
                 <ArticleCitationList
                   rows={articles.map((a) => ({ ...toCitationRow(a), stage: a.stage, stageConfidence: a.stageConfidence }))}
                   rangeLabel={rangeLabel}
@@ -944,19 +957,19 @@ export async function renderTranslationalPortfolioReport({
                   ) : (
                     <ul className={cn("m-0 list-none p-0", !printScholars && "print:hidden")}>
                       {data.scholars.rows.map((s) => (
-                        <ScholarRow key={s.cwid} s={s} hasSel={hasSel} stages={p.stages} portfolioHref={href({ cwid: s.cwid }, "#items")} />
+                        <ScholarRow key={s.cwid} s={s} hasSel={hasSel} stages={p.stages} portfolioHref={canOpen.has(s.cwid) ? personHref(s.cwid) : null} />
                       ))}
                     </ul>
                   )}
                 </div>
               )}
 
-              {!data.person && pages > 1 && (
+              {pages > 1 && (
                 <p className="text-muted-foreground hidden pt-2 text-xs print:block">
                   This printout holds page {p.page.toLocaleString()} of {pages.toLocaleString()} of the list.
                 </p>
               )}
-              {!data.person && pages > 1 && (
+              {pages > 1 && (
                 <nav aria-label="Pages" className="border-apollo-border flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3.5 print:hidden">
                   <span className="text-muted-foreground grow text-[13px]">
                     Page {p.page.toLocaleString()} of {pages.toLocaleString()}
@@ -1028,7 +1041,8 @@ function ScholarRow({
   s: PortfolioData["scholars"]["rows"][number];
   hasSel: boolean;
   stages: readonly TranslationalStage[];
-  portfolioHref: string;
+  /** The scholar's portfolio page; null when this viewer may not open it. */
+  portfolioHref: string | null;
 }) {
   const ex = exactStagedShares(s.counts);
   return (
@@ -1036,9 +1050,13 @@ function ScholarRow({
       <div className="flex min-w-0 flex-[1_1_300px] gap-3">
         <HeadshotAvatar cwid={s.cwid} preferredName={s.name} size="md" />
         <div className="flex min-w-0 grow flex-col gap-0.5">
-          <Link href={portfolioHref} className={cn(LINK, "text-sm font-medium")}>
-            {s.name}
-          </Link>
+          {portfolioHref ? (
+            <Link href={portfolioHref} className={cn(LINK, "text-sm font-medium")}>
+              {s.name}
+            </Link>
+          ) : (
+            <span className="text-sm font-medium">{s.name}</span>
+          )}
           <span className="text-muted-foreground text-xs">{[s.title, s.department].filter(Boolean).join(" · ")}</span>
           <div className="mt-2.5 flex max-w-[280px] flex-col gap-1.5">
             <span className="text-[13px]">
@@ -1060,14 +1078,16 @@ function ScholarRow({
             </span>
             <span className={cn(EYEBROW, "mt-1.5 text-[11px]")}>Papers by stage</span>
             <StageCountColumns counts={s.counts} />
-            <Link
-              href={portfolioHref}
-              aria-label={`Translational portfolio for ${s.name}`}
-              className="border-apollo-border-strong text-apollo-slate mt-1.5 inline-flex items-center gap-1.5 self-start rounded-lg border bg-white px-3 py-1.5 text-[13px] font-medium hover:underline print:hidden"
-            >
-              Translational portfolio
-              <ArrowRight className="size-3.5" aria-hidden />
-            </Link>
+            {portfolioHref && (
+              <Link
+                href={portfolioHref}
+                aria-label={`Translational portfolio for ${s.name}`}
+                className="border-apollo-border-strong text-apollo-slate mt-1.5 inline-flex items-center gap-1.5 self-start rounded-lg border bg-white px-3 py-1.5 text-[13px] font-medium hover:underline print:hidden"
+              >
+                Translational portfolio
+                <ArrowRight className="size-3.5" aria-hidden />
+              </Link>
+            )}
             {s.slug && (
               <a href={profilePath(s.slug)} className={cn(LINK, "self-start text-xs print:hidden")}>
                 Open profile
@@ -1089,81 +1109,5 @@ function ScholarRow({
         )}
       </div>
     </li>
-  );
-}
-
-/** One scholar: counts by stage and recent staged publications. Counts only,
- *  no percentages. The full per-scholar page is the plan's PR 2. */
-function PersonView({ data, params, clearHref }: { data: PortfolioData; params: PortfolioParams; clearHref: string }) {
-  const s = data.person!;
-  const max = Math.max(1, ...TRANSLATIONAL_STAGES.map((k) => data.all[k]), data.all.none);
-  return (
-    <div className="border-apollo-border flex flex-col gap-3.5 border-t pt-4" data-testid="portfolio-person">
-      <Link href={clearHref} className={cn(LINK, "min-h-8 self-start font-medium print:hidden")}>
-        Back to scholars
-      </Link>
-      <div className="flex items-center gap-3">
-        <HeadshotAvatar cwid={s.cwid} preferredName={s.name} size="lg" />
-        <span className="flex flex-col gap-0.5">
-          <span className="text-base font-semibold">{s.name}</span>
-          <span className="text-apollo-ink-2 text-[13px]">
-            {[s.title, s.department].filter(Boolean).join(" · ")} · <span className="font-mono">{s.cwid}</span>
-          </span>
-          {s.slug && (
-            <a href={profilePath(s.slug)} className={cn(LINK, "self-start text-[13px] font-medium")}>
-              Open profile
-            </a>
-          )}
-        </span>
-      </div>
-      <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
-        <table className="min-w-0 flex-[1_1_380px] border-collapse text-sm">
-          <caption className="sr-only">
-            {s.name}&rsquo;s first- or senior-author publications by stage, {params.from} to {params.to}
-          </caption>
-          <thead>
-            <tr className="text-muted-foreground text-left text-xs">
-              <th scope="col" className="py-1.5 font-normal">
-                Stage
-              </th>
-              <th scope="col" className="py-1.5 font-normal">
-                Publications
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...TRANSLATIONAL_STAGES, "none" as const].map((k) => (
-              <tr key={k} className="border-apollo-border border-t">
-                <th scope="row" className="py-2.5 pr-3 text-left font-normal">
-                  {k === "none" ? (
-                    <span className="text-muted-foreground">{NO_STAGE_LABEL}</span>
-                  ) : (
-                    <>
-                      <span className="font-semibold">{code(k)}</span> <span className="text-muted-foreground">{TRANSLATIONAL_STAGE_LABELS[k]}</span>
-                    </>
-                  )}
-                </th>
-                <td className="w-1/2 py-2.5">
-                  <span className="tabular-nums">{data.all[k].toLocaleString()}</span>
-                  <ThinBar share={(data.all[k] / max) * 100} color={k === "none" ? COVERAGE : STAGE_FILL[k].bg} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="flex min-w-0 flex-[1_1_380px] flex-col gap-3">
-          <span className={EYEBROW}>Recent publications</span>
-          {s.works.length === 0 ? (
-            <span className="text-muted-foreground text-[13px]">No staged first- or senior-author publications in this window.</span>
-          ) : (
-            <ul className="m-0 flex list-none flex-col gap-3.5 p-0">
-              {s.works.map((w) => (
-                <WorkItem key={w.pmid} w={w} />
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }

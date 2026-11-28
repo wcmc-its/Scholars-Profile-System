@@ -180,6 +180,23 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
   };
 }
 
+/** Report 8's `unit=inst:CODE` values (primary institution), which
+ *  `parsePortfolioParams` leaves out of `units`: the scholar page carries
+ *  them for its link back. */
+export function portfolioUnitInsts(sp: URLSearchParams): string[] {
+  return parsePersonFilter(sp)
+    .unitValues.filter((u) => u.startsWith("inst:"))
+    .map((u) => u.slice("inst:".length));
+}
+
+/** The params the report page and its `.xlsx` read: never one scholar. One
+ *  scholar is their own page (`/edit/scholar/[cwid]/translational-portfolio`),
+ *  gated by `authorizeCvExport`; the report's gate is wider, so `?cwid=` must
+ *  not scope anything here (the page redirects it, the download ignores it). */
+export function parsePortfolioReportParams(sp: URLSearchParams): PortfolioParams {
+  return { ...parsePortfolioParams(sp), cwid: null };
+}
+
 /** The canonical query string: every selection, so a view round-trips. */
 export function portfolioQueryString(p: PortfolioParams): string {
   const q = new URLSearchParams();
