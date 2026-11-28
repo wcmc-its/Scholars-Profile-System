@@ -108,7 +108,8 @@ export function toSearchParams(sp: Record<string, string | string[] | undefined>
 export const scholarPortfolioXlsxHref = (cwid: string, p: ScholarPortfolioParams) =>
   `/api/edit/reports/translational-portfolio-scholar?${new URLSearchParams([
     ["cwid", cwid],
-    ...new URLSearchParams(scholarPortfolioQueryString({ ...p, page: 1 })),
+    // The link back (`r`) is no part of the download.
+    ...[...new URLSearchParams(scholarPortfolioQueryString({ ...p, page: 1 }))].filter(([k]) => k !== "r"),
   ])}`;
 
 /** The page's header: back link, headshot, the name as the h1, title ·
@@ -246,13 +247,8 @@ export async function ScholarPortfolioBody({
       testId="scholar-portfolio-rail"
     >
       <AutoSubmitForm action={base} className="group" data-testid="scholar-portfolio-filters">
-        {/* The report's filters, for the link back; and the list's stage. */}
-        {p.units.map((u) => (
-          <input key={u} type="hidden" name="unit" value={u} />
-        ))}
-        {p.insts.map((i) => (
-          <input key={i} type="hidden" name="inst" value={i} />
-        ))}
+        {/* The report's state, for the link back; and the list's stage. */}
+        <input type="hidden" name="r" value={p.back} />
         {p.stage && <input type="hidden" name="stage" value={p.stage} />}
         <RailSection
           label="Publication year"

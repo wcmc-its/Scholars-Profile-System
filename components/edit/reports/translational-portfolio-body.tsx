@@ -38,7 +38,7 @@ import { SELECT } from "@/components/edit/reports/citation-report-parts";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { RailChecklist, type RailChecklistOption } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout, ReportRail, type FilterChip } from "@/components/edit/reports/report-ui";
-import { PortfolioDownloadMenu, ScrollToHash } from "@/components/edit/reports/translational-portfolio-client";
+import { PortfolioDownloadMenu, ScholarLookup, ScrollToHash } from "@/components/edit/reports/translational-portfolio-client";
 import { PubTitle } from "@/components/publication/pub-html";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Button } from "@/components/ui/button";
@@ -75,7 +75,7 @@ import {
   type StageCounts,
   type UnitTab,
 } from "@/lib/edit/translational-portfolio-report";
-import { carriedFilters, scholarPortfolioHref } from "@/lib/edit/translational-portfolio-scholar";
+import { scholarPortfolioHref } from "@/lib/edit/translational-portfolio-scholar";
 import { institutionDisplayName } from "@/lib/institutions";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { profilePath } from "@/lib/profile-url";
@@ -319,9 +319,8 @@ export async function renderTranslationalPortfolioReport({
   const href = (q: Partial<PortfolioParams>, hash = "") => `${basePath}?${portfolioQueryString({ ...p, page: 1, ...q })}${hash}`;
   // A scholar's own page, under this page's filters; offered only for the
   // scholars this viewer may open it for (one batched check; the page re-checks).
-  const carried = carriedFilters(sp);
-  const personHref = (cwid: string) => scholarPortfolioHref(cwid, carried);
-  const canOpen = await loadBibliometricsAccess([...data.scholars.rows.map((s) => s.cwid), ...data.lookup.map((s) => s.cwid)]);
+  const personHref = (cwid: string) => scholarPortfolioHref(cwid, p);
+  const canOpen = await loadBibliometricsAccess(data.scholars.rows.map((s) => s.cwid));
   const hasSel = p.stages.length > 0;
   const total = countsTotal(data.all);
   const first = data.byYear[0]?.counts;
@@ -389,15 +388,7 @@ export async function renderTranslationalPortfolioReport({
           <input key={u} type="hidden" name="unit" value={u} />
         ))}
         <RailSection label="Scholar" summary="Open one scholar's portfolio" defaultOpen testId="portfolio-rail-scholar">
-          <input
-            type="search"
-            name="q"
-            defaultValue={p.q}
-            placeholder="Search by name or CWID…"
-            aria-label="Look up a scholar by name or CWID"
-            autoComplete="off"
-            className="border-apollo-border-strong bg-apollo-surface h-10 w-full rounded-lg border px-3 text-[15px]"
-          />
+          <ScholarLookup report={portfolioQueryString({ ...p, cwid: null, q: "", page: 1 })} />
         </RailSection>
         <RailSection label="Publication year" summary={`${yearsLabel} · Calendar`} defaultOpen testId="portfolio-rail-years">
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -558,48 +549,6 @@ export async function renderTranslationalPortfolioReport({
               <span className="text-muted-foreground mr-1 text-[13px]">Showing</span>
               <FilterChips chips={chips} testId="portfolio-chips" />
             </div>
-
-            {p.q && (
-              <div className="bg-apollo-surface border-apollo-border max-w-[480px] rounded-xl border p-1 print:hidden" data-testid="portfolio-lookup">
-                {data.lookup.length === 0 ? (
-                  <p className="text-muted-foreground px-3 py-2 text-sm">No active scholar matches &ldquo;{p.q}&rdquo;.</p>
-                ) : (
-                  <ul className="m-0 list-none p-0">
-                    {data.lookup.map((s) => {
-                      const who = (
-                        <>
-                          <HeadshotAvatar cwid={s.cwid} preferredName={s.name} size="sm" />
-                          <span className="flex min-w-0 flex-col">
-                            <span className="text-sm font-medium">{s.name}</span>
-                            <span className="text-muted-foreground text-xs">
-                              {[s.title, s.department].filter(Boolean).join(" · ")} · <span className="font-mono">{s.cwid}</span>
-                            </span>
-                            {!canOpen.has(s.cwid) && (
-                              <span className="text-muted-foreground text-xs">You can&rsquo;t open this scholar&rsquo;s portfolio.</span>
-                            )}
-                          </span>
-                        </>
-                      );
-                      return (
-                        <li key={s.cwid}>
-                          {canOpen.has(s.cwid) ? (
-                            <Link
-                              href={personHref(s.cwid)}
-                              className="hover:bg-apollo-surface-2 flex min-h-12 items-center gap-2.5 rounded-lg px-2 py-1"
-                              data-testid="portfolio-lookup-link"
-                            >
-                              {who}
-                            </Link>
-                          ) : (
-                            <div className="flex min-h-12 items-center gap-2.5 px-2 py-1">{who}</div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            )}
 
             {/* Summary tiles: every number opens the list it counts. */}
             <section aria-label="Summary" className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-3" data-testid="portfolio-tiles">

@@ -171,10 +171,10 @@ describe("params", () => {
     expect(p.insts).toEqual(["HSS", "WCMC-Q", "CU GHS"]);
     expect(parsePortfolioParams(new URLSearchParams(portfolioQueryString(p)))).toEqual(p);
   });
-  it("falls back on bad values and defaults to 2020 through the last complete year", () => {
+  it("falls back on bad values and defaults to 2020 through the current year", () => {
     const p = parsePortfolioParams(new URLSearchParams("stage=NA&stage=T9&by=nope&view=x&area=<x>&cwid=a;b&unit=inst:X"));
     const y = new Date().getUTCFullYear();
-    expect(p).toMatchObject({ stages: [], by: "dept", view: "scholars", areas: [], gaps: false, allRows: false, cwid: null, units: [], from: 2020, to: y - 1 });
+    expect(p).toMatchObject({ stages: [], by: "dept", view: "scholars", areas: [], gaps: false, allRows: false, cwid: null, units: [], from: 2020, to: y });
   });
   it("defaults to the Scholars list and leaves the default out of the URL", () => {
     const p = parsePortfolioParams(new URLSearchParams("from=2020&to=2024"));
@@ -225,8 +225,7 @@ describe("buildPortfolioWorkbook", () => {
       })),
     },
     person: null,
-    lookup: [],
-    activities: { total: 10, pmids: [] },
+      activities: { total: 10, pmids: [] },
   });
   const sheet = async (n: number) => {
     const wb = new ExcelJS.Workbook();

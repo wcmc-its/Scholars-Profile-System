@@ -48,14 +48,17 @@ import {
   papersByYear,
   parseScholarPortfolioParams,
   portfolioCwidRedirect,
+  reportHrefFor,
   resolveScholarPortfolioAccess,
   scholarPapersSql,
+  scholarPortfolioHref,
   scholarPortfolioQueryString,
   stageSpan,
   WAFFLE_MAX_PER_YEAR,
   yearChartKind,
   type ScholarPaper,
 } from "@/lib/edit/translational-portfolio-scholar";
+import { parsePortfolioParams } from "@/lib/edit/translational-portfolio-report";
 import { emptyCounts } from "@/lib/translational-stage";
 
 const VIEWER = { cwid: "view001", isSuperuser: false, isCommsSteward: false };
@@ -376,32 +379,45 @@ describe("the year chart", () => {
 });
 
 describe("the URL", () => {
-  it("round-trips every selection, and carries unit and inst for the link back", () => {
-    const qs =
-      "unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1&authorship=all&stage=none&page=3";
-    expect(scholarPortfolioQueryString(parseScholarPortfolioParams(new URLSearchParams(qs)))).toBe(
-      qs,
-    );
-    expect(
-      parseScholarPortfolioParams(new URLSearchParams("stage=T5&authorship=yes")),
-    ).toMatchObject({ stage: null, middle: false });
+  it("round-trips every selection, with the report's state apart in r", () => {
+    const qs = `from=2021&to=2024&area=area_a&authorship=all&stage=none&page=3&r=${encodeURIComponent("unit=dept%3AN1&from=2020&to=2026&inst=INST1&by=area")}`;
+    const p = parseScholarPortfolioParams(new URLSearchParams(qs));
+    expect(p).toMatchObject({ from: 2021, to: 2024, areas: ["area_a"], middle: true, stage: "none", page: 3 });
+    expect(scholarPortfolioQueryString(p)).toBe(qs);
+    expect(parseScholarPortfolioParams(new URLSearchParams("stage=T5&authorship=yes"))).toMatchObject({ stage: null, middle: false });
   });
 
-  it("sends report 26's ?cwid= to the scholar's page with the report's filters, and nothing else", () => {
-    expect(
-      portfolioCwidRedirect(
-        new URLSearchParams(
-          "cwid=abc1234&unit=dept:N1&from=2021&to=2024&area=area_a&inst=INST1&stage=T2&view=activities&page=4",
-        ),
-      ),
-    ).toBe(
-      "/edit/scholar/abc1234/translational-portfolio?unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1",
+  it("never lets the page's own filters into the link back, so they never reach the report or the next scholar", () => {
+    const opened = new URLSearchParams(scholarPortfolioHref("abc1234", parsePortfolioParams(new URLSearchParams("unit=dept:N1&from=2021&to=2024")))!.split("?")[1]);
+    // Tick an area, include middle authors, filter the list: the page's own state.
+    opened.append("area", "area_b");
+    opened.set("authorship", "all");
+    opened.set("stage", "T0");
+    const p = parseScholarPortfolioParams(opened);
+    expect(p.areas).toEqual(["area_b"]);
+    expect(reportHrefFor("/r", p)).toBe("/r?unit=dept%3AN1&from=2021&to=2024");
+    // A link from before `r` reads only the report's keys, never the list's stage or page.
+    expect(parseScholarPortfolioParams(new URLSearchParams("unit=dept:N1&from=2021&to=2024&stage=T0&page=3")).back).toBe(
+      "unit=dept%3AN1&from=2021&to=2024",
     );
+    // `r` is re-serialized by the report's parser: only report filters, never a scholar.
+    expect(parseScholarPortfolioParams(new URLSearchParams("r=cwid%3Dxyz9%26from%3D2021%26junk%3D1")).back).not.toMatch(/cwid|junk/);
+  });
+
+  it("sends report 26's ?cwid= to the scholar's page, seeded from the report and keeping its whole state for the way back", () => {
+    const href = portfolioCwidRedirect(
+      new URLSearchParams("cwid=abc1234&unit=dept:N1&from=2021&to=2024&area=area_a&inst=INST1&stage=T2&view=activities&page=4"),
+    )!;
+    const [path, qs] = href.split("?");
+    expect(path).toBe("/edit/scholar/abc1234/translational-portfolio");
+    const sp = new URLSearchParams(qs);
+    expect([...sp.keys()]).toEqual(["from", "to", "area", "r"]);
+    expect(sp.get("r")).toBe("unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1&stage=T2&view=activities&page=4");
     expect(portfolioCwidRedirect(new URLSearchParams("unit=dept:N1"))).toBeNull();
     // Report 8's `unit=inst:CODE` form carries the institution too.
-    expect(
-      portfolioCwidRedirect(new URLSearchParams("cwid=abc1234&unit=inst:INST2&unit=dept:N1")),
-    ).toMatch(/\?unit=dept%3AN1&from=\d+&to=\d+&inst=INST2$/);
+    expect(new URLSearchParams(portfolioCwidRedirect(new URLSearchParams("cwid=abc1234&unit=inst:INST2&unit=dept:N1"))!.split("?")[1]).get("r")).toMatch(
+      /^unit=dept%3AN1&from=\d+&to=\d+&inst=INST2$/,
+    );
   });
 });
 
