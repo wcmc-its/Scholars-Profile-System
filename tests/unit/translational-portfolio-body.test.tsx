@@ -259,3 +259,14 @@ describe("report 26 with nothing to compare", () => {
     expect(container.textContent).not.toContain("0 of 0");
   });
 });
+
+describe("report 26's primary institution filter", () => {
+  it("shows each institution as a chip and passes it to the reach tile loader", async () => {
+    h.tile.mockResolvedValue(TILE);
+    const { container } = await page({ ...SP, inst: ["HSS", "WCMC"] });
+    const chips = within(container).getByTestId("portfolio-chips");
+    expect(chips.textContent).toContain("Hospital for Special Surgery");
+    expect(chips.textContent).toContain("Weill Cornell Medicine");
+    expect(h.tile.mock.calls[0][0].insts).toEqual(["HSS", "WCMC"]);
+  });
+});

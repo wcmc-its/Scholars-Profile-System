@@ -74,6 +74,7 @@ import {
   type StageCounts,
   type UnitTab,
 } from "@/lib/edit/translational-portfolio-report";
+import { institutionDisplayName } from "@/lib/institutions";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { profilePath } from "@/lib/profile-url";
 import {
@@ -322,6 +323,8 @@ export async function renderTranslationalPortfolioReport({
 
   const unitName = p.units.map((u) => choices.labels.get(u) ?? u).join(", ");
   const areaLabel = new Map(choices.areas.map((a) => [a.id, a.label]));
+  const instLabel = (c: string) => institutionDisplayName(c);
+  const instSummary = p.insts.length === 0 ? "All institutions" : p.insts.length <= 2 ? p.insts.map(instLabel).join(", ") : `${p.insts.length} selected`;
   const defaults = defaultYears();
 
   // The active filters, each removable where it has a default to fall back to.
@@ -330,6 +333,7 @@ export async function renderTranslationalPortfolioReport({
       ? [{ group: "Scholar", value: data.person?.name ?? "Unknown scholar", mono: p.cwid, removeHref: href({ cwid: null }) }]
       : []),
     { group: "Unit", value: unitName || "All of Weill Cornell Medicine", removeHref: p.units.length > 0 ? href({ units: [] }) : null },
+    ...p.insts.map((i) => ({ group: "Institution", value: instLabel(i), removeHref: href({ insts: p.insts.filter((x) => x !== i) }) })),
     {
       group: "Years",
       value: yearsLabel,
@@ -426,6 +430,17 @@ export async function renderTranslationalPortfolioReport({
               </Link>
             </p>
           )}
+        </RailSection>
+        <RailSection label="Primary institution" summary={instSummary} defaultOpen={p.insts.length > 0} testId="portfolio-rail-inst">
+          <RailChecklist
+            name="inst"
+            roomy
+            options={choices.facets.institutions.map((o) => ({ value: o.value.replace(/^inst:/, ""), label: o.label }))}
+            selected={p.insts}
+            searchPlaceholder="Search institutions…"
+            collapseAfter={5}
+          />
+          <p className="text-muted-foreground text-xs">None checked = all. Narrows the org unit to its scholars at a checked institution.</p>
         </RailSection>
         <RailSection
           label="Research area"
