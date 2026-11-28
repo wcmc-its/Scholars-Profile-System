@@ -3,7 +3,7 @@
  * drawn: its shell (`ReportLayout`, `CitationRail`, `FilterChips`,
  * `ReportCard`), tabs (`ReportTab`), tables (`TH` / `TD`), pager and export
  * button, the shared headline numbers (`ReportStats`), the neutral stage
- * badge (`StageBadge`) and the public publication modal.
+ * tag (report 26's coloured `StageTag`) and the public publication modal.
  *
  * THE RULE (plan, "The rule this plan is built on"): no number without a link
  * to the paged list of exactly the records it counts.
@@ -69,7 +69,7 @@ import { RailChecklist } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout, ReportStats } from "@/components/edit/reports/report-ui";
 import { PubTitle } from "@/components/publication/pub-html";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
-import { StageBadge } from "@/components/publication/stage-badge";
+import { StageTag } from "@/components/edit/reports/translational-portfolio-body";
 import { Button } from "@/components/ui/button";
 import { loadDataQualityFacets, type DataQualityFacets } from "@/lib/api/data-quality";
 import { db } from "@/lib/db";
@@ -305,7 +305,9 @@ function PublicationTable({
                 {r.stage === "none" ? (
                   <span className="text-muted-foreground text-xs">{NO_STAGE_LABEL}</span>
                 ) : (
-                  <StageBadge stage={r.stage} />
+                  <span data-testid="pub-row-stage">
+                    <StageTag stage={r.stage} />
+                  </span>
                 )}
               </td>
               {types.map((t) => {
