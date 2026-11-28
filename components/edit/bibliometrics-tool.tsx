@@ -478,6 +478,18 @@ function Report({
               ))}
             </tbody>
           </table>
+          {reach.connections ? (
+            <p className="text-sm" data-testid="bibliometrics-reach-connections">
+              Colleagues citing this work who have never co-authored with this scholar:{" "}
+              <a
+                href={reach.connections.href}
+                className={LINK}
+                aria-label={`${plural(reach.connections.colleagues, "colleague", "colleagues")} citing this work who have never co-authored with this scholar, in the Downstream reach report`}
+              >
+                {reach.connections.colleagues.toLocaleString()}
+              </a>
+            </p>
+          ) : null}
           <p className="text-apollo-ink-2 text-[13px]">{reach.note}</p>
         </section>
       ) : null}

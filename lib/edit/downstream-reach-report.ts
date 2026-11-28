@@ -176,6 +176,9 @@ export const DEFAULT_STAGES: readonly StageKey[] = ["T0", "T1"];
  *  means every stage, not the default. */
 export const STAGE_ANY = "any";
 
+const sameStages = (a: readonly StageKey[], b: readonly StageKey[]): boolean =>
+  a.length === b.length && a.every((s) => b.includes(s));
+
 export const stageKeyLabel = (k: StageKey): string => (k === "none" ? NO_STAGE_LABEL : translationalStageDisplay(k));
 
 /** A paper's stage key under the display rule: a stage counts only under
@@ -251,7 +254,15 @@ export const REACH_DOC_SORT_LABEL = {
 } as const;
 export type ReachDocSort = keyof typeof REACH_DOC_SORT_LABEL;
 
-export type ReachView = "publications" | "documents" | "people";
+export type ReachView = "publications" | "documents" | "people" | "connections";
+export const REACH_VIEWS: readonly ReachView[] = ["publications", "documents", "people", "connections"];
+
+/** Which list of the Connections view a pairs list (`with`) belongs to:
+ *  `cited` = colleagues whose papers cite the scholar's work ("Cite S's
+ *  work"); `cites` = colleagues whose work the scholar's papers cite ("S
+ *  cites"). See `downstream-reach-connections.ts`. */
+export const CONNECTION_DIRS = ["cited", "cites"] as const;
+export type ConnectionDir = (typeof CONNECTION_DIRS)[number];
 
 /** A `doc` filter, resolved: which citing document (or invention, or deduped
  *  document) the id stands for. */
@@ -284,10 +295,16 @@ export type ReachParams = WhoParams & {
   /** `docs`, resolved (`resolveReachParams`). null = not resolved: a `doc`
    *  filter then matches nothing. Never from the URL. */
   docRefs: ReachDocRef[] | null;
+  /** `with`: the Connections view's pairs list for the scholar in `person`
+   *  and this colleague (a CWID); null = the two lists. Carried only on the
+   *  Connections view. */
+  with: string | null;
+  /** `dir`: which of the two lists `with` is from. Default `cited`. */
+  dir: ConnectionDir;
 };
 
 /** View state, not filters: a URL with nothing else is bare. */
-const VIEW_KEYS = new Set(["view", "sort", "dsort", "q", "page", "show"]);
+const VIEW_KEYS = new Set(["view", "sort", "dsort", "q", "page", "show", "with", "dir"]);
 
 /**
  * Every param is optional; a stray value is dropped. Defaults that do not
@@ -308,14 +325,21 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
   const own = sp.getAll("own");
   const area = sp.get("area")?.trim() ?? "";
   const pmid = sp.get("pmid")?.trim() ?? "";
+  const withCwid = sp.get("with")?.trim() ?? "";
   const docs = [...new Set(sp.getAll("doc").map((v) => (/^[1-9]\d{0,9}$/.test(v) ? Number(v) : 0)))]
     .filter((n) => n > 0)
     .slice(0, MAX_DOC_FILTERS);
+  const view = one("view", REACH_VIEWS, "publications");
+  // The Connections view applies no position, paper or citing-document
+  // filter (`downstream-reach-connections.ts`), so it does not carry them: a
+  // tab click from another view drops them, and no chip or Criteria row names
+  // a filter the lists were not taken under.
+  const connections = view === "connections";
   return {
     types,
     units,
     people,
-    positions,
+    positions: connections ? [] : positions,
     basis,
     from: bare ? DEFAULT_FROM : from,
     to,
@@ -323,16 +347,19 @@ export function parseReachParams(sp: URLSearchParams): ReachParams {
     ctypes: among("ctype", REACH_TYPES),
     includeOwn: own.includes("in") && !own.includes("out"),
     area: /^[A-Za-z0-9_-]{1,128}$/.test(area) ? area : null,
-    pmid: /^\d{1,16}$/.test(pmid) ? pmid : null,
-    docs,
+    pmid: !connections && /^\d{1,16}$/.test(pmid) ? pmid : null,
+    docs: connections ? [] : docs,
     showAll: sp.get("show") === "all",
-    view: one("view", ["publications", "documents", "people"] as const, "publications"),
+    view,
     sort: one("sort", Object.keys(REACH_SORT_LABEL) as ReachSort[], "cited"),
     docSort: one("dsort", Object.keys(REACH_DOC_SORT_LABEL) as ReachDocSort[], "papers"),
     q,
     page,
     scope: [],
     docRefs: null,
+    // The person filter's CWID rule.
+    with: /^[A-Za-z0-9]{2,16}$/.test(withCwid) ? withCwid : null,
+    dir: one("dir", CONNECTION_DIRS, "cited"),
   };
 }
 
@@ -358,6 +385,11 @@ export function reachQueryString(p: ReachParams, over: Partial<ReachParams> = {}
   for (const d of x.docs) q.append("doc", String(d));
   if (x.showAll) q.set("show", "all");
   if (x.view !== "publications") q.set("view", x.view);
+  // A pairs list exists only on the Connections view: any other view drops it.
+  if (x.view === "connections" && x.with) {
+    q.set("with", x.with);
+    if (x.dir !== "cited") q.set("dir", x.dir);
+  }
   if (x.sort !== "cited") q.set("sort", x.sort);
   if (x.docSort !== "papers") q.set("dsort", x.docSort);
   if (x.q) q.set("q", x.q);
@@ -401,8 +433,17 @@ export function reachLinks(p: ReachParams) {
      *  the ticked types or by one. */
     person: (cwid: string, t: ReachType | null) =>
       qs({ view: "publications", people: [cwid], positions: peoplePositions(p) ?? [], ...(t ? { ctypes: [t] } : {}) }),
-    /** A tab. */
-    view: (v: ReachView) => qs({ view: v }),
+    /** A tab. The Connections tab opens its two lists, not a pairs list, and
+     *  widens the report's default T0 and T1 to every stage: few papers have a
+     *  stage, so under the default the lists are empty for nearly everyone
+     *  (staging, 2026-11-28: 0 connections for each of the five most-cited
+     *  scholars). A stage pick of the user's own is kept. */
+    view: (v: ReachView) =>
+      qs({
+        view: v,
+        with: null,
+        ...(v === "connections" && sameStages(p.stages, DEFAULT_STAGES) ? { stages: [] } : {}),
+      }),
   };
 }
 
@@ -526,6 +567,19 @@ function docFilterSql(p: Pick<ReachParams, "includeOwn">, ref: ReachDocRef): Pri
                     WHERE d2.level = ${ref.level} AND d2.dedup_key = ${ref.dedupKey} ${counted})`;
 }
 
+/** The paper's own filters, as conditions on `p` (`publication`): years,
+ *  stage and research area. What the Connections view applies to the cited
+ *  paper (`downstream-reach-connections.ts`). */
+export function citedPaperSql(p: Pick<ReachParams, "basis" | "from" | "to" | "stages" | "area">): Prisma.Sql {
+  return Prisma.sql`${pubYearSql(p)}
+       ${stageSql(p.stages)}
+       ${
+         p.area
+           ? Prisma.sql`AND p.pmid IN (SELECT pt_a.pmid FROM publication_topic pt_a WHERE pt_a.parent_topic_id = ${p.area} AND pt_a.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR})`
+           : Prisma.empty
+       }`;
+}
+
 /** Which publications are in scope, as conditions on `p` (`publication`):
  *  years, stage, research area, one paper, and the citing-document filters.
  *  The authorship half of the scope is `policyScopeSql`. */
@@ -536,13 +590,7 @@ export function reachPubSql(p: ReachParams): Prisma.Sql {
       : p.docRefs === null || p.docRefs.length !== p.docs.length
         ? Prisma.sql`AND 1 = 0`
         : Prisma.join(p.docRefs.map((ref) => docFilterSql(p, ref)), " ");
-  return Prisma.sql`${pubYearSql(p)}
-       ${stageSql(p.stages)}
-       ${
-         p.area
-           ? Prisma.sql`AND p.pmid IN (SELECT pt_a.pmid FROM publication_topic pt_a WHERE pt_a.parent_topic_id = ${p.area} AND pt_a.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR})`
-           : Prisma.empty
-       }
+  return Prisma.sql`${citedPaperSql(p)}
        ${p.pmid ? Prisma.sql`AND p.pmid = ${p.pmid}` : Prisma.empty}
        ${docs}`;
 }
@@ -1314,6 +1362,10 @@ export async function buildReachWorkbook(
   generatedAt: Date,
   labels?: ReadonlyMap<string, string>,
   areaLabel?: ReadonlyMap<string, string>,
+  /** One more sheet, added after People, and its Criteria rows: the
+   *  Connections sheet (`connectionsSheet`), when the download is taken from
+   *  that view with one scholar. */
+  extra?: { addSheet: (wb: ExcelJS.Workbook) => void; criteria: [string, string][] },
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const types = tickedTypes(p);
@@ -1379,6 +1431,8 @@ export async function buildReachWorkbook(
     people.addRow([r.name, r.cwid, r.orgUnit, r.personType, r.institution, r.papers, ...types.map((t) => r[t])]);
   }
 
+  extra?.addSheet(wb);
+
   addCriteriaSheet(wb, [
     ...describeReachCriteria(p, generatedAt, labels, areaLabel),
     ["Publications sheet", sheetNote(data.pubs.length, data.pubTotal, "publications", REACH_LIST_CAP)],
@@ -1392,6 +1446,7 @@ export async function buildReachWorkbook(
       "People sheet",
       `Lists all ${data.people.length.toLocaleString()} people, with no contact details. This report follows report 24's exemption from the 50-person limit on scholar exports (extended to this report 2026-11-26).`,
     ],
+    ...(extra?.criteria ?? []),
   ]);
 
   return workbookBuffer(wb);

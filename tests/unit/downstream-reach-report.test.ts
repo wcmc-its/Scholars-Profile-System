@@ -430,6 +430,8 @@ describe("parseReachParams", () => {
       page: 1,
       scope: [],
       docRefs: null,
+      with: null,
+      dir: "cited",
     });
     expect(DEFAULT_STAGES).toEqual(["T0", "T1"]);
     expect(isReachDefault(parse())).toBe(true);

@@ -25,6 +25,8 @@
  *     links to the Publications view that lists them.
  *   - Every count's link is named for what it opens (`aria-label`), not by
  *     its digits alone.
+ *   - The Connections view (`downstream-reach-connections.tsx`) needs one
+ *     scholar; its tab carries no count, and is loaded only when open.
  *
  * Filters, search, sort, tab and page are the URL. Parser, access scope,
  * loaders, chips and the workbook live in `lib/edit/downstream-reach-report.ts`;
@@ -58,6 +60,11 @@ import {
   type PersonFooter,
 } from "@/components/edit/reports/citation-report-parts";
 import { ModalCount, PaperTitle } from "@/components/edit/reports/downstream-reach-client";
+import {
+  ConnectionsPanel,
+  connectionsPageCwids,
+  loadConnectionsPage,
+} from "@/components/edit/reports/downstream-reach-connections";
 import { RailChecklist } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout, ReportStats } from "@/components/edit/reports/report-ui";
 import { PubTitle } from "@/components/publication/pub-html";
@@ -172,6 +179,12 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
             <input key={d} type="hidden" name="doc" value={d} />
           ))}
           {params.showAll && <input type="hidden" name="show" value="all" />}
+          {params.view === "connections" && params.with && (
+            <>
+              <input type="hidden" name="with" value={params.with} />
+              <input type="hidden" name="dir" value={params.dir} />
+            </>
+          )}
           {/* The form was submitted: no stage ticked then means every stage. */}
           <input type="hidden" name="stage" value={STAGE_ANY} />
           {/* Sent always; the ticked box below adds "out", which wins. */}
@@ -464,10 +477,12 @@ export async function renderDownstreamReachReport({
   const { view } = params;
   const types = tickedTypes(params);
   const offset = (params.page - 1) * REACH_PAGE_SIZE;
-  const [facets, areas, data] = await Promise.all([
+  const [facets, areas, data, connections] = await Promise.all([
     loadDataQualityFacets(db.read),
     loadReachAreas(),
     loadReach(params, { views: [view], limit: REACH_PAGE_SIZE, offset }),
+    // Only when its tab is open: no Connections query runs for another view.
+    view === "connections" ? loadConnectionsPage(params, offset, REACH_PAGE_SIZE) : null,
   ]);
   const people = (data.people ?? []).slice(offset, offset + REACH_PAGE_SIZE);
   const pagePmids = data.pubs.map((r) => r.pmid);
@@ -486,7 +501,9 @@ export async function renderDownstreamReachReport({
       ? [...new Set(pubs.flatMap((r) => r.authors.map((a) => a.cwid)))]
       : view === "people"
         ? people.map((r) => r.cwid)
-        : [],
+        : view === "connections"
+          ? connectionsPageCwids(connections)
+          : [],
   );
   const labels = unitLabels(facets);
   const areaLabel = new Map(areas.map((a) => [a.id, a.label]));
@@ -558,7 +575,9 @@ export async function renderDownstreamReachReport({
           </a>
         </Button>
         <span className="text-muted-foreground text-xs" data-testid={`${TEST}-download-note`}>
-          Publications, Citing documents, People and Criteria sheets
+          {connections?.status === "lists" || connections?.status === "pairs"
+            ? "Publications, Citing documents, People, Connections and Criteria sheets"
+            : "Publications, Citing documents, People and Criteria sheets"}
           {data.pubTotal > REACH_LIST_CAP && " · Publications lists the first rows only; the Criteria sheet says how many"}
           {docsTooWide(data.pubTotal) &&
             " · Citing documents is not listed for a selection this wide; the Criteria sheet says so"}
@@ -635,6 +654,7 @@ export async function renderDownstreamReachReport({
               {tab("publications", "Publications", data.pubTotal)}
               {tab("documents", "Citing documents", data.docTotal)}
               {tab("people", "People", data.peopleTotal)}
+              {tab("connections", "Connections", null)}
             </nav>
             {view === "publications" ? (
               <PublicationModalProvider>
@@ -711,6 +731,16 @@ export async function renderDownstreamReachReport({
                 )}
                 {pager(data.docTotal ?? 0)}
               </>
+            ) : view === "connections" && connections ? (
+              <ConnectionsPanel
+                page={connections}
+                params={params}
+                pageSize={REACH_PAGE_SIZE}
+                href={href}
+                footer={personFooter}
+                bibliometrics={bibliometrics}
+                peopleHref={href(links.view("people"))}
+              />
             ) : (
               <>
                 {toolbar(
