@@ -23,7 +23,8 @@
  * Grants and clinical trials: the report's rules
  * (`lib/edit/translational-portfolio-activities.ts`) for this scholar, under
  * the page's years and research areas, listed. Trials carry their trial phase's
- * stage; grants have none yet.
+ * stage; grants ReciterAI's reading of their abstract (`grantProjectStage`,
+ * over this scholar's rows).
  *
  * Counts only: one person's few dozen papers make a percentage swing on one
  * misassigned stage, and the page compares this scholar with nobody.
@@ -72,6 +73,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { formatPublishedName } from "@/lib/postnominal";
 import {
   emptyCounts,
+  GRANT_STAGE_RULE,
   isTranslationalStage,
   STAGE_RULE,
   TRIAL_STAGE_RULE,
@@ -508,6 +510,7 @@ export function describeScholarPortfolioCriteria(
     ["Counting rule", COUNTING_RULE],
     ["Stage rule", STAGE_RULE],
     ["Grant rule", GRANT_RULE],
+    ["Grant stage rule", GRANT_STAGE_RULE],
     ["Trial rule", TRIAL_RULE],
     ["Trial stage rule", TRIAL_STAGE_RULE],
     ...(p.areas.length > 0 ? ([["Grants and trials under an area", ACTIVITY_AREA_RULE]] as [string, string][]) : []),
@@ -539,7 +542,15 @@ export async function buildScholarPortfolioWorkbook(
   gs.addRow(["Title", "Funder", "Award number", "Role", "Start", "End", "Translational stage"]);
   boldRow(gs, 1);
   for (const g of data.grants)
-    gs.addRow([g.title, g.funder, g.awardNumber ?? "", rolesOf(g, scholar.cwid).join(", "), g.start, g.end, "Not yet assigned"]);
+    gs.addRow([
+      g.title,
+      g.funder,
+      g.awardNumber ?? "",
+      rolesOf(g, scholar.cwid).join(", "),
+      g.start,
+      g.end,
+      g.stage ? translationalStageDisplay(g.stage) : NO_STAGE_LABEL,
+    ]);
   gs.getColumn(1).width = 80;
   const ts = wb.addWorksheet("Clinical trials");
   ts.addRow(["Title", "NCT number", "Protocol number", "Trial phase", "Status", "Start year", "End year", "Translational stage"]);
