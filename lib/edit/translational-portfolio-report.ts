@@ -58,10 +58,12 @@ import {
   MANUAL_DIVISION_SOURCE,
   parsePersonFilter,
   personFilterCriteria,
+  personFilterSql,
   unitLabels,
   utcToday,
 } from "@/lib/edit/person-filter";
 import { addCriteriaSheet, boldRow, workbookBuffer } from "@/lib/edit/report-xlsx";
+import { institutionDisplayName } from "@/lib/institutions";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { formatRoleCategory } from "@/lib/role-display";
 import {
@@ -119,6 +121,10 @@ export type PortfolioParams = {
   to: number;
   /** Research area topic ids (repeated `area`); a publication in ANY counts. */
   areas: string[];
+  /** Primary institution codes (repeated `inst`, `Scholar.primaryOrgCode`): a
+   *  scholar at ANY counts, and the filter narrows the unit (AND), unlike report
+   *  8's `unit=inst:`, which ORs with the other units. */
+  insts: string[];
   /** Research areas tab: only the areas with a gap (`gaps=1`). */
   gaps: boolean;
   /** The unit table in full instead of its first `TABLE_PREVIEW_ROWS` (`rows=all`). */
@@ -152,11 +158,16 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
   const to = Math.max(from, int("to", d.to, 1900, 2100));
   const cwid = sp.get("cwid")?.trim() ?? "";
   const by = sp.get("by");
+  const unitValues = parsePersonFilter(sp).unitValues;
   return {
-    units: parsePersonFilter(sp).unitValues.filter((u) => !u.startsWith("inst:")),
+    units: unitValues.filter((u) => !u.startsWith("inst:")),
     from,
     to,
     areas: [...new Set(sp.getAll("area").map((a) => a.trim()))].filter((a) => /^[A-Za-z0-9_-]{1,128}$/.test(a)).slice(0, 50),
+    // A report 8 link's `unit=inst:X` lands here too, as a filter on the scope.
+    insts: [...new Set([...sp.getAll("inst"), ...unitValues.filter((u) => u.startsWith("inst:")).map((u) => u.slice(5))].map((c) => c.trim()))]
+      .filter((c) => /^[A-Za-z0-9 _-]{1,32}$/.test(c))
+      .slice(0, 50),
     gaps: sp.get("gaps") === "1",
     allRows: sp.get("rows") === "all",
     stages: TRANSLATIONAL_STAGES.filter((s) => sp.getAll("stage").includes(s)),
@@ -169,6 +180,23 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
   };
 }
 
+/** Report 8's `unit=inst:CODE` values (primary institution), which
+ *  `parsePortfolioParams` leaves out of `units`: the scholar page carries
+ *  them for its link back. */
+export function portfolioUnitInsts(sp: URLSearchParams): string[] {
+  return parsePersonFilter(sp)
+    .unitValues.filter((u) => u.startsWith("inst:"))
+    .map((u) => u.slice("inst:".length));
+}
+
+/** The params the report page and its `.xlsx` read: never one scholar. One
+ *  scholar is their own page (`/edit/scholar/[cwid]/translational-portfolio`),
+ *  gated by `authorizeCvExport`; the report's gate is wider, so `?cwid=` must
+ *  not scope anything here (the page redirects it, the download ignores it). */
+export function parsePortfolioReportParams(sp: URLSearchParams): PortfolioParams {
+  return { ...parsePortfolioParams(sp), cwid: null };
+}
+
 /** The canonical query string: every selection, so a view round-trips. */
 export function portfolioQueryString(p: PortfolioParams): string {
   const q = new URLSearchParams();
@@ -176,6 +204,7 @@ export function portfolioQueryString(p: PortfolioParams): string {
   q.set("from", String(p.from));
   q.set("to", String(p.to));
   for (const a of p.areas) q.append("area", a);
+  for (const i of p.insts) q.append("inst", i);
   if (p.gaps) q.set("gaps", "1");
   if (p.allRows) q.set("rows", "all");
   for (const s of p.stages) q.append("stage", s);
@@ -281,9 +310,14 @@ function articleScope(p: PortfolioParams, opts: { stages?: TranslationalStage[];
   };
 }
 
-/** The area and scholar clauses on top of report 8's scope. */
-function extraSql(p: PortfolioParams): Prisma.Sql {
+/** The area, institution and scholar clauses on top of report 8's scope.
+ *  `insts: false` leaves the institution out (the all-of-WCM baseline). */
+function extraSql(p: PortfolioParams, opts: { insts?: boolean } = {}): Prisma.Sql {
   return Prisma.sql`${
+    p.insts.length > 0 && opts.insts !== false
+      ? personFilterSql({ types: [], unitValues: p.insts.map((c) => `inst:${c}`) }, { scholar: "s" })
+      : Prisma.empty
+  } ${
     p.areas.length > 0
       ? Prisma.sql`AND p.pmid IN (SELECT pt_a.pmid FROM publication_topic pt_a WHERE pt_a.parent_topic_id IN (${Prisma.join(p.areas)}) AND pt_a.score >= ${TOPIC_ACTIVITY_SCORE_FLOOR})`
       : Prisma.empty
@@ -546,7 +580,7 @@ export async function loadPortfolio(
   const [counts, baselineMap, centers, scholarCounts, lookup, person] = await Promise.all([
     stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? [] : [p.by])], byYear),
     p.units.length > 0
-      ? stageCounts(articleScope(p, { units: [] }), extra, ["all"], byYear).then((m) => m.get("all")!)
+      ? stageCounts(articleScope(p, { units: [] }), extraSql(p, { insts: false }), ["all"], byYear).then((m) => m.get("all")!)
       : Promise.resolve(null),
     p.by === "center" ? centerSizes() : Promise.resolve(new Map<string, { members: number; departments: number }>()),
     scholarGroups.length > 0
@@ -707,6 +741,7 @@ export function describePortfolioCriteria(
     ...personFilterCriteria({ types: [], unitValues: p.units }, choices.labels, (r) => formatRoleCategory(r) ?? ""),
     ["Years", `${p.from}–${p.to} (calendar year of publication)`],
     ["Research area", areas],
+    ["Primary institution", p.insts.length > 0 ? p.insts.map(institutionDisplayName).join("; ") : "All"],
     ...(p.gaps && p.by === "area" ? ([["Research areas listed", "Only areas with a gap"]] as [string, string][]) : []),
     ["Gap rule", GAP_RULE],
     ["Translational stage", p.stages.length > 0 ? p.stages.map(translationalStageDisplay).join("; ") : "All"],

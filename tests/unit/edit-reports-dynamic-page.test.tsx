@@ -462,3 +462,21 @@ describe("/edit/reports/[report] — Cornell Ithaca partner session", () => {
     expect(h.mockPartnerSession).not.toHaveBeenCalled();
   });
 });
+
+describe("/edit/reports/[report] — report 26 with one scholar", () => {
+  it("hands ?cwid= to the scholar's own page with the report's filters, before the report's gate", async () => {
+    const q = { cwid: "abc1234", unit: "dept:N1", from: "2021", to: "2024", area: "area_a", inst: "INST1", stage: "T2", view: "activities" };
+    await expect(page("translational-portfolio", q)).rejects.toThrow(
+      "__REDIRECT__:/edit/scholar/abc1234/translational-portfolio?unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1",
+    );
+    // The number form gets there too, through the slug.
+    await expect(page("26", { cwid: "abc1234" })).rejects.toThrow("__REDIRECT__:/edit/reports/translational-portfolio?cwid=abc1234");
+  });
+
+  it("does not hand off without a (valid) cwid", async () => {
+    // Report 26 is off here, so its own gate answers: 404, not a redirect.
+    await expect(page("translational-portfolio", { unit: "dept:N1" })).rejects.toThrow("__NOT_FOUND__");
+    await expect(page("translational-portfolio", { cwid: "not a cwid!" })).rejects.toThrow("__NOT_FOUND__");
+    expect(h.mockRedirect).not.toHaveBeenCalled();
+  });
+});

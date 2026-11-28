@@ -120,6 +120,7 @@ import {
 import { canViewDownstreamReachReport } from "@/lib/edit/downstream-reach-report";
 import { canViewPatentCitationsReport } from "@/lib/edit/patent-citations-report";
 import { canViewTranslationalPortfolioReport } from "@/lib/edit/translational-portfolio-report";
+import { portfolioCwidRedirect } from "@/lib/edit/translational-portfolio-scholar";
 import { canViewPolicyCitationsReport, POLICY_CITATIONS_ACCESS_RULE } from "@/lib/edit/policy-citations-report";
 import type { ReportKey } from "@/lib/edit/report-meta";
 
@@ -206,6 +207,10 @@ export type ReportDef =
       accessRule?: string;
       /** The body renders `ReportRender.aside` into the header. */
       headerAside?: boolean;
+      /** A URL this report hands off to instead of rendering (report 26's
+       *  `?cwid=` → the scholar's own page), or null. Asked before the gate:
+       *  the target runs its own, and the URL only echoes the request. */
+      redirectTo?: (sp: URLSearchParams) => string | null;
       render: (props: AdminReportProps) => Promise<ReportRender>;
     }
   | {
@@ -298,6 +303,7 @@ export const REPORTS: Record<ReportKey, ReportDef> = {
     gate: "admin",
     canView: canViewTranslationalPortfolioReport,
     headerAside: true,
+    redirectTo: portfolioCwidRedirect,
     render: renderTranslationalPortfolioReport,
   },
   // Downstream reach (clinical studies, trials, guidelines and policy, patents

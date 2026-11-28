@@ -165,6 +165,12 @@ describe("params", () => {
     });
     expect(parsePortfolioParams(new URLSearchParams(portfolioQueryString(p)))).toEqual(p);
   });
+  it("keeps primary institutions apart from the unit, and folds report 8's unit=inst: into them", () => {
+    const p = parsePortfolioParams(new URLSearchParams("unit=dept:N1&inst=HSS&inst=WCMC-Q&unit=inst:CU GHS&inst=<x>"));
+    expect(p.units).toEqual(["dept:N1"]);
+    expect(p.insts).toEqual(["HSS", "WCMC-Q", "CU GHS"]);
+    expect(parsePortfolioParams(new URLSearchParams(portfolioQueryString(p)))).toEqual(p);
+  });
   it("falls back on bad values and defaults to 2020 through the last complete year", () => {
     const p = parsePortfolioParams(new URLSearchParams("stage=NA&stage=T9&by=nope&view=x&area=<x>&cwid=a;b&unit=inst:X"));
     const y = new Date().getUTCFullYear();
@@ -320,11 +326,32 @@ describe("loadPortfolio", () => {
   });
 });
 
+describe("loadPortfolio's institution filter", () => {
+  it("narrows every count to the institution's scholars, but not the all-of-WCM baseline", async () => {
+    const seen: { inst: boolean; unit: boolean }[] = [];
+    (db.read as unknown as Record<string, unknown>).$queryRaw = vi.fn(async (q: { sql?: string; values?: unknown[] }) => {
+      const text = String(q.sql);
+      seen.push({ inst: /s\.primary_org_code IN/.test(text) && (q.values ?? []).includes("HSS"), unit: (q.values ?? []).includes("N1") });
+      return [];
+    });
+    const choices: PortfolioChoices = { facets: { roleCategories: [], departments: [], centers: [], institutions: [] }, labels: new Map(), areas: [] };
+    await loadPortfolio(parsePortfolioParams(new URLSearchParams("unit=dept:N1&inst=HSS&from=2024&to=2025")), choices);
+    // Every unit-scoped query carries the institution; the one without the unit (the baseline) does not.
+    expect(seen.length).toBeGreaterThan(1);
+    for (const q of seen) expect(q.inst).toBe(q.unit);
+    expect(seen.filter((q) => !q.unit)).toHaveLength(1);
+  });
+});
+
 describe("copy", () => {
   it('never calls a translational stage a "phase"', () => {
     for (const f of [
       "lib/edit/translational-portfolio-report.ts",
       "components/edit/reports/translational-portfolio-body.tsx",
+      "lib/edit/translational-portfolio-scholar.ts",
+      "components/edit/reports/translational-portfolio-scholar-body.tsx",
+      "components/edit/reports/translational-portfolio-scholar-client.tsx",
+      "app/edit/scholar/[cwid]/translational-portfolio/page.tsx",
     ]) {
       const text = readFileSync(path.resolve(__dirname, "../..", f), "utf8");
       expect(text, f).not.toMatch(/\bphases?\b/i);

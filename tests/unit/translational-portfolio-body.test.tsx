@@ -15,7 +15,7 @@
 import { cleanup, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ portfolio: vi.fn(), tile: vi.fn() }));
+const h = vi.hoisted(() => ({ portfolio: vi.fn(), tile: vi.fn(), access: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} }, prisma: {} }));
 vi.mock("@/lib/edit/translational-portfolio-report", async (actual) => ({
@@ -33,6 +33,7 @@ vi.mock("@/lib/edit/translational-portfolio-report", async (actual) => ({
   }),
 }));
 vi.mock("@/lib/edit/downstream-reach-entry", () => ({ loadPortfolioReachTile: h.tile }));
+vi.mock("@/lib/edit/bibliometrics-access", () => ({ loadBibliometricsAccess: h.access }));
 
 import { renderTranslationalPortfolioReport } from "@/components/edit/reports/translational-portfolio-body";
 import type { PortfolioReachTile } from "@/lib/edit/downstream-reach-entry";
@@ -76,6 +77,7 @@ const tiles = (root: HTMLElement) =>
 beforeEach(() => {
   h.portfolio.mockReset().mockResolvedValue(DATA);
   h.tile.mockReset().mockResolvedValue(null);
+  h.access.mockReset().mockResolvedValue(new Set());
 });
 afterEach(cleanup);
 
@@ -201,15 +203,47 @@ describe("report 26's redesigned page", () => {
     expect(within(full.container).getByTestId("portfolio-table").querySelectorAll("tbody tr")).toHaveLength(10);
   });
 
-  it("draws a scholar's stages as columns, a dash for none, and a link to their portfolio", async () => {
+  it("draws a scholar's stages as columns, a dash for none, and a link to their portfolio page under the filters", async () => {
     h.portfolio.mockResolvedValue({ ...DATA, scholars: { total: 1, rows: [scholar(1)] } });
-    const { container } = await page();
+    h.access.mockResolvedValue(new Set(["abc1001"]));
+    const { container } = await page({ ...SP, area: "area_a", inst: "INST1", by: "area" });
     const li = within(container).getByTestId("portfolio-scholar");
     expect(li.textContent).toContain("6 staged papers");
     expect(li.textContent).toMatch(/T0–T1–T21T3–45/);
     const link = within(li).getByRole("link", { name: "Translational portfolio for Example Person 1" });
-    expect(link.getAttribute("href")).toContain("cwid=abc1001");
+    expect(link.getAttribute("href")).toBe(
+      "/edit/scholar/abc1001/translational-portfolio?unit=dept%3AN1&from=2020&to=2021&area=area_a&inst=INST1",
+    );
+    expect(within(li).getByRole("link", { name: "Example Person 1" }).getAttribute("href")).toBe(link.getAttribute("href"));
     expect(within(li).getByRole("link", { name: "91" }).getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/91/");
+  });
+
+  it("asks once for the whole page who may be opened, and offers no portfolio for a scholar outside it", async () => {
+    h.portfolio.mockResolvedValue({ ...DATA, scholars: { total: 2, rows: [scholar(1), scholar(2)] } });
+    h.access.mockResolvedValue(new Set(["abc1002"]));
+    const { container } = await page();
+    expect(h.access).toHaveBeenCalledTimes(1);
+    expect(h.access).toHaveBeenCalledWith(["abc1001", "abc1002"]);
+    const [one, two] = within(container).getAllByTestId("portfolio-scholar");
+    expect(within(one).queryByRole("link", { name: /Translational portfolio/ })).toBeNull();
+    expect(within(one).queryByRole("link", { name: "Example Person 1" })).toBeNull();
+    expect(one.textContent).toContain("Example Person 1");
+    expect(one.innerHTML).not.toContain("translational-portfolio");
+    expect(within(two).getByRole("link", { name: "Translational portfolio for Example Person 2" })).toBeTruthy();
+  });
+
+  it("links a lookup match to the scholar's page only when the viewer may open it", async () => {
+    const who = (cwid: string, name: string) => ({ cwid, name, title: "Professor", department: "Examples", slug: null });
+    h.portfolio.mockResolvedValue({ ...DATA, lookup: [who("abc2001", "Example Lookup A"), who("abc2002", "Example Lookup B")] });
+    h.access.mockResolvedValue(new Set(["abc2001"]));
+    const { container } = await page({ ...SP, q: "Example" });
+    expect(h.access).toHaveBeenCalledWith(["abc2001", "abc2002"]);
+    const lookup = within(container).getByTestId("portfolio-lookup");
+    const links = within(lookup).getAllByTestId("portfolio-lookup-link");
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("/edit/scholar/abc2001/translational-portfolio?unit=dept%3AN1&from=2020&to=2021");
+    expect(lookup.textContent).toContain("Example Lookup B");
+    expect(lookup.textContent).toContain("can\u2019t open this scholar\u2019s portfolio");
   });
 
   it("keeps every unit of an old several-unit link through a rail change, and says so", async () => {
@@ -239,16 +273,23 @@ describe("report 26 with nothing to compare", () => {
     return rows[rows.length - 1].textContent;
   };
 
-  it("compares a unit with all of WCM, but a scholar in a unit with their own years, since the baseline keeps the scholar", async () => {
+  it("compares a unit with all of WCM, and every year together without a unit", async () => {
     h.portfolio.mockResolvedValue({ ...DATA, baseline: WCM });
     const unit = (await page()).container;
     expect(bottomRow(unit)).toContain("All of WCM");
     expect(bottomRow(unit)).toContain("97%");
     cleanup();
-    const scholar = (await page({ ...SP, cwid: "abc1234" })).container;
-    expect(bottomRow(scholar)).toContain("All years");
-    expect(bottomRow(scholar)).not.toContain("97%");
-    expect(scholar.textContent).not.toContain("All of WCM");
+    const all = (await page({ from: "2020", to: "2021" })).container;
+    expect(bottomRow(all)).toContain("All years");
+    expect(all.textContent).not.toContain("All of WCM");
+  });
+
+  it("never scopes the report to one scholar: that is the scholar's own page now", async () => {
+    const { container } = await page({ ...SP, cwid: "abc1234" });
+    expect(h.portfolio.mock.calls[0][0].cwid).toBeNull();
+    expect(h.tile.mock.calls[0][0].cwid).toBeNull();
+    expect(container.innerHTML).not.toContain("abc1234");
+    expect(within(container).queryByTestId("portfolio-person")).toBeNull();
   });
 
   it("drops the areas tile when no area is big enough to check, and the reach tile when it counts nothing", async () => {
@@ -257,5 +298,16 @@ describe("report 26 with nothing to compare", () => {
     const { container } = await page();
     expect(tiles(container)).toEqual([["Publications, 2020 to 2021", "125", "80% have a stage"]]);
     expect(container.textContent).not.toContain("0 of 0");
+  });
+});
+
+describe("report 26's primary institution filter", () => {
+  it("shows each institution as a chip and passes it to the reach tile loader", async () => {
+    h.tile.mockResolvedValue(TILE);
+    const { container } = await page({ ...SP, inst: ["HSS", "WCMC"] });
+    const chips = within(container).getByTestId("portfolio-chips");
+    expect(chips.textContent).toContain("Hospital for Special Surgery");
+    expect(chips.textContent).toContain("Weill Cornell Medicine");
+    expect(h.tile.mock.calls[0][0].insts).toEqual(["HSS", "WCMC"]);
   });
 });

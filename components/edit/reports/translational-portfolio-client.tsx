@@ -14,7 +14,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 const ITEM = "hover:bg-apollo-surface-2 flex w-full flex-col gap-0.5 rounded-md px-3 py-2.5 text-left";
 
-export function PortfolioDownloadMenu({ xlsxHref }: { xlsxHref: string }) {
+export function PortfolioDownloadMenu({
+  xlsxHref,
+  xlsxNote = "Every table on the page, one tab each, with the underlying counts",
+}: {
+  xlsxHref: string;
+  /** What the spreadsheet holds, under its name. */
+  xlsxNote?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -31,7 +38,7 @@ export function PortfolioDownloadMenu({ xlsxHref }: { xlsxHref: string }) {
             <span className="text-sm font-medium">Spreadsheet</span>
             <span className="text-muted-foreground text-xs">.xlsx</span>
           </span>
-          <span className="text-muted-foreground text-xs leading-[1.45]">Every table on the page, one tab each, with the underlying counts</span>
+          <span className="text-muted-foreground text-xs leading-[1.45]">{xlsxNote}</span>
         </a>
         <button
           type="button"
