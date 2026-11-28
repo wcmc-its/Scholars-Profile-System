@@ -5,7 +5,9 @@
  * area, with the All of WCM baseline), "Scholars" (the Scholars list, only at
  * or under `SCHOLAR_EXPORT_CAP`; above it the sheet says so and lists no one)
  * and "Criteria". Same query string and parser as the page
- * (`parsePortfolioParams`), same gate (`canViewTranslationalPortfolioReport`).
+ * (`parsePortfolioReportParams`, which ignores `cwid`: one scholar is their
+ * own page, behind `authorizeCvExport`), same gate
+ * (`canViewTranslationalPortfolioReport`).
  * Flag off → 404 · no session → 401 · not an administrator → 403. `no-store`.
  */
 import { NextResponse } from "next/server";
@@ -18,7 +20,7 @@ import {
   isTranslationalPortfolioReportEnabled,
   loadPortfolio,
   loadPortfolioChoices,
-  parsePortfolioParams,
+  parsePortfolioReportParams,
 } from "@/lib/edit/translational-portfolio-report";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +31,9 @@ export async function GET(request: Request) {
   if (!session) return new NextResponse("Unauthorized", { status: 401 });
   if (!(await canViewTranslationalPortfolioReport(session))) return new NextResponse("Forbidden", { status: 403 });
 
-  const params = parsePortfolioParams(new URL(request.url).searchParams);
+  // Never one scholar: report 26's gate is wider than the scholar page's
+  // (`authorizeCvExport`), so `?cwid=` is ignored here, as on the page.
+  const params = parsePortfolioReportParams(new URL(request.url).searchParams);
   const generatedAt = new Date();
   const choices = await loadPortfolioChoices();
   const data = await loadPortfolio(params, choices, { forExport: true });

@@ -473,7 +473,7 @@ export async function ScholarPortfolioBody({
                   return (
                     <Link
                       key={r.year}
-                      href={href({ from: r.year, to: r.year })}
+                      href={href({ from: r.year, to: r.year, stage: null })}
                       aria-label={`${r.year}: ${n} publications (${ariaCounts(r.counts)}). Show only ${r.year}.`}
                       className="hover:bg-apollo-surface-2 flex flex-col items-center gap-2 rounded-md p-1"
                       data-testid="year-column"
@@ -584,7 +584,7 @@ export async function ScholarPortfolioBody({
                     />
                   </span>
                   <Link
-                    href={href({ areas: [a.id] }, "#p-pubs")}
+                    href={href({ areas: [a.id], stage: null }, "#p-pubs")}
                     aria-label={`${a.n} papers in ${a.label}. Show only this area.`}
                     className={cn(LINK, "text-right text-sm font-medium tabular-nums")}
                   >

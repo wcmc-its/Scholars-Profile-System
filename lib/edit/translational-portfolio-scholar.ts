@@ -8,7 +8,8 @@
  * (`isTranslationalPortfolioReportEnabled`) AND `authorizeCvExport` allows the
  * viewer this scholar (self, superuser, granted proxy, owner or curator of one
  * of the scholar's units, the read-only observer). Then the editor's existence
- * and #536 hidden-class guards. Anyone else, and any unknown CWID, gets the
+ * and #536 hidden-class guards, and an active scholar (report 8's scope counts
+ * no one else, so a suppressed or external scholar would read as no papers). Anyone else, and any unknown CWID, gets the
  * same 404, so the page never says whether a CWID exists.
  *
  * Scope: report 8's (`scopeSql`) for this scholar: their ReCiter-confirmed
@@ -47,6 +48,7 @@ import {
   isTranslationalPortfolioReportEnabled,
   parsePortfolioParams,
   PORTFOLIO_PAGE_SIZE,
+  portfolioUnitInsts,
 } from "@/lib/edit/translational-portfolio-report";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -94,9 +96,11 @@ export type ScholarPortfolioParams = CarriedFilters & {
   page: number;
 };
 
-/** `inst` (repeated): primary institution codes, kept for the link back. */
+/** Primary institution codes, kept for the link back: the repeated `inst`
+ *  and report 8's `unit=inst:CODE` form (which `parsePortfolioParams` leaves
+ *  out of `units`), so either spelling of a report URL carries it. */
 function parseInsts(sp: URLSearchParams): string[] {
-  return [...new Set(sp.getAll("inst").map((c) => c.trim()))]
+  return [...new Set([...sp.getAll("inst"), ...portfolioUnitInsts(sp)].map((c) => c.trim()))]
     .filter((c) => INST_RE.test(c))
     .slice(0, 50);
 }
@@ -206,12 +210,16 @@ export async function resolveScholarPortfolioAccess(
       postnominal: true,
       roleCategory: true,
       deletedAt: true,
+      status: true,
       primaryTitle: true,
       primaryDepartment: true,
       slug: true,
     },
   });
-  if (!s || s.deletedAt !== null) return { kind: "denied" };
+  // Report 8's scope counts active scholars only (`s.status = 'active'`): a
+  // suppressed or external scholar's page would read as "no papers", so it is
+  // the same 404.
+  if (!s || s.deletedAt !== null || s.status !== "active") return { kind: "denied" };
   if (!session.isSuperuser && !isPubliclyDisplayed(s.roleCategory)) return { kind: "denied" };
   return {
     kind: "ok",
@@ -258,7 +266,11 @@ export type ScholarPortfolio = {
   /** The rail's areas: over the scope without the area filter, at least
    *  `MIN_SCHOLAR_AREA_PAPERS` papers, plus any area the URL checks. */
   areaChoices: { id: string; label: string; n: number }[];
-  /** The section's areas: over the scope, at least `MIN_SCHOLAR_AREA_PAPERS`. */
+  /** The section's areas: over the scope, at least `MIN_SCHOLAR_AREA_PAPERS`;
+   *  with an area filter, only the checked areas, so each count is exactly
+   *  the list its link opens (the filter is OR: a checked area's papers are
+   *  all in scope, while another area's count would be an overlap no link
+   *  can open). */
   areas: ScholarArea[];
 };
 
@@ -368,7 +380,7 @@ export async function loadScholarPortfolio(
       .filter((a) => a.n >= MIN_SCHOLAR_AREA_PAPERS || picked.has(a.id))
       .sort(byCount),
     areas: [...areaTally]
-      .filter(([, list]) => list.length >= MIN_SCHOLAR_AREA_PAPERS)
+      .filter(([id, list]) => list.length >= MIN_SCHOLAR_AREA_PAPERS && (picked.size === 0 || picked.has(id)))
       .map(([id, list]) => ({
         id,
         label: topic.get(id)?.label ?? id,

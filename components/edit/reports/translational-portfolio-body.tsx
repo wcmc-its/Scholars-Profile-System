@@ -60,7 +60,7 @@ import {
   loadPortfolioChoices,
   MIN_AREA_SIZE,
   MIN_SCHOLAR_ACTIVITIES,
-  parsePortfolioParams,
+  parsePortfolioReportParams,
   PORTFOLIO_PAGE_SIZE,
   portfolioQueryString,
   stageAssignedShare,
@@ -293,7 +293,7 @@ export async function renderTranslationalPortfolioReport({
   const sp = toSearchParams(searchParams);
   // One scholar is a page of its own now: the registry redirects `?cwid=` to
   // it before this body runs, so the report itself never scopes to a scholar.
-  const p: PortfolioParams = { ...parsePortfolioParams(sp), cwid: null };
+  const p = parsePortfolioReportParams(sp);
   const choices = await loadPortfolioChoices();
   const [data, reach] = await Promise.all([
     loadPortfolio(p, choices),

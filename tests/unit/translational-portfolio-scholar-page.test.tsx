@@ -316,6 +316,20 @@ describe("the body", () => {
     expect(row.textContent).toContain("Runs T0 to T2");
   });
 
+  it("opens the list each year or area count counts: the list's stage filter does not carry", async () => {
+    const c = await open({ from: "2021", to: "2022", stage: "T0", authorship: "all" });
+    const year = within(within(c).getByTestId("scholar-portfolio-years")).getAllByTestId(
+      "year-column",
+    )[0];
+    expect(year.getAttribute("href")).toBe(`${BASE}?from=2021&to=2021&authorship=all`);
+    const row = within(c).getByTestId("scholar-portfolio-area");
+    expect(
+      within(row)
+        .getByRole("link", { name: "3 papers in Example area. Show only this area." })
+        .getAttribute("href"),
+    ).toBe(`${BASE}?from=2021&to=2022&area=area_a&authorship=all#p-pubs`);
+  });
+
   it("keeps the rail's authorship toggle, areas and the report's filters in its form", async () => {
     const c = await open({
       unit: "dept:N1",

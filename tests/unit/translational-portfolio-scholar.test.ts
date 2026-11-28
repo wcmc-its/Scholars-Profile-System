@@ -64,6 +64,7 @@ const SCHOLAR_ROW = {
   postnominal: "MD, PhD",
   roleCategory: "full_time_faculty",
   deletedAt: null,
+  status: "active",
   primaryTitle: "Professor of Examples",
   primaryDepartment: "Examples",
   slug: "example-person",
@@ -124,6 +125,15 @@ describe("who may open one scholar's portfolio", () => {
     h.findScholar.mockResolvedValue({ ...SCHOLAR_ROW, deletedAt: new Date() });
     h.authz.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
     expect(await resolveScholarPortfolioAccess("abc1234", "/x")).toEqual(refused);
+  });
+
+  it("refuses a scholar who is not active (report 8 counts no one else), to everyone, as the same 404", async () => {
+    const su = { ...VIEWER, isSuperuser: true };
+    h.identity.mockResolvedValue({ session: su, realCwid: su.cwid, impersonatedCwid: null });
+    for (const status of ["suppressed", "external"]) {
+      h.findScholar.mockResolvedValue({ ...SCHOLAR_ROW, status });
+      expect(await resolveScholarPortfolioAccess("abc1234", "/x")).toEqual({ kind: "denied" });
+    }
   });
 
   it("hides a hidden identity class from everyone but a superuser", async () => {
@@ -305,6 +315,32 @@ describe("research areas", () => {
     ]);
   });
 
+  it("with an area checked, lists only the checked areas, each counting every one of its papers", async () => {
+    // area_a: papers 1-4; area_b: papers 2-5, so 3 papers in both.
+    const overlap = [
+      ...["1", "2", "3", "4"].map((pmid) => ({ pmid, g: "area_a" })),
+      ...["2", "3", "4", "5"].map((pmid) => ({ pmid, g: "area_b" })),
+    ];
+    h.queryRaw.mockImplementation(async (q: { sql: string }) =>
+      sqlText(q).includes("publication_topic") ? overlap : rows,
+    );
+    const d = await loadScholarPortfolio(
+      "abc1234",
+      parseScholarPortfolioParams(new URLSearchParams("area=area_a")),
+    );
+    // area_b's 3 here would be the overlap, which no link opens: not listed.
+    expect(d.papers.map((x) => x.pmid)).toEqual(["1", "2", "3", "4"]);
+    expect(d.areas.map((a) => [a.id, a.n])).toEqual([["area_a", 4]]);
+    const both = await loadScholarPortfolio(
+      "abc1234",
+      parseScholarPortfolioParams(new URLSearchParams("area=area_a&area=area_b")),
+    );
+    expect(both.areas.map((a) => [a.id, a.n])).toEqual([
+      ["area_a", 4],
+      ["area_b", 4],
+    ]);
+  });
+
   it("describes an area's stage range", () => {
     expect(stageSpan({ ...emptyCounts(), T0: 2, "T3-4": 1 })).toBe("Runs T0 to T3–4");
     expect(stageSpan({ ...emptyCounts(), T2: 4 })).toBe("T2 only");
@@ -362,6 +398,10 @@ describe("the URL", () => {
       "/edit/scholar/abc1234/translational-portfolio?unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1",
     );
     expect(portfolioCwidRedirect(new URLSearchParams("unit=dept:N1"))).toBeNull();
+    // Report 8's `unit=inst:CODE` form carries the institution too.
+    expect(
+      portfolioCwidRedirect(new URLSearchParams("cwid=abc1234&unit=inst:INST2&unit=dept:N1")),
+    ).toMatch(/\?unit=dept%3AN1&from=\d+&to=\d+&inst=INST2$/);
   });
 });
 
