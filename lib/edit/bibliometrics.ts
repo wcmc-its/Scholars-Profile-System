@@ -334,6 +334,7 @@ function summarySentences(args: {
   leadOnly: boolean;
   lead: number;
   rated: number;
+  topDecile: number;
   topDecilePct: number | null;
   guidelinePapers: number;
   authorityPapers: number;
@@ -348,8 +349,11 @@ function summarySentences(args: {
       ? `has published ${count(args.total, "research article")} as first or senior author${span}.`
       : `has published ${count(args.total, "research article")}${span}, ` +
         `${args.lead.toLocaleString("en-US")} as first or senior author.`,
-    `Of the ${count(args.rated, "article")} with an NIH percentile, ${args.topDecilePct}% rank in the ` +
-      "top 10% of NIH-funded papers in their field and year.",
+    // The count and the baseline: "11%" alone reads as average to anyone who
+    // does not know 10% is expected.
+    `Of the ${count(args.rated, "article")} with an NIH percentile, ${args.topDecile.toLocaleString("en-US")} ` +
+      `(${args.topDecilePct}%) ${args.topDecile === 1 ? "is" : "are"} in the top 10% of NIH-funded papers ` +
+      "for their field and year, where 10% is expected.",
   ];
   const from = args.bodies.map((b) => BODY_PHRASE[b] ?? b);
   const authorities =
@@ -390,7 +394,7 @@ const DEFINITIONS: BibliometricsReport["definitions"] = [
   },
   {
     term: "NIH percentile and citation ratio",
-    text: "NIH iCite. A paper needs about two years of citations before it is rated.",
+    text: "NIH iCite. Recent papers are rated too, but for their first two years or so the figures rest on few citations and can still move.",
   },
   {
     term: "h-index and h5-index",
@@ -487,6 +491,7 @@ export function buildBibliometricsReport(input: {
       leadOnly: filters.authorship === "lead",
       lead: byPosition.first + byPosition.senior,
       rated: rated.length,
+      topDecile: topDecileArticles,
       topDecilePct,
       guidelinePapers: policy[1]!.papers,
       authorityPapers: policy[0]!.papers,

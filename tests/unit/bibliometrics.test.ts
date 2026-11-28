@@ -142,7 +142,7 @@ describe("buildBibliometricsReport — the minimum-paper rule", () => {
     ]);
     expect(r.summary).toEqual([
       "has published 10 research articles since 2011, 9 as first or senior author.",
-      "Of the 10 articles with an NIH percentile, 90% rank in the top 10% of NIH-funded papers in their field and year.",
+      "Of the 10 articles with an NIH percentile, 9 (90%) are in the top 10% of NIH-funded papers for their field and year, where 10% is expected.",
       "1 article is cited in clinical practice guidelines.",
     ]);
   });
