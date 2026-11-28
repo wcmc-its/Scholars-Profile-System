@@ -6,7 +6,7 @@
  * on-screen filters to the Word download. All people and papers invented.
  */
 import * as React from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/edit/scholar-hover-card", () => ({
@@ -157,7 +157,7 @@ describe("BibliometricsTool", () => {
     expect(screen.getByText("h-index, all publications").previousSibling?.textContent).toBe("12");
     // Five tiles, in the Summary section: no separate Citation metrics card.
     expect(screen.getByTestId("bibliometrics-tiles").children).toHaveLength(5);
-    expect(screen.getByText(/Showing 10 of 12\./)).toBeTruthy();
+    expect(screen.getByText("Showing 5 of the top 10 · 12 articles in scope")).toBeTruthy();
     expect(screen.getByText("Updated November 25, 2026.", { exact: false })).toBeTruthy();
     // The scholar is bold in the author list; the other author is not.
     expect(document.querySelectorAll("strong")[0]?.textContent).toBe("Vale J");
@@ -171,15 +171,108 @@ describe("BibliometricsTool", () => {
     expect(screen.getByText("h5-index, last 5 years")).toBeTruthy();
   });
 
-  it("opens a paper's citing documents behind More", async () => {
-    respond(12);
+  it("opens one count's citing documents at a time, counts in a fixed order", async () => {
+    const r = report(12);
+    const row0 = r.papers.rows[0]!;
+    const doc = row0.citing[0]!;
+    row0.guidelines = 4;
+    row0.citing = [1, 2, 3, 4].map((i) => ({ ...doc, id: i, title: `An invented guideline ${i}` }));
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
     render(<BibliometricsTool entityId="zzz9001" />);
-    const more = await screen.findByRole("button", { name: "More" });
-    expect(screen.getByText("WHO guideline")).toBeTruthy();
-    expect(screen.queryByText("Clinical practice guidelines", { exact: false, selector: "div" })).toBeNull();
-    fireEvent.click(more);
-    expect(screen.getByRole("link", { name: "An invented guideline" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Less" }).getAttribute("aria-expanded")).toBe("true");
+    const row = await screen.findByTestId("bibliometrics-paper-90000100");
+    const counts = within(screen.getByTestId("bibliometrics-signals-90000100")).getAllByRole("button");
+    // Guidelines before the health authorities; policy sources bold.
+    expect(counts.map((b) => b.textContent)).toEqual(["Guidelines 4", "WHO 1"]);
+    expect(counts[0]!.className).toContain("font-semibold");
+    // A paper with no citing documents says so; a zero count never shows.
+    expect(screen.getByTestId("bibliometrics-signals-90000101").textContent).toBe(
+      "No guideline, policy or review citations yet",
+    );
+
+    fireEvent.click(counts[0]!);
+    expect(counts[0]!.getAttribute("aria-expanded")).toBe("true");
+    expect(within(row).getByText("4 clinical practice guidelines citing this paper")).toBeTruthy();
+    expect(within(row).getAllByRole("link", { name: /An invented guideline/ })).toHaveLength(3);
+    expect(within(row).getAllByText("Guideline J · 2022 · guideline")).toHaveLength(3);
+    fireEvent.click(within(row).getByRole("button", { name: "See all 4" }));
+    expect(within(row).getAllByRole("link", { name: /An invented guideline/ })).toHaveLength(4);
+
+    // Another count replaces the open list; the same count, or ×, closes it.
+    fireEvent.click(counts[1]!);
+    expect(within(row).queryByRole("link", { name: /An invented guideline/ })).toBeNull();
+    expect(within(row).getByText("1 WHO guideline citing this paper")).toBeTruthy();
+    fireEvent.click(counts[1]!);
+    expect(within(row).queryByText("1 WHO guideline citing this paper")).toBeNull();
+    fireEvent.click(counts[0]!);
+    fireEvent.click(within(row).getByRole("button", { name: "Close list" }));
+    expect(within(row).queryByText(/citing this paper/)).toBeNull();
+  });
+
+  it("shows five papers, then all ten; PMID and DOI on their own line; co-authors as text without the scholar", async () => {
+    const r = report(12);
+    r.papers.rows[0]!.wcmAuthors = [
+      { cwid: "zzz9001", name: "Jordan Vale" },
+      ...["Avery Marsh", "Blake Okafor", "Casey Quill", "Devon Reyes", "Emery Stone"].map((name, i) => ({
+        cwid: `zzz900${i + 2}`,
+        name,
+      })),
+    ];
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    await screen.findByTestId("bibliometrics-paper-90000100");
+    const rows = () => document.querySelectorAll('[data-testid^="bibliometrics-paper-"]');
+    expect(rows()).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 10" }));
+    expect(rows()).toHaveLength(10);
+    expect(screen.getByRole("button", { name: "Show top 5" })).toBeTruthy();
+
+    const row = screen.getByTestId("bibliometrics-paper-90000100");
+    expect(within(row).getByRole("button", { name: "Copy PMID" })).toBeTruthy();
+    expect(within(row).getByRole("link", { name: "DOI 10.5555/example.0" })).toBeTruthy();
+    const co = within(row).getByText(/WCM co-authors:/);
+    expect(co.textContent).toBe("WCM co-authors: Avery Marsh, Blake Okafor, Casey Quill +2 more");
+    fireEvent.click(within(co).getByRole("button", { name: "+2 more" }));
+    expect(co.textContent).toBe("WCM co-authors: Avery Marsh, Blake Okafor, Casey Quill, Devon Reyes, Emery Stone");
+    expect(within(row).getAllByRole("cell")[1]!.textContent).toBe("First");
+    expect(screen.getByRole("columnheader", { name: "Cited by (Scopus)" })).toBeTruthy();
+  });
+
+  it("marks a percentile early for papers from this year and last, and explains each metric behind an info mark", async () => {
+    const r = report(12);
+    r.papers.rows[0]!.year = 2025; // asOf is 2026-11-25
+    r.papers.rows[1]!.year = 2024;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const pctl = async (pmid: string) => within(await screen.findByTestId(`bibliometrics-paper-${pmid}`)).getAllByRole("cell")[2]!;
+    expect((await pctl("90000100")).textContent).toBe("95.0early");
+    expect((await pctl("90000101")).textContent).toBe("94.0");
+
+    expect(screen.queryByText(/relative citation ratio/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "About citation ratio" }));
+    expect(await screen.findByText(/relative citation ratio/)).toBeTruthy();
+    for (const name of ["About h-index, all publications", "About h5-index, last 5 years", "About NIH percentile", "About Cited by"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
+  });
+
+  it("copies a PMID and says Copied for 1.5 s", async () => {
+    respond(12);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const row = await screen.findByTestId("bibliometrics-paper-90000100");
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        fireEvent.click(within(row).getByRole("button", { name: "Copy PMID" }));
+      });
+      expect(writeText).toHaveBeenCalledWith("90000100");
+      expect(within(row).getByText("Copied")).toBeTruthy();
+      act(() => vi.advanceTimersByTime(1500));
+      expect(within(row).queryByText("Copied")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refetches on a filter change and points the Word download at the same filters", async () => {
@@ -248,12 +341,13 @@ describe("BibliometricsTool", () => {
     expect(card.textContent).toContain("cites 2 papers");
     expect(card.textContent).toContain("cites 1 paper");
     expect(within(card).queryByTestId("bibliometrics-patents-report")).toBeNull();
-    // Under the paper, behind "More", as the publication modal lists them.
+    // Under the paper, behind its Patents count.
     const row = screen.getByTestId("bibliometrics-paper-90000101");
-    fireEvent.click(within(row).getByRole("button", { name: "More" }));
+    fireEvent.click(within(row).getByRole("button", { name: "Patents 1" }));
     const below = document.getElementById("bibliometrics-citing-90000101")!;
-    expect(within(below).getByText("Patents that cite this paper")).toBeTruthy();
+    expect(within(below).getByText("1 patented invention citing this paper")).toBeTruthy();
     expect(within(below).getByText("Compound and uses")).toBeTruthy();
+    expect(within(below).getByText("Example Biotech, Inc. · granted 2022 · US 90000002 B2")).toBeTruthy();
   });
 
   it("shows the patents line, each paper's count and the Excel download when a patent cites the work", async () => {
@@ -268,12 +362,11 @@ describe("BibliometricsTool", () => {
     expect(screen.getByTestId("bibliometrics-patents-report").getAttribute("href")).toBe(
       "/edit/reports/patent-citations?person=zzz9001",
     );
-    // Plain text beside the other counts, singular for one, absent for none.
-    const paper = (i: number) => screen.getByTestId(`bibliometrics-paper-${90000100 + i}`).textContent ?? "";
-    expect(paper(0)).toContain("14 patents");
-    expect(paper(1)).toContain("1 patent");
-    expect(paper(1)).not.toContain("1 patents");
-    expect(paper(2)).not.toMatch(/\d patents?\b/);
+    // Each paper's count is in its impact line, absent for none.
+    const signals = (i: number) => screen.getByTestId(`bibliometrics-signals-${90000100 + i}`).textContent ?? "";
+    expect(signals(0)).toContain("Patents 14");
+    expect(signals(1)).toBe("Patents 1");
+    expect(signals(2)).not.toContain("Patents");
   });
 
   it("leaves out the link to report 25 for a viewer who may not open it", async () => {
