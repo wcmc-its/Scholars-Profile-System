@@ -704,7 +704,7 @@ export const OWN_PATENTS_NOTE =
 
 /** The Excel download of every patent citing the scholar's work. */
 export const PATENTS_DOWNLOAD_PATH = "/api/edit/bibliometrics/patents";
-export const PATENTS_DOWNLOAD_LABEL = "Download patents citing this work (Excel)";
+export const PATENTS_DOWNLOAD_LABEL = "Download patents citing any of the publications (Excel)";
 
 /** Help text behind the tab's info marks, beside each metric's label. */
 export const METRIC_HELP = {

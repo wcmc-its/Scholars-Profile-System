@@ -1,10 +1,10 @@
 /**
- * GET /api/edit/bibliometrics?cwid=&authorship=&from=&to=[&format=docx]
+ * GET /api/edit/bibliometrics?cwid=&authorship=&from=&to=[&format=docx|xlsx]
  * GET /api/edit/bibliometrics?cwid=&part=reach
  *
  * One scholar's Bibliometrics report (`EDIT_BIBLIOMETRICS`, off ⇒ 404): the
  * section model as JSON for the `/edit` tab, or the same model as a Word
- * attachment with `format=docx`. Read-only; nothing is persisted.
+ * attachment with `format=docx` or a workbook with `format=xlsx`. Read-only; nothing is persisted.
  *
  * `part=reach` answers `{ reach }` instead: the tab's "Downstream reach"
  * block, or null unless `DOWNSTREAM_REACH_REPORT` is on and the viewer can
@@ -26,7 +26,8 @@ import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isBibliometricsEnabled, parseBibliometricsFilters } from "@/lib/edit/bibliometrics";
 import { buildBibliometricsDocx } from "@/lib/edit/bibliometrics-docx";
-import { loadBibliometricsReport } from "@/lib/edit/bibliometrics-loader";
+import { loadBibliometrics, loadBibliometricsReport } from "@/lib/edit/bibliometrics-loader";
+import { buildBibliometricsWorkbook, loadCitingDocRows } from "@/lib/edit/bibliometrics-xlsx";
 import { patentReportHref } from "@/lib/edit/bibliometrics-patents";
 import { isTranslationalPortfolioReportEnabled } from "@/lib/edit/translational-portfolio-report";
 import { scholarPortfolioPath } from "@/lib/edit/translational-portfolio-scholar";
@@ -78,6 +79,21 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   try {
+    if (params.get("format") === "xlsx") {
+      const loaded = await loadBibliometrics(targetCwid, parseBibliometricsFilters(params));
+      if (!loaded) return editError(404, "scholar_not_found", "cwid");
+      const citing = await loadCitingDocRows(loaded.articles.map((p) => p.pmid));
+      const buffer = await buildBibliometricsWorkbook(loaded.report, loaded.articles, citing);
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="bibliometrics-${targetCwid}-${loaded.report.asOf}.xlsx"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
     const report = await loadBibliometricsReport(targetCwid, parseBibliometricsFilters(params));
     if (!report) return editError(404, "scholar_not_found", "cwid");
     if (params.get("format") !== "docx") {

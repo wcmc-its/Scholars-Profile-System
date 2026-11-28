@@ -675,3 +675,14 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* The Bibliometrics PDF is the tab printed (its Download menu). Popovers
+   never print; sections, table rows and list items keep together. */
+@media print {
+  [data-slot="popover-content"] {
+    display: none;
+  }
+  [data-slot="bibliometrics-tool"] :is(section, tr, li) {
+    break-inside: avoid;
+  }
+}

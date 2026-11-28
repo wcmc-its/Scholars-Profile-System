@@ -41,7 +41,7 @@ export function CopyPmid({ pmid, label = false }: { pmid: string; label?: boolea
         );
       }}
       className={cn(
-        "text-muted-foreground hover:text-foreground ml-0.5 inline-flex min-w-6 items-center justify-center gap-1 rounded align-middle",
+        "text-muted-foreground hover:text-foreground ml-0.5 inline-flex min-w-6 items-center justify-center gap-1 rounded align-middle print:hidden",
         label ? "text-apollo-slate min-h-7 text-xs" : "size-6",
       )}
     >

@@ -303,7 +303,7 @@ describe("BibliometricsTool", () => {
     }
   });
 
-  it("refetches on a filter change and points the Word download at the same filters", async () => {
+  it("refetches on a filter change and points the Word and spreadsheet downloads at the same filters", async () => {
     respond(12);
     render(<BibliometricsTool entityId="zzz9001" />);
     await screen.findByTestId("bibliometrics-report");
@@ -311,9 +311,42 @@ describe("BibliometricsTool", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.at(-1)![0]).toBe("/api/edit/bibliometrics?cwid=zzz9001&authorship=lead"),
     );
-    expect(screen.getByTestId("bibliometrics-download").getAttribute("href")).toBe(
+    fireEvent.click(screen.getByTestId("bibliometrics-download"));
+    expect(screen.getByTestId("bibliometrics-download-docx").getAttribute("href")).toBe(
       "/api/edit/bibliometrics?cwid=zzz9001&authorship=lead&format=docx",
     );
+    expect(screen.getByTestId("bibliometrics-download-xlsx").getAttribute("href")).toBe(
+      "/api/edit/bibliometrics?cwid=zzz9001&authorship=lead&format=xlsx",
+    );
+    expect(screen.getByText("Every file uses the current filters and notes the date.")).toBeTruthy();
+  });
+
+  it("prints the page for the PDF, with every fold open while it prints", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const print = vi.fn();
+    vi.stubGlobal("print", print);
+    try {
+      respond(12);
+      render(<BibliometricsTool entityId="zzz9001" />);
+      await screen.findByTestId("bibliometrics-report");
+      fireEvent.click(screen.getByTestId("bibliometrics-download"));
+      fireEvent.click(screen.getByTestId("bibliometrics-download-pdf"));
+      // The menu closes first, so it is not printed.
+      expect(screen.queryByTestId("bibliometrics-download-pdf")).toBeNull();
+      act(() => vi.runAllTimers());
+      expect(print).toHaveBeenCalledOnce();
+
+      const folds = [...document.querySelectorAll<HTMLDetailsElement>('[data-slot="bibliometrics-tool"] details')];
+      expect(folds.length).toBeGreaterThan(0);
+      expect(folds.every((d) => !d.open)).toBe(true);
+      act(() => void window.dispatchEvent(new Event("beforeprint")));
+      expect(folds.every((d) => d.open)).toBe(true);
+      act(() => void window.dispatchEvent(new Event("afterprint")));
+      expect(folds.every((d) => !d.open)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 
   it("marks the sections that follow the filters as Filtered", async () => {
