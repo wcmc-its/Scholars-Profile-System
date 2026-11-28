@@ -113,6 +113,7 @@ import {
   withReachPublicationDetails,
   type ModalCounts,
   type ReachDocRow,
+  type ReachNotable,
   type ReachDocSort,
   type ReachParams,
   type ReachPersonRow,
@@ -123,7 +124,7 @@ import {
 import { unitLabels } from "@/lib/edit/person-filter";
 import { loadPersonNames, UNKNOWN_PERSON } from "@/lib/edit/policy-citations-report";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 
 const RAIL_LEGEND = "mb-1.5 p-0 text-[13px] font-medium";
 const TEST = "downstream-reach";
@@ -251,6 +252,35 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
   );
 }
 
+/** The row's most notable citing document (spec C), then "+N more" for the
+ *  rest of what the row counts, which opens them all. */
+function NotableLine({ doc, more, moreHref }: { doc: ReachNotable; more: number; moreHref: string }) {
+  const parts = [doc.id, doc.facts, doc.type === "trial" ? null : doc.year].filter((x) => x !== null && x !== "");
+  const title = htmlToPlainText(doc.title, Number.POSITIVE_INFINITY);
+  return (
+    <div className="mt-1.5 flex min-w-0 items-baseline gap-1.5 text-[13px]" data-testid={`${TEST}-notable`}>
+      <span className="bg-apollo-surface-2 shrink-0 rounded px-1.5 py-px text-xs font-medium">{doc.kind}</span>
+      {parts.map((x) => (
+        <span key={String(x)} className="text-muted-foreground shrink-0">
+          {x} ·
+        </span>
+      ))}
+      <ExternalLink href={doc.url} className="min-w-0 truncate" title={title}>
+        {title}
+      </ExternalLink>
+      {more > 0 && (
+        <Link
+          href={moreHref}
+          aria-label={`${noun(more, ["more citing document", "more citing documents"])} of this paper`}
+          className={cn(LINK, "shrink-0")}
+        >
+          +{more.toLocaleString()} more
+        </Link>
+      )}
+    </div>
+  );
+}
+
 /** A count column's header (spec B3): a link that sorts by it, highest first,
  *  and lowest first on the next click; `aria-sort` says which. Plain text when
  *  the list does not sort (every publication in scope, newest first). */
@@ -354,6 +384,13 @@ function PublicationTable({
                     }
                   />
                 </div>
+                {r.notable && (
+                  <NotableLine
+                    doc={r.notable}
+                    more={reachTotal(r, types) - 1}
+                    moreHref={docsHref(r.pmid, null)}
+                  />
+                )}
                 <AuthorPills authors={r.authors} footer={footer} max={3} match={match} />
               </td>
               <td className={cn(TD, "text-right text-[15px] font-semibold")} data-testid={`${TEST}-cell-total`}>

@@ -93,6 +93,7 @@ afterEach(() => {
 const BASE = "/edit/reports/downstream-reach";
 const pub = (pmid: string, over: Partial<ReachPubRow> = {}): ReachPubRow => ({
   pmid,
+  notable: null,
   year: 2021,
   stage: "T0",
   clinical: 0,
@@ -361,6 +362,23 @@ describe("report 27 page", () => {
     expect(view.queryAllByTestId("downstream-reach-modal-count")).toHaveLength(0);
     const row = within(view.getAllByTestId("downstream-reach-pub-row")[0]);
     expect(queryOf(within(row.getByTestId("downstream-reach-cell-clinical")).getByRole("link").getAttribute("href")).get("view")).toBe("documents");
+  });
+
+  it("the most notable citing document: one line under the metadata, its title linked, then +N more", async () => {
+    const trial = { type: "trial" as const, kind: "Registered trial", id: "NCT01234567", facts: "Phase 2 · Completed", year: 2023, title: "A long <i>trial</i> title", url: "https://clinicaltrials.gov/study/NCT01234567" };
+    h.pubs.mockResolvedValue([
+      pub("10000001", { clinical: 2, trial: 1, notable: trial }),
+      pub("10000002", { patent: 1, notable: { type: "patent", kind: "Patent", id: "US 9,000,001 B2", facts: null, year: 2020, title: "A method", url: "https://patents.google.com/patent/US9000001B2" } }),
+    ]);
+    const view = await page({ basis: "cy" });
+    const [one, two] = view.getAllByTestId("downstream-reach-notable");
+    expect(one.textContent).toBe("Registered trialNCT01234567 ·Phase 2 · Completed ·A long trial title+2 more");
+    const title = within(one).getByRole("link", { name: "A long trial title" });
+    expect([title.getAttribute("href"), title.getAttribute("title"), title.getAttribute("target")]).toEqual([trial.url, "A long trial title", "_blank"]);
+    const more = within(one).getByRole("link", { name: "2 more citing documents of this paper" });
+    expect(more.getAttribute("href")).toBe(`${BASE}?${reachLinks(paramsOf("basis=cy")).paperDocs("10000001", null)}`);
+    // A patent shows its year; with nothing else counted there is no "+0 more".
+    expect(two.textContent).toBe("PatentUS 9,000,001 B2 ·2020 ·A method");
   });
 
   it("the Total opens the paper's citing documents of every ticked type; each header sorts, then reverses", async () => {

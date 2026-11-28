@@ -396,10 +396,21 @@ export function personFacetOptions<R extends { cwid: string; name: string }>(
 }
 
 /** An off-site link; anything that is not https renders as plain text. */
-export function ExternalLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {
-  if (!href.startsWith("https://")) return <span className={className}>{children}</span>;
+export function ExternalLink({
+  href,
+  className,
+  title,
+  children,
+}: {
+  href: string;
+  className?: string;
+  /** The full text when `children` is cut short. */
+  title?: string;
+  children: ReactNode;
+}) {
+  if (!href.startsWith("https://")) return <span className={className} title={title}>{children}</span>;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={cn(LINK, className)}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cn(LINK, className)} title={title}>
       {children}
     </a>
   );

@@ -73,6 +73,7 @@ import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-
 import { TOPIC_ACTIVITY_SCORE_FLOOR } from "@/lib/api/topic-activity";
 import type { EditSession } from "@/lib/auth/superuser";
 import { POLICY_REVIEWS_CAP, policyCitationBadgesOn } from "@/lib/citations/policy-rollup";
+import { trialDisplay } from "@/lib/citations/trials-patents";
 import {
   clinicalCitationsModalOn,
   patentCitationsModalOn,
@@ -869,19 +870,136 @@ export async function loadScopePage(
   return raw.map((r) => ({ pmid: r.pmid, year: num(r.year), stage: stageKeyOf(r.stage, r.confidence) }));
 }
 
-export type ReachPubRow = ReachPubCounts & PubDetails;
+/**
+ * Each row's most notable citing document (spec C): the one line an
+ * administrator can quote. Paul reorders the pick here and nowhere else:
+ *   - `REACH_NOTABLE_ORDER`: which type wins. Guidelines and policy lead now
+ *     that systematic reviews are a type of their own (decision 10); reviews,
+ *     not ranked by the spec, sit after clinical studies.
+ *   - `NOTABLE_WITHIN`: the order inside a type, highest first. Trials: phase
+ *     (4, 3, 2, 1, early 1, none), then completed, recruiting or active over
+ *     anything else, over withdrawn, terminated or suspended. Guidelines and
+ *     policy: health authority, guideline, consensus. Patents: granted over
+ *     applications. Clinical studies and reviews: none (no publication type is
+ *     stored for them, so "randomized controlled trial first" is not possible).
+ *   - Then the most recent, then the highest id.
+ * Only documents the row's counts take: the ticked types, under the own-work rule.
+ */
+export const REACH_NOTABLE_ORDER: readonly ReachType[] = ["policy", "trial", "clinical", "review", "patent"];
+const detail = (key: string) => Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(d.details, ${`$.${key}`}))`;
+const NOTABLE_WITHIN: Record<ReachType, Prisma.Sql> = {
+  policy: Prisma.sql`CASE d.level WHEN 'authority' THEN 3 WHEN 'guideline' THEN 2 ELSE 1 END`,
+  trial: Prisma.sql`(CASE WHEN ${detail("phase")} LIKE '%PHASE4%' THEN 5 WHEN ${detail("phase")} LIKE '%PHASE3%' THEN 4
+      WHEN ${detail("phase")} LIKE '%PHASE2%' THEN 3 WHEN ${detail("phase")} LIKE '%EARLY%' THEN 1
+      WHEN ${detail("phase")} LIKE '%PHASE1%' THEN 2 ELSE 0 END) * 3
+    + CASE WHEN ${detail("status")} IN ('COMPLETED', 'RECRUITING', 'ACTIVE_NOT_RECRUITING', 'ENROLLING_BY_INVITATION') THEN 2
+      WHEN ${detail("status")} IN ('WITHDRAWN', 'TERMINATED', 'SUSPENDED') THEN 0 ELSE 1 END`,
+  clinical: Prisma.sql`0`,
+  review: Prisma.sql`0`,
+  patent: Prisma.sql`IF(${detail("kind")} = 'application', 0, 1)`,
+};
+const levelCase = (pick: (t: ReachType, i: number) => Prisma.Sql): Prisma.Sql =>
+  Prisma.sql`CASE ${Prisma.join(
+    REACH_NOTABLE_ORDER.map((t, i) => Prisma.sql`WHEN d.level IN (${Prisma.join([...levelsOf(t)])}) THEN ${pick(t, i)}`),
+    " ",
+  )} END`;
 
-/** The rows of one page, or one sheet, with each publication's own columns
- *  and the authors the viewer may see (`loadPublicationDetails`, report 24's). */
+export type ReachNotable = {
+  type: ReachType;
+  /** "Clinical guideline", "Patent application": `docKind`. */
+  kind: string;
+  /** NCT number, patent number, or the journal or issuing body. */
+  id: string | null;
+  /** Trials: "Phase 2 · Completed". */
+  facts: string | null;
+  year: number | null;
+  title: string;
+  url: string;
+};
+
+/** The pick per PMID (`REACH_NOTABLE_ORDER`), one query per chunk of rows. */
+export async function loadReachNotable(p: ReachParams, pmids: readonly string[]): Promise<Map<string, ReachNotable>> {
+  const out = new Map<string, ReachNotable>();
+  const levels = tickedTypes(p).flatMap(levelsOf);
+  for (let i = 0; i < pmids.length; i += 500) {
+    const raw = await db.read.$queryRaw<
+      {
+        pmid: string;
+        level: string;
+        year: Num | null;
+        title: string;
+        url: string;
+        external_id: string;
+        journal: string | null;
+        journal_abbrev: string | null;
+        issuing_body: string | null;
+        phase: string | null;
+        status: string | null;
+        kind: string | null;
+      }[]
+    >`
+      SELECT x.* FROM (
+        SELECT l.pmid, d.level, d.year, d.title, d.url, d.external_id, d.journal, d.journal_abbrev, d.issuing_body,
+               ${detail("phase")} AS phase, ${detail("status")} AS status, ${detail("kind")} AS kind,
+               ROW_NUMBER() OVER (PARTITION BY l.pmid
+                 ORDER BY ${levelCase((_t, i) => Prisma.sql`${i}`)}, ${levelCase((t) => NOTABLE_WITHIN[t])} DESC,
+                          d.year DESC, d.id DESC) AS rn
+          FROM publication_citing_document l
+          JOIN citing_document d ON d.id = l.citing_document_id
+         WHERE l.pmid IN (${Prisma.join(pmids.slice(i, i + 500))})
+           AND d.level IN (${Prisma.join(levels)})
+           ${countedLinkSql(p)}
+      ) x WHERE x.rn = 1`;
+    for (const r of raw) {
+      const type = reachTypeOfLevel(r.level);
+      if (!type) continue;
+      // JSON_UNQUOTE of a JSON null is the string "null" (staging: 2,538 trials have no phase).
+      const val = (v: string | null) => (v === null || v === "null" ? null : v);
+      const trial = type === "trial" ? trialDisplay({ phase: val(r.phase), status: val(r.status) }) : null;
+      out.set(r.pmid, {
+        type,
+        kind: docKind({ type, level: r.level, application: val(r.kind) === "application" }),
+        id:
+          type === "patent"
+            ? (parsePatentId(r.external_id)?.display ?? r.external_id.toUpperCase())
+            : type === "trial"
+              ? r.external_id
+              : (r.issuing_body ?? r.journal_abbrev ?? r.journal),
+        facts: trial ? [trial.phase, trial.status].filter(Boolean).join(" · ") || null : null,
+        year: num(r.year),
+        title: r.title,
+        url: r.url,
+      });
+    }
+  }
+  return out;
+}
+
+export type ReachPubRow = ReachPubCounts & PubDetails & { notable: ReachNotable | null };
+
+/** The rows of one page, or one sheet, with each publication's own columns,
+ *  the authors the viewer may see (`loadPublicationDetails`, report 24's), and
+ *  its most notable citing document (`loadReachNotable`). */
 export async function withReachPublicationDetails(
   p: ReachParams,
   rows: readonly ReachPubCounts[],
 ): Promise<ReachPubRow[]> {
-  const pubs = await loadPublicationDetails(
-    p,
-    rows.map((r) => r.pmid),
-  );
-  return rows.map((r) => ({ ...r, ...(pubs.get(r.pmid) ?? { title: "", journal: null, doi: null, authors: [] }) }));
+  const types = tickedTypes(p);
+  const [pubs, notable] = await Promise.all([
+    loadPublicationDetails(
+      p,
+      rows.map((r) => r.pmid),
+    ),
+    loadReachNotable(
+      p,
+      rows.filter((r) => types.some((t) => r[t] > 0)).map((r) => r.pmid),
+    ),
+  ]);
+  return rows.map((r) => ({
+    ...r,
+    ...(pubs.get(r.pmid) ?? { title: "", journal: null, doi: null, authors: [] }),
+    notable: notable.get(r.pmid) ?? null,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1490,8 +1608,8 @@ export async function buildReachWorkbook(
 
   const pubs = sheet(
     "Publications",
-    ["PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Total", ...types.map((t) => REACH_TYPE_LABEL[t]), "DOI"],
-    [12, 70, 30, 8, 30, 40, 10, ...types.map(() => 14), 28],
+    ["PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Total", ...types.map((t) => REACH_TYPE_LABEL[t]), "Top citing document", "DOI"],
+    [12, 70, 30, 8, 30, 40, 10, ...types.map(() => 14), 60, 28],
   );
   for (const r of data.pubs) {
     pubs.addRow([
@@ -1503,6 +1621,7 @@ export async function buildReachWorkbook(
       r.authors.map((a) => `${a.name} (${a.position} author)`).join("; "),
       reachTotal(r, types),
       ...types.map((t) => r[t]),
+      r.notable ? [r.notable.kind, r.notable.id, plain(r.notable.title)].filter(Boolean).join(" · ") : null,
       r.doi,
     ]);
   }

@@ -79,6 +79,7 @@ import {
   reachTypeOfLevel,
   resolveReachParams,
   sortReachPublications,
+  REACH_NOTABLE_ORDER,
   stageKeyOf,
   tickedTypes,
   usesRollups,
@@ -266,6 +267,21 @@ function docGroups(p: ReachParams) {
 function answer(text: string, values: unknown[]): unknown[] {
   const p = cur;
   const lastTwo = () => values.slice(-2).map(Number) as [number, number];
+  // The most notable citing document per paper: the type order, then the newest, then the highest id.
+  if (text.includes("ROW_NUMBER() OVER (PARTITION BY l.pmid")) {
+    const types = tickedTypes(p);
+    return fx.pubs
+      .filter((pub) => values.includes(pub.pmid))
+      .flatMap((pub) => {
+        const rank = (d: Doc) => REACH_NOTABLE_ORDER.indexOf(reachTypeOfLevel(d.level)!);
+        const [best] = counted(pub, p)
+          .map((l) => doc(l.doc))
+          .filter((d) => types.includes(reachTypeOfLevel(d.level)!))
+          .sort((a, b) => rank(a) - rank(b) || (b.year ?? 0) - (a.year ?? 0) || b.id - a.id);
+        if (!best) return [];
+        return [{ pmid: pub.pmid, level: best.level, year: best.year, title: best.title, url: `https://example.org/doc/${best.id}`, external_id: best.level === "trial" ? "NCT00000003" : `x${best.id}`, journal: "Journal of Examples", journal_abbrev: null, issuing_body: null, phase: best.level === "trial" ? "PHASE2" : "null", status: best.level === "trial" ? "COMPLETED" : "null", kind: best.application ? "application" : null }];
+      });
+  }
   if (text.includes("SELECT d.id, d.level, d.dedup_key, d.title FROM citing_document d WHERE d.id IN")) {
     return fx.docs.filter((d) => values.includes(d.id)).map((d) => ({ id: d.id, level: d.level, dedup_key: d.dedupKey, title: d.title }));
   }
@@ -789,6 +805,27 @@ describe("where the counts come from", () => {
     expect(missing.data.pubTotal).toBe(0);
   });
 
+  it("the most notable citing document: one ranked query per page, under the ticked types and the own-work rule", async () => {
+    const { p, data } = await open("stage=any");
+    const rows = await withReachPublicationDetails(p, data.pubs);
+    const row = (pmid: string) => rows.find((r) => r.pmid === pmid)!;
+    // 102: a guideline beats a review; 104: the patent, as its own trial is left out.
+    // A JSON null reads back as the string "null": no facts, not "Null".
+    expect(row("102").notable).toMatchObject({ type: "policy", facts: null });
+    expect(row("104").notable).toMatchObject({ type: "patent" });
+    // 101's own clinical article is not counted; its trial outranks the clinical study.
+    expect(row("101").notable).toMatchObject({ type: "trial", id: "NCT00000003", facts: "Phase 2 · Completed" });
+    const sql = calls().find((c) => c.text.includes("ROW_NUMBER() OVER (PARTITION BY l.pmid"))!;
+    expect(sql.text).toContain("AND NOT ((d.level = 'clinical'");
+    // The type order is the constant's, levels and all.
+    const order = REACH_NOTABLE_ORDER.flatMap((t) => REACH_LEVELS[t]);
+    expect(sql.values.filter((v) => typeof v === "string" && order.includes(v as never)).slice(0, order.length)).toEqual(order);
+    // Only the ticked types are picked from.
+    const clinical = await open("stage=any&ctype=clinical");
+    const only = await withReachPublicationDetails(clinical.p, clinical.data.pubs);
+    expect(only.find((r) => r.pmid === "101")!.notable).toMatchObject({ type: "clinical" });
+  });
+
   it("sorts: most citing documents over the ticked types, or publication year", () => {
     const row = (pmid: string, year: number, c: Partial<ReachCounts>) => ({
       pmid,
@@ -1281,11 +1318,16 @@ describe("scope narrowing", () => {
     cur = await resolveReachParams(parse(qs), ADMIN);
     return cur;
   };
-  /** Every query either carries the viewer's department, or reads citing-document facts alone. */
-  const expectEveryQueryScoped = () => {
+  /** Every query either carries the viewer's department, or reads citing-document facts alone, or
+   *  (the most notable citing document) reads the links of papers already listed under the scope. */
+  const expectEveryQueryScoped = (listed: readonly string[] = []) => {
     let scopedQueries = 0;
     for (const { text, values } of calls()) {
-      if (readsPeopleOrPapers(text)) {
+      if (text.includes("ROW_NUMBER() OVER (PARTITION BY l.pmid")) {
+        const pmids = values.filter((v) => typeof v === "string" && /^\d+$/.test(v));
+        expect(pmids.length, text).toBeGreaterThan(0);
+        for (const v of pmids) expect(listed, text).toContain(v);
+      } else if (readsPeopleOrPapers(text)) {
         expect(text, text).toContain("s.dept_code IN (?)");
         expect(values, text).toContain("N1");
         scopedQueries += 1;
@@ -1338,7 +1380,7 @@ describe("scope narrowing", () => {
     const data = await loadReach(p, { views: ["publications", "documents", "people"], limit: EVERYTHING });
     await withReachPublicationDetails(p, data.pubs);
     await loadModalCounts(p, data.pubs.map((r) => r.pmid));
-    expect(expectEveryQueryScoped()).toBeGreaterThanOrEqual(5);
+    expect(expectEveryQueryScoped(data.pubs.map((r) => r.pmid))).toBeGreaterThanOrEqual(5);
   });
 
   it("a unit administrator sees only their units' papers and people", async () => {
@@ -1403,6 +1445,7 @@ describe("scope narrowing", () => {
 describe("the workbook", () => {
   const pub = (over: Partial<ReachPubRow> = {}): ReachPubRow => ({
     pmid: "101",
+    notable: null,
     year: 2021,
     stage: "T0",
     clinical: 4,
@@ -1453,8 +1496,8 @@ describe("the workbook", () => {
     );
     expect(wb.worksheets.map((w) => w.name)).toEqual(["Publications", "Citing documents", "People", "Criteria"]);
     const pubs = wb.getWorksheet("Publications")!;
-    expect(pubs.getRow(1).values).toEqual([undefined, "PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Total", "Clinical studies", "Patents", "DOI"]);
-    expect(pubs.getRow(2).values).toEqual([undefined, "101", "A paper about examples", "Journal of Examples", 2021, "T0 · Basic research", "Ada Example (first author)", 6, 4, 2, "10.1000/example.101"]);
+    expect(pubs.getRow(1).values).toEqual([undefined, "PMID", "Title", "Journal", "Year", "Stage", "WCM authors", "Total", "Clinical studies", "Patents", "Top citing document", "DOI"]);
+    expect(pubs.getRow(2).values).toEqual([undefined, "101", "A paper about examples", "Journal of Examples", 2021, "T0 · Basic research", "Ada Example (first author)", 6, 4, 2, undefined, "10.1000/example.101"]);
     expect(wb.getWorksheet("Citing documents")!.getRow(2).values).toEqual([undefined, "Example method", "Patent", "US90000001B2", 2024, 2, "https://example.org/doc/7"]);
     expect(wb.getWorksheet("People")!.getRow(1).values).toEqual([
       undefined,
@@ -1480,9 +1523,10 @@ describe("the workbook", () => {
       "Guidelines and policy",
       "Systematic reviews",
       "Patents",
+      "Top citing document",
       "DOI",
     ]);
-    expect((pubs.getRow(2).values as unknown[]).slice(7)).toEqual([10, 4, 1, 0, 3, 2, "10.1000/example.101"]);
+    expect((pubs.getRow(2).values as unknown[]).slice(7)).toEqual([10, 4, 1, 0, 3, 2, undefined, "10.1000/example.101"]);
     const people = wb.getWorksheet("People")!;
     expect((people.getRow(1).values as unknown[]).slice(7)).toEqual([
       "Papers cited by clinical studies",
@@ -1496,7 +1540,7 @@ describe("the workbook", () => {
     const only = await read(
       await buildReachWorkbook({ ...parse("ctype=review"), scope: null }, { pubs: [pub()], pubTotal: 1, docs: [], docTotal: 0, people: [person(1)] }, AT),
     );
-    expect((only.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Total", "Systematic reviews", "DOI"]);
+    expect((only.getWorksheet("Publications")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Total", "Systematic reviews", "Top citing document", "DOI"]);
     expect((only.getWorksheet("People")!.getRow(1).values as unknown[]).slice(7)).toEqual(["Papers cited in systematic reviews"]);
     const criteria = new Map(
       (only.getWorksheet("Criteria")!.getSheetValues() as unknown[][]).filter(Boolean).map((r) => [String(r[1]), String(r[2])]),
