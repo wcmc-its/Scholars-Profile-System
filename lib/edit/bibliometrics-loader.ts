@@ -14,9 +14,12 @@ import { shapeScholarInventions, shapeTrialPatentCitations } from "@/lib/citatio
 import { OWN_FLAG, ownFlagSql } from "@/lib/edit/downstream-reach-report";
 import { loadPatentDataEnd } from "@/lib/edit/patent-citations-report";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { htmlToPlainText } from "@/lib/utils";
 import {
   buildBibliometricsReport,
   inScope,
+  type BibliometricsCitingDoc,
+  type CitingLevel,
   type BibliometricsFilters,
   type BibliometricsPubRow,
   type BibliometricsReport,
@@ -100,6 +103,77 @@ export async function loadScholarPublications(cwid: string): Promise<{
   return { scholar, all, visible };
 }
 
+/** The research articles inside the filters, as the report counts them. */
+const scopedArticles = (visible: readonly BibliometricsPubRow[], filters: BibliometricsFilters) =>
+  visible.filter((p) => p.publicationType === "Academic Article" && inScope(p, filters));
+
+/** Citing documents one Downstream impact list sends, newest first. */
+export const CITING_LIST_CAP = 500;
+
+const LEVEL_COUNT: Record<CitingLevel, (p: BibliometricsPubRow) => number> = {
+  authority: (p) => p.authorityCount,
+  guideline: (p) => p.guidelineCount,
+  consensus: (p) => p.consensusCount,
+  review: (p) => p.reviewCount,
+  clinical: (p) => p.clinicalCiteCount ?? 0,
+  trial: (p) => p.trialCount ?? 0,
+};
+
+/**
+ * The citing documents behind one Citing documents count of the tab (or one
+ * health authority's count with `body`): the research articles in scope,
+ * counted as the report counts them (policy levels once per `dedup_key`,
+ * clinical studies and trials once per document, the authors' own left out).
+ * Newest first, the first `CITING_LIST_CAP`; `total` counts them all. Null for
+ * a cwid with no scholar.
+ */
+export async function loadCitingDocuments(
+  cwid: string,
+  filters: BibliometricsFilters,
+  level: CitingLevel,
+  body: string | null,
+): Promise<{ docs: BibliometricsCitingDoc[]; total: number } | null> {
+  const pubs = await loadScholarPublications(cwid);
+  if (!pubs) return null;
+  const pmids = scopedArticles(pubs.visible, filters)
+    .filter((p) => LEVEL_COUNT[level](p) > 0)
+    .map((p) => p.pmid);
+  if (pmids.length === 0) return { docs: [], total: 0 };
+  const own = level === "clinical" || level === "trial" ? Prisma.sql`AND NOT ${ownFlagSql("l", OWN_FLAG[level]!)}` : Prisma.empty;
+  const byBody = level === "authority" && body ? Prisma.sql`AND d.issuing_body = ${body}` : Prisma.empty;
+  // ponytail: every link is read and deduplicated here (slim rows; a heavily
+  // reviewed scholar's systematic reviews are the largest). Group in SQL if
+  // that ever shows in the click's latency.
+  const rows = await db.read.$queryRaw<
+    { id: number; title: string; url: string | null; year: number | null; body: string | null; journal: string | null; publisher: string | null; dk: string }[]
+  >`
+    SELECT d.id AS id, d.title AS title, d.url AS url, d.year AS year, d.issuing_body AS body,
+           d.journal AS journal, d.publisher AS publisher, d.dedup_key AS dk
+      FROM publication_citing_document l
+      JOIN citing_document d ON d.id = l.citing_document_id
+     WHERE l.pmid IN (${Prisma.join(pmids)})
+       AND d.level = ${level}
+       ${byBody}
+       ${own}
+     ORDER BY d.year DESC, d.id ASC`;
+  const seen = new Set<string>();
+  const docs: BibliometricsCitingDoc[] = [];
+  for (const r of rows) {
+    // The counts on the tab: policy documents once per dedup key, the rest once per document.
+    const key = level === "clinical" || level === "trial" ? `#${r.id}` : r.dk;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    docs.push({
+      id: Number(r.id),
+      title: r.title,
+      url: r.url,
+      year: r.year === null ? null : Number(r.year),
+      source: r.body ?? (r.journal ? htmlToPlainText(r.journal, Number.POSITIVE_INFINITY) : r.publisher),
+    });
+  }
+  return { docs: docs.slice(0, CITING_LIST_CAP), total: docs.length };
+}
+
 export async function loadBibliometricsReport(
   cwid: string,
   filters: BibliometricsFilters,
@@ -121,7 +195,7 @@ export async function loadBibliometricsReport(
   // Distinct citing documents per level: a guideline citing two of the
   // scholar's papers counts once, which per-paper rollups cannot say.
   // Only the research articles inside the filters, as the report counts them.
-  const scoped = visible.filter((p) => p.publicationType === "Academic Article" && inScope(p, filters));
+  const scoped = scopedArticles(visible, filters);
   const citedPmids = scoped
     .filter((p) => p.authorityCount + p.guidelineCount + p.consensusCount + p.reviewCount > 0)
     .map((p) => p.pmid);

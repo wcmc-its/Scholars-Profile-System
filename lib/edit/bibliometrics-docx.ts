@@ -29,6 +29,7 @@ import {
   UNSTAGED_REASONS,
   papersNote,
   percentileText,
+  summaryText,
   unratedNote,
   type BibliometricsPaper,
   type BibliometricsReport,
@@ -150,7 +151,7 @@ export async function buildBibliometricsDocx(r: BibliometricsReport): Promise<Bu
     ...(filters ? [para(`Filters: ${filters}.`)] : []),
 
     heading("Summary"),
-    para(r.summary.length > 0 ? `${r.scholar.name} ${r.summary.join(" ")}` : NO_SUMMARY_NOTE),
+    para(r.summary.length > 0 ? `${r.scholar.name} ${summaryText(r).join(" ")}` : NO_SUMMARY_NOTE),
 
     heading("Citation metrics"),
     para(`h-index (all publications): ${r.metrics.hIndex}`),
