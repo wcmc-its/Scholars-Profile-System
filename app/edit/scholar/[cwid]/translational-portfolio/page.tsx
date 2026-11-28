@@ -30,6 +30,7 @@ import { reportMetaFor } from "@/lib/edit/report-meta";
 import { loadPortfolioChoices } from "@/lib/edit/translational-portfolio-report";
 import {
   parseScholarPortfolioParams,
+  backParams,
   reportHrefFor,
   resolveScholarPortfolioAccess,
   scholarPortfolioPath,
@@ -64,11 +65,12 @@ export default async function ScholarTranslationalPortfolioPage({
   const { session, scholar } = access;
 
   const p = parseScholarPortfolioParams(toSearchParams(sp));
+  const { units } = backParams(p);
   const [meta, unitName] = await Promise.all([
     reportMetaFor("26"),
-    p.units.length > 0
+    units.length > 0
       ? loadPortfolioChoices()
-          .then((c) => p.units.map((u) => c.labels.get(u) ?? u).join(", "))
+          .then((c) => units.map((u) => c.labels.get(u) ?? u).join(", "))
           .catch(() => "")
       : Promise.resolve(""),
   ]);

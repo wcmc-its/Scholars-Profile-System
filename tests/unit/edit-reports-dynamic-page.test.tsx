@@ -467,7 +467,7 @@ describe("/edit/reports/[report] — report 26 with one scholar", () => {
   it("hands ?cwid= to the scholar's own page with the report's filters, before the report's gate", async () => {
     const q = { cwid: "abc1234", unit: "dept:N1", from: "2021", to: "2024", area: "area_a", inst: "INST1", stage: "T2", view: "activities" };
     await expect(page("translational-portfolio", q)).rejects.toThrow(
-      "__REDIRECT__:/edit/scholar/abc1234/translational-portfolio?unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1",
+      `__REDIRECT__:/edit/scholar/abc1234/translational-portfolio?from=2021&to=2024&area=area_a&r=${encodeURIComponent("unit=dept%3AN1&from=2021&to=2024&area=area_a&inst=INST1&stage=T2&view=activities")}`,
     );
     // The number form gets there too, through the slug.
     await expect(page("26", { cwid: "abc1234" })).rejects.toThrow("__REDIRECT__:/edit/reports/translational-portfolio?cwid=abc1234");

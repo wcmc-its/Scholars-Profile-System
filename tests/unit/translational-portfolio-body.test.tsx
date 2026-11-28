@@ -55,7 +55,6 @@ const DATA: PortfolioData = {
   areaOrder: [],
   scholars: { total: 0, rows: [] },
   person: null,
-  lookup: [],
   activities: { total: 0, pmids: [] },
 };
 const TILE: PortfolioReachTile = {
@@ -130,7 +129,7 @@ describe("report 26's Downstream reach tile", () => {
   });
 
   it("leaves the rest of the page as it was", async () => {
-    const strip = (html: string) => html.replace(/ id="[^"]*"| aria-labelledby="[^"]*"| for="[^"]*"/g, "");
+    const strip = (html: string) => html.replace(/ id="[^"]*"| aria-labelledby="[^"]*"| aria-controls="[^"]*"| for="[^"]*"/g, "");
     const before = strip((await page()).container.innerHTML);
     cleanup();
     h.tile.mockResolvedValue(TILE);
@@ -211,8 +210,9 @@ describe("report 26's redesigned page", () => {
     expect(li.textContent).toContain("6 staged papers");
     expect(li.textContent).toMatch(/T0–T1–T21T3–45/);
     const link = within(li).getByRole("link", { name: "Translational portfolio for Example Person 1" });
+    // Seeded from the report's years and area; the report's whole state rides in `r` for the way back.
     expect(link.getAttribute("href")).toBe(
-      "/edit/scholar/abc1001/translational-portfolio?unit=dept%3AN1&from=2020&to=2021&area=area_a&inst=INST1",
+      `/edit/scholar/abc1001/translational-portfolio?from=2020&to=2021&area=area_a&r=${encodeURIComponent("unit=dept%3AN1&from=2020&to=2021&area=area_a&inst=INST1&by=area")}`,
     );
     expect(within(li).getByRole("link", { name: "Example Person 1" }).getAttribute("href")).toBe(link.getAttribute("href"));
     expect(within(li).getByRole("link", { name: "91" }).getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/91/");
@@ -232,18 +232,13 @@ describe("report 26's redesigned page", () => {
     expect(within(two).getByRole("link", { name: "Translational portfolio for Example Person 2" })).toBeTruthy();
   });
 
-  it("links a lookup match to the scholar's page only when the viewer may open it", async () => {
-    const who = (cwid: string, name: string) => ({ cwid, name, title: "Professor", department: "Examples", slug: null });
-    h.portfolio.mockResolvedValue({ ...DATA, lookup: [who("abc2001", "Example Lookup A"), who("abc2002", "Example Lookup B")] });
-    h.access.mockResolvedValue(new Set(["abc2001"]));
+  it("looks scholars up in the rail as you type, not in a card on the page", async () => {
     const { container } = await page({ ...SP, q: "Example" });
-    expect(h.access).toHaveBeenCalledWith(["abc2001", "abc2002"]);
-    const lookup = within(container).getByTestId("portfolio-lookup");
-    const links = within(lookup).getAllByTestId("portfolio-lookup-link");
-    expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/edit/scholar/abc2001/translational-portfolio?unit=dept%3AN1&from=2020&to=2021");
-    expect(lookup.textContent).toContain("Example Lookup B");
-    expect(lookup.textContent).toContain("can\u2019t open this scholar\u2019s portfolio");
+    const rail = within(container).getAllByTestId("portfolio-rail-scholar")[0];
+    const input = within(rail).getByTestId("portfolio-lookup-input");
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("name")).toBeNull(); // not a filter: the form never sends it
+    expect(within(container).queryByTestId("portfolio-lookup")).toBeNull();
   });
 
   it("keeps every unit of an old several-unit link through a rail change, and says so", async () => {

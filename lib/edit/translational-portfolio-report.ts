@@ -142,10 +142,13 @@ export type PortfolioParams = {
  *  window starting before it reads as a shift that is only missing data. */
 export const FIRST_STAGED_YEAR = 2020;
 
-/** The default window: `FIRST_STAGED_YEAR` through the last complete year. */
+/** The default window: `FIRST_STAGED_YEAR` through the current year. The
+ *  current year is partial, but shares are within each year and its staging
+ *  keeps pace (2026: 44% staged, 2025: 47%, staging 2026-11-28), so it reads
+ *  like any other year; only its counts are smaller. */
 export function defaultYears(now = new Date()): { from: number; to: number } {
   const y = now.getUTCFullYear();
-  return { from: FIRST_STAGED_YEAR, to: Math.max(FIRST_STAGED_YEAR, y - 1) };
+  return { from: FIRST_STAGED_YEAR, to: Math.max(FIRST_STAGED_YEAR, y) };
 }
 
 export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
@@ -178,15 +181,6 @@ export function parsePortfolioParams(sp: URLSearchParams): PortfolioParams {
     view: sp.get("view") === "activities" ? "activities" : "scholars",
     page: int("page", 1, 1, 10_000),
   };
-}
-
-/** Report 8's `unit=inst:CODE` values (primary institution), which
- *  `parsePortfolioParams` leaves out of `units`: the scholar page carries
- *  them for its link back. */
-export function portfolioUnitInsts(sp: URLSearchParams): string[] {
-  return parsePersonFilter(sp)
-    .unitValues.filter((u) => u.startsWith("inst:"))
-    .map((u) => u.slice("inst:".length));
 }
 
 /** The params the report page and its `.xlsx` read: never one scholar. One
@@ -517,8 +511,6 @@ export type PortfolioData = {
   scholars: { total: number; rows: (PortfolioScholar & { n: number; counts: StageCounts; works: RecentWork[] })[] };
   /** The scoped scholar (`cwid`), with their recent staged papers. */
   person: (PortfolioScholar & { works: RecentWork[] }) | null;
-  /** The lookup's matches (`q`), up to 8. */
-  lookup: PortfolioScholar[];
   /** The Activities list's page of pmids, newest first, and its total. */
   activities: { total: number; pmids: string[] };
 };
@@ -537,8 +529,9 @@ export async function loadPortfolioChoices(): Promise<PortfolioChoices> {
   return { facets, labels: unitLabels(facets), areas };
 }
 
-/** Scholars matching the lookup text: exact CWID, or a name containing it. */
-async function lookupScholars(q: string): Promise<PortfolioScholar[]> {
+/** Scholars matching the lookup text: exact CWID, or a name containing it.
+ *  The rail's type-ahead (`/api/edit/reports/translational-portfolio/scholars`). */
+export async function lookupScholars(q: string): Promise<PortfolioScholar[]> {
   if (q.length < 2) return [];
   const rows = await db.read.scholar.findMany({
     where: {
@@ -577,7 +570,7 @@ export async function loadPortfolio(
   const byYear = !p.cwid && p.areas.length === 0;
   // The Scholars list's groupings share one query over its first / senior scope.
   const scholarGroups = [...(showScholars ? (["cwid"] as const) : []), ...(p.by === "area" ? (["areaPeople"] as const) : [])];
-  const [counts, baselineMap, centers, scholarCounts, lookup, person] = await Promise.all([
+  const [counts, baselineMap, centers, scholarCounts, person] = await Promise.all([
     stageCounts(ac, extra, ["all", "year", "area", ...(p.by === "area" ? [] : [p.by])], byYear),
     p.units.length > 0
       ? stageCounts(articleScope(p, { units: [] }), extraSql(p, { insts: false }), ["all"], byYear).then((m) => m.get("all")!)
@@ -586,7 +579,6 @@ export async function loadPortfolio(
     scholarGroups.length > 0
       ? stageCounts(acScholars, extra, scholarGroups, byYear, p.stages.length > 0 ? p.stages : TRANSLATIONAL_STAGES)
       : Promise.resolve(new Map<"cwid" | "areaPeople", Map<string, StageCounts>>()),
-    opts.forExport ? Promise.resolve([]) : lookupScholars(p.q),
     p.cwid && !opts.forExport ? loadScholars([p.cwid]) : Promise.resolve(new Map<string, PortfolioScholar>()),
   ]);
   const all = counts.get("all")!;
@@ -682,7 +674,6 @@ export async function loadPortfolio(
       }),
     },
     person: personRow ? { ...personRow, works: personWorks.get(personRow.cwid) ?? [] } : null,
-    lookup,
     activities: {
       total: p.stages.length > 0 ? countsIn(allCounts, p.stages) : countsTotal(allCounts),
       pmids: activities,
