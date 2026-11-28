@@ -309,12 +309,16 @@ export function shapeTrialPatentCitations(
 }
 
 /** One invention citing some of a scholar's papers, with how many of them. */
-export type ScholarInvention = CitingInvention & { papers: number };
+export type ScholarInvention = CitingInvention & {
+  papers: number;
+  /** The scholar's papers it cites (`papers` of them), for "cites <title>". */
+  pmids: string[];
+};
 
 /**
  * The inventions citing any of a scholar's papers (the Bibliometrics patents
  * card): patents grouped into inventions as the publication modal groups
- * them, most of the scholar's papers cited first, then newest. The first
+ * them, newest first, then most of the scholar's papers cited. The first
  * `TRIAL_PATENT_CAP` are sent with the true total; the Excel download has all.
  */
 export function shapeScholarInventions(
@@ -329,7 +333,7 @@ export function shapeScholarInventions(
     families.set(d.dedupKey, f);
   }
   const items = [...families.values()]
-    .map((f) => ({ ...toInvention([...f.docs.values()]), papers: f.papers.size }))
-    .sort((a, b) => b.papers - a.papers || (b.year ?? 0) - (a.year ?? 0) || a.id - b.id);
+    .map((f) => ({ ...toInvention([...f.docs.values()]), papers: f.papers.size, pmids: [...f.papers] }))
+    .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.papers - a.papers || a.id - b.id);
   return { items: items.slice(0, TRIAL_PATENT_CAP), total: items.length };
 }

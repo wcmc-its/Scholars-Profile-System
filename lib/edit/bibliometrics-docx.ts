@@ -184,16 +184,25 @@ export async function buildBibliometricsDocx(r: BibliometricsReport): Promise<Bu
 
     ...(r.stages ? stageBlocks(r.stages, filters) : []),
 
-    heading("Guideline and policy citations"),
+    heading("Downstream impact"),
     table(
-      ["Cited in", "Papers cited", "Citing documents"],
-      r.policy.map((l) => [
-        l.bodies.length > 0
-          ? `${l.label} (${l.bodies.map((b) => `${b.body} · ${b.count}`).join(", ")})`
-          : l.label,
-        String(l.papers),
-        String(l.documents),
-      ]),
+      ["Cited in", "Articles cited", "Citing documents"],
+      [
+        ...r.policy.map((l) => [
+          l.bodies.length > 0
+            ? `${l.label} (${l.bodies.map((b) => `${b.body} · ${b.count}`).join(", ")})`
+            : l.label,
+          String(l.papers),
+          String(l.documents),
+        ]),
+        ["Clinical studies (excluding the article's own authors)", String(r.research.clinical.papers), String(r.research.clinical.documents)],
+        ["Registered trials (excluding the article's own authors)", String(r.research.trial.papers), String(r.research.trial.documents)],
+        [
+          `Patents${r.patents.dataEnd ? ` (patent data through ${r.patents.dataEnd})` : ""}`,
+          String(r.patents.papers),
+          `${r.patents.inventions} inventions`,
+        ],
+      ],
     ),
 
     heading("Definitions and sources"),

@@ -204,13 +204,43 @@ describe("the tab load", () => {
     expect(h.links).not.toHaveBeenCalled();
   });
 
-  it("lists the inventions on the card, most of the scholar's papers cited first, for every viewer", async () => {
+  it("counts distinct clinical studies and trials for the articles in scope, the authors' own left out", async () => {
+    h.authorships.mockImplementation(async (args: { where: { cwid?: string } }) =>
+      args.where.cwid
+        ? PAPERS.map(authorship).map((a) =>
+            a.publication.pmid === "90000101"
+              ? { ...a, publication: { ...a.publication, clinicalCiteCount: 3, trialCount: 1 } }
+              : a.publication.pmid === "90000102" // a review: not a research article
+                ? { ...a, publication: { ...a.publication, clinicalCiteCount: 9 } }
+                : a,
+          )
+        : [],
+    );
+    const base = h.queryRaw.getMockImplementation()!;
+    h.queryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) =>
+      strings.join("?").includes("d.level IN ('clinical', 'trial')")
+        ? [
+            { level: "clinical", n: 2n },
+            { level: "trial", n: 1n },
+          ]
+        : base(strings, ...values),
+    );
     const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
-    expect(report!.patents.list.map((i) => [i.title, i.papers, i.granted, i.related])).toEqual([
-      ["Example composition 2", 2, true, 2], // the family's earliest grant stands for it
-      ["Example composition 1", 1, false, 0],
+    expect(report!.research).toEqual({ clinical: { papers: 1, documents: 2 }, trial: { papers: 1, documents: 1 } });
+    const q = calls().find((c) => c.text.includes("d.level IN ('clinical', 'trial')"))!;
+    expect(q.values).toContain("90000101");
+    expect(q.values).not.toContain("90000102");
+    expect(q.text).toContain("$.ownWork");
+    expect(q.text).toContain("$.ownTrial");
+  });
+
+  it("lists the inventions newest first, with the papers each cites, for every viewer", async () => {
+    const report = await loadBibliometricsReport(CWID, { authorship: "all", yearFrom: null, yearTo: null });
+    expect(report!.patents.list.map((i) => [i.title, i.year, i.papers, i.pmids, i.granted, i.related])).toEqual([
+      ["Example composition 1", 2022, 1, ["90000101"], false, 0],
+      ["Example composition 2", 2019, 2, ["90000101", "90000102"], true, 2], // the family's earliest grant stands for it
     ]);
-    expect(report!.patents.list[0]!.holder).toBe("Example Biotech, Inc.");
+    expect(report!.patents.list[1]!.holder).toBe("Example Biotech, Inc.");
   });
 
   it("lists each listed paper's own citing inventions, as the publication modal does", async () => {

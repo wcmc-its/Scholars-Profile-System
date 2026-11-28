@@ -323,9 +323,8 @@ describe("BibliometricsTool", () => {
     const marked = [...document.querySelectorAll("h3")]
       .filter((h) => h.nextElementSibling?.textContent === "Filtered")
       .map((h) => h.textContent);
-    // Every section but Downstream reach (one scholar, unfiltered, until it
-    // joins Downstream impact); the h-index and h5 tiles say "all publications".
-    expect(marked).toEqual(["Summary", "Output", "Guideline and policy citations", "Most impactful papers"]);
+    // Every section; the h-index and h5 tiles say "all publications".
+    expect(marked).toEqual(["Summary", "Output", "Downstream impact", "Most impactful papers"]);
     // The filters and Download share the bar above the sections.
     const bar = screen.getByRole("heading", { level: 2, name: "Bibliometrics" }).closest("header")!;
     expect(within(bar).getByLabelText("First or senior author only")).toBeTruthy();
@@ -347,9 +346,56 @@ describe("BibliometricsTool", () => {
     expect(screen.getByTestId(`bibliometrics-year-${r.output.byYear[0]!.year}`).children).toHaveLength(0);
   });
 
-  it("lists the citing inventions on the card and under a paper, for a viewer with no report access", async () => {
+  it("puts policy, research and invention citations in one Downstream impact table; each Articles cited count lists its articles", async () => {
+    const pubs = [
+      pub(0, {
+        title: "A guideline paper",
+        guidelineCount: 1,
+        authorityCount: 1,
+        authorityBodies: [{ body: "WHO", count: 1 }],
+        clinicalCiteCount: 3,
+      }),
+      pub(1, { title: "A trial paper", year: 2021, trialCount: 2, clinicalCiteCount: 1 }),
+      pub(2),
+    ];
+    const r = buildBibliometricsReport({
+      scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
+      visible: pubs,
+      all: pubs,
+      filters: { authorship: "all", yearFrom: null, yearTo: null },
+      now: new Date("2026-11-25T12:00:00Z"),
+    });
+    r.policy[0]!.bodies = [{ body: "WHO", count: 4 }];
+    r.research.clinical.documents = 5; // the loader's distinct count
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const impact = await screen.findByTestId("bibliometrics-impact");
+    expect([...impact.querySelectorAll('th[scope="colgroup"]')].map((th) => th.textContent)).toEqual([
+      "Policy and practice",
+      "Research by others",
+      "Invention",
+    ]);
+    const line = (label: string) =>
+      [...impact.querySelectorAll('tbody th[scope="row"]')].find((th) => th.textContent!.startsWith(label))!.closest("tr")!;
+    expect(line("Health authorities").textContent).toContain("WHO 4");
+    expect(line("Clinical studies").textContent).toBe("Clinical studies (excluding the article\u2019s own authors)25");
+    // A zero is plain text, never a button.
+    expect(within(line("Consensus statements")).queryByRole("button")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("bibliometrics-cited-clinical"));
+    expect(within(impact).getByRole("link", { name: "A trial paper" })).toBeTruthy(); // newest first
+    expect(within(impact).getByRole("link", { name: "A guideline paper" })).toBeTruthy();
+    fireEvent.click(screen.getByTestId("bibliometrics-cited-trial"));
+    expect(within(impact).queryByRole("link", { name: "A guideline paper" })).toBeNull();
+    expect(within(impact).getByRole("link", { name: "A trial paper" })).toBeTruthy();
+    // Nothing of the three old sections is left.
+    expect(screen.queryByText("Guideline and policy citations")).toBeNull();
+    expect(screen.queryByText("Patents citing this work")).toBeNull();
+  });
+
+  it("lists the citing inventions newest first under the Patents row, each with the paper it cites", async () => {
     const r = report(12, [14, 1]);
-    const inv = (id: number, title: string, papers: number) => ({
+    const inv = (id: number, title: string, papers: number, pmids: string[] = []) => ({
       id,
       title,
       url: `https://patents.google.com/patent/US9000000${id}B2/en`,
@@ -359,16 +405,41 @@ describe("BibliometricsTool", () => {
       number: `US 9000000${id} B2`,
       related: 0,
       papers,
+      pmids,
     });
-    r.patents = { ...r.patents, inventions: 2, dataEnd: "31 December 2025", reportHref: null, list: [inv(1, "Widget calibration", 2), inv(2, "Compound and uses", 1)] };
+    const list = [
+      inv(5, "Sensor housing", 1, ["90000101"]),
+      inv(4, "Assay kit", 1, ["90000101"]),
+      inv(3, "Dosing regimen", 1, ["90000100"]),
+      inv(2, "Compound and uses", 1, ["90000101"]),
+      inv(1, "Widget calibration", 2, ["90000100", "90000101"]),
+    ];
+    r.patents = { ...r.patents, inventions: 5, dataEnd: "31 December 2025", reportHref: null, list };
     r.papers.rows[1]!.citingPatents = { items: [inv(2, "Compound and uses", 1)], total: 1 };
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
     render(<BibliometricsTool entityId="zzz9001" />);
-    const card = await screen.findByTestId("bibliometrics-patents");
-    expect(within(card).getByText("Widget calibration").closest("a")!.getAttribute("href")).toBe("https://patents.google.com/patent/US90000001B2/en");
-    expect(card.textContent).toContain("cites 2 papers");
-    expect(card.textContent).toContain("cites 1 paper");
-    expect(within(card).queryByTestId("bibliometrics-patents-report")).toBeNull();
+    const impact = await screen.findByTestId("bibliometrics-impact");
+    expect(impact.textContent).toContain("Patents (patent data through 31 December 2025)");
+    expect(screen.queryByTestId("bibliometrics-inventions")).toBeNull();
+    fireEvent.click(screen.getByTestId("bibliometrics-inventions-toggle"));
+    const panel = screen.getByTestId("bibliometrics-inventions");
+    expect(within(panel).getAllByRole("listitem").map((li) => li.querySelector("a")!.textContent)).toEqual([
+      "Sensor housing",
+      "Assay kit",
+      "Dosing regimen",
+    ]);
+    fireEvent.click(within(panel).getByRole("button", { name: "Show all 5" }));
+    const widget = within(panel).getByText("Widget calibration").closest("li")!;
+    expect(widget.querySelector("a")!.getAttribute("href")).toBe("https://patents.google.com/patent/US90000001B2/en");
+    expect(widget.textContent).toBe(
+      "Widget calibrationExample Biotech, Inc. · granted 2021 · US 90000001 B2 · cites Invented paper 0 and 1 more paper",
+    );
+    expect(within(panel).getByText("Dosing regimen").closest("li")!.textContent).toContain("cites Invented paper 0");
+    // The download for every viewer; report 25 only for one who may open it.
+    expect(within(panel).getByTestId("bibliometrics-patents-download").getAttribute("href")).toBe(
+      "/api/edit/bibliometrics/patents?cwid=zzz9001",
+    );
+    expect(within(panel).queryByTestId("bibliometrics-patents-report")).toBeNull();
     // Under the paper, behind its Patents count.
     const row = screen.getByTestId("bibliometrics-paper-90000101");
     fireEvent.click(within(row).getByRole("button", { name: "Patents 1" }));
@@ -378,15 +449,10 @@ describe("BibliometricsTool", () => {
     expect(within(below).getByText("Example Biotech, Inc. · granted 2022 · US 90000002 B2")).toBeTruthy();
   });
 
-  it("shows the patents line, each paper's count and the Excel download when a patent cites the work", async () => {
+  it("links report 25 from the inventions for a viewer who may open it", async () => {
     respondWithPatents("/edit/reports/patent-citations?person=zzz9001");
     render(<BibliometricsTool entityId="zzz9001" />);
-    const line = await screen.findByTestId("bibliometrics-patents-line");
-    expect(line.textContent).toBe("2 papers cited by 15 patented inventions, in patent data through 31 December 2025.");
-    expect(screen.getByText(/Patents on which the scholar is an inventor are not separated out\./)).toBeTruthy();
-    const download = screen.getByTestId("bibliometrics-patents-download");
-    expect(download.textContent).toBe("Download patents citing this work (Excel)");
-    expect(download.getAttribute("href")).toBe("/api/edit/bibliometrics/patents?cwid=zzz9001");
+    fireEvent.click(await screen.findByTestId("bibliometrics-inventions-toggle"));
     expect(screen.getByTestId("bibliometrics-patents-report").getAttribute("href")).toBe(
       "/edit/reports/patent-citations?person=zzz9001",
     );
@@ -397,37 +463,22 @@ describe("BibliometricsTool", () => {
     expect(signals(2)).not.toContain("Patents");
   });
 
-  it("leaves out the link to report 25 for a viewer who may not open it", async () => {
-    respondWithPatents(null);
-    render(<BibliometricsTool entityId="zzz9001" />);
-    expect(await screen.findByTestId("bibliometrics-patents-download")).toBeTruthy();
-    expect(screen.queryByTestId("bibliometrics-patents-report")).toBeNull();
-  });
-
-  it("shows no patents line, count or download when no patent cites the work", async () => {
+  it("shows zero inventions and no toggle or download when no patent cites the work", async () => {
     respond(12);
     render(<BibliometricsTool entityId="zzz9001" />);
-    await screen.findByTestId("bibliometrics-report");
-    expect(screen.queryByTestId("bibliometrics-patents")).toBeNull();
+    const impact = await screen.findByTestId("bibliometrics-impact");
+    expect(impact.textContent).toContain("0 inventions");
+    expect(screen.queryByTestId("bibliometrics-inventions-toggle")).toBeNull();
     expect(screen.queryByTestId("bibliometrics-patents-download")).toBeNull();
-    expect(screen.queryByText(/\d patents?\b/)).toBeNull();
   });
 
   const headings = () => [...document.querySelectorAll("h3")].map((x) => x.textContent);
   // In the mockup's order; Definitions and sources is the closing <details>, not an h3.
-  const SECTIONS = [
-    "Summary",
-    "Output",
-    "Guideline and policy citations",
-    "Most impactful papers",
-  ];
+  const SECTIONS = ["Summary", "Output", "Downstream impact", "Most impactful papers"];
   const REACH: ScholarReach = {
     note: "What the block counts.",
     lines: [
       { type: "clinical", label: "Clinical studies", papers: 1204, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=clinical&basis=cy" },
-      { type: "trial", label: "Registered trials", papers: 0, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=trial&basis=cy" },
-      { type: "review", label: "Systematic reviews", papers: 38, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=review&basis=cy" },
-      { type: "patent", label: "Patents", papers: 1, href: "/edit/reports/27?person=zzz9001&stage=any&ctype=patent&basis=cy" },
     ],
   };
 
@@ -443,71 +494,42 @@ describe("BibliometricsTool", () => {
     );
   }
   const reachRequests = () => fetchMock.mock.calls.filter((c) => c[0] === REACH_URL).length;
+  const CONNECTIONS = { colleagues: 7, href: "/edit/reports/27?person=zzz9001&stage=any&basis=cy&view=connections" };
 
-  it("draws no Downstream reach block, and the same sections as before, when the route sends none", async () => {
-    respondWithReach(null);
+  it("draws the same sections, and no report 27 lines, whatever the route sends", async () => {
+    respondWithReach(REACH);
     render(<BibliometricsTool entityId="zzz9001" />);
     await screen.findByTestId("bibliometrics-report");
     await waitFor(() => expect(reachRequests()).toBe(1));
-    expect(screen.queryByTestId("bibliometrics-reach")).toBeNull();
     expect(headings()).toEqual(SECTIONS);
     expect(document.querySelector("details:not([open]) > summary")?.textContent).toContain("Definitions and sources");
-    expect(document.body.textContent).not.toContain("Downstream reach");
+    // The counts are the table's own now: report 27 lines would count other publication types.
+    expect(screen.queryByText("1,204")).toBeNull();
   });
 
-  it("draws the Downstream reach block the route sends: one line per type, every number a link into report 27", async () => {
-    respondWithReach(REACH);
-    render(<BibliometricsTool entityId="zzz9001" />);
-    const block = await screen.findByTestId("bibliometrics-reach");
-    expect(headings()).toEqual([...SECTIONS.slice(0, 3), "Downstream reach", "Most impactful papers"]);
-    expect([...block.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("th")?.textContent)).toEqual([
-      "Clinical studies",
-      "Registered trials",
-      "Systematic reviews",
-      "Patents",
-    ]);
-    // A zero is a line like any other, and still a link to its (empty) list.
-    expect(screen.getByRole("link", { name: "0 publications cited by registered trials, in the Downstream reach report" }).textContent).toBe("0");
-    // Two columns fit a phone: nothing forces the table wider than its card.
-    expect(block.querySelector("table")!.className).not.toContain("min-w-");
-    for (const l of REACH.lines) {
-      const link = screen.getByTestId(`bibliometrics-reach-${l.type}`);
-      expect(link.getAttribute("href")).toBe(l.href);
-      expect(link.textContent).toBe(l.papers.toLocaleString());
-    }
-    // No number in the block outside a link.
-    expect([...block.querySelectorAll("td")].every((td) => td.textContent === td.querySelector("a")?.textContent)).toBe(true);
-    expect(screen.getByRole("link", { name: "1 publication cited by patents, in the Downstream reach report" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "38 publications cited by systematic reviews, in the Downstream reach report" }).getAttribute("href")).toBe(
-      "/edit/reports/27?person=zzz9001&stage=any&ctype=review&basis=cy",
-    );
-    expect(block.textContent).toContain(REACH.note);
-  });
-
-  it("draws the Connections line the route sends: its number a link to the list, with no stage in its wording", async () => {
-    const href = "/edit/reports/27?person=zzz9001&stage=any&basis=cy&view=connections";
-    respondWithReach({ ...REACH, connections: { colleagues: 7, href } });
+  it("draws the Connections line the route sends under Downstream impact: its number a link to the list", async () => {
+    respondWithReach({ ...REACH, connections: CONNECTIONS });
     render(<BibliometricsTool entityId="zzz9001" />);
     const line = await screen.findByTestId("bibliometrics-reach-connections");
+    expect(line.closest('[data-testid="bibliometrics-impact"]')).toBeTruthy();
     expect(line.textContent).toBe("Colleagues citing this work who have never co-authored with this scholar: 7");
     const link = screen.getByRole("link", {
       name: "7 colleagues citing this work who have never co-authored with this scholar, in the Downstream reach report",
     });
-    expect(link.getAttribute("href")).toBe(href);
-    expect(link.textContent).toBe("7");
+    expect(link.getAttribute("href")).toBe(CONNECTIONS.href);
     expect(line.textContent).not.toMatch(/stage/i);
   });
 
-  it("asks for the block once per scholar: a filter change reloads the report and leaves the block alone", async () => {
-    respondWithReach(REACH);
+  it("asks for the Connections line once per scholar: a filter change reloads the report and leaves it alone", async () => {
+    respondWithReach({ ...REACH, connections: CONNECTIONS });
     render(<BibliometricsTool entityId="zzz9001" />);
-    await screen.findByTestId("bibliometrics-reach");
+    await screen.findByTestId("bibliometrics-reach-connections");
     fireEvent.click(screen.getByLabelText("First or senior author only"));
     await waitFor(() =>
       expect(fetchMock.mock.calls.at(-1)![0]).toBe("/api/edit/bibliometrics?cwid=zzz9001&authorship=lead"),
     );
     expect(reachRequests()).toBe(1);
-    expect(screen.getByTestId("bibliometrics-reach")).toBeTruthy();
+    expect(screen.getByTestId("bibliometrics-reach-connections")).toBeTruthy();
   });
 
   it("draws the report without the block when the block's request fails", async () => {
@@ -515,7 +537,7 @@ describe("BibliometricsTool", () => {
     render(<BibliometricsTool entityId="zzz9001" />);
     await screen.findByTestId("bibliometrics-report");
     await waitFor(() => expect(reachRequests()).toBe(1));
-    expect(screen.queryByTestId("bibliometrics-reach")).toBeNull();
+    expect(screen.queryByTestId("bibliometrics-reach-connections")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
