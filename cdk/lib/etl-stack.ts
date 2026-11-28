@@ -2294,6 +2294,12 @@ export class EtlStack extends Stack {
       // affiliations for the collab matrix. Aurora + Bedrock + public EFetch, so
       // external:false. After Reciter (the pub load); `continue` keeps prior rows.
       { id: "CenterPubRelevanceNightly", npmScript: "etl:center-pub-relevance", external: false, tier: "continue" },
+      // Report 26's scoped row set (etl/translational-portfolio): rebuilds
+      // translational_portfolio_author_pub from publication_author + publication
+      // in one transaction, refusing an empty or >50% shrunk fill. After Reciter
+      // (authorships) and Dynamodb (stages); SPS-DB only, so external:false.
+      // `continue`: a missed night keeps last night's rows, still correct as of then.
+      { id: "TranslationalPortfolioNightly", npmScript: "etl:translational-portfolio", external: false, tier: "continue" },
       { id: "HeadshotMissingNightly", npmScript: "etl:headshot:missing", external: false, tier: "continue" },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
