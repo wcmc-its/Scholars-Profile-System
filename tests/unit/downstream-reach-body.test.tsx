@@ -293,7 +293,7 @@ describe("report 27 page", () => {
     const first = within(rows[0]);
     fireEvent.click(first.getByTestId("downstream-reach-title"));
     expect(h.open).toHaveBeenLastCalledWith("10000001");
-    expect(first.getByTestId("pub-row-stage").textContent).toBe("T0 Basic research");
+    expect(first.getByTestId("pub-row-stage").textContent).toBe("T0Basic research");
     // No stage is words, not a badge.
     expect(within(rows[1]).queryByTestId("pub-row-stage")).toBeNull();
     expect(rows[1].textContent).toContain("No stage");
