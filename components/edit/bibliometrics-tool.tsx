@@ -8,7 +8,7 @@
 "use client";
 
 import * as React from "react";
-import { Download, FileText, Lock } from "lucide-react";
+import { Download, FileText, Info, Lock } from "lucide-react";
 
 import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
@@ -17,15 +17,18 @@ import { PubJournal, pubTitleProps } from "@/components/publication/pub-html";
 import { InventionRow, TrialPatentGroup } from "@/components/publication/publication-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { citationIdentifier } from "@/lib/citation";
 import { authorityBadgeLabel, plural } from "@/lib/citations/policy-rollup";
 import {
   NO_SUMMARY_NOTE,
+  METRIC_HELP,
   OWN_PATENTS_NOTE,
   PATENTS_DOWNLOAD_LABEL,
   PATENTS_DOWNLOAD_PATH,
   STAGES_NOTE,
   bibliometricsQuery,
+  isEarlyPercentile,
   patentsLine,
   percentileText,
   unratedNote,
@@ -265,8 +268,8 @@ function Report({
         )}
         <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3" data-testid="bibliometrics-tiles">
           {/* The h-index and h5-index never follow the filters; their labels say so. */}
-          <Tile value={String(r.metrics.hIndex)} label="h-index, all publications" />
-          <Tile value={String(r.metrics.h5Index)} label="h5-index, last 5 years" />
+          <Tile value={String(r.metrics.hIndex)} label="h-index, all publications" help={METRIC_HELP.hIndex} />
+          <Tile value={String(r.metrics.h5Index)} label="h5-index, last 5 years" help={METRIC_HELP.h5Index} />
           <Tile
             value={r.metrics.topDecilePct === null ? "n/a" : r.metrics.topDecileArticles.toLocaleString()}
             share={r.metrics.topDecilePct === null ? undefined : `${r.metrics.topDecilePct}%`}
@@ -275,6 +278,7 @@ function Report({
                 ? "in NIH top 10%: no article rated yet"
                 : `in NIH top 10%, of ${r.metrics.ratedArticles.toLocaleString()} rated (10% expected)`
             }
+            help={METRIC_HELP.topDecile}
           />
           <Tile value={r.policy[1]!.papers.toLocaleString()} label="articles cited in clinical guidelines" />
           <Tile value={r.policy[0]!.papers.toLocaleString()} label="articles cited in health-authority reports" />
@@ -522,14 +526,36 @@ function Report({
   );
 }
 
-function Tile({ value, share, label }: { value: string; share?: string; label: string }) {
+/** An ⓘ that opens its text on click, tap or keyboard (a hover tooltip never
+ *  opens on a phone). */
+function InfoMark({ label, text }: { label: string; text: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${label}`}
+          className="text-apollo-ink-2 hover:text-apollo-slate inline-flex size-6 items-center justify-center rounded align-middle"
+        >
+          <Info aria-hidden className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 text-[13px] leading-normal font-normal">{text}</PopoverContent>
+    </Popover>
+  );
+}
+
+function Tile({ value, share, label, help }: { value: string; share?: string; label: string; help?: string }) {
   return (
     <div className={`${LIGHT_BOX} px-4 py-3.5`}>
       <div className="text-[30px] leading-[1.1] font-semibold tabular-nums">
         {value}
         {share ? <span className="text-apollo-ink-2 text-base font-medium"> · {share}</span> : null}
       </div>
-      <div className="text-apollo-ink-2 mt-1 text-sm">{label}</div>
+      <div className="text-apollo-ink-2 mt-1 text-sm">
+        {label}
+        {help ? <InfoMark label={label} text={help} /> : null}
+      </div>
     </div>
   );
 }
@@ -766,14 +792,17 @@ function PapersList({ report: r }: { report: BibliometricsReport }) {
               <th scope="col" className={`${HEAD} w-[88px]`}>
                 Position
               </th>
-              <th scope="col" className={`${HEAD} w-[88px] text-right`}>
+              <th scope="col" className={`${HEAD} w-[96px] text-right`}>
                 NIH pctl
+                <InfoMark label="NIH percentile" text={METRIC_HELP.percentile} />
               </th>
-              <th scope="col" className={`${HEAD} w-[88px] text-right`}>
+              <th scope="col" className={`${HEAD} w-[96px] text-right`}>
                 Citation ratio
+                <InfoMark label="citation ratio" text={METRIC_HELP.citationRatio} />
               </th>
-              <th scope="col" className={`${HEAD} w-[104px] text-right`}>
+              <th scope="col" className={`${HEAD} w-[112px] text-right`}>
                 Cited by (Scopus)
+                <InfoMark label="Cited by" text={METRIC_HELP.citedBy} />
               </th>
             </tr>
           </thead>
@@ -783,6 +812,7 @@ function PapersList({ report: r }: { report: BibliometricsReport }) {
                 key={p.pmid}
                 paper={p}
                 scholarCwid={r.scholar.cwid}
+                early={isEarlyPercentile(p, r.asOf)}
                 openKey={open?.pmid === p.pmid ? open.key : null}
                 setOpenKey={(key) => setOpen(key ? { pmid: p.pmid, key } : null)}
               />
@@ -812,11 +842,14 @@ function PapersList({ report: r }: { report: BibliometricsReport }) {
 function PaperRow({
   paper: p,
   scholarCwid,
+  early,
   openKey,
   setOpenKey,
 }: {
   paper: BibliometricsPaper;
   scholarCwid: string;
+  /** The percentile is an early figure (this year or last). */
+  early: boolean;
   /** The count whose list is open under this paper, if any. */
   openKey: string | null;
   setOpenKey: (key: string | null) => void;
@@ -897,7 +930,10 @@ function PaperRow({
         {coauthors.length > 0 ? <CoAuthors authors={coauthors} /> : null}
       </td>
       <td className={CELL}>{POSITION_SHORT[p.position]}</td>
-      <td className={`${CELL} text-right font-medium`}>{percentileText(p)}</td>
+      <td className={`${CELL} text-right font-medium`}>
+        {percentileText(p)}
+        {early ? <div className="text-apollo-ink-2 text-xs font-normal">early</div> : null}
+      </td>
       <td className={`${CELL} text-right`}>{p.relativeCitationRatio?.toFixed(1) ?? "n/a"}</td>
       <td className={`${CELL} text-right`}>{p.citationCount.toLocaleString()}</td>
     </tr>

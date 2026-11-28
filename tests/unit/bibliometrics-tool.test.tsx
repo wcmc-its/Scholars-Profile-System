@@ -237,6 +237,24 @@ describe("BibliometricsTool", () => {
     expect(screen.getByRole("columnheader", { name: "Cited by (Scopus)" })).toBeTruthy();
   });
 
+  it("marks a percentile early for papers from this year and last, and explains each metric behind an info mark", async () => {
+    const r = report(12);
+    r.papers.rows[0]!.year = 2025; // asOf is 2026-11-25
+    r.papers.rows[1]!.year = 2024;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const pctl = async (pmid: string) => within(await screen.findByTestId(`bibliometrics-paper-${pmid}`)).getAllByRole("cell")[2]!;
+    expect((await pctl("90000100")).textContent).toBe("95.0early");
+    expect((await pctl("90000101")).textContent).toBe("94.0");
+
+    expect(screen.queryByText(/relative citation ratio/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "About citation ratio" }));
+    expect(await screen.findByText(/relative citation ratio/)).toBeTruthy();
+    for (const name of ["About h-index, all publications", "About h5-index, last 5 years", "About NIH percentile", "About Cited by"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
+  });
+
   it("copies a PMID and says Copied for 1.5 s", async () => {
     respond(12);
     const writeText = vi.fn().mockResolvedValue(undefined);
