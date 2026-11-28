@@ -344,6 +344,30 @@ describe("BibliometricsTool", () => {
     expect([...bar.children].map((c) => (c as HTMLElement).style.flexGrow)).toEqual(["3", "2", "1"]);
     // An empty year draws no segment.
     expect(screen.getByTestId(`bibliometrics-year-${r.output.byYear[0]!.year}`).children).toHaveLength(0);
+    // Amber first author, two blues (the validated set).
+    expect([...bar.children].map((c) => (c as HTMLElement).style.backgroundColor)).toEqual([
+      "rgb(45, 92, 158)",
+      "rgb(111, 154, 214)",
+      "rgb(166, 112, 18)",
+    ]);
+    // An even axis top (6 here), every year labelled, this year starred and explained.
+    expect(bar.style.height).toBe("100%");
+    expect(screen.getByTestId("bibliometrics-year-labels").textContent).toBe(
+      "2017201820192020202120222023202420252026*",
+    );
+    expect(screen.getByText("2026* is year to date.")).toBeTruthy();
+  });
+
+  it("puts an odd peak under an even axis top, and stars no year when the chart stops before this one", async () => {
+    const r = report(3);
+    r.output.byYear = r.output.byYear.map((y, i) => ({ ...y, count: i === 4 ? 5 : 0, first: i === 4 ? 5 : 0, senior: 0, co: 0 }));
+    r.output.byYear = r.output.byYear.slice(0, 5); // 2017 to 2021, as a "to 2021" filter draws it
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const bar = await screen.findByTestId("bibliometrics-year-2021");
+    expect(parseFloat(bar.style.height)).toBeCloseTo((5 / 6) * 100, 2);
+    expect(screen.getByTestId("bibliometrics-year-labels").textContent).not.toContain("*");
+    expect(screen.queryByText(/is year to date/)).toBeNull();
   });
 
   it("puts policy, research and invention citations in one Downstream impact table; each Articles cited count lists its articles", async () => {
