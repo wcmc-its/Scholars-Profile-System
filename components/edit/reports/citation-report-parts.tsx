@@ -626,10 +626,13 @@ export function Pager({
       <span className="text-muted-foreground text-[13px] tabular-nums">
         {total === 0 ? "0" : `${from.toLocaleString()}–${to.toLocaleString()}`} of {total.toLocaleString()}
       </span>
-      <div className="flex gap-2">
-        {step("Previous", Math.min(page - 1, last), page > 1)}
-        {step("Next", page + 1, page < last)}
-      </div>
+      {/* Nothing to step to when everything fits on one page. */}
+      {(last > 1 || page > 1) && (
+        <div className="flex gap-2">
+          {step("Previous", Math.min(page - 1, last), page > 1)}
+          {step("Next", page + 1, page < last)}
+        </div>
+      )}
     </div>
   );
 }
