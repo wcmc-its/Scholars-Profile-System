@@ -409,9 +409,12 @@ export function ExternalLink({ href, className, children }: { href: string; clas
 export function PubMeta({
   pub,
   copy = false,
+  extra,
 }: {
   pub: { pmid: string; journal: string | null; year: number | null };
   copy?: boolean;
+  /** Shown after the year (report 27's stage tag). */
+  extra?: ReactNode;
 }) {
   const id = citationIdentifier(pub.pmid);
   return (
@@ -422,14 +425,18 @@ export function PubMeta({
         </>
       )}
       {pub.year !== null && <>{pub.year} · </>}
-      {id.href ? (
-        <a href={id.href} target="_blank" rel="noopener noreferrer" className={LINK}>
-          {id.label} {id.value}
-        </a>
-      ) : (
-        `${id.label} ${id.value}`
-      )}
-      {copy && <CopyPmid pmid={id.value} />}
+      {extra && <>{extra} · </>}
+      {/* The PMID and its copy button wrap as one. */}
+      <span className="whitespace-nowrap">
+        {id.href ? (
+          <a href={id.href} target="_blank" rel="noopener noreferrer" className={LINK}>
+            {id.label} {id.value}
+          </a>
+        ) : (
+          `${id.label} ${id.value}`
+        )}
+        {copy && <CopyPmid pmid={id.value} />}
+      </span>
     </>
   );
 }
