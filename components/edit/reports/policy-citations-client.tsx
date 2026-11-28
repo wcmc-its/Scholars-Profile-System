@@ -7,7 +7,7 @@
  * fetches or reaches `@/lib/db` (the report's library is imported for its
  * types only).
  */
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Check, ClipboardCheck, Copy, Landmark, Layers, Users } from "lucide-react";
 
 import { Caret } from "@/components/ui/caret";
@@ -21,8 +21,14 @@ export function LevelIcon({ level }: { level: Level }) {
   return <Icon aria-hidden className="mr-[5px] inline-block size-[13px] align-[-2px]" />;
 }
 
-export function CopyPmid({ pmid }: { pmid: string }) {
+export function CopyPmid({ pmid, label = false }: { pmid: string; label?: boolean }) {
   const [done, setDone] = useState(false);
+  // Back to the copy icon after 1.5 s, so a second copy reads as one.
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(false), 1500);
+    return () => clearTimeout(t);
+  }, [done]);
   return (
     <button
       type="button"
@@ -34,9 +40,13 @@ export function CopyPmid({ pmid }: { pmid: string }) {
           () => {},
         );
       }}
-      className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-6 items-center justify-center rounded align-middle"
+      className={cn(
+        "text-muted-foreground hover:text-foreground ml-0.5 inline-flex min-w-6 items-center justify-center gap-1 rounded align-middle",
+        label ? "text-apollo-slate min-h-7 text-xs" : "size-6",
+      )}
     >
       {done ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
+      {label && done ? <span aria-hidden>Copied</span> : null}
     </button>
   );
 }
