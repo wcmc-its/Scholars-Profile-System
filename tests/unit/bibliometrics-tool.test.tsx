@@ -355,6 +355,20 @@ describe("BibliometricsTool", () => {
     expect(block.textContent).toContain(REACH.note);
   });
 
+  it("draws the Connections line the route sends: its number a link to the list, with no stage in its wording", async () => {
+    const href = "/edit/reports/27?person=zzz9001&stage=any&basis=cy&view=connections";
+    respondWithReach({ ...REACH, connections: { colleagues: 7, href } });
+    render(<BibliometricsTool entityId="zzz9001" />);
+    const line = await screen.findByTestId("bibliometrics-reach-connections");
+    expect(line.textContent).toBe("Colleagues citing this work who have never co-authored with this scholar: 7");
+    const link = screen.getByRole("link", {
+      name: "7 colleagues citing this work who have never co-authored with this scholar, in the Downstream reach report",
+    });
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.textContent).toBe("7");
+    expect(line.textContent).not.toMatch(/stage/i);
+  });
+
   it("asks for the block once per scholar: a filter change reloads the report and leaves the block alone", async () => {
     respondWithReach(REACH);
     render(<BibliometricsTool entityId="zzz9001" />);

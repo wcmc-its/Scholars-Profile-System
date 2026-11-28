@@ -327,7 +327,7 @@ const POSITION_SQL: Record<Position, Prisma.Sql> = {
 };
 
 /** The viewer's units alone, as a condition on `s`. */
-const viewerScopeSql = (p: Pick<WhoParams, "scope">): Prisma.Sql =>
+export const viewerScopeSql = (p: Pick<WhoParams, "scope">): Prisma.Sql =>
   p.scope === null
     ? Prisma.empty
     : p.scope.length === 0
@@ -357,7 +357,7 @@ export const hasAuthorSql = (p: WhoParams, pmid: Prisma.Sql): Prisma.Sql =>
                 WHERE pa.pmid = ${pmid} AND ${policyScopeSql(p)})`;
 
 /** The publication-year window (`p` = `publication`). */
-export const pubYearSql = (p: WhoParams): Prisma.Sql =>
+export const pubYearSql = (p: Pick<WhoParams, "basis" | "from" | "to">): Prisma.Sql =>
   yearWindow(articleYearExpr({ basis: p.basis, added: null }), p.from, p.to);
 
 /** A filter on the citing documents themselves (issuing body, citing year,
