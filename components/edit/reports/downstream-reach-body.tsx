@@ -59,13 +59,12 @@ import {
   toSearchParams,
   type PersonFooter,
 } from "@/components/edit/reports/citation-report-parts";
-import { ModalCount, PaperTitle } from "@/components/edit/reports/downstream-reach-client";
+import { AtLeastOneChecklist, ModalCount, PaperTitle } from "@/components/edit/reports/downstream-reach-client";
 import {
   ConnectionsPanel,
   connectionsPageCwids,
   loadConnectionsPage,
 } from "@/components/edit/reports/downstream-reach-connections";
-import { RailChecklist } from "@/components/edit/reports/rail-checklist";
 import { FilterChips, RailSection, ReportCard, ReportLayout, ReportStats } from "@/components/edit/reports/report-ui";
 import { PubTitle } from "@/components/publication/pub-html";
 import { PublicationModalProvider } from "@/components/publication/publication-modal";
@@ -89,6 +88,7 @@ import {
   modalListsExactly,
   parseReachParams,
   REACH_COUNTING_RULE,
+  REACH_DEFINITION,
   REACH_DOC_SORT_LABEL,
   REACH_DOCS_NARROW_HINT,
   REACH_DOCS_PAPER_CEILING,
@@ -120,7 +120,7 @@ import {
   type ReachType,
 } from "@/lib/edit/downstream-reach-report";
 import { unitLabels } from "@/lib/edit/person-filter";
-import { fiscalLabel, loadPersonNames, UNKNOWN_PERSON, yearSpan } from "@/lib/edit/policy-citations-report";
+import { loadPersonNames, UNKNOWN_PERSON } from "@/lib/edit/policy-citations-report";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
 import { cn } from "@/lib/utils";
 
@@ -187,7 +187,7 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
               <input type="hidden" name="dir" value={params.dir} />
             </>
           )}
-          {/* The form was submitted: no stage ticked then means every stage. */}
+          {/* The form was submitted: no stage ticked (no JS) then means every stage. */}
           <input type="hidden" name="stage" value={STAGE_ANY} />
           {/* Sent always; the ticked box below adds "out", which wins. */}
           <input type="hidden" name="own" value="in" />
@@ -200,13 +200,11 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
           <>
             <fieldset className="m-0 border-0 px-[18px] pt-0 pb-3" data-testid={`${TEST}-ctype`}>
               <legend className={RAIL_LEGEND}>Citing type</legend>
-              <RailChecklist
+              <AtLeastOneChecklist
                 name="ctype"
-                roomy
                 options={REACH_TYPES.map((t) => ({ value: t, label: REACH_TYPE_LABEL[t] }))}
-                selected={params.ctypes}
+                selected={tickedTypes(params)}
               />
-              <p className="text-muted-foreground mt-1 text-xs">None checked = all.</p>
               <label className="border-apollo-rail-border mt-3 flex cursor-pointer items-center gap-2 border-t pt-2.5 text-sm">
                 <input
                   type="checkbox"
@@ -221,13 +219,11 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
             </fieldset>
             <fieldset className="m-0 border-0 px-[18px] pt-0 pb-3" data-testid={`${TEST}-stage`}>
               <legend className={RAIL_LEGEND}>Stage of the cited paper</legend>
-              <RailChecklist
+              <AtLeastOneChecklist
                 name="stage"
-                roomy
                 options={STAGE_KEYS.map((k) => ({ value: k, label: stageKeyLabel(k) }))}
-                selected={params.stages}
+                selected={params.stages.length > 0 ? params.stages : STAGE_KEYS}
               />
-              <p className="text-muted-foreground mt-1 text-xs">None checked = every stage.</p>
             </fieldset>
             <RailSection
               label="Research area"
@@ -553,18 +549,13 @@ export async function renderDownstreamReachReport({
       testId={`${TEST}-pager`}
     />
   );
-  const published = yearSpan(params.from, params.to, fiscalLabel(params));
-  const stagesText =
-    params.stages.length > 0 ? `at ${params.stages.map(stageKeyLabel).join(", ")}` : "at every stage";
   const allTypes = params.ctypes.length === 0 || params.ctypes.length === REACH_TYPES.length;
 
   return {
+    // A fixed definition (spec E1): the chips are the one live summary of the filters.
     subtitle: (
       <p className="text-muted-foreground text-sm" data-testid={`${TEST}-subtitle`}>
-        Publications {stagesText} · {published ? `published ${published}` : "published in any year"} ·{" "}
-        {params.scope === null ? "all units" : params.scope.map((u) => labels.get(u) ?? u).join("; ")} · cited by{" "}
-        {typePhrase(types)}
-        {params.includeOwn ? " · the authors' own work counted" : " · the authors' own work left out"}
+        {REACH_DEFINITION}
       </p>
     ),
     aside: (
