@@ -26,7 +26,9 @@ import {
   OWN_PATENTS_NOTE,
   PATENTS_DOWNLOAD_LABEL,
   PATENTS_DOWNLOAD_PATH,
-  STAGES_NOTE,
+  STAGE_FOLD_BELOW_PCT,
+  UNSTAGED_LABEL,
+  UNSTAGED_REASONS,
   bibliometricsQuery,
   isEarlyPercentile,
   patentsLine,
@@ -36,14 +38,10 @@ import {
   type BibliometricsPaper,
   type BibliometricsReport,
   type BibliometricsStages,
+  type UnstagedReason,
 } from "@/lib/edit/bibliometrics";
 import type { ScholarReach } from "@/lib/edit/downstream-reach-entry";
-import {
-  NO_STAGE_LABEL,
-  STAGE_BUCKETS,
-  TRANSLATIONAL_STAGE_LABELS,
-  type StageBucket,
-} from "@/lib/translational-stage";
+import { TRANSLATIONAL_STAGES, TRANSLATIONAL_STAGE_LABELS, type StageBucket } from "@/lib/translational-stage";
 import { htmlToPlainText, sanitizePubTitle } from "@/lib/utils";
 
 const PATH = "/api/edit/bibliometrics";
@@ -560,117 +558,137 @@ function Tile({ value, share, label, help }: { value: string; share?: string; la
   );
 }
 
-/** Research articles by translational stage; each count opens its papers. */
+type StageKey = StageBucket | UnstagedReason;
+
+/** Research articles by translational stage: coverage first, then the four
+ *  stages with bars as long as their shares. Every count opens its papers. */
 function StagesSection({ stages }: { stages: BibliometricsStages }) {
-  const [open, setOpen] = React.useState<StageBucket | null>(null);
-  const max = Math.max(1, ...STAGE_BUCKETS.map((k) => stages.counts[k]));
-  const total = STAGE_BUCKETS.reduce((n, k) => n + stages.counts[k], 0);
+  const [open, setOpen] = React.useState<StageKey | null>(null);
+  const staged = TRANSLATIONAL_STAGES.reduce((n, k) => n + stages.counts[k], 0);
+  const unstaged = stages.counts.none;
+  const total = staged + unstaged;
+  const coverage = total > 0 ? Math.round((staged / total) * 100) : 0;
+  const listOf = (k: StageKey) =>
+    (UNSTAGED_REASONS as readonly string[]).includes(k)
+      ? stages.papers.none.filter((p) => p.reason === k)
+      : stages.papers[k as StageBucket];
+  const count = (k: StageKey, n: number) => (
+    <button
+      type="button"
+      className={`${LINK} font-medium tabular-nums`}
+      aria-expanded={open === k}
+      aria-controls={`bibliometrics-stage-${k}`}
+      onClick={() => setOpen(open === k ? null : k)}
+      data-testid={`bibliometrics-stage-count-${k}`}
+    >
+      {n.toLocaleString()}
+    </button>
+  );
+  const list = (k: StageKey) =>
+    open === k ? <StagePapers id={`bibliometrics-stage-${k}`} papers={listOf(k)} /> : null;
+  const reasons = UNSTAGED_REASONS.filter((k) => stages.unstaged[k] > 0);
+  const rows = (
+    <div className="overflow-x-auto">
+      <div className="min-w-[440px] tabular-nums">
+        {TRANSLATIONAL_STAGES.map((k) => {
+          const n = stages.counts[k];
+          return (
+            <React.Fragment key={k}>
+              <div className="border-apollo-border grid grid-cols-[minmax(180px,1.2fr)_48px_minmax(120px,2fr)_48px] items-center gap-3.5 border-b py-2.5 text-sm">
+                <div>
+                  <span className="font-semibold">{k.replace("-", "\u2013")}</span>{" "}
+                  {TRANSLATIONAL_STAGE_LABELS[k]}
+                </div>
+                <div className="text-right">{n > 0 ? count(k, n) : <span className="text-apollo-ink-2">0</span>}</div>
+                <div className="bg-apollo-surface-2 h-2 rounded" aria-hidden>
+                  <div className="bg-apollo-slate h-2 rounded" style={{ width: `${stages.shares[k]}%` }} />
+                </div>
+                <div className="text-right font-medium">{stages.shares[k]}%</div>
+              </div>
+              {list(k)}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
   return (
     <section className={SECTION} data-testid="bibliometrics-stages">
       <SectionHead title="Translational stage" filtered />
-      <p className="text-apollo-ink-2 text-[13px]">{STAGES_NOTE}</p>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] text-sm">
-          <thead>
-            <tr className="bg-apollo-surface-2 text-apollo-ink-2">
-              <th scope="col" className={TH}>
-                Stage
-              </th>
-              <th scope="col" className={TH}>
-                Papers
-              </th>
-              <th scope="col" className={`${TH} text-right`}>
-                Share
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {STAGE_BUCKETS.map((k) => {
-              const n = stages.counts[k];
-              const listId = `bibliometrics-stage-${k}`;
-              return (
-                <React.Fragment key={k}>
-                  <tr className="border-apollo-border border-b">
-                    <th scope="row" className="p-2.5 text-left font-normal">
-                      {k === "none" ? (
-                        <span className="text-apollo-ink-2">{NO_STAGE_LABEL}</span>
-                      ) : (
-                        <>
-                          <span className="font-semibold">{k.replace("-", "\u2013")}</span>{" "}
-                          <span className="text-apollo-ink-2">{TRANSLATIONAL_STAGE_LABELS[k]}</span>
-                        </>
-                      )}
-                    </th>
-                    <td className="w-1/2 p-2.5">
-                      <span className="flex flex-col gap-1">
-                        {n > 0 ? (
-                          <button
-                            type="button"
-                            className={`${LINK} min-h-6 self-start text-left tabular-nums`}
-                            aria-expanded={open === k}
-                            aria-controls={listId}
-                            onClick={() => setOpen(open === k ? null : k)}
-                          >
-                            {n.toLocaleString()}
-                          </button>
-                        ) : (
-                          <span className="tabular-nums">0</span>
-                        )}
-                        <span className="bg-apollo-surface-2 block h-1.5 rounded-full" aria-hidden>
-                          <span
-                            className={`block h-1.5 rounded-full ${k === "none" ? "bg-apollo-border-strong" : "bg-apollo-slate"}`}
-                            style={{ width: `${(n / max) * 100}%` }}
-                          />
-                        </span>
-                      </span>
-                    </td>
-                    <td className="p-2.5 text-right tabular-nums">{k === "none" ? "–" : `${stages.shares[k]}%`}</td>
-                  </tr>
-                  {open === k ? (
-                    <tr className="border-apollo-border border-b">
-                      <td colSpan={3} className="bg-apollo-surface-2 px-2.5 py-2">
-                        <ul id={listId} className="flex flex-col gap-2" aria-label={`${n} papers`}>
-                          {stages.papers[k].map((p) => (
-                            <li key={p.pmid} className="text-[13px] leading-normal">
-                              <a
-                                href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                {...pubTitleProps(sanitizePubTitle(p.title), LINK)}
-                              />
-                              <div className="text-apollo-ink-2">
-                                {p.journal ? <PubJournal value={p.journal} /> : null}
-                                {p.journal && p.year ? ", " : ""}
-                                {p.year ?? ""}
-                                {" · PMID "}
-                                {p.pmid}
-                                <CopyPmid pmid={p.pmid} />
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </td>
-                    </tr>
-                  ) : null}
-                </React.Fragment>
-              );
-            })}
-            <tr>
-              <th scope="row" className="p-2.5 text-left font-semibold">
-                All research articles
-              </th>
-              <td className="p-2.5 font-semibold tabular-nums">{total.toLocaleString()}</td>
-              <td className="p-2.5 text-right font-semibold tabular-nums">–</td>
-            </tr>
-          </tbody>
-        </table>
+      <div
+        className="border-apollo-slate-tint-border bg-apollo-slate-tint rounded-lg border px-3.5 py-2.5 text-sm"
+        data-testid="bibliometrics-stage-coverage"
+      >
+        <span className="font-semibold">
+          Stage assigned for {staged.toLocaleString()} of {total.toLocaleString()}{" "}
+          {total === 1 ? "article" : "articles"} ({coverage}%).
+        </span>
+        {unstaged > 0 ? (
+          <span className="text-[#3d4a57]">
+            {" "}
+            The other {count("none", unstaged)} {unstaged === 1 ? "is" : "are"} unstaged:{" "}
+            {reasons.map((k, i) => (
+              <React.Fragment key={k}>
+                {i > 0 ? "; " : ""}
+                {count(k, stages.unstaged[k])} {UNSTAGED_LABEL[k]}
+              </React.Fragment>
+            ))}
+            .{staged > 0 ? ` Shares below are of the ${staged.toLocaleString()}.` : ""}
+          </span>
+        ) : null}
       </div>
+      {list("none")}
+      {reasons.map((k) => (
+        <React.Fragment key={k}>{list(k)}</React.Fragment>
+      ))}
+      {staged === 0 ? null : coverage < STAGE_FOLD_BELOW_PCT ? (
+        // Low coverage: the shares would claim more than they should, so the
+        // breakdown starts folded under the coverage line.
+        <details className="group" data-testid="bibliometrics-stage-fold">
+          <summary className="text-apollo-slate min-h-11 cursor-pointer list-none py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+            Show the breakdown of the {staged.toLocaleString()} staged{" "}
+            {staged === 1 ? "article" : "articles"}{" "}
+            <span aria-hidden className="inline-block transition-transform group-open:rotate-90">
+              ▸
+            </span>
+          </summary>
+          {rows}
+        </details>
+      ) : (
+        rows
+      )}
       {stages.portfolioHref ? (
         <a href={stages.portfolioHref} className={`${LINK} min-h-11 self-start text-sm font-medium`}>
           Full translational profile (first or senior author, every publication type)
         </a>
       ) : null}
     </section>
+  );
+}
+
+/** The papers behind one stage count, newest first. */
+function StagePapers({ id, papers }: { id: string; papers: BibliometricsStages["papers"]["none"] }) {
+  return (
+    <ul id={id} className={`${LIGHT_BOX} my-1.5 flex flex-col gap-2 px-3.5 py-2.5`} aria-label={`${papers.length} papers`}>
+      {papers.map((p) => (
+        <li key={p.pmid} className="text-[13px] leading-normal">
+          <a
+            href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            {...pubTitleProps(sanitizePubTitle(p.title), LINK)}
+          />
+          <div className="text-apollo-ink-2">
+            {p.journal ? <PubJournal value={p.journal} /> : null}
+            {p.journal && p.year ? ", " : ""}
+            {p.year ?? ""}
+            {" · PMID "}
+            {p.pmid}
+            <CopyPmid pmid={p.pmid} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

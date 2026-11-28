@@ -25,6 +25,8 @@ import {
   POSITION_LABEL,
   TOP_DECILE_LABEL,
   filtersNote,
+  UNSTAGED_LABEL,
+  UNSTAGED_REASONS,
   papersNote,
   percentileText,
   unratedNote,
@@ -109,6 +111,15 @@ function stageBlocks(s: NonNullable<BibliometricsReport["stages"]>, filters: str
   return [
     heading("Translational stage"),
     para(`Research articles${filters ? `, filters: ${filters}` : ""}. Shares are among papers with a stage.`),
+    // The tab's coverage line: how many have a stage, and why the rest do not.
+    para(
+      `Stage assigned for ${total - s.counts.none} of ${total} (${total > 0 ? Math.round(((total - s.counts.none) / total) * 100) : 0}%).` +
+        (s.counts.none > 0
+          ? ` Unstaged: ${UNSTAGED_REASONS.filter((k) => s.unstaged[k] > 0)
+              .map((k) => `${s.unstaged[k]} ${UNSTAGED_LABEL[k]}`)
+              .join("; ")}.`
+          : ""),
+    ),
     table(
       ["Stage", "Papers", "Share"],
       [

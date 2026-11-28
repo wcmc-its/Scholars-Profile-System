@@ -105,37 +105,65 @@ afterEach(() => {
 });
 
 describe("BibliometricsTool", () => {
-  it("lists a stage's papers when its count is selected, and links report 26 only when allowed", async () => {
-    const pubs = [
-      pub(1, { translationalStage: "T2", translationalStageConfidence: "high", title: "A staged paper" }),
-      pub(2, { translationalStage: null }),
-    ];
-    const r = buildBibliometricsReport({
-      scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
-      visible: pubs,
-      all: pubs,
-      filters: { authorship: "all", yearFrom: null, yearTo: null },
-      now: new Date("2026-11-25T12:00:00Z"),
-      stagesEnabled: true,
-    });
+  it("states coverage first, splits the unstaged by reason, and every count opens its papers", async () => {
+    const stagesReport = (pubs: BibliometricsPubRow[]) =>
+      buildBibliometricsReport({
+        scholar: { cwid: "zzz9001", name: "Jordan Vale", hIndex: 12 },
+        visible: pubs,
+        all: pubs,
+        filters: { authorship: "all", yearFrom: null, yearTo: null },
+        now: new Date("2026-11-25T12:00:00Z"),
+        stagesEnabled: true,
+      });
+    const r = stagesReport([
+      pub(1, { year: 2021, translationalStage: "T2", translationalStageConfidence: "high", title: "A staged paper" }),
+      pub(2, { year: 2018, translationalStage: null, title: "An older paper" }),
+      pub(3, { year: 2022, translationalStage: "T1", translationalStageConfidence: "low", title: "An unsure paper" }),
+      pub(4, { year: 2022, translationalStage: "NA", translationalStageConfidence: "high" }),
+      pub(5, { year: 2023, translationalStage: null }),
+    ]);
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: r }) });
     render(<BibliometricsTool entityId="zzz9001" />);
     const section = await screen.findByTestId("bibliometrics-stages");
-    // One staged paper of two: T2 is 100% of the papers WITH a stage; No stage has no share.
-    expect(section.textContent).toContain("100%");
-    expect(section.textContent).not.toContain("50%");
+    expect(screen.getByTestId("bibliometrics-stage-coverage").textContent).toBe(
+      "Stage assigned for 1 of 5 articles (20%). The other 4 are unstaged: " +
+        "1 published before 2020, outside the years ReCiterAI stages; 1 low-confidence; " +
+        "1 outside the T0\u2013T4 spectrum, which is common for health services and informatics research; " +
+        "1 from 2020 on that ReCiterAI has not staged (no usable abstract, or not yet processed). Shares below are of the 1.",
+    );
+    // Each reason opens its own papers; "4" opens all of them.
+    const open = (k: string) => fireEvent.click(screen.getByTestId(`bibliometrics-stage-count-${k}`));
+    open("before");
+    expect(within(section).getByRole("link", { name: "An older paper" })).toBeTruthy();
+    expect(within(section).queryByRole("link", { name: "An unsure paper" })).toBeNull();
+    open("none");
+    expect(within(section).getAllByRole("listitem")).toHaveLength(4);
+    // Under 25% coverage the breakdown starts folded; bars are as long as shares.
+    const fold = screen.getByTestId("bibliometrics-stage-fold") as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    open("T2");
+    expect(within(section).getByRole("link", { name: "A staged paper" })).toBeTruthy();
+    const bars = [...section.querySelectorAll<HTMLElement>(".bg-apollo-slate.h-2")].map((b) => b.style.width);
+    expect(bars).toEqual(["0%", "0%", "100%", "0%"]);
     expect(screen.queryByText("Full translational profile", { exact: false })).toBeNull();
-    const counts = section.querySelectorAll("button[aria-expanded]");
-    expect(counts).toHaveLength(2); // T2 and No stage; zero rows are not buttons
-    const listed = () => within(section).queryByRole("link", { name: "A staged paper" });
-    expect(listed()).toBeNull();
-    fireEvent.click(counts[0]!);
-    expect(counts[0]!.getAttribute("aria-expanded")).toBe("true");
-    expect(listed()).toBeTruthy();
+
     cleanup();
-    r.stages!.portfolioHref = "/edit/scholar/zzz9001/translational-portfolio";
+    const wide = stagesReport([
+      pub(1, { year: 2021, translationalStage: "T2", translationalStageConfidence: "high" }),
+      pub(2, { year: 2021, translationalStage: "T0", translationalStageConfidence: "high" }),
+      pub(3, { year: 2021, translationalStage: "NA" }),
+    ]);
+    wide.stages!.portfolioHref = "/edit/scholar/zzz9001/translational-portfolio";
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true, report: wide }) });
     render(<BibliometricsTool entityId="zzz9001" />);
-    expect((await screen.findByText("Full translational profile", { exact: false })).getAttribute("href")).toBe(
+    expect((await screen.findByTestId("bibliometrics-stage-coverage")).textContent).toBe(
+      "Stage assigned for 2 of 3 articles (67%). The other 1 is unstaged: " +
+        "1 outside the T0\u2013T4 spectrum, which is common for health services and informatics research. Shares below are of the 2.",
+    );
+    expect(screen.queryByTestId("bibliometrics-stage-fold")).toBeNull();
+    // A zero stays plain text, never a button.
+    expect(screen.queryByTestId("bibliometrics-stage-count-T1")).toBeNull();
+    expect(screen.getByText("Full translational profile", { exact: false }).getAttribute("href")).toBe(
       "/edit/scholar/zzz9001/translational-portfolio",
     );
   });
