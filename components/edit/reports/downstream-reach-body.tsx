@@ -112,6 +112,7 @@ import {
   withReachPublicationDetails,
   type ModalCounts,
   type ReachDocRow,
+  type ReachNotable,
   type ReachDocSort,
   type ReachParams,
   type ReachPersonRow,
@@ -122,7 +123,7 @@ import {
 import { unitLabels } from "@/lib/edit/person-filter";
 import { fiscalLabel, loadPersonNames, UNKNOWN_PERSON, yearSpan } from "@/lib/edit/policy-citations-report";
 import type { AdminReportProps, ReportRender } from "@/lib/edit/report-registry";
-import { cn } from "@/lib/utils";
+import { cn, htmlToPlainText } from "@/lib/utils";
 
 const RAIL_LEGEND = "mb-1.5 p-0 text-[13px] font-medium";
 const TEST = "downstream-reach";
@@ -253,6 +254,35 @@ function Rail({ basePath, params, facets, labels, areas, names, resetHref }: Rai
   );
 }
 
+/** The row's most notable citing document (spec C), then "+N more" for the
+ *  rest of what the row counts, which opens them all. */
+function NotableLine({ doc, more, moreHref }: { doc: ReachNotable; more: number; moreHref: string }) {
+  const parts = [doc.id, doc.facts, doc.type === "trial" ? null : doc.year].filter((x) => x !== null && x !== "");
+  const title = htmlToPlainText(doc.title, Number.POSITIVE_INFINITY);
+  return (
+    <div className="mt-1.5 flex min-w-0 items-baseline gap-1.5 text-[13px]" data-testid={`${TEST}-notable`}>
+      <span className="bg-apollo-surface-2 shrink-0 rounded px-1.5 py-px text-xs font-medium">{doc.kind}</span>
+      {parts.map((x) => (
+        <span key={String(x)} className="text-muted-foreground shrink-0">
+          {x} ·
+        </span>
+      ))}
+      <ExternalLink href={doc.url} className="min-w-0 truncate" title={title}>
+        {title}
+      </ExternalLink>
+      {more > 0 && (
+        <Link
+          href={moreHref}
+          aria-label={`${noun(more, ["more citing document", "more citing documents"])} of this paper`}
+          className={cn(LINK, "shrink-0")}
+        >
+          +{more.toLocaleString()} more
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function PublicationTable({
   pubs,
   types,
@@ -269,8 +299,8 @@ function PublicationTable({
   /** Papers the modal will not open (`loadModalHidden`). */
   hidden: ReadonlySet<string>;
   on: Record<ReachType, boolean>;
-  /** The Citing documents view filtered to one paper and type. */
-  docsHref: (pmid: string, type: ReachType) => string;
+  /** The Citing documents view filtered to one paper and type (null: every ticked type). */
+  docsHref: (pmid: string, type: ReachType | null) => string;
   footer: PersonFooter;
 }) {
   return (
@@ -301,6 +331,13 @@ function PublicationTable({
                 <div className="text-muted-foreground mt-0.5 leading-normal">
                   <PubMeta pub={r} copy />
                 </div>
+                {r.notable && (
+                  <NotableLine
+                    doc={r.notable}
+                    more={types.reduce((n, t) => n + r[t], 0) - 1}
+                    moreHref={docsHref(r.pmid, null)}
+                  />
+                )}
                 <AuthorPills authors={r.authors} footer={footer} />
               </td>
               <td className={TD}>
