@@ -142,6 +142,8 @@ export type PortfolioReachTile = {
 export function portfolioReachParams(p: PortfolioParams): ReachParams | null {
   // Report 27 takes one research area; several have no form there.
   if (p.areas.length > 1) return null;
+  // ponytail: report 27 ORs `inst:` with its units, so an institution filter has no form there; carry it if anyone asks for the tile under one.
+  if (p.insts.length > 0) return null;
   return expressible({
     ...base(),
     units: p.units,

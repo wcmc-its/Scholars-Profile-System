@@ -1542,4 +1542,11 @@ describe("the portfolio report's Downstream reach tile", () => {
     expect(await loadPortfolioReachTile(portfolio(two), SUPER)).toBeNull();
     expect(h.queryRaw).not.toHaveBeenCalled();
   });
+
+  it("is absent under a primary institution filter (report 27 would OR it with the unit)", async () => {
+    const inst = "unit=dept:N1&inst=HSS&from=2020&to=2024";
+    expect(portfolioReachParams(portfolio(inst))).toBeNull();
+    expect(await loadPortfolioReachTile(portfolio(inst), SUPER)).toBeNull();
+    expect(h.queryRaw).not.toHaveBeenCalled();
+  });
 });
