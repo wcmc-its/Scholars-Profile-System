@@ -193,6 +193,20 @@ describe("BibliometricsTool", () => {
     );
   });
 
+  it("marks only the sections that follow the filters as Filtered", async () => {
+    respond(12);
+    render(<BibliometricsTool entityId="zzz9001" />);
+    await screen.findByTestId("bibliometrics-report");
+    const marked = [...document.querySelectorAll("h3")]
+      .filter((h) => h.nextElementSibling?.textContent === "Filtered")
+      .map((h) => h.textContent);
+    expect(marked).toEqual(["Most impactful papers"]);
+    // The filters and Download share the bar above the sections.
+    const bar = screen.getByRole("heading", { level: 2, name: "Bibliometrics" }).closest("header")!;
+    expect(within(bar).getByLabelText("First or senior author only")).toBeTruthy();
+    expect(within(bar).getByTestId("bibliometrics-download")).toBeTruthy();
+  });
+
   it("stacks each year's bar by author position, senior at the base, with each part named on hover", async () => {
     const r = report(3);
     r.output.byYear = r.output.byYear.map((y, i) => (i === 9 ? { ...y, count: 6, first: 1, senior: 3, co: 2 } : { ...y, count: 0, first: 0, senior: 0, co: 0 }));
@@ -275,13 +289,13 @@ describe("BibliometricsTool", () => {
   });
 
   const headings = () => [...document.querySelectorAll("h3")].map((x) => x.textContent);
+  // In the mockup's order; Definitions and sources is the closing <details>, not an h3.
   const SECTIONS = [
     "Summary",
     "Citation metrics",
     "Output",
-    "Most impactful papers",
     "Guideline and policy citations",
-    "Definitions and sources",
+    "Most impactful papers",
   ];
   const REACH: ScholarReach = {
     note: "What the block counts.",
@@ -312,6 +326,7 @@ describe("BibliometricsTool", () => {
     await waitFor(() => expect(reachRequests()).toBe(1));
     expect(screen.queryByTestId("bibliometrics-reach")).toBeNull();
     expect(headings()).toEqual(SECTIONS);
+    expect(document.querySelector("details:not([open]) > summary")?.textContent).toContain("Definitions and sources");
     expect(document.body.textContent).not.toContain("Downstream reach");
   });
 
@@ -319,7 +334,7 @@ describe("BibliometricsTool", () => {
     respondWithReach(REACH);
     render(<BibliometricsTool entityId="zzz9001" />);
     const block = await screen.findByTestId("bibliometrics-reach");
-    expect(headings()).toEqual([...SECTIONS.slice(0, 5), "Downstream reach", "Definitions and sources"]);
+    expect(headings()).toEqual([...SECTIONS.slice(0, 4), "Downstream reach", "Most impactful papers"]);
     expect([...block.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("th")?.textContent)).toEqual([
       "Clinical studies",
       "Registered trials",

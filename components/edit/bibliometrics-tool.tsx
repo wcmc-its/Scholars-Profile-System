@@ -10,7 +10,7 @@
 import * as React from "react";
 import { Download, FileText, Landmark, Lock } from "lucide-react";
 
-import { EditPanel } from "@/components/edit/edit-panel";
+import { EDIT_PANEL_HEADING_ID } from "@/components/edit/edit-panel";
 import { AuthorPills } from "@/components/edit/reports/author-pills";
 import { CopyPmid } from "@/components/edit/reports/policy-citations-client";
 import { ScholarHoverCard } from "@/components/edit/scholar-hover-card";
@@ -50,8 +50,11 @@ import { sanitizePubTitle } from "@/lib/utils";
 const PATH = "/api/edit/bibliometrics";
 const FAILED = "We couldn't load the bibliometrics report just now. Please try again.";
 
-const CARD = "bg-apollo-surface border-apollo-border flex flex-col gap-3 rounded-xl border px-5 py-[18px]";
-const EYEBROW = "text-apollo-ink-2 text-xs font-medium tracking-[0.06em] uppercase";
+/** One flat section of the single white panel (no card inside the card). */
+const SECTION = "flex flex-col gap-3 px-5 pt-7 pb-2 sm:px-7";
+const LIGHT_BOX = "bg-apollo-surface-2 rounded-[10px]";
+const FILTERED_BADGE =
+  "border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate rounded-full border px-2 py-px text-xs font-medium";
 const LINK = "text-apollo-slate hover:underline";
 const BADGE = "inline-flex items-center gap-1 rounded-full border px-2.5 text-xs leading-[18px] font-medium";
 // Health authority: the guideline tint with a slate outline and bolder text.
@@ -67,8 +70,7 @@ const OUTPUT_ROWS = [
   ["Senior author", "senior"],
   ["Co-author", "co"],
 ] as const;
-const SELECT =
-  "border-apollo-border-strong bg-apollo-surface min-h-11 rounded-lg border px-2.5 text-sm";
+const SELECT = "border-apollo-border-strong bg-apollo-surface min-h-9 rounded-md border px-2 text-sm";
 
 export function BibliometricsTool({ entityId }: { entityId: string }) {
   const [filters, setFilters] = React.useState<BibliometricsFilters>({
@@ -123,61 +125,137 @@ export function BibliometricsTool({ entityId }: { entityId: string }) {
     : null;
 
   return (
-    <EditPanel
-      slot="bibliometrics-tool"
-      heading="Bibliometrics"
-      description={
-        <span className="inline-flex items-center gap-1.5">
-          <Lock className="size-3" aria-hidden />
-          Locked — calculated from the publications in Scholars.{updated ? ` Updated ${updated}.` : ""}
-        </span>
-      }
-      headerAction={
-        <Button asChild variant="apollo" className="min-h-11">
-          <a href={`${PATH}?${query}&format=docx`} download data-testid="bibliometrics-download">
-            <Download className="size-4" />
-            Download Word document
-          </a>
-        </Button>
-      }
+    <section
+      data-slot="bibliometrics-tool"
+      className="bg-apollo-surface border-apollo-border rounded-[var(--apollo-radius-card)] border print:border-0"
     >
+      {/* The sticky bar: heading, Download and the filters. Phones scroll it
+          away (sticky from md up) so it does not eat a small screen. */}
+      <header className="bg-apollo-surface border-apollo-border z-20 rounded-t-[var(--apollo-radius-card)] border-b px-5 pt-5 pb-4 sm:px-7 md:sticky md:top-14">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id={EDIT_PANEL_HEADING_ID} className="text-2xl font-semibold tracking-[-0.01em]">
+              Bibliometrics
+            </h2>
+            <p className="text-apollo-ink-2 mt-0.5 inline-flex items-center gap-1.5 text-[13px]">
+              <Lock className="size-3" aria-hidden />
+              Locked: calculated from the publications in Scholars.{updated ? ` Updated ${updated}.` : ""}
+            </p>
+          </div>
+          <Button asChild variant="apollo" className="min-h-10">
+            <a href={`${PATH}?${query}&format=docx`} download data-testid="bibliometrics-download">
+              <Download className="size-4" />
+              Download Word document
+            </a>
+          </Button>
+        </div>
+        {report ? <FilterBar filters={filters} setFilters={setFilters} yearRange={report.yearRange} /> : null}
+      </header>
       {failed ? (
-        <Alert variant="destructive" data-testid="bibliometrics-error">
+        <Alert variant="destructive" data-testid="bibliometrics-error" className="mx-5 mt-5 w-auto sm:mx-7">
           <AlertDescription>{FAILED}</AlertDescription>
         </Alert>
       ) : null}
       {report ? (
-        <Report report={report} reach={reach} filters={filters} setFilters={setFilters} />
+        <Report report={report} reach={reach} />
       ) : failed ? null : (
-        <p className="text-muted-foreground text-sm">Loading…</p>
+        <p className="text-muted-foreground px-5 py-6 text-sm sm:px-7">Loading…</p>
       )}
-    </EditPanel>
+    </section>
+  );
+}
+
+function FilterBar({
+  filters,
+  setFilters,
+  yearRange,
+}: {
+  /** The controls follow the local choice; the report catches up when its fetch lands. */
+  filters: BibliometricsFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BibliometricsFilters>>;
+  yearRange: BibliometricsReport["yearRange"];
+}) {
+  const years = yearRange
+    ? Array.from({ length: yearRange.max - yearRange.min + 1 }, (_, i) => yearRange.min + i)
+    : [];
+  return (
+    <div className="bg-apollo-surface-2 border-apollo-border-strong mt-4 flex flex-wrap items-center gap-x-7 gap-y-3 rounded-[10px] border px-4 py-2.5 text-sm">
+      <fieldset className="flex flex-wrap items-center gap-x-3.5">
+        <legend className="float-left mr-3.5 font-medium">Authorship</legend>
+        {(
+          [
+            ["all", "All papers"],
+            ["lead", "First or senior author only"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value} className="inline-flex min-h-11 items-center gap-2">
+            <input
+              type="radio"
+              name="bibliometrics-authorship"
+              checked={filters.authorship === value}
+              onChange={() => setFilters((f) => ({ ...f, authorship: value }))}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      <div className="flex items-center gap-2">
+        {(
+          [
+            ["yearFrom", "Published", "Published from", yearRange?.min],
+            ["yearTo", "to", "Published to", yearRange?.max],
+          ] as const
+        ).map(([key, label, aria, fallback]) => (
+          <React.Fragment key={key}>
+            <label htmlFor={`bibliometrics-${key}`} className={key === "yearFrom" ? "font-medium" : undefined}>
+              {label}
+            </label>
+            <select
+              id={`bibliometrics-${key}`}
+              aria-label={aria}
+              className={SELECT}
+              value={filters[key] ?? fallback ?? ""}
+              onChange={(e) => setFilters((f) => ({ ...f, [key]: Number(e.target.value) }))}
+            >
+              {years.map((y) => (
+                <option key={y}>{y}</option>
+              ))}
+            </select>
+          </React.Fragment>
+        ))}
+      </div>
+      <p className="text-apollo-ink-2 ml-auto text-[13px]">
+        Applies to sections marked <span className={FILTERED_BADGE}>Filtered</span> and to downloads.
+      </p>
+    </div>
+  );
+}
+
+/** A section heading, with the Filtered badge when the section follows the filters. */
+function SectionHead({ title, filtered = false }: { title: string; filtered?: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <h3 className="text-lg font-semibold">{title}</h3>
+      {filtered ? <span className={FILTERED_BADGE}>Filtered</span> : null}
+    </div>
   );
 }
 
 function Report({
   report: r,
   reach,
-  filters,
-  setFilters,
 }: {
   report: BibliometricsReport;
   /** The "Downstream reach" block; null when the viewer gets none. */
   reach: ScholarReach | null;
-  /** The controls follow the local choice; `r` catches up when its fetch lands. */
-  filters: BibliometricsFilters;
-  setFilters: React.Dispatch<React.SetStateAction<BibliometricsFilters>>;
 }) {
   const unrated = unratedNote(r);
   const patents = patentsLine(r.patents);
   const peak = Math.max(1, ...r.output.byYear.map((y) => y.count));
-  const years = r.yearRange
-    ? Array.from({ length: r.yearRange.max - r.yearRange.min + 1 }, (_, i) => r.yearRange!.min + i)
-    : [];
   return (
-    <div className="flex flex-col gap-5" data-testid="bibliometrics-report">
-      <section className={CARD}>
-        <h3 className={EYEBROW}>Summary</h3>
+    <div className="flex flex-col pb-2" data-testid="bibliometrics-report">
+      <section className={`${SECTION} pt-6`}>
+        <SectionHead title="Summary" />
         {r.summary.length > 0 ? (
           <p className="text-[15px] leading-[1.6]" data-testid="bibliometrics-summary">
             <ScholarHoverCard cwid={r.scholar.cwid}>
@@ -192,8 +270,8 @@ function Report({
         )}
       </section>
 
-      <section className={CARD}>
-        <h3 className={EYEBROW}>Citation metrics</h3>
+      <section className={SECTION}>
+        <SectionHead title="Citation metrics" />
         <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
           <Tile value={String(r.metrics.hIndex)} label="h-index" />
           <Tile value={String(r.metrics.h5Index)} label="h5-index (last 5 years)" />
@@ -205,8 +283,8 @@ function Report({
         {unrated ? <p className="text-apollo-ink-2 text-[13px]">{unrated}</p> : null}
       </section>
 
-      <section className={CARD}>
-        <h3 className={EYEBROW}>Output</h3>
+      <section className={SECTION}>
+        <SectionHead title="Output" />
         <div className="flex flex-wrap gap-7">
           <table className="min-w-0 flex-[1_1_260px] text-sm">
             <caption className="pb-1.5 text-left font-semibold">By author position</caption>
@@ -272,97 +350,8 @@ function Report({
         </div>
       </section>
 
-      <section className={CARD}>
-        <h3 className={EYEBROW}>Most impactful papers</h3>
-        <div className="bg-apollo-surface-2 border-apollo-border-strong flex flex-wrap items-end gap-5 rounded-[10px] border px-3.5 py-3">
-          <fieldset className="flex flex-col gap-1.5">
-            <legend className="text-apollo-ink-2 text-xs font-medium">Authorship</legend>
-            <div className="flex flex-wrap gap-4 text-sm">
-              {(
-                [
-                  ["all", "All papers"],
-                  ["lead", "First or senior author only"],
-                ] as const
-              ).map(([value, label]) => (
-                <label key={value} className="inline-flex min-h-11 items-center gap-1.5">
-                  <input
-                    type="radio"
-                    name="bibliometrics-authorship"
-                    checked={filters.authorship === value}
-                    onChange={() => setFilters((f) => ({ ...f, authorship: value }))}
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          {(
-            [
-              ["yearFrom", "Published from", r.yearRange?.min],
-              ["yearTo", "Published to", r.yearRange?.max],
-            ] as const
-          ).map(([key, label, fallback]) => (
-            <div key={key} className="flex flex-col gap-1.5">
-              <label htmlFor={`bibliometrics-${key}`} className="text-apollo-ink-2 text-xs font-medium">
-                {label}
-              </label>
-              <select
-                id={`bibliometrics-${key}`}
-                className={SELECT}
-                value={filters[key] ?? fallback ?? ""}
-                onChange={(e) => setFilters((f) => ({ ...f, [key]: Number(e.target.value) }))}
-              >
-                {years.map((y) => (
-                  <option key={y}>{y}</option>
-                ))}
-              </select>
-            </div>
-          ))}
-          <div className="text-apollo-ink-2 pb-3 text-[13px]">
-            The Word document uses the filters set here.
-          </div>
-        </div>
-        {r.papers.rows.length > 0 ? (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="bg-apollo-surface-2 text-apollo-ink-2">
-                    <th scope="col" className={TH}>
-                      Paper
-                    </th>
-                    <th scope="col" className={TH}>
-                      Position
-                    </th>
-                    <th scope="col" className={`${TH} text-right`}>
-                      NIH percentile
-                    </th>
-                    <th scope="col" className={`${TH} text-right`}>
-                      Citation ratio
-                    </th>
-                    <th scope="col" className={`${TH} text-right`}>
-                      Cited by
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.papers.rows.map((p) => (
-                    <PaperRows key={p.pmid} paper={p} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-apollo-ink-2 text-[13px]">{papersNote(r)}</p>
-          </>
-        ) : (
-          <p className="text-apollo-ink-2 text-sm">No research articles match.</p>
-        )}
-      </section>
-
-      {r.stages ? <StagesSection stages={r.stages} /> : null}
-
-      <section className={CARD}>
-        <h3 className={EYEBROW}>Guideline and policy citations</h3>
+      <section className={SECTION}>
+        <SectionHead title="Guideline and policy citations" />
         <div className="overflow-x-auto">
           <table className="w-full min-w-[520px] text-sm">
             <thead>
@@ -405,8 +394,8 @@ function Report({
       </section>
 
       {patents ? (
-        <section className={CARD} data-testid="bibliometrics-patents">
-          <h3 className={EYEBROW}>Patents citing this work</h3>
+        <section className={SECTION} data-testid="bibliometrics-patents">
+          <SectionHead title="Patents citing this work" />
           <p className="text-[15px] leading-[1.6]" data-testid="bibliometrics-patents-line">
             {patents}
             {r.patents.dataEnd ? `, in patent data through ${r.patents.dataEnd}.` : "."}
@@ -445,8 +434,8 @@ function Report({
       ) : null}
 
       {reach ? (
-        <section className={CARD} data-testid="bibliometrics-reach">
-          <h3 className={EYEBROW}>Downstream reach</h3>
+        <section className={SECTION} data-testid="bibliometrics-reach">
+          <SectionHead title="Downstream reach" />
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-apollo-surface-2 text-apollo-ink-2">
@@ -482,14 +471,64 @@ function Report({
         </section>
       ) : null}
 
-      <section className="bg-apollo-lock-bg border-apollo-border-strong flex flex-col gap-1.5 rounded-xl border px-5 py-4 text-[13px] leading-[1.55]">
-        <h3 className={EYEBROW}>Definitions and sources</h3>
-        {r.definitions.map((d) => (
-          <div key={d.text}>
-            {d.term ? <span className="font-semibold">{d.term}: </span> : null}
-            {d.text}
+      {r.stages ? <StagesSection stages={r.stages} /> : null}
+
+      <section className={SECTION}>
+        <SectionHead title="Most impactful papers" filtered />
+        {r.papers.rows.length > 0 ? (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="bg-apollo-surface-2 text-apollo-ink-2">
+                    <th scope="col" className={TH}>
+                      Paper
+                    </th>
+                    <th scope="col" className={TH}>
+                      Position
+                    </th>
+                    <th scope="col" className={`${TH} text-right`}>
+                      NIH percentile
+                    </th>
+                    <th scope="col" className={`${TH} text-right`}>
+                      Citation ratio
+                    </th>
+                    <th scope="col" className={`${TH} text-right`}>
+                      Cited by
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.papers.rows.map((p) => (
+                    <PaperRows key={p.pmid} paper={p} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-apollo-ink-2 text-[13px]">{papersNote(r)}</p>
+          </>
+        ) : (
+          <p className="text-apollo-ink-2 text-sm">No research articles match.</p>
+        )}
+      </section>
+
+      <section className="px-5 pt-5 pb-5 sm:px-7">
+        <details className={`${LIGHT_BOX} group px-4 py-3.5 text-[13px] leading-[1.55]`}>
+          <summary className="min-h-6 cursor-pointer list-none text-sm font-semibold [&::-webkit-details-marker]:hidden">
+            Definitions and sources{" "}
+            <span aria-hidden className="inline-block transition-transform group-open:rotate-90">
+              ▸
+            </span>
+          </summary>
+          <div className="mt-2.5 grid max-w-[900px] gap-2">
+            {r.definitions.map((d) => (
+              <div key={d.text}>
+                {d.term ? <span className="font-semibold">{d.term}: </span> : null}
+                {d.text}
+              </div>
+            ))}
           </div>
-        ))}
+        </details>
       </section>
     </div>
   );
@@ -497,7 +536,7 @@ function Report({
 
 function Tile({ value, label }: { value: string; label: string }) {
   return (
-    <div className="bg-apollo-surface-2 border-apollo-border-strong rounded-[10px] border px-4 py-3.5">
+    <div className={`${LIGHT_BOX} px-4 py-3.5`}>
       <div className="text-[28px] leading-[1.2] font-semibold">{value}</div>
       <div className="text-apollo-ink-2 text-[13px]">{label}</div>
     </div>
@@ -510,8 +549,8 @@ function StagesSection({ stages }: { stages: BibliometricsStages }) {
   const max = Math.max(1, ...STAGE_BUCKETS.map((k) => stages.counts[k]));
   const total = STAGE_BUCKETS.reduce((n, k) => n + stages.counts[k], 0);
   return (
-    <section className={CARD} data-testid="bibliometrics-stages">
-      <h3 className={EYEBROW}>Translational stage</h3>
+    <section className={SECTION} data-testid="bibliometrics-stages">
+      <SectionHead title="Translational stage" filtered />
       <p className="text-apollo-ink-2 text-[13px]">{STAGES_NOTE}</p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[480px] text-sm">
