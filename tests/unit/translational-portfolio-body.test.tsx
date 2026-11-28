@@ -48,10 +48,25 @@ const DATA: PortfolioData = {
   grants: 12,
   trials: 3,
   byYear: [
-    { year: 2020, counts, grants: 6, trials: 1, trialCounts: { T0: 0, T1: 1, T2: 0, "T3-4": 0, none: 0 } },
-    { year: 2021, counts, grants: 8, trials: 2, trialCounts: { T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 0 } },
+    {
+      year: 2020,
+      counts,
+      grants: 6,
+      trials: 1,
+      trialCounts: { T0: 0, T1: 1, T2: 0, "T3-4": 0, none: 0 },
+      grantCounts: { T0: 1, T1: 1, T2: 1, "T3-4": 0, none: 3 },
+    },
+    {
+      year: 2021,
+      counts,
+      grants: 8,
+      trials: 2,
+      trialCounts: { T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 0 },
+      grantCounts: { T0: 1, T1: 2, T2: 2, "T3-4": 1, none: 2 },
+    },
   ],
   trialStages: { all: { T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 1 }, baseline: { T0: 0, T1: 10, T2: 30, "T3-4": 5, none: 15 } },
+  grantStages: { all: { T0: 1, T1: 2, T2: 2, "T3-4": 1, none: 6 }, baseline: { T0: 10, T1: 10, T2: 20, "T3-4": 10, none: 50 } },
   baseline: counts,
   baselineActivities: null,
   table: [],
@@ -87,7 +102,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("report 26's Downstream reach tile", () => {
-  const GRANTS = ["Grants, 2020 to 2021", "12", "Active in these years, as PI, Co-PI or subaward PI. No stage yet."];
+  const GRANTS = ["Grants, 2020 to 2021", "12", "Active in these years, as PI, Co-PI or subaward PI. 50% have a stage."];
   const TRIALS = ["Clinical trials, 2020 to 2021", "3", "67% have a stage, from their trial phase"];
   const FOUR = [
     ["Publications, 2020 to 2021", "125", "80% have a stage"],
@@ -170,6 +185,7 @@ const row = (key: string, over: Partial<Row> = {}): Row => ({
   grants: 0,
   trials: 0,
   trialCounts: { T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 0 },
+  grantCounts: { T0: 0, T1: 0, T2: 0, "T3-4": 0, none: 0 },
   ...over,
 });
 const scholar = (i: number): PortfolioData["scholars"]["rows"][number] => ({
@@ -308,7 +324,7 @@ describe("report 26 with nothing to compare", () => {
     const { container } = await page();
     expect(tiles(container)).toEqual([
       ["Publications, 2020 to 2021", "125", "80% have a stage"],
-      ["Grants, 2020 to 2021", "12", "Active in these years, as PI, Co-PI or subaward PI. No stage yet."],
+      ["Grants, 2020 to 2021", "12", "Active in these years, as PI, Co-PI or subaward PI. 50% have a stage."],
       ["Clinical trials, 2020 to 2021", "3", "67% have a stage, from their trial phase"],
     ]);
     expect(container.textContent).not.toContain("0 of 0");
@@ -361,6 +377,7 @@ describe("report 26's grants and clinical trials", () => {
     people: [{ cwid: "abc1001", role: "PI" }, { cwid: "abc1002", role: "Co-PI" }],
     deptCodes: ["N1"],
     areas: [],
+    stage: "T1" as const,
     names,
   };
   const TRIAL = {
@@ -380,16 +397,24 @@ describe("report 26's grants and clinical trials", () => {
     names,
   };
 
-  it("lists the grants, each award once with its investigators, and no stage filter", async () => {
-    h.portfolio.mockResolvedValue({ ...DATA, grantList: { total: 1, rows: [GRANT] } });
+  it("lists the grants, each award once with its investigators and its stage, under the stage chips", async () => {
+    const bare = { ...GRANT, key: "INFOED-2", title: "A title-only award", stage: null };
+    h.portfolio.mockResolvedValue({ ...DATA, grantList: { total: 2, rows: [GRANT, bare] } });
     const { container } = await page({ ...SP, view: "grants" });
-    const item = within(container).getByTestId("portfolio-grant");
+    const [item, other] = within(container).getAllByTestId("portfolio-grant");
     expect(item.textContent).toContain("An example award");
     expect(item.textContent).toContain("NCI· 5 R01 CA000001-03· 2019–2024");
     expect(item.textContent).toContain("Example Person 1 (PI), Example Person 2 (Co-PI)");
-    expect(item.textContent).toContain("No stage yet");
-    expect(within(container).queryByTestId("portfolio-list-stages")).toBeNull();
-    expect(container.textContent).toContain("1 to 1 of 1");
+    expect(item.textContent).toContain("T1Early translation");
+    expect(other.textContent).toContain("No stage");
+    expect(within(container).getByTestId("portfolio-list-stages")).toBeTruthy();
+    expect(container.textContent).toContain("1 to 2 of 2");
+  });
+
+  it("names the stage pick in the grants list's heading and its empty line", async () => {
+    const { container } = await page({ ...SP, view: "grants", stage: "T2" });
+    expect(container.textContent).toContain("Grants in T2, Department of Examples");
+    expect(within(container).getByTestId("portfolio-grants").textContent).toBe("No grants in T2 were active in this scope, 2020 to 2021.");
   });
 
   it("lists the trials with their NCT link and the trial's own phase", async () => {
@@ -400,6 +425,13 @@ describe("report 26's grants and clinical trials", () => {
     expect(item.textContent).toContain("Phase 2");
     expect(item.textContent).toContain("Open to accrual");
     expect(item.textContent).toContain("Principal investigator: Example Person 1");
+  });
+
+  it("opens every grant from the tile and the activity row, whatever stage is picked", async () => {
+    const { container } = await page({ ...SP, stage: "T2" });
+    expect(within(container).getByTestId("portfolio-grants-total").getAttribute("href")).toBe(`${BASE}?unit=dept%3AN1&from=2020&to=2021&view=grants#items`);
+    const row = within(container).getByTestId("portfolio-activity-grants");
+    expect(within(row).getByRole("link", { name: "12 grants. Show them." }).getAttribute("href")).toBe(`${BASE}?unit=dept%3AN1&from=2020&to=2021&view=grants#items`);
   });
 
   it("links each tile and table count to its list", async () => {
@@ -438,8 +470,19 @@ describe("report 26's trial stages", () => {
     expect(within(trials).getByRole("link", { name: "3 clinical trials. Show them." }).getAttribute("href")).toContain("view=trials");
     expect(within(trials).getByRole("link", { name: "Clinical trials" }).getAttribute("href")).toBe(`${BASE}?unit=dept%3AN1&from=2020&to=2021&act=trials#stages`);
     expect(trials.querySelector('[role="cell"]')!.getAttribute("aria-label")).toBe("T0 0%, T1 50%, T2 50%, T3–4 0%; stage assigned 67%");
-    expect(grants.textContent).toContain("No stage yet");
-    expect(within(grants).queryByRole("link", { name: "Grants" })).toBeNull();
+    // Grants: 6 of the 12 staged (1/2/2/1).
+    expect(within(grants).getByRole("link", { name: "Grants" }).getAttribute("href")).toBe(`${BASE}?unit=dept%3AN1&from=2020&to=2021&act=grants#stages`);
+    expect(grants.querySelector('[role="cell"]')!.getAttribute("aria-label")).toBe("T0 17%, T1 33%, T2 33%, T3–4 17%; stage assigned 50%");
+    expect(grants.textContent).toContain("50%");
+  });
+
+  it("never says grants have no stage yet, and states the grant stage rule", async () => {
+    const { container } = await page();
+    expect(container.textContent).not.toMatch(/no stage yet|stage not yet|not yet assigned/i);
+    expect(container.textContent).toContain(
+      "A grant's stage comes from ReciterAI's reading of its abstract; grants with only a title have no stage.",
+    );
+    expect(container.textContent).not.toContain("—");
   });
 
   it("under act=trials, draws the trials' stages over time and in the table, and the stage cells open the trials", async () => {
@@ -478,5 +521,48 @@ describe("report 26's trial stages", () => {
     expect(a.textContent).toContain("T2Clinical trials and efficacy");
     expect(b.textContent).toContain("No stage");
     expect(within(container).getByTestId("portfolio-list-stages")).toBeTruthy();
+  });
+});
+
+describe("report 26's grant stages", () => {
+  it("under act=grants, draws the grants' stages over time, the tiles and the table, and the stage cells open the grants", async () => {
+    h.portfolio.mockResolvedValue({
+      ...DATA,
+      table: [row("N9", { gaps: ["T3-4"], grants: 4, grantCounts: { T0: 1, T1: 0, T2: 3, "T3-4": 0, none: 0 } })],
+    });
+    const { container } = await page({ ...SP, act: "grants", by: "area" });
+    const rows = within(container).getByTestId("portfolio-stage-rows");
+    const cells = [...rows.querySelectorAll('[role="cell"][aria-label]')].map((x) => x.getAttribute("aria-label"));
+    // 2020: 1/1/1/0 of 3 staged, 3 of 6 with a stage.
+    expect(cells[0]).toBe("T0 34%, T1 33%, T2 33%, T3–4 0%; stage assigned 50%");
+    // The All of WCM row is the grants' baseline.
+    expect(cells.at(-1)).toBe("T0 20%, T1 20%, T2 40%, T3–4 20%; stage assigned 50%");
+    expect(container.textContent).toContain("Grants with a stage");
+    // 2020: T2 and T3–4 are 1 of 3 staged; 2021: 3 of 6.
+    expect(container.textContent).toContain("33% in 2020 → 50% in 2021");
+    expect(container.textContent).toContain("Shares leave out grants with no stage.");
+    const table = within(container).getByTestId("portfolio-table");
+    const t2 = within(table).getByRole("link", { name: "75% in T2, Area N9. Show grants." });
+    expect(t2.getAttribute("href")).toBe(`${BASE}?area=N9&stage=T2&view=grants#items`);
+    // Gaps are a publication rule: none in grant mode.
+    expect(table.textContent).not.toContain("Gap");
+    for (const label of ["Show stages of", "Stage shares for"]) {
+      const nav = within(container).getByRole("navigation", { name: label });
+      const on = within(nav).getByRole("link", { name: "Grants" });
+      expect(on.getAttribute("aria-current")).toBe("page");
+    }
+  });
+
+  it("offers Grants in both stage switches and keeps act=grants through a rail change", async () => {
+    const { container } = await page({ ...SP, act: "grants" });
+    const form = within(container).getAllByTestId("portfolio-filters")[0];
+    expect(form.querySelector('input[type="hidden"][name="act"]')?.getAttribute("value")).toBe("grants");
+    const nav = within(container).getByRole("navigation", { name: "Show stages of" });
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["Publications", "Clinical trials", "Grants"]);
+  });
+
+  it("says only grants with a research area count under an area filter, beside their stage share", async () => {
+    const { container } = await page({ ...SP, area: "area_a" });
+    expect(tiles(container)[1]).toEqual(["Grants, 2020 to 2021", "12", "Only grants with a research area. 50% have a stage."]);
   });
 });

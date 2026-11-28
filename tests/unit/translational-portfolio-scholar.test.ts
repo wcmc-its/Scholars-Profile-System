@@ -461,3 +461,36 @@ describe("the workbook", () => {
     expect(criteria["Translational stage"]).toBe("No stage only");
   });
 });
+
+describe("the grants sheet", () => {
+  it("gives each award its stage, or No stage, and states the grant stage rule", async () => {
+    const grant = (key: string, stage: "T2" | null) => ({
+      key,
+      title: `Award ${key}`,
+      funder: "NCI",
+      awardNumber: null,
+      start: "2021-01-01",
+      end: "2023-12-31",
+      years: [2021],
+      people: [{ cwid: "abc1234", role: "PI" }],
+      deptCodes: [],
+      areas: [],
+      stage,
+    });
+    const buf = await buildScholarPortfolioWorkbook(
+      parseScholarPortfolioParams(new URLSearchParams("from=2020&to=2025")),
+      { cwid: "abc1234", name: "Example Person", preferredName: "Example Person", title: null, department: null, slug: null },
+      { papers: [], areaChoices: [], areas: [], grants: [grant("a", "T2"), grant("b", null)], trials: [] },
+      new Date("2026-11-28T00:00:00Z"),
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const rows = wb.getWorksheet("Grants")!.getSheetValues().slice(1).map((r) => (r as unknown[]).slice(1));
+    expect(rows[0].at(-1)).toBe("Translational stage");
+    expect(rows.slice(1).map((r) => r.at(-1))).toEqual(["T2 · Clinical trials and efficacy", "No stage"]);
+    const criteria = Object.fromEntries(
+      wb.getWorksheet("Criteria")!.getSheetValues().slice(1).map((r) => (r as unknown[]).slice(1, 3)),
+    );
+    expect(criteria["Grant stage rule"]).toMatch(/^A grant's stage comes from ReciterAI's reading of its abstract/);
+  });
+});

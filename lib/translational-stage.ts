@@ -205,3 +205,14 @@ export function trialStageFromPhaseKey(key: string): TranslationalStage | null {
 
 export const TRIAL_STAGE_RULE =
   "A clinical trial's stage comes from its phase: Phase 1 (and early Phase 1) is T1, Phase 2 and 3 (and 1/2, 2/3) are T2, Phase 4 is T3–4. Observational, not-applicable and unregistered studies have no stage. Trial stages are counted apart from publications, never mixed into their shares.";
+
+/**
+ * A grant's stage (grant translational stage plan, 2026-11-28): ReciterAI
+ * reads the abstract of each grant text (`area_signal_text`, keyed by
+ * `Grant.areaTextKey`) with the publication stage prompt. Shown by the same
+ * rule as a paper's (`displayStage`). Title-only texts get none. A funding
+ * project takes the stage of its newest row that has one
+ * (`grantProjectStage`, report 26). Grant stages stay on grants.
+ */
+export const GRANT_STAGE_RULE =
+  "A grant's stage comes from ReciterAI's reading of its abstract; grants with only a title have no stage. An award takes the stage of its most recent record that has one, shown only when the model was not unsure. Grant stages are counted apart from publications and trials, never mixed into their shares.";

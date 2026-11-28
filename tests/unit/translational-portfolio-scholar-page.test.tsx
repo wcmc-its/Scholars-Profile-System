@@ -119,6 +119,7 @@ const DATA: ScholarPortfolio = {
       people: [{ cwid: "abc1234", role: "PI" }],
       deptCodes: [],
       areas: [],
+      stage: "T1",
     },
   ],
   trials: [
@@ -414,7 +415,7 @@ describe("the research area card", () => {
 });
 
 describe("funding and clinical trials", () => {
-  it("lists this scholar's awards and trials with role, years and identifiers, stage not yet assigned", async () => {
+  it("lists this scholar's awards and trials with role, years, identifiers and stage", async () => {
     const c = await open();
     const grants = within(c).getByTestId("scholar-portfolio-grants");
     expect(grants.querySelector("h2")!.textContent).toBe("Funding");
@@ -422,7 +423,9 @@ describe("funding and clinical trials", () => {
     const g = within(grants).getByTestId("scholar-portfolio-grant");
     expect(g.textContent).toContain("PI·2021–2026");
     expect(g.textContent).toContain("Award 5 R01 CA000001-03");
-    expect(g.textContent).toContain("Stage not yet assigned");
+    expect(g.textContent).toContain("T1Early translation");
+    expect(c.textContent).not.toMatch(/not yet assigned|no translational stage yet|no stage yet/i);
+    expect(c.textContent).toContain("A grant's stage comes from ReciterAI's reading of its abstract; grants with only a title have no stage.");
 
     const trials = within(c).getByTestId("scholar-portfolio-trials");
     const t = within(trials).getByTestId("scholar-portfolio-trial");
@@ -449,5 +452,17 @@ describe("trial stages on the scholar page", () => {
     cleanup();
     h.data.mockResolvedValue({ ...DATA, trials: [{ ...DATA.trials[0], stage: null, trialPhase: "Not applicable" }] });
     expect(within(await open()).getByTestId("scholar-portfolio-trial").textContent).toContain("No stage");
+  });
+});
+
+describe("grant stages on the scholar page", () => {
+  it("tags a grant with its ReciterAI stage, and one without a stage with No stage", async () => {
+    const g = within(await open()).getByTestId("scholar-portfolio-grant");
+    expect(g.textContent).toContain("T1");
+    cleanup();
+    h.data.mockResolvedValue({ ...DATA, grants: [{ ...DATA.grants[0], stage: null }] });
+    const bare = within(await open()).getByTestId("scholar-portfolio-grant");
+    expect(bare.textContent).toContain("No stage");
+    expect(bare.textContent).not.toContain("T1");
   });
 });

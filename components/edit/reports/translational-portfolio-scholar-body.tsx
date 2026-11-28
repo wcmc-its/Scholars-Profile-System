@@ -3,10 +3,11 @@
  * `/edit/scholar/[cwid]/translational-portfolio`. Mockup: the Design canvas
  * "Translational portfolio" (Person artboard; sample data only). Built: the
  * header, Summary, Publications by year, By research area, Publications and
- * stages, How to read this, the rail and the Download. Not yet: Funding,
- * Clinical trials, From discovery to trial and Flag stage (no staged grants or
- * trials yet; plan PRs 4–7), and Clinical uptake (report 27's per-scholar
- * block counts every stage and year, not this page's T0 and T1 in scope).
+ * stages, Funding and Clinical trials (each grant and trial with its stage),
+ * How to read this, the rail and the Download. Not yet: From discovery to
+ * trial and Flag stage (plan PR 7), and Clinical uptake (report 27's
+ * per-scholar block counts every stage and year, not this page's T0 and T1 in
+ * scope).
  *
  * Counts only, never a percentage, a rank or another person. Every count opens
  * the list it counts: a stage's count filters the paper list (`stage`), an
@@ -79,11 +80,13 @@ import { methodologyHref } from "@/lib/methodology-anchors";
 import { profilePath } from "@/lib/profile-url";
 import {
   countsTotal,
+  GRANT_STAGE_RULE,
   STAGE_BUCKETS,
   TRIAL_STAGE_RULE,
   TRANSLATIONAL_STAGE_LABELS,
   type StageBucket,
   type StageCounts,
+  type TranslationalStage,
 } from "@/lib/translational-stage";
 import { cn } from "@/lib/utils";
 
@@ -631,7 +634,7 @@ export async function ScholarPortfolioBody({
           <ActivitySection
             id="funding"
             title="Funding"
-            note={`Awards active ${yearsLabel} where they are PI, Co-PI or subaward PI, from WCM sponsored research and NIH RePORTER records. Each award counts once, renewal years included.${p.areas.length > 0 ? " Under an area filter, only grants with a research area are listed." : ""}`}
+            note={`Awards active ${yearsLabel} where they are PI, Co-PI or subaward PI, from WCM sponsored research and NIH RePORTER records. Each award counts once, renewal years included, staged from the abstract.${p.areas.length > 0 ? " Under an area filter, only grants with a research area are listed." : ""}`}
             count={data.grants.length}
             noun={["award", "awards"]}
             empty="No awards in these years."
@@ -778,7 +781,7 @@ export async function ScholarPortfolioBody({
               {p.middle ? AUTHORSHIP_RULE_ALL : AUTHORSHIP_RULE_DEFAULT} {COUNTING_RULE}
             </p>
             <p className="text-muted-foreground text-xs">
-              {GRANT_RULE} {TRIAL_RULE} {TRIAL_STAGE_RULE} {ACTIVITY_AREA_RULE} Grants have no translational stage yet.
+              {GRANT_RULE} {GRANT_STAGE_RULE} {TRIAL_RULE} {TRIAL_STAGE_RULE} {ACTIVITY_AREA_RULE}
             </p>
             <a
               href={methodologyHref("translationalStage")}
@@ -927,13 +930,20 @@ function ActivitySection({
   );
 }
 
-const NOT_YET_STAGED = (
-  <span>
-    <span className="text-apollo-ink-2 inline-flex rounded-full border border-dashed bg-white px-2 py-px text-xs leading-normal" style={{ borderColor: NO_STAGE_EDGE }}>
-      Stage not yet assigned
+/** A grant's or trial's stage tag, or the No stage pill. */
+function ActivityStage({ stage }: { stage: TranslationalStage | null }) {
+  return (
+    <span>
+      {stage ? (
+        <StageTag stage={stage} />
+      ) : (
+        <span className="text-apollo-ink-2 inline-flex rounded-full border bg-white px-2 py-px text-xs leading-normal" style={{ borderColor: NO_STAGE_EDGE }}>
+          {NO_STAGE_LABEL}
+        </span>
+      )}
     </span>
-  </span>
-);
+  );
+}
 
 function GrantRow({ g, roles }: { g: PortfolioGrant; roles: string[] }) {
   return (
@@ -955,7 +965,7 @@ function GrantRow({ g, roles }: { g: PortfolioGrant; roles: string[] }) {
           </>
         )}
       </span>
-      {NOT_YET_STAGED}
+      <ActivityStage stage={g.stage} />
     </li>
   );
 }
@@ -992,15 +1002,7 @@ function TrialRow({ t }: { t: PortfolioTrial }) {
           <>Protocol {t.protocolNumber}</>
         )}
       </span>
-      <span>
-        {t.stage ? (
-          <StageTag stage={t.stage} />
-        ) : (
-          <span className="text-apollo-ink-2 inline-flex rounded-full border bg-white px-2 py-px text-xs leading-normal" style={{ borderColor: NO_STAGE_EDGE }}>
-            {NO_STAGE_LABEL}
-          </span>
-        )}
-      </span>
+      <ActivityStage stage={t.stage} />
     </li>
   );
 }

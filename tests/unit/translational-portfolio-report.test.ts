@@ -207,12 +207,13 @@ describe("buildPortfolioWorkbook", () => {
     all: c(4, 3, 2, 1, 0),
     grants: 7,
     trials: 2,
-    byYear: [{ year: 2025, counts: c(4, 3, 2, 1, 0), grants: 7, trials: 2, trialCounts: c(0, 1, 1, 0, 0) }],
+    byYear: [{ year: 2025, counts: c(4, 3, 2, 1, 0), grants: 7, trials: 2, trialCounts: c(0, 1, 1, 0, 0), grantCounts: c(1, 2, 0, 1, 3) }],
     trialStages: { all: c(0, 1, 1, 0, 0), baseline: c(0, 5, 10, 2, 3) },
+    grantStages: { all: c(1, 2, 0, 1, 3), baseline: c(10, 20, 15, 5, 20) },
     baseline: c(4, 3, 2, 1, 0),
     baselineActivities: { grants: 70, trials: 20 },
     table: [
-      { key: "a1", label: "Area one", href: "", note: "12 scholars", noteHref: null, gaps: ["T1", "T3-4"], counts: c(60, 1, 20, 1, 9), grants: 5, trials: 1, trialCounts: c(0, 0, 1, 0, 0) },
+      { key: "a1", label: "Area one", href: "", note: "12 scholars", noteHref: null, gaps: ["T1", "T3-4"], counts: c(60, 1, 20, 1, 9), grants: 5, trials: 1, trialCounts: c(0, 0, 1, 0, 0), grantCounts: c(0, 3, 0, 0, 2) },
     ],
     areaCoverage: { sized: 0, spanning: 0 },
     areaOrder: [],
@@ -279,17 +280,31 @@ describe("buildPortfolioWorkbook", () => {
       "Trials: T2",
       "Trials: T3–4",
       "Trials: No stage",
+      "Grants: T0",
+      "Grants: T1",
+      "Grants: T2",
+      "Grants: T3–4",
+      "Grants: No stage",
     ]);
-    // Area one: 82 staged of 91; 60/1/20/1 of the 82 staged (T2 takes the leftover point); then 5 grants, 1 trial (T2).
-    expect((ws.getRow(3).values as unknown[]).slice(10)).toEqual([90, 73, 1, 25, 1, 5, 1, 0, 0, 1, 0, 0]);
-    // The all-of-WCM row carries the baseline grants and trials, and the trials' stages.
-    expect((ws.getRow(2).values as unknown[]).slice(15)).toEqual([70, 20, 0, 5, 10, 2, 3]);
+    // Area one: 82 staged of 91; 60/1/20/1 of the 82 staged (T2 takes the leftover point); then 5 grants, 1 trial (T2),
+    // and the 5 grants by stage (3 in T1, 2 with none).
+    expect((ws.getRow(3).values as unknown[]).slice(10)).toEqual([90, 73, 1, 25, 1, 5, 1, 0, 0, 1, 0, 0, 0, 3, 0, 0, 2]);
+    // The all-of-WCM row carries the baseline grants and trials, and both series' stages.
+    expect((ws.getRow(2).values as unknown[]).slice(15)).toEqual([70, 20, 0, 5, 10, 2, 3, 10, 20, 15, 5, 20]);
   });
-  it("counts grants and trials by year and in total, once each in the total", async () => {
+  it("counts grants and trials by year and in total, once each in the total, each by stage", async () => {
     const ws = (await sheet(0)).getWorksheet("By year")!;
-    expect((ws.getRow(1).values as unknown[]).slice(-7, -5)).toEqual(["Grants", "Clinical trials"]);
-    expect((ws.getRow(2).values as unknown[]).slice(-7)).toEqual([7, 2, 0, 1, 1, 0, 0]);
-    expect((ws.getRow(3).values as unknown[]).slice(-7)).toEqual([7, 2, 0, 1, 1, 0, 0]);
+    expect((ws.getRow(1).values as unknown[]).slice(-12, -10)).toEqual(["Grants", "Clinical trials"]);
+    expect((ws.getRow(1).values as unknown[]).slice(-5)).toEqual(["Grants: T0", "Grants: T1", "Grants: T2", "Grants: T3–4", "Grants: No stage"]);
+    expect((ws.getRow(2).values as unknown[]).slice(-12)).toEqual([7, 2, 0, 1, 1, 0, 0, 1, 2, 0, 1, 3]);
+    expect((ws.getRow(3).values as unknown[]).slice(-12)).toEqual([7, 2, 0, 1, 1, 0, 0, 1, 2, 0, 1, 3]);
+  });
+  it("states the grant stage rule and that the stage filter applies to grants", () => {
+    const rows = new Map(describePortfolioCriteria(parsePortfolioParams(new URLSearchParams("act=grants")), choices, new Date(0)));
+    expect(rows.get("Grant stage rule")).toMatch(/^A grant's stage comes from ReciterAI's reading of its abstract; grants with only a title have no stage\./);
+    expect(rows.get("Record type")).toBe("Research articles, grants and clinical trials. Each has its own stages, and the stage filter applies to all three lists.");
+    expect(rows.get("Stages shown on the page")).toBe("Grants");
+    for (const v of rows.values()) expect(v).not.toMatch(/no stage yet|not yet assigned|—/i);
   });
 });
 
@@ -346,8 +361,8 @@ describe("loadPortfolio", () => {
     expect(texts.filter((t) => t.includes("UNION ALL"))).toHaveLength(1);
     expect(d.all).toEqual(c(3, 0, 0, 0, 2));
     expect(d.byYear).toEqual([
-      { year: 2024, counts: c(3, 0, 0, 0, 0), grants: 0, trials: 0, trialCounts: c(0, 0, 0, 0, 0) },
-      { year: 2025, counts: c(0, 0, 0, 0, 2), grants: 0, trials: 0, trialCounts: c(0, 0, 0, 0, 0) },
+      { year: 2024, counts: c(3, 0, 0, 0, 0), grants: 0, trials: 0, trialCounts: c(0, 0, 0, 0, 0), grantCounts: c(0, 0, 0, 0, 0) },
+      { year: 2025, counts: c(0, 0, 0, 0, 2), grants: 0, trials: 0, trialCounts: c(0, 0, 0, 0, 0), grantCounts: c(0, 0, 0, 0, 0) },
     ]);
     expect(d.table.map((r) => [r.key, r.counts])).toEqual([["dept:x", c(0, 1, 0, 0, 0)]]);
     expect(d.activities.pmids).toEqual(["9"]);
@@ -479,6 +494,89 @@ describe("loadPortfolio's trial stages", () => {
     expect(p.act).toBe("trials");
     expect(portfolioQueryString(p)).toContain("act=trials");
     expect(portfolioQueryString(parsePortfolioParams(new URLSearchParams("act=bogus")))).not.toContain("act=");
+  });
+});
+
+describe("loadPortfolio's grant stages", () => {
+  // One row per project (distinct core project numbers); `st` / `conf` are the grant text's raw stage.
+  const grantRow = (n: number, dc: string, st: string | null, conf: string | null = "high") => ({
+    id: String(n), cwid: "aaa1001", title: `Award ${n}`, role: "PI", funder: "NCI", award_number: `1 R01 CA00000${n}-01`,
+    external_id: `INFOED-${n}-aaa1001`, intake_type: "Grant", start_date: new Date("2023-01-01T00:00:00Z"),
+    end_date: new Date("2025-12-31T00:00:00Z"), area_text_key: `k${n}`, stage: st, stage_confidence: conf, dc,
+  });
+  const choices = { facets: { roleCategories: [], departments: [], centers: [], institutions: [] }, labels: new Map(), areas: [] } as PortfolioChoices;
+  const mock = (pubRows: { k: string; g: string; st: string; n: bigint }[]) => {
+    const reads = db.read as unknown as Record<string, unknown>;
+    reads.suppression = { findMany: vi.fn(async () => []) };
+    reads.areaSignalTopic = { findMany: vi.fn(async () => []) };
+    reads.scholar = { findMany: vi.fn(async () => []) };
+    const calls: { sql: string; values: unknown[] }[] = [];
+    reads.$queryRaw = vi.fn(async (q: { sql?: string; values?: unknown[] }) => {
+      const text = String(q.sql);
+      calls.push({ sql: text, values: q.values ?? [] });
+      if (text.includes("FROM `grant` g"))
+        return [
+          grantRow(1, "a", "T0"),
+          grantRow(2, "b", "T2"),
+          grantRow(3, "b", "T2", null),
+          grantRow(4, "a", "T1", "low"),
+          grantRow(5, "a", "NA"),
+          grantRow(6, "a", null, null),
+        ];
+      if (text.includes("WITH x AS")) return pubRows;
+      return [];
+    });
+    return calls;
+  };
+
+  it("reads each grant text's stage beside the grant", async () => {
+    const calls = mock([]);
+    await loadPortfolio(parsePortfolioParams(new URLSearchParams("from=2027&to=2028")), choices);
+    const sql = calls.find((q) => q.sql.includes("FROM `grant` g"))!.sql;
+    expect(sql).toMatch(/LEFT JOIN area_signal_text ast ON ast\.text_key = g\.area_text_key/);
+    expect(sql).toMatch(/ast\.translational_stage AS stage, ast\.translational_stage_confidence AS stage_confidence/);
+  });
+
+  it("counts grants by stage under act=grants, sorts the table by them, and filters the grants list by the pick", async () => {
+    mock([
+      { k: "dept", g: "a", st: "T0", n: 50n },
+      { k: "dept", g: "b", st: "T0", n: 5n },
+    ]);
+    // A window no other test uses: grouped counts are cached by their SQL.
+    const d = await loadPortfolio(parsePortfolioParams(new URLSearchParams("from=2019&to=2026&act=grants&stage=T2&view=grants")), choices);
+    // T0, T2, T2 (no confidence is shown), then low confidence, NA and title-only: no stage.
+    expect(d.grantStages.all).toEqual(c(1, 0, 2, 0, 3));
+    expect(d.grants).toBe(6);
+    // Sorted by share of staged grants in the pick (T2): b (2 of 2) before a (0 of 1).
+    expect(d.table.map((r) => [r.key, r.grantCounts, r.grants, countsTotal(r.counts)])).toEqual([
+      ["b", c(0, 0, 2, 0, 0), 2, 5],
+      ["a", c(1, 0, 0, 0, 3), 4, 50],
+    ]);
+    // The Grants list follows the stage pick; the tile total does not.
+    expect(d.grantList.total).toBe(2);
+    expect(d.grantList.rows.map((g) => [g.title, g.stage])).toEqual([
+      ["Award 2", "T2"],
+      ["Award 3", "T2"],
+    ]);
+    expect(d.byYear.find((y) => y.year === 2024)?.grantCounts).toEqual(c(1, 0, 2, 0, 3));
+    expect(d.byYear.find((y) => y.year === 2024)?.grants).toBe(6);
+    expect(d.byYear.find((y) => y.year === 2020)?.grantCounts).toEqual(c(0, 0, 0, 0, 0));
+  });
+
+  it("loads all of WCM's grants for the baseline row on a unit view under act=grants only", async () => {
+    const calls = mock([]);
+    await loadPortfolio(parsePortfolioParams(new URLSearchParams("unit=dept:a&from=2018&to=2026")), choices);
+    expect(calls.filter((q) => q.sql.includes("FROM `grant` g"))).toHaveLength(1);
+    calls.length = 0;
+    const d = await loadPortfolio(parsePortfolioParams(new URLSearchParams("unit=dept:a&from=2018&to=2026&act=grants")), choices);
+    expect(calls.filter((q) => q.sql.includes("FROM `grant` g"))).toHaveLength(2);
+    expect(d.grantStages.baseline).toEqual(c(1, 0, 2, 0, 3));
+  });
+
+  it("round-trips act=grants in the query string", () => {
+    const p = parsePortfolioParams(new URLSearchParams("act=grants"));
+    expect(p.act).toBe("grants");
+    expect(portfolioQueryString(p)).toBe(`from=${p.from}&to=${p.to}&act=grants`);
   });
 });
 

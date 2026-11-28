@@ -22,6 +22,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  grantProjectStage,
   loadPortfolioGrants,
   loadPortfolioTrials,
   tally,
@@ -251,5 +252,49 @@ describe("trial stages from the trial phase", () => {
     const { stageCountsOfItems, stageTally } = await import("@/lib/edit/translational-portfolio-activities");
     expect(stageCountsOfItems(out)).toEqual({ T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 1 });
     expect(stageTally(out, (t) => t.deptCodes).get("N1")).toEqual({ T0: 0, T1: 1, T2: 1, "T3-4": 0, none: 1 });
+  });
+});
+
+describe("grant stages", () => {
+  const row = (end: string, start: string, stage: string | null, conf: string | null = "high") => ({
+    start_date: new Date(`${start}T00:00:00Z`),
+    end_date: new Date(`${end}T00:00:00Z`),
+    stage,
+    stage_confidence: conf,
+  });
+
+  it("takes the most recent staged row: latest end date, then latest start date", () => {
+    expect(grantProjectStage([row("2022-03-31", "2021-04-01", "T0"), row("2025-03-31", "2024-04-01", "T2")])).toBe("T2");
+    expect(grantProjectStage([row("2025-03-31", "2024-04-01", "T2"), row("2022-03-31", "2021-04-01", "T0")])).toBe("T2");
+    // Same end: the later start wins.
+    expect(grantProjectStage([row("2025-03-31", "2020-04-01", "T0"), row("2025-03-31", "2023-04-01", "T3-4")])).toBe("T3-4");
+  });
+
+  it("skips a newer row with no displayed stage (low confidence, NA, title only), so an older staged row wins", () => {
+    const old = row("2022-03-31", "2021-04-01", "T1");
+    expect(grantProjectStage([old, row("2025-03-31", "2024-04-01", "T2", "low")])).toBe("T1");
+    expect(grantProjectStage([old, row("2025-03-31", "2024-04-01", "NA")])).toBe("T1");
+    expect(grantProjectStage([old, row("2025-03-31", "2024-04-01", null, null)])).toBe("T1");
+  });
+
+  it("is no stage when no row has a displayed one, and shows a stage with no confidence recorded", () => {
+    expect(grantProjectStage([row("2025-03-31", "2024-04-01", "T2", "low"), row("2023-03-31", "2022-04-01", null, null)])).toBeNull();
+    expect(grantProjectStage([])).toBeNull();
+    expect(grantProjectStage([row("2025-03-31", "2024-04-01", "T0", null)])).toBe("T0");
+  });
+
+  it("reads the grant text's stage and puts the project's on each grant", async () => {
+    h.queryRaw.mockResolvedValue([
+      grant({ id: "1", start_date: new Date("2019-04-01T00:00:00Z"), end_date: new Date("2021-03-31T00:00:00Z"), stage: "T0", stage_confidence: "medium" }),
+      grant({ id: "2", award_number: "5 R01 CA000001-03", start_date: new Date("2021-04-01T00:00:00Z"), end_date: new Date("2024-03-31T00:00:00Z"), stage: "T2", stage_confidence: "low" }),
+      grant({ id: "3", award_number: "1 R21 CA000002-01", external_id: "INFOED-200-aaa1001", stage: null, stage_confidence: null }),
+    ]);
+    const out = await loadPortfolioGrants(SCOPE);
+    expect(sqlOf(h.queryRaw.mock.calls[0][0])).toMatch(/LEFT JOIN area_signal_text ast ON ast\.text_key = g\.area_text_key/);
+    // The R01's renewal is low confidence, so its older T0 row gives the project its stage; the title-only R21 has none.
+    expect(out.map((g) => [g.awardNumber, g.stage])).toEqual([
+      ["1 R21 CA000002-01", null],
+      ["5 R01 CA000001-03", "T0"],
+    ]);
   });
 });

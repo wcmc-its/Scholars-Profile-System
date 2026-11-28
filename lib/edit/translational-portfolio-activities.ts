@@ -1,8 +1,9 @@
 /**
  * Report 26's grants and clinical trials (plan
- * 2026-11-27-translational-portfolio-redesign-plan.md, PRs 4–5): counts and
+ * 2026-11-27-translational-portfolio-redesign-plan.md, PRs 4–6): counts and
  * lists. Trials carry a stage from their phase (`trialStageFromPhaseKey`);
- * grants have none yet (PR 6). Shared by the report (`translational-portfolio-report.ts`)
+ * grants from ReciterAI's reading of their abstract (`grantProjectStage`).
+ * Shared by the report (`translational-portfolio-report.ts`)
  * and the one-scholar page (`translational-portfolio-scholar.ts`), so the two
  * count the same awards and trials. Rules decided with Paul on 2026-11-28:
  *
@@ -19,6 +20,9 @@
  *     Funding search tab, the unit pages and the topic feed use (NIH core project
  *     number, else the InfoEd account). Renewal years collapse into one project.
  *   - A project counts in every calendar year one of its rows was active.
+ *   - A project's stage is its newest row's (latest end, then start) among the
+ *     rows whose text has a displayed stage (`displayStage`, read off
+ *     `area_signal_text`); none = No stage. Rows in scope only, like its areas.
  *
  * Clinical trials
  *   - The scholar is the trial's Principal Investigator (every link in prod is).
@@ -49,7 +53,13 @@ import { currentCenterMembershipSql, MANUAL_DIVISION_SOURCE, personFilterSql, ut
 import { groupGrantsByProject } from "@/lib/funding-projection";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { trialDates } from "@/lib/search-trial-evidence";
-import { emptyCounts, trialStageFromPhaseKey, type StageCounts, type TranslationalStage } from "@/lib/translational-stage";
+import {
+  displayStage,
+  emptyCounts,
+  trialStageFromPhaseKey,
+  type StageCounts,
+  type TranslationalStage,
+} from "@/lib/translational-stage";
 
 export const GRANT_PROGRAM_TYPES: readonly string[] = ["Grant", "Career", "Contract with funding"];
 /** InfoEd intake types that are agreements, not funding. Substrings, so a new
@@ -63,7 +73,7 @@ export const TRIAL_RULE =
 export const ACTIVITY_AREA_RULE =
   "Under a research area filter, only grants and trials with a research area count: leadership-role grants and registered trials started 2020 or later.";
 
-/** The filters grants and trials honor; the stage pick does not apply (no stages yet). */
+/** The filters grants and trials load under; the stage pick filters their lists, not these loads. */
 export type ActivityScope = {
   from: number;
   to: number;
@@ -92,6 +102,8 @@ export type PortfolioGrant = {
   people: PortfolioPerson[];
   deptCodes: string[];
   areas: string[];
+  /** ReciterAI's stage of the project's newest staged row (`grantProjectStage`); null = no stage. */
+  stage: TranslationalStage | null;
 };
 
 export type PortfolioTrial = {
@@ -192,15 +204,38 @@ type GrantRaw = {
   start_date: unknown;
   end_date: unknown;
   area_text_key: string | null;
+  /** The grant text's raw ReciterAI stage and confidence (`area_signal_text`); null when none. */
+  stage: string | null;
+  stage_confidence: string | null;
   dc: string | null;
 };
+
+/** The project-stage rule's view of one row. */
+export type GrantStageRow = { start_date: unknown; end_date: unknown; stage: string | null; stage_confidence: string | null };
+
+/** A grant project's stage: the newest row (latest end date, then start date)
+ *  whose text has a displayed stage; a low-confidence, NA or title-only row
+ *  never wins, so an older staged row does. Null when no row has one. */
+export function grantProjectStage(rows: readonly GrantStageRow[]): TranslationalStage | null {
+  let best: { end: string; start: string; stage: TranslationalStage } | null = null;
+  for (const r of rows) {
+    const stage = displayStage(r.stage, r.stage_confidence);
+    if (!stage) continue;
+    const end = isoDay(r.end_date);
+    const start = isoDay(r.start_date);
+    if (!best || end > best.end || (end === best.end && start > best.start)) best = { end, start, stage };
+  }
+  return best?.stage ?? null;
+}
 
 export async function loadPortfolioGrants(s: ActivityScope): Promise<PortfolioGrant[]> {
   const raw = await db.read.$queryRaw<GrantRaw[]>(Prisma.sql`
     SELECT g.id, g.cwid, g.title, g.role, g.funder, g.award_number, g.external_id, g.intake_type,
-           g.start_date, g.end_date, g.area_text_key, s.dept_code AS dc
+           g.start_date, g.end_date, g.area_text_key, s.dept_code AS dc,
+           ast.translational_stage AS stage, ast.translational_stage_confidence AS stage_confidence
       FROM \`grant\` g
       JOIN scholar s ON s.cwid = g.cwid
+      LEFT JOIN area_signal_text ast ON ast.text_key = g.area_text_key
      WHERE s.deleted_at IS NULL AND s.status = 'active'
        AND g.role IN (${Prisma.join([...AREA_GRANT_ROLES])})
        AND g.program_type IN (${Prisma.join([...GRANT_PROGRAM_TYPES])})
@@ -243,6 +278,7 @@ export async function loadPortfolioGrants(s: ActivityScope): Promise<PortfolioGr
       people: group.map((r) => ({ cwid: r.cwid, role: r.role })),
       deptCodes: [...new Set(group.flatMap((r) => (r.dc ? [r.dc] : [])))],
       areas,
+      stage: grantProjectStage(group),
     });
   }
   return out.sort((a, b) => b.start.localeCompare(a.start) || a.key.localeCompare(b.key));
