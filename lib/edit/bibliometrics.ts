@@ -14,7 +14,6 @@ import {
   displayStage,
   emptyCounts,
   STAGE_BUCKETS,
-  STAGE_RULE,
   stagedShares,
   type StageBucket,
   type StageCounts,
@@ -168,8 +167,24 @@ export type BibliometricsPatents = {
   reportHref: string | null;
 };
 
-/** One paper in a stage's list. */
-export type BibliometricsStagePaper = { pmid: string; title: string; journal: string | null; year: number | null };
+/** ReCiterAI stages Academic Articles from this publication year on
+ *  (`articleYear >= 2020` in both its daily job and its wide backfill). */
+export const STAGE_FIRST_YEAR = 2020;
+
+/** Why a research article has no stage: published before ReCiterAI's years,
+ *  a low-confidence call, outside the T0–T4 spectrum ("NA"), or from those
+ *  years but not staged (no usable abstract, or not processed yet). */
+export type UnstagedReason = "before" | "low" | "outside" | "pending";
+export const UNSTAGED_REASONS: readonly UnstagedReason[] = ["before", "low", "outside", "pending"];
+
+/** One paper in a stage's list; an unstaged one carries its reason. */
+export type BibliometricsStagePaper = {
+  pmid: string;
+  title: string;
+  journal: string | null;
+  year: number | null;
+  reason?: UnstagedReason;
+};
 
 /** The research articles matching the filters, by translational stage
  *  (report 26's rule). Each bucket lists the papers it counts, newest first. */
@@ -179,6 +194,8 @@ export type BibliometricsStages = {
    *  to 100 (`stagedShares`, report 26's rule). No stage has no share. */
   shares: StageShares;
   papers: Record<StageBucket, BibliometricsStagePaper[]>;
+  /** The unstaged ("none") papers by reason; adds up to `counts.none`. */
+  unstaged: Record<UnstagedReason, number>;
   /** Report 26 for this scholar, filled by the route; null when the viewer may
    *  not open that report. */
   portfolioHref: string | null;
@@ -531,24 +548,50 @@ export function buildBibliometricsReport(input: {
   };
 }
 
-const STAGE_DEFINITION = { term: "Translational stage", text: STAGE_RULE };
+const STAGE_DEFINITION = {
+  term: "Translational stage",
+  text: `Assigned by ReCiterAI from the abstract or summary, for research articles published ${STAGE_FIRST_YEAR} onward. Earlier articles, low-confidence calls and articles outside the T0\u2013T4 spectrum are left unstaged. Shares are among articles with a stage, so the four stages add up to 100%.`,
+};
+
+function unstagedReason(p: BibliometricsPubRow): UnstagedReason {
+  if (p.translationalStageConfidence === "low") return "low";
+  if (p.translationalStage === "NA") return "outside";
+  if (p.year !== null && p.year < STAGE_FIRST_YEAR) return "before";
+  return "pending";
+}
 
 function stagesOf(pubs: readonly BibliometricsPubRow[]): BibliometricsStages {
   const counts = emptyCounts();
+  const unstaged: Record<UnstagedReason, number> = { before: 0, low: 0, outside: 0, pending: 0 };
   const papers = Object.fromEntries(STAGE_BUCKETS.map((k) => [k, []])) as unknown as BibliometricsStages["papers"];
   const newest = [...pubs].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.pmid.localeCompare(a.pmid));
   for (const p of newest) {
     const k = displayStage(p.translationalStage, p.translationalStageConfidence) ?? "none";
     counts[k]++;
+    const reason = k === "none" ? unstagedReason(p) : undefined;
+    if (reason) unstaged[reason]++;
     papers[k].push({
       pmid: p.pmid,
       title: p.title,
       journal: p.journal ? htmlToPlainText(p.journal, Number.POSITIVE_INFINITY) : null,
       year: p.year,
+      ...(reason ? { reason } : {}),
     });
   }
-  return { counts, shares: stagedShares(counts), papers, portfolioHref: null };
+  return { counts, shares: stagedShares(counts), papers, unstaged, portfolioHref: null };
 }
+
+/** Below this share of articles with a stage, the stage breakdown starts
+ *  folded: the shares would claim more than the coverage supports. */
+export const STAGE_FOLD_BELOW_PCT = 25;
+
+/** "published before 2020", "low-confidence", … for the coverage line. */
+export const UNSTAGED_LABEL: Record<UnstagedReason, string> = {
+  before: `published before ${STAGE_FIRST_YEAR}, outside the years ReCiterAI stages`,
+  low: "low-confidence",
+  outside: "outside the T0\u2013T4 spectrum, which is common for health services and informatics research",
+  pending: `from ${STAGE_FIRST_YEAR} on that ReCiterAI has not staged (no usable abstract, or not yet processed)`,
+};
 
 /** What the stage section counts, under its heading. */
 export const STAGES_NOTE =
